@@ -5149,9 +5149,14 @@ body.presentation-mode .presentation-bar {
                     </h3>
                     <div class="profile-photo-section">
                         <div class="profile-photo-preview" id="profile-photo-preview">👤</div>
-                        <div>
-                            <input type="text" class="profile-input" id="profile-photo" placeholder="URL de votre photo" oninput="app.PublicProfile.updatePhotoPreview()">
-                            <p style="font-size:0.8rem; color:var(--text-sec); margin-top:5px;">Utilisez un lien vers votre photo (Imgur, Google Drive...)</p>
+                        <div style="flex:1;">
+                            <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
+                                <button type="button" onclick="document.getElementById('profile-photo-input').click()" class="profile-input" style="background:var(--primary); color:white; cursor:pointer; padding:10px 20px; border:none; font-weight:600;">📷 Choisir une photo</button>
+                                <input type="file" id="profile-photo-input" accept="image/*" style="display:none;" onchange="app.PublicProfile.handlePhotoUpload(event)">
+                                <span id="profile-photo-status" style="font-size:0.85rem; color:var(--text-sec);"></span>
+                            </div>
+                            <input type="hidden" id="profile-photo" value="">
+                            <p style="font-size:0.8rem; color:var(--text-sec);">Formats acceptés : JPG, PNG, GIF (max 2 Mo, redimensionné à 800px)</p>
                         </div>
                     </div>
                     <div class="profile-row">
@@ -22687,6 +22692,7 @@ const PublicProfile = {
         
         // Identité
         document.getElementById('profile-photo').value = profile.photo || '';
+        PublicProfile.updatePhotoPreview();
         document.getElementById('profile-name').value = profile.name || '';
         document.getElementById('profile-gender').value = profile.gender || '';
         document.getElementById('profile-email').value = state.currentUser?.email || '';
@@ -23542,6 +23548,95 @@ const PublicProfile = {
         } else {
             preview.innerHTML = '👤';
         }
+    },
+    
+    handlePhotoUpload: async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const statusEl = document.getElementById('profile-photo-status');
+        const preview = document.getElementById('profile-photo-preview');
+        const photoInput = document.getElementById('profile-photo');
+        
+        // Vérifier le type
+        if (!file.type.startsWith('image/')) {
+            statusEl.textContent = '❌ Fichier non valide';
+            statusEl.style.color = '#e74c3c';
+            return;
+        }
+        
+        // Vérifier la taille (max 5 Mo avant compression)
+        if (file.size > 5 * 1024 * 1024) {
+            statusEl.textContent = '❌ Fichier trop volumineux (max 5 Mo)';
+            statusEl.style.color = '#e74c3c';
+            return;
+        }
+        
+        statusEl.textContent = '⏳ Compression en cours...';
+        statusEl.style.color = 'var(--text-sec)';
+        
+        try {
+            const compressedBase64 = await PublicProfile.compressImage(file, 800, 0.8);
+            
+            // Vérifier la taille finale (max 500 Ko en base64)
+            const sizeKo = Math.round(compressedBase64.length * 0.75 / 1024);
+            if (sizeKo > 500) {
+                // Recompresser avec plus de compression
+                const moreCompressed = await PublicProfile.compressImage(file, 600, 0.6);
+                photoInput.value = moreCompressed;
+                preview.innerHTML = `<img src="${moreCompressed}" alt="Photo">`;
+                const finalSize = Math.round(moreCompressed.length * 0.75 / 1024);
+                statusEl.textContent = `✅ Photo compressée (${finalSize} Ko)`;
+            } else {
+                photoInput.value = compressedBase64;
+                preview.innerHTML = `<img src="${compressedBase64}" alt="Photo">`;
+                statusEl.textContent = `✅ Photo ajoutée (${sizeKo} Ko)`;
+            }
+            statusEl.style.color = '#27ae60';
+        } catch (err) {
+            console.error('Erreur compression:', err);
+            statusEl.textContent = '❌ Erreur lors du traitement';
+            statusEl.style.color = '#e74c3c';
+        }
+    },
+    
+    compressImage: (file, maxSize, quality) => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+                    
+                    // Redimensionner si nécessaire
+                    if (width > maxSize || height > maxSize) {
+                        if (width > height) {
+                            height = Math.round(height * maxSize / width);
+                            width = maxSize;
+                        } else {
+                            width = Math.round(width * maxSize / height);
+                            height = maxSize;
+                        }
+                    }
+                    
+                    canvas.width = width;
+                    canvas.height = height;
+                    
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    
+                    // Convertir en JPEG compressé
+                    const base64 = canvas.toDataURL('image/jpeg', quality);
+                    resolve(base64);
+                };
+                img.onerror = reject;
+                img.src = e.target.result;
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
     },
     
     updateStatus: () => {
