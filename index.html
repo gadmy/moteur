@@ -495,7 +495,7 @@ V1.0 - Base solide (Déc. 2024)
 ================================================================================
 -->
 <head>
-<title>Moteur - Gestion de production audiovisuelle - 1.9.9.7</title>
+<title>Moteur - Gestion de production audiovisuelle - 1.9.9.8</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -4744,7 +4744,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v1.9.9.7</p>
+      <p>v1.9.9.8</p>
       
       <form id="login-form" onsubmit="event.preventDefault(); app.Auth.login()">
         <input type="email" id="login-email" name="email" class="auth-input" placeholder="Email" autocomplete="username">
@@ -8738,6 +8738,7 @@ crewRoles: {
       dbListener: null, 
       presenceRef: null, 
       locksListener: null, 
+      locksChannel: null,
       activeLocks: {}, 
       contextSceneId: null,
       contacts: { actors: [], crew: [] },
@@ -10760,27 +10761,107 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           return { text: '', icon: '', class: '', extraRoles: [] };
       },
       initLocks: (id) => { 
-          // Pour Supabase, on simplifie la gestion des locks
-          // Les locks seront stockés dans le champ data du projet
+          // Supabase Realtime Broadcast pour synchroniser les locks entre collaborateurs
+          if(state.locksChannel) {
+              supabase.removeChannel(state.locksChannel);
+          }
+          
           state.activeLocks = {};
+          
+          state.locksChannel = supabase.channel('locks_' + id);
+          
+          // Écouter les changements de locks des autres utilisateurs
+          state.locksChannel
+              .on('broadcast', { event: 'lock_acquired' }, (payload) => {
+                  const { sceneId, lock } = payload.payload;
+                  state.activeLocks[sceneId] = lock;
+                  UI.applyLocks();
+              })
+              .on('broadcast', { event: 'lock_released' }, (payload) => {
+                  const { sceneId } = payload.payload;
+                  delete state.activeLocks[sceneId];
+                  UI.applyLocks();
+              })
+              .on('presence', { event: 'leave' }, (payload) => {
+                  // Nettoyer les locks de l'utilisateur qui part
+                  const leftUserIds = payload.leftPresences?.map(p => p.uid) || [];
+                  let changed = false;
+                  Object.keys(state.activeLocks).forEach(sceneId => {
+                      if(leftUserIds.includes(state.activeLocks[sceneId]?.uid)) {
+                          delete state.activeLocks[sceneId];
+                          changed = true;
+                      }
+                  });
+                  if(changed) UI.applyLocks();
+              })
+              .subscribe(async (status) => {
+                  if(status === 'SUBSCRIBED') {
+                      await state.locksChannel.track({ 
+                          uid: state.currentUser.uid, 
+                          email: state.currentUser.email 
+                      });
+                  }
+              });
+          
           UI.applyLocks();
       },
-      acquireLock: (sceneId) => { 
+      acquireLock: async (sceneId) => { 
           if(state.currentRole === 'viewer') return; 
-          // Simplifié pour Supabase - locks en mémoire locale
+          
           const existingLock = state.activeLocks[sceneId];
           if (existingLock && existingLock.uid !== state.currentUser.uid) {
               Utils.toast(`Scène déjà éditée par ${existingLock.user.split('@')[0]}`, 'warning');
               return;
           }
-          state.activeLocks[sceneId] = { user: state.currentUser.email, uid: state.currentUser.uid, timestamp: Date.now() };
+          
+          const lock = { 
+              user: state.currentUser.email, 
+              uid: state.currentUser.uid, 
+              timestamp: Date.now() 
+          };
+          state.activeLocks[sceneId] = lock;
+          
+          if(state.locksChannel) {
+              await state.locksChannel.send({
+                  type: 'broadcast',
+                  event: 'lock_acquired',
+                  payload: { sceneId, lock }
+              });
+          }
+          UI.applyLocks();
       },
-      releaseLock: (sceneId) => { 
+      releaseLock: async (sceneId) => { 
           if(state.currentRole === 'viewer') return; 
           const lock = state.activeLocks[sceneId]; 
           if(lock && lock.uid === state.currentUser.uid) { 
-              delete state.activeLocks[sceneId]; 
+              delete state.activeLocks[sceneId];
+              
+              if(state.locksChannel) {
+                  await state.locksChannel.send({
+                      type: 'broadcast',
+                      event: 'lock_released',
+                      payload: { sceneId }
+                  });
+              }
+              UI.applyLocks();
           } 
+      },
+      cleanupLocks: async () => {
+          if(state.locksChannel) {
+              const myLocks = Object.keys(state.activeLocks).filter(
+                  sceneId => state.activeLocks[sceneId]?.uid === state.currentUser?.uid
+              );
+              for(const sceneId of myLocks) {
+                  await state.locksChannel.send({
+                      type: 'broadcast',
+                      event: 'lock_released',
+                      payload: { sceneId }
+                  });
+              }
+              supabase.removeChannel(state.locksChannel);
+              state.locksChannel = null;
+          }
+          state.activeLocks = {};
       },
 	  
       updateScene: Utils.debounce(async (sceneId, content) => { 
@@ -11776,7 +11857,9 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           els.dashboardView.style.display = 'flex';
           
           // Nettoyer le chat
-          if(typeof Chat !== 'undefined') Chat.cleanup(); 
+          if(typeof Chat !== 'undefined') Chat.cleanup();
+          // Nettoyer les locks de scène
+          if(typeof Store !== 'undefined' && Store.cleanupLocks) await Store.cleanupLocks();
           const accountType = state.userProfile?.accountType || 'producer';
           const typeLabel = accountType === 'actor' ? '🎭 Comédien.ne' : (accountType === 'crew' ? '🎥 Technicien.ne' : '🎬 Réalisateur');
           document.getElementById('user-welcome').innerText = typeLabel + " • " + (state.currentUser ? state.currentUser.email : ""); 
@@ -14758,42 +14841,45 @@ const tabToSection = {
                           .eq('id', actor.publicProfileId)
                           .single();
                       if(publicData) {
+                          // Extraire les données du champ JSONB
+                          const extraData = publicData.data || {};
                           // Mettre à jour les données de l'acteur avec le profil public
                           actor.name = publicData.name || actor.name;
                           actor.photo = publicData.photo || actor.photo;
                           actor.phone = publicData.phone || actor.phone;
                           actor.bio = publicData.bio || actor.bio;
                           actor.gender = publicData.gender || actor.gender;
-                          actor.height = publicData.height || actor.height;
-                          actor.age = publicData.age || actor.age;
-                          actor.eyeColor = publicData.eyeColor || actor.eyeColor;
-                          actor.hairColor = publicData.hairColor || actor.hairColor;
-                          actor.ethnicity = publicData.ethnicity || actor.ethnicity;
-                          actor.languages = publicData.languages || actor.languages;
-                          actor.sports = publicData.sports || actor.sports;
-                          actor.dailyRate = publicData.dailyRate || actor.dailyRate;
-                          actor.rateCurrency = publicData.rateCurrency || actor.rateCurrency;
-                          actor.rateType = publicData.rateType || actor.rateType;
-                          actor.website = publicData.website || actor.website;
                           actor.city = publicData.city || actor.city;
-                          actor.weight = publicData.weight || actor.weight;
-                          actor.hairLength = publicData.hairLength || actor.hairLength;
-                          actor.corpulence = publicData.corpulence || actor.corpulence;
-                          actor.demoreel = publicData.demoreel || actor.demoreel;
-                          actor.galleryPhotos = publicData.galleryPhotos || actor.galleryPhotos || [];
-                          actor.hasVehicle = publicData.hasVehicle || actor.hasVehicle;
-                          actor.vehicleType = publicData.vehicleType || actor.vehicleType;
-                          actor.vehiclePlate = publicData.vehiclePlate || actor.vehiclePlate;
-                          actor.vehicleSeats = publicData.vehicleSeats || actor.vehicleSeats;
-                          actor.vehicleTrunk = publicData.vehicleTrunk || actor.vehicleTrunk;
-                          actor.vehicleNotes = publicData.vehicleNotes || actor.vehicleNotes;
-                          actor.availabilityText = publicData.availabilityText || actor.availabilityText;
-                          actor.availabilityDates = publicData.availabilityDates || actor.availabilityDates;
-                          actor.unavailabilityDates = publicData.unavailabilityDates || actor.unavailabilityDates;
-                          actor.professionalStatus = publicData.professionalStatus || actor.professionalStatus;
-                          actor.collabType = publicData.collabType || actor.collabType;
+                          // Données depuis extraData
+                          actor.height = extraData.height || actor.height;
+                          actor.age = extraData.age || actor.age;
+                          actor.eyeColor = extraData.eyeColor || actor.eyeColor;
+                          actor.hairColor = extraData.hairColor || actor.hairColor;
+                          actor.hairLength = extraData.hairLength || actor.hairLength;
+                          actor.ethnicity = extraData.ethnicity || actor.ethnicity;
+                          actor.corpulence = extraData.corpulence || actor.corpulence;
+                          actor.weight = extraData.weight || actor.weight;
+                          actor.languages = extraData.languages || actor.languages;
+                          actor.sports = extraData.sports || actor.sports;
+                          actor.dailyRate = extraData.dailyRate || actor.dailyRate;
+                          actor.rateCurrency = extraData.rateCurrency || actor.rateCurrency;
+                          actor.rateType = extraData.rateType || actor.rateType;
+                          actor.website = extraData.website || actor.website;
+                          actor.demoreel = extraData.demoreel || actor.demoreel;
+                          actor.galleryPhotos = extraData.galleryPhotos || actor.galleryPhotos || [];
+                          actor.hasVehicle = publicData.vehicle || actor.hasVehicle;
+                          actor.vehicleType = extraData.vehicleType || actor.vehicleType;
+                          actor.vehiclePlate = extraData.vehiclePlate || actor.vehiclePlate;
+                          actor.vehicleSeats = extraData.vehicleSeats || actor.vehicleSeats;
+                          actor.vehicleTrunk = extraData.vehicleTrunk || actor.vehicleTrunk;
+                          actor.vehicleNotes = extraData.vehicleNotes || actor.vehicleNotes;
+                          actor.availabilityText = publicData.availability || actor.availabilityText;
+                          actor.availabilityDates = extraData.availabilityDates || actor.availabilityDates;
+                          actor.unavailabilityDates = extraData.unavailabilityDates || actor.unavailabilityDates;
+                          actor.professionalStatus = extraData.professionalStatus || actor.professionalStatus;
+                          actor.collabType = extraData.collabType || actor.collabType;
                           // Préférences de visibilité
-                          actor.hiddenProject = publicData.hiddenProject || [];
+                          actor.hiddenProject = extraData.hiddenProject || [];
                           // Marquer comme synchronisé
                           actor.lastSyncedAt = Date.now();
                       }
@@ -14843,34 +14929,37 @@ const tabToSection = {
                           .eq('id', member.publicProfileId)
                           .single();
                       if(publicData) {
+                          // Extraire les données du champ JSONB
+                          const extraData = publicData.data || {};
                           // Mettre à jour les données du technicien avec le profil public
                           member.name = publicData.name || member.name;
                           member.photo = publicData.photo || member.photo;
                           member.phone = publicData.phone || member.phone;
                           member.email = publicData.email || member.email;
-                          member.address = publicData.address || member.address;
                           member.gender = publicData.gender || member.gender;
-                          member.role = publicData.role || member.role;
-                          member.department = publicData.department || member.department;
-                          member.dailyRate = publicData.dailyRate || member.dailyRate;
-                          member.rateCurrency = publicData.rateCurrency || member.rateCurrency;
                           member.city = publicData.city || member.city;
-                          member.rateType = publicData.rateType || member.rateType;
-                          member.availabilityText = publicData.availabilityText || member.availabilityText;
-                          member.availabilityDates = publicData.availabilityDates || member.availabilityDates;
-                          member.unavailabilityDates = publicData.unavailabilityDates || member.unavailabilityDates;
-                          member.demoreel = publicData.demoreel || member.demoreel;
-                          member.galleryPhotos = publicData.crewGalleryPhotos || publicData.galleryPhotos || member.galleryPhotos || [];
-                          member.hasVehicle = publicData.hasVehicle || member.hasVehicle;
-                          member.vehicleType = publicData.vehicleType || member.vehicleType;
-                          member.vehiclePlate = publicData.vehiclePlate || member.vehiclePlate;
-                          member.vehicleSeats = publicData.vehicleSeats || member.vehicleSeats;
-                          member.vehicleTrunk = publicData.vehicleTrunk || member.vehicleTrunk;
-                          member.vehicleNotes = publicData.vehicleNotes || member.vehicleNotes;
-                          member.professionalStatus = publicData.professionalStatus || member.professionalStatus;
-                          member.collabType = publicData.collabType || member.collabType;
+                          // Données depuis extraData
+                          member.address = extraData.address || member.address;
+                          member.role = extraData.role || member.role;
+                          member.department = extraData.department || member.department;
+                          member.dailyRate = extraData.dailyRate || member.dailyRate;
+                          member.rateCurrency = extraData.rateCurrency || member.rateCurrency;
+                          member.rateType = extraData.rateType || member.rateType;
+                          member.availabilityText = publicData.availability || member.availabilityText;
+                          member.availabilityDates = extraData.availabilityDates || member.availabilityDates;
+                          member.unavailabilityDates = extraData.unavailabilityDates || member.unavailabilityDates;
+                          member.demoreel = extraData.demoreel || member.demoreel;
+                          member.galleryPhotos = extraData.crewGalleryPhotos || extraData.galleryPhotos || member.galleryPhotos || [];
+                          member.hasVehicle = publicData.vehicle || member.hasVehicle;
+                          member.vehicleType = extraData.vehicleType || member.vehicleType;
+                          member.vehiclePlate = extraData.vehiclePlate || member.vehiclePlate;
+                          member.vehicleSeats = extraData.vehicleSeats || member.vehicleSeats;
+                          member.vehicleTrunk = extraData.vehicleTrunk || member.vehicleTrunk;
+                          member.vehicleNotes = extraData.vehicleNotes || member.vehicleNotes;
+                          member.professionalStatus = extraData.professionalStatus || member.professionalStatus;
+                          member.collabType = extraData.collabType || member.collabType;
                           // Préférences de visibilité
-                          member.hiddenProject = publicData.hiddenProject || [];
+                          member.hiddenProject = extraData.hiddenProject || [];
                           // Marquer comme synchronisé
                           member.lastSyncedAt = Date.now();
                       }
@@ -23759,7 +23848,24 @@ const PublicProfile = {
                     availabilityText: userProfile.availability || '',
                     is_public: userProfile.is_public,
                     profileComplete: userProfile.is_public,
-                    // Données comédien
+                    // Commun
+                    address: extraData.address || '',
+                    hideAddress: extraData.hideAddress || false,
+                    hideAddressInProjects: extraData.hideAddressInProjects || false,
+                    website: extraData.website || '',
+                    dailyRate: extraData.dailyRate || '',
+                    rateCurrency: extraData.rateCurrency || '€',
+                    rateNegotiable: extraData.rateNegotiable || false,
+                    collabTypes: extraData.collabTypes || [],
+                    availabilityDates: extraData.availabilityDates || [],
+                    unavailabilityDates: extraData.unavailabilityDates || [],
+                    // Véhicule
+                    vehicleType: extraData.vehicleType || '',
+                    vehiclePlate: extraData.vehiclePlate || '',
+                    vehicleSeats: extraData.vehicleSeats || '',
+                    vehicleTrunk: extraData.vehicleTrunk || false,
+                    vehicleNotes: extraData.vehicleNotes || '',
+                    // Comédien
                     height: extraData.height || '',
                     weight: extraData.weight || '',
                     age: extraData.age || '',
@@ -23770,8 +23876,11 @@ const PublicProfile = {
                     corpulence: extraData.corpulence || '',
                     sports: extraData.sports || '',
                     languages: extraData.languages || '',
+                    languagesWithLevels: extraData.languagesWithLevels || [],
+                    sportsWithLevels: extraData.sportsWithLevels || [],
                     galleryPhotos: extraData.galleryPhotos || [],
-                    // Données technicien
+                    demoreel: extraData.demoreel || '',
+                    // Technicien
                     department: extraData.department || '',
                     role: extraData.role || '',
                     cameras: extraData.cameras || [],
@@ -23781,24 +23890,41 @@ const PublicProfile = {
                     grips: extraData.grips || [],
                     makeups: extraData.makeups || [],
                     otherEquipment: extraData.otherEquipment || [],
-                    // Tarif et véhicule
-                    dailyRate: extraData.dailyRate || '',
-                    rateCurrency: extraData.rateCurrency || '€',
-                    vehicleType: extraData.vehicleType || '',
-                    vehicleSeats: extraData.vehicleSeats || '',
-                    vehicleTrunk: extraData.vehicleTrunk || false,
-                    // Disponibilités
-                    availabilityDates: extraData.availabilityDates || [],
-                    unavailabilityDates: extraData.unavailabilityDates || [],
-                    collabTypes: extraData.collabTypes || [],
+                    crewGalleryPhotos: extraData.crewGalleryPhotos || [],
                     // Association
                     assoName: extraData.assoName || '',
                     assoType: extraData.assoType || '',
+                    assoSiret: extraData.assoSiret || '',
+                    assoMembers: extraData.assoMembers || '',
+                    assoYear: extraData.assoYear || '',
+                    assoPresident: extraData.assoPresident || '',
                     assoMission: extraData.assoMission || '',
+                    assoActivities: extraData.assoActivities || '',
+                    assoServices: extraData.assoServices || {},
+                    assoFacebook: extraData.assoFacebook || '',
+                    assoInstagram: extraData.assoInstagram || '',
+                    assoYoutube: extraData.assoYoutube || '',
+                    assoLinkedin: extraData.assoLinkedin || '',
+                    assoDemoreel: extraData.assoDemoreel || '',
                     // Entreprise
                     entName: extraData.entName || '',
                     entType: extraData.entType || '',
-                    entDescription: extraData.entDescription || ''
+                    entSiret: extraData.entSiret || '',
+                    entLegal: extraData.entLegal || '',
+                    entYear: extraData.entYear || '',
+                    entEmployees: extraData.entEmployees || '',
+                    entDirector: extraData.entDirector || '',
+                    entContact: extraData.entContact || '',
+                    entDescription: extraData.entDescription || '',
+                    entServices: extraData.entServices || '',
+                    entSpecialties: extraData.entSpecialties || {},
+                    entFacebook: extraData.entFacebook || '',
+                    entInstagram: extraData.entInstagram || '',
+                    entYoutube: extraData.entYoutube || '',
+                    entLinkedin: extraData.entLinkedin || '',
+                    entVimeo: extraData.entVimeo || '',
+                    entImdb: extraData.entImdb || '',
+                    entDemoreel: extraData.entDemoreel || ''
                 };
                 PublicProfile.profiles = [profile];
             } else {
@@ -23875,6 +24001,24 @@ const PublicProfile = {
                 is_public: true,
                 updated_at: new Date().toISOString(),
                 data: {
+                    // Commun
+                    address: profile.address || '',
+                    hideAddress: profile.hideAddress || false,
+                    hideAddressInProjects: profile.hideAddressInProjects || false,
+                    website: profile.website || '',
+                    dailyRate: profile.dailyRate || '',
+                    rateCurrency: profile.rateCurrency || '€',
+                    rateNegotiable: profile.rateNegotiable || false,
+                    collabTypes: profile.collabTypes || [],
+                    availabilityDates: profile.availabilityDates || [],
+                    unavailabilityDates: profile.unavailabilityDates || [],
+                    // Véhicule
+                    vehicleType: profile.vehicleType || '',
+                    vehiclePlate: profile.vehiclePlate || '',
+                    vehicleSeats: profile.vehicleSeats || '',
+                    vehicleTrunk: profile.vehicleTrunk || false,
+                    vehicleNotes: profile.vehicleNotes || '',
+                    // Comédien
                     height: profile.height || '',
                     weight: profile.weight || '',
                     age: profile.age || '',
@@ -23885,11 +24029,13 @@ const PublicProfile = {
                     corpulence: profile.corpulence || '',
                     sports: profile.sports || '',
                     languages: profile.languages || '',
+                    languagesWithLevels: profile.languagesWithLevels || [],
+                    sportsWithLevels: profile.sportsWithLevels || [],
+                    galleryPhotos: profile.galleryPhotos || [],
+                    demoreel: profile.demoreel || '',
+                    // Technicien
                     department: profile.department || '',
                     role: profile.role || '',
-                    dailyRate: profile.dailyRate || '',
-                    rateCurrency: profile.rateCurrency || '€',
-                    galleryPhotos: profile.galleryPhotos || [],
                     cameras: profile.cameras || [],
                     lenses: profile.lenses || [],
                     lights: profile.lights || [],
@@ -23897,18 +24043,41 @@ const PublicProfile = {
                     grips: profile.grips || [],
                     makeups: profile.makeups || [],
                     otherEquipment: profile.otherEquipment || [],
-                    vehicleType: profile.vehicleType || '',
-                    vehicleSeats: profile.vehicleSeats || '',
-                    vehicleTrunk: profile.vehicleTrunk || false,
-                    availabilityDates: profile.availabilityDates || [],
-                    unavailabilityDates: profile.unavailabilityDates || [],
-                    collabTypes: profile.collabTypes || [],
+                    crewGalleryPhotos: profile.crewGalleryPhotos || [],
+                    // Association
                     assoName: profile.assoName || '',
                     assoType: profile.assoType || '',
+                    assoSiret: profile.assoSiret || '',
+                    assoMembers: profile.assoMembers || '',
+                    assoYear: profile.assoYear || '',
+                    assoPresident: profile.assoPresident || '',
                     assoMission: profile.assoMission || '',
+                    assoActivities: profile.assoActivities || '',
+                    assoServices: profile.assoServices || {},
+                    assoFacebook: profile.assoFacebook || '',
+                    assoInstagram: profile.assoInstagram || '',
+                    assoYoutube: profile.assoYoutube || '',
+                    assoLinkedin: profile.assoLinkedin || '',
+                    assoDemoreel: profile.assoDemoreel || '',
+                    // Entreprise
                     entName: profile.entName || '',
                     entType: profile.entType || '',
-                    entDescription: profile.entDescription || ''
+                    entSiret: profile.entSiret || '',
+                    entLegal: profile.entLegal || '',
+                    entYear: profile.entYear || '',
+                    entEmployees: profile.entEmployees || '',
+                    entDirector: profile.entDirector || '',
+                    entContact: profile.entContact || '',
+                    entDescription: profile.entDescription || '',
+                    entServices: profile.entServices || '',
+                    entSpecialties: profile.entSpecialties || {},
+                    entFacebook: profile.entFacebook || '',
+                    entInstagram: profile.entInstagram || '',
+                    entYoutube: profile.entYoutube || '',
+                    entLinkedin: profile.entLinkedin || '',
+                    entVimeo: profile.entVimeo || '',
+                    entImdb: profile.entImdb || '',
+                    entDemoreel: profile.entDemoreel || ''
                 }
             };
             
@@ -25624,10 +25793,23 @@ const GlobalSearch = {
                 .eq('profile_type', profileType)
                 .eq('is_public', true);
             
-            let results = (!error && data) ? data : [];
+            let results = [];
+            if(!error && data) {
+                // Extraire les données du champ JSONB pour chaque profil
+                results = data.map(p => {
+                    const extraData = p.data || {};
+                    return {
+                        ...p,
+                        ...extraData,
+                        type: p.profile_type || 'crew',
+                        hasVehicle: p.vehicle || false,
+                        availabilityText: p.availability || ''
+                    };
+                });
+            }
             
             // Filtrer uniquement les profils complets
-            results = results.filter(r => r.profileComplete);
+            results = results.filter(r => r.is_public);
             
             // Appliquer les filtres
             const name = (document.getElementById('gs-name')?.value || '').toLowerCase();
@@ -26197,10 +26379,23 @@ if(isActors) {
                 .eq('profile_type', profileType)
                 .eq('is_public', true);
             
-            let results = (!error && data) ? data : [];
+            let results = [];
+            if(!error && data) {
+                // Extraire les données du champ JSONB pour chaque profil
+                results = data.map(p => {
+                    const extraData = p.data || {};
+                    return {
+                        ...p,
+                        ...extraData,
+                        type: p.profile_type || 'crew',
+                        hasVehicle: p.vehicle || false,
+                        availabilityText: p.availability || ''
+                    };
+                });
+            }
             
             // Filtrer profils complets uniquement
-            results = results.filter(r => r.profileComplete);
+            results = results.filter(r => r.is_public);
             
             // Appliquer filtres
             const name = (document.getElementById('contact-filter-name')?.value || '').toLowerCase();
@@ -39084,7 +39279,17 @@ const Universe = {
                     .eq('id', profile.id)
                     .single();
                 
-                if(profileData) fullProfile = { ...profileData, id: profile.id, type: profile.type };
+                if(profileData) {
+                    const extraData = profileData.data || {};
+                    fullProfile = { 
+                        ...profileData, 
+                        ...extraData,
+                        id: profile.id, 
+                        type: profileData.profile_type || profile.type,
+                        hasVehicle: profileData.vehicle || false,
+                        availabilityText: profileData.availability || ''
+                    };
+                }
             } catch(e) { console.warn('Erreur chargement profil:', e); }
         }
         
@@ -39632,9 +39837,13 @@ const Universe = {
                 profiles.forEach(p => {
                     if(p.name) {
                         const type = p.profile_type || 'crew';
+                        const extraData = p.data || {};
                         Universe.allProfiles.push({ 
                             ...p, 
+                            ...extraData,
                             type: type,
+                            hasVehicle: p.vehicle || false,
+                            availabilityText: p.availability || '',
                             profileComplete: true 
                         });
                     }
@@ -40562,7 +40771,18 @@ const coords = await Universe.geocodeCity(city);
                     .eq('id', profile.id)
                     .single();
                 
-                if(profileData) fullProfile = { ...profileData, id: profile.id, type: profile.type };
+                if(profileData) {
+                    // Extraire les données du champ JSONB
+                    const extraData = profileData.data || {};
+                    fullProfile = { 
+                        ...profileData, 
+                        ...extraData,
+                        id: profile.id, 
+                        type: profileData.profile_type || profile.type,
+                        hasVehicle: profileData.vehicle || false,
+                        availabilityText: profileData.availability || ''
+                    };
+                }
             } catch(e) { console.warn('Erreur chargement profil:', e); }
         }
         
@@ -40588,13 +40808,14 @@ const coords = await Universe.geocodeCity(city);
         const name = fullProfile.name || fullProfile.displayName || fullProfile.title || fullProfile.assoName || fullProfile.entName || 'Sans nom';
         document.getElementById('pm-name').textContent = name;
         
-        // Rôle / Type
+        // Rôle / Type - chercher dans data si pas trouvé directement
+        const extraData = fullProfile.data || {};
         let roleText = '';
         if(isProject) roleText = fullProfile.projectType || 'Projet';
-        else if(isActor) roleText = fullProfile.role || 'Comédien·ne';
-        else if(isCrew) roleText = fullProfile.role || 'Technicien·ne';
-        else if(isAssociation) roleText = fullProfile.assoType || 'Association';
-        else if(isEnterprise) roleText = fullProfile.entType || 'Entreprise';
+        else if(isActor) roleText = fullProfile.role || extraData.role || 'Comédien·ne';
+        else if(isCrew) roleText = fullProfile.role || extraData.role || extraData.department || 'Technicien·ne';
+        else if(isAssociation) roleText = fullProfile.assoType || extraData.assoType || 'Association';
+        else if(isEnterprise) roleText = fullProfile.entType || extraData.entType || 'Entreprise';
         document.getElementById('pm-role').textContent = roleText;
         
         // Ville
