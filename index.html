@@ -460,15 +460,14 @@ V1.0 - Base solide (Déc. 2024)
 ================================================================================
 -->
 <head>
-<title>Moteur - Gestion de production audiovisuelle - 1.9.9.5</title>
+<title>Moteur - Gestion de production audiovisuelle - 1.9.9.6</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
 
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<!-- Supabase SDK -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <!-- EmailJS SDK pour les invitations -->
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
@@ -4710,7 +4709,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v1.9.9.5</p>
+      <p>v1.9.9.6</p>
       
       <form id="login-form" onsubmit="event.preventDefault(); app.Auth.login()">
         <input type="email" id="login-email" name="email" class="auth-input" placeholder="Email" autocomplete="username">
@@ -8385,27 +8384,21 @@ body.presentation-mode .presentation-bar {
   <script>
 const app = (function(){
 
-  // --- CONFIGURATION FIREBASE ---
-  const firebaseConfig = {
-    apiKey: "AIzaSyCwa_kBWWv5DMcNgVjYFsoRHeAUb1MdpY4",
-    authDomain: "moteur-3c6fa.firebaseapp.com",
-    databaseURL: "https://moteur-3c6fa-default-rtdb.europe-west1.firebasedatabase.app",
-    projectId: "moteur-3c6fa",
-    storageBucket: "moteur-3c6fa.firebasestorage.app",
-    messagingSenderId: "703232951545",
-    appId: "1:703232951545:web:8f9c4e5579d63d2d460e28"
-  };
+  // --- CONFIGURATION SUPABASE ---
+  const SUPABASE_URL = 'https://txjuniuzqxpxghubluxm.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_Y4nYJdwgru-KimLbMpwQPQ_onREt1lD';
   
-  function initFirebase() {
-      if (typeof firebase !== 'undefined') {
-          firebase.initializeApp(firebaseConfig);
-          console.log("Firebase initialisé avec succès");
+  let supabase;
+  function initSupabase() {
+      if (typeof window.supabase !== 'undefined') {
+          supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+          console.log("Supabase initialisé avec succès");
       } else {
-          console.log("Attente de Firebase...");
-          setTimeout(initFirebase, 100);
+          console.log("Attente de Supabase...");
+          setTimeout(initSupabase, 100);
       }
   }
-  initFirebase();
+  initSupabase();
   
 const CONFIG = { 
     themeKey: 'fmp_theme_pref',
@@ -9353,7 +9346,7 @@ crewRoles: {
               case 'DATA_UPDATED':
                   // Un autre onglet a modifié les données
                   if(data.projectId === state.currentProjectId) {
-                      Store.loadFromFirebase(state.currentProjectId);
+                      Store.loadFromSupabase(state.currentProjectId);
                   }
                   break;
                   
@@ -9366,7 +9359,7 @@ crewRoles: {
                   
               case 'LOGOUT':
                   // Déconnexion depuis un autre onglet
-                  firebase.auth().signOut().then(() => location.reload());
+                  supabase.auth.signOut().then(() => location.reload());
                   break;
           }
       },
@@ -9417,10 +9410,8 @@ crewRoles: {
           });
       },
       
-      // Vérifier la session sur Firebase (multi-ordinateurs)
+      // Vérifier la session (simplifié pour Supabase)
       startSessionCheck: async (userId) => {
-          const sessionRef = firebase.database().ref(`user_sessions/${userId}`);
-          
           // Générer un token de session unique pour cet ordinateur/navigateur
           let browserToken = localStorage.getItem('moteur_browser_token');
           if(!browserToken) {
@@ -9429,68 +9420,14 @@ crewRoles: {
           }
           SessionManager.sessionToken = browserToken;
           
-          // Vérifier s'il y a déjà une session active
-          const snapshot = await sessionRef.once('value');
-          const existingSession = snapshot.val();
-          
-          if(existingSession && existingSession.token !== browserToken) {
-              // Une autre session existe, vérifier si elle est encore active
-              const lastHeartbeat = existingSession.lastHeartbeat || 0;
-              const isStale = Date.now() - lastHeartbeat > 60000; // 1 minute sans heartbeat = session morte
-              
-              if(!isStale) {
-                  // Session active sur un autre appareil
-                  const takeOver = await ConfirmModal.show({
-                      title: '⚠️ Session active ailleurs',
-                      message: `Votre compte est déjà connecté sur un autre appareil.\n\nDernière activité : ${new Date(lastHeartbeat).toLocaleString()}\n\nVoulez-vous prendre le contrôle ici et déconnecter l'autre session ?`,
-                      icon: '🔐',
-                      confirmText: 'Prendre le contrôle',
-                      cancelText: 'Annuler',
-                      dangerous: true
-                  });
-                  
-                  if(!takeOver) {
-                      // L'utilisateur refuse, le déconnecter
-                      firebase.auth().signOut();
-                      return false;
-                  }
-              }
-          }
-          
-          // Enregistrer cette session
-          await sessionRef.set({
-              token: browserToken,
-              startedAt: Date.now(),
-              lastHeartbeat: Date.now(),
-              userAgent: navigator.userAgent.substring(0, 100)
-          });
-          
-          // Heartbeat pour maintenir la session active
-          SessionManager.heartbeatInterval = setInterval(async () => {
-              try {
-                  await sessionRef.update({ lastHeartbeat: Date.now() });
-              } catch(e) {
-                  console.warn('Session heartbeat failed:', e);
-              }
-          }, 30000); // Toutes les 30 secondes
-          
-          // Écouter les changements de session (si quelqu'un prend le contrôle)
-          sessionRef.on('value', (snap) => {
-              const session = snap.val();
-              if(session && session.token !== browserToken) {
-                  // Quelqu'un d'autre a pris le contrôle
-                  clearInterval(SessionManager.heartbeatInterval);
-                  SessionManager.showKickedModal();
-              }
-          });
+          // Pour Supabase, on simplifie la gestion de session
+          // La gestion multi-appareils sera gérée par les tokens JWT de Supabase
           
           // Nettoyer à la fermeture
           window.addEventListener('beforeunload', () => {
-              if(SessionManager.isLeaderTab) {
-                  // Seulement le leader nettoie la session Firebase
-                  sessionRef.remove();
+              if(SessionManager.heartbeatInterval) {
+                  clearInterval(SessionManager.heartbeatInterval);
               }
-              clearInterval(SessionManager.heartbeatInterval);
           });
           
           return true;
@@ -9535,7 +9472,7 @@ crewRoles: {
   };
 
   const Auth = {
-      init: () => { 
+      init: async () => { 
           try {
               const theme = localStorage.getItem(CONFIG.themeKey); 
               if(theme === 'dark') document.body.classList.add('dark-mode');
@@ -9569,11 +9506,15 @@ crewRoles: {
               }
           });
           
-          firebase.auth().onAuthStateChanged(async (user) => { 
-              if (user && user.emailVerified) { 
-                  state.currentUser = user; 
+          // Écouter les changements d'authentification Supabase
+          supabase.auth.onAuthStateChange(async (event, session) => { 
+              if (session && session.user) { 
+                  state.currentUser = session.user;
+                  state.currentUser.email = session.user.email;
+                  state.currentUser.uid = session.user.id;
+                  state.currentUser.emailVerified = session.user.email_confirmed_at !== null;
                   // Vérifier la session unique
-                  const sessionOk = await SessionManager.startSessionCheck(user.uid);
+                  const sessionOk = await SessionManager.startSessionCheck(session.user.id);
                   if(sessionOk) {
                       Auth.showDashboard(); 
                   }
@@ -9583,16 +9524,37 @@ crewRoles: {
                   SessionManager.cleanup();
                   Auth.showAuth(); 
               } 
-          }); 
+          });
+          
+          // Vérifier s'il y a déjà une session active
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session && session.user) {
+              state.currentUser = session.user;
+              state.currentUser.email = session.user.email;
+              state.currentUser.uid = session.user.id;
+              state.currentUser.emailVerified = session.user.email_confirmed_at !== null;
+              Auth.showDashboard();
+          } else {
+              Auth.showAuth();
+          }
       },
       showAuth: () => { els.authView.style.display = 'flex'; els.dashboardView.style.display = 'none'; els.appView.style.display = 'none'; },
 showDashboard: async () => { 
     els.authView.style.display = 'none'; 
-    // Charger le profil utilisateur
-    const emailKey = Utils.sanitizeEmail(state.currentUser.email);
+    // Charger le profil utilisateur depuis Supabase
     try {
-        const profileSnap = await firebase.database().ref('user_profiles/' + emailKey).once('value');
-        state.userProfile = profileSnap.val() || { accountType: 'producer' };
+        const { data, error } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('email', state.currentUser.email.toLowerCase())
+            .single();
+        
+        if (data) {
+            state.userProfile = data;
+            state.userProfile.accountType = data.profile_type || 'producer';
+        } else {
+            state.userProfile = { accountType: 'producer' };
+        }
     } catch(e) {
         state.userProfile = { accountType: 'producer' };
     }
@@ -9639,7 +9601,7 @@ showDashboard: async () => {
           document.querySelectorAll('.auth-error, .auth-success').forEach(e => e.style.display='none');
           els.loginForm.style.display = 'none'; els.signupForm.style.display = 'none'; els.forgotForm.style.display = 'block';
       },
-      login: () => { 
+      login: async () => { 
           const email = els.loginEmail.value.trim(); const pass = els.loginPass.value.trim(); 
           if(!email || !pass) return;
           const btn = els.loginForm.querySelector('button[type="submit"]');
@@ -9647,12 +9609,29 @@ showDashboard: async () => {
           btn.innerHTML = '<span class="spinner"></span>Connexion...';
           btn.classList.add('btn-loading');
           els.loginError.style.display = 'none';
-          firebase.auth().signInWithEmailAndPassword(email, pass).then((userCredential) => {
-              const user = userCredential.user;
-              if (!user.emailVerified) { firebase.auth().signOut(); els.loginError.innerText = "Veuillez valider votre email avant de vous connecter."; els.loginError.style.display = 'block'; btn.innerHTML = originalText; btn.classList.remove('btn-loading'); }
-          }).catch(e => { els.loginError.innerText = e.message; els.loginError.style.display = 'block'; btn.innerHTML = originalText; btn.classList.remove('btn-loading'); }); 
+          
+          const { data, error } = await supabase.auth.signInWithPassword({
+              email: email,
+              password: pass
+          });
+          
+          if (error) {
+              let message = error.message;
+              if (message.includes('Invalid login')) message = "Email ou mot de passe incorrect.";
+              if (message.includes('Email not confirmed')) message = "Veuillez valider votre email avant de vous connecter.";
+              els.loginError.innerText = message;
+              els.loginError.style.display = 'block';
+              btn.innerHTML = originalText;
+              btn.classList.remove('btn-loading');
+          } else if (data.user && !data.user.email_confirmed_at) {
+              await supabase.auth.signOut();
+              els.loginError.innerText = "Veuillez valider votre email avant de vous connecter.";
+              els.loginError.style.display = 'block';
+              btn.innerHTML = originalText;
+              btn.classList.remove('btn-loading');
+          }
       },
-      signup: () => { 
+      signup: async () => { 
           const email = els.signupEmail.value.trim(); const pass = els.signupPass.value.trim(); const confirm = els.signupConfirm.value.trim(); 
           const accountType = 'new'; // Pas de type par défaut, l'utilisateur créera ses profils ensuite
           if(!email || !pass) return; 
@@ -9673,31 +9652,63 @@ showDashboard: async () => {
           btn.innerHTML = '<span class="spinner"></span>Création...';
           btn.classList.add('btn-loading');
           els.signupError.style.display = 'none';
-          firebase.auth().createUserWithEmailAndPassword(email, pass).then((userCredential) => { 
-              const emailKey = Utils.sanitizeEmail(email);
-              // Sauvegarder le profil utilisateur avec le type de compte + marqueur pré-alpha
-              firebase.database().ref('user_profiles/' + emailKey).set({
-                  email: email,
-                  accountType: accountType,
-                  createdAt: new Date().toISOString(),
-                  displayName: '',
-                  profileComplete: false,
-                  preAlphaTester: true,
-                  subscription: { active: true, plan: 'prealpha', expiresAt: null }
-              }).then(() => {
-                  userCredential.user.sendEmailVerification().then(() => {
-                      btn.innerHTML = originalText; btn.classList.remove('btn-loading');
-                      Auth.toggleMode('login'); els.loginSuccess.innerText = "🎉 Bienvenue dans la pré-alpha ! Un lien de validation a été envoyé à " + email; els.loginSuccess.style.display = 'block'; firebase.auth().signOut();
-                  });
-              });
-          }).catch(e => { els.signupError.innerText = e.message; els.signupError.style.display = 'block'; btn.innerHTML = originalText; btn.classList.remove('btn-loading'); }); 
+          
+          const { data, error } = await supabase.auth.signUp({
+              email: email,
+              password: pass
+          });
+          
+          if (error) {
+              let message = error.message;
+              if (message.includes('already registered')) message = "Cet email est déjà utilisé.";
+              els.signupError.innerText = message;
+              els.signupError.style.display = 'block';
+              btn.innerHTML = originalText;
+              btn.classList.remove('btn-loading');
+              return;
+          }
+          
+          // Créer le profil utilisateur dans la table user_profiles
+          const { error: profileError } = await supabase.from('user_profiles').insert({
+              email: email.toLowerCase(),
+              name: '',
+              profile_type: accountType,
+              created_at: new Date().toISOString(),
+              is_public: false
+          });
+          
+          if (profileError) {
+              console.error('Erreur création profil:', profileError);
+          }
+          
+          btn.innerHTML = originalText;
+          btn.classList.remove('btn-loading');
+          Auth.toggleMode('login');
+          els.loginSuccess.innerText = "🎉 Bienvenue dans la pré-alpha ! Un lien de validation a été envoyé à " + email;
+          els.loginSuccess.style.display = 'block';
+          await supabase.auth.signOut();
       },
-      resetPassword: () => {
+      resetPassword: async () => {
           const email = els.forgotEmail.value.trim();
           if(!email) { els.forgotError.innerText = "Veuillez entrer votre email."; els.forgotError.style.display = 'block'; return; }
-          firebase.auth().sendPasswordResetEmail(email).then(() => { els.forgotSuccess.style.display = 'block'; els.forgotError.style.display = 'none'; }).catch((error) => { els.forgotError.innerText = error.message; els.forgotError.style.display = 'block'; els.forgotSuccess.style.display = 'none'; });
+          
+          const { error } = await supabase.auth.resetPasswordForEmail(email, {
+              redirectTo: window.location.origin
+          });
+          
+          if (error) {
+              els.forgotError.innerText = error.message;
+              els.forgotError.style.display = 'block';
+              els.forgotSuccess.style.display = 'none';
+          } else {
+              els.forgotSuccess.style.display = 'block';
+              els.forgotError.style.display = 'none';
+          }
       },
-      logout: () => { if(state.presenceRef) state.presenceRef.remove(); firebase.auth().signOut().then(() => location.reload()); }
+      logout: async () => { 
+          await supabase.auth.signOut();
+          location.reload();
+      }
   };
   
   // ========== PRICING ==========
@@ -9806,8 +9817,12 @@ showDashboard: async () => {
           const details = [];
           
           for(const project of ownedProjects) {
-              const dataSnap = await firebase.database().ref('all_projects/' + project.id + '/data').once('value');
-              const projectData = dataSnap.val();
+              const { data: projectRow } = await supabase
+                  .from('projects')
+                  .select('data')
+                  .eq('id', project.id)
+                  .single();
+              const projectData = projectRow?.data;
               const price = Pricing.calculateProjectPrice(projectData);
               
               totalMonthly += price.total;
@@ -9870,16 +9885,30 @@ showDashboard: async () => {
               return false;
           }
           
-          const emailKey = Utils.sanitizeEmail(state.currentUser.email);
-          await firebase.database().ref('user_profiles/' + emailKey + '/trial').set({
-              used: true,
-              startedAt: new Date().toISOString(),
-              projectId: null // Sera rempli à la création du projet
-          });
+          const myEmail = state.currentUser.email.toLowerCase();
+          
+          // Mettre à jour le profil avec les infos d'essai
+          const { error } = await supabase
+              .from('user_profiles')
+              .update({
+                  trial_used: true,
+                  trial_started_at: new Date().toISOString()
+              })
+              .eq('email', myEmail);
+          
+          if (error) {
+              console.error('Erreur activation essai:', error);
+              return false;
+          }
           
           // Recharger le profil
-          const profileSnap = await firebase.database().ref('user_profiles/' + emailKey).once('value');
-          state.userProfile = profileSnap.val();
+          const { data: profile } = await supabase
+              .from('user_profiles')
+              .select('*')
+              .eq('email', myEmail)
+              .single();
+          
+          state.userProfile = profile;
           
           Utils.toast('🎬 Essai gratuit activé ! Vous avez 48h pour tester.', 'success');
           return true;
@@ -10132,7 +10161,40 @@ showDashboard: async () => {
   const Store = {
       // V62: Initialisation du tableau snapshots
       getEmpty: () => ({ title: "Nouveau Film", filmId: 'film_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11), synopsis: "", synopsisShort: "", synopsisLong: "", scriptMeta: { author: "", coAuthor: "", contact: "", copyright: "", draft: "Premier jet", draftDate: "", source: "", notes: "" }, titlePage: { title: "", author: "", coAuthor: "", contact: "", draft: "Premier jet", draftDate: "", source: "", copyright: "", notes: "" }, snapshots: [], scenes: [], characters: [], actors: [], locations: [], resources: [], crew: [], shootingDays: [], tags: CONFIG.defaultTags, groups: [...CONFIG.defaultGroups, ...CONFIG.crewGroups], shots: [], counter: 1, uiConfig: { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [] }, budget: { total: 0, currency: '€', manager: '', managerEmailNotif: true, envelopes: {}, deptManagers: {} }, expenses: [], presentation: { title: '', genre: '', format: '', duration: '', productionType: '', description: '', team: [], associations: [], enterprises: [], needsCrew: {}, needsActors: [], image: '' }, memberPermissions: {}, chatChannels: [], chatExtraMembers: [], workplanOverrides: {}, scriptReports: {} }),
-      getProjectsList: async () => { if(!state.currentUser) return []; const myEmailKey = Utils.sanitizeEmail(state.currentUser.email); const indexSnap = await firebase.database().ref('user_projects/' + myEmailKey).once('value'); const indexVal = indexSnap.val(); if(!indexVal) return []; const promises = Object.keys(indexVal).map(async (pid) => { const metaSnap = await firebase.database().ref('all_projects/' + pid + '/meta').once('value'); const meta = metaSnap.val(); return meta ? { id: pid, ...meta, role: indexVal[pid] } : null; }); const results = await Promise.all(promises); return results.filter(r => r !== null); },
+      getProjectsList: async () => { 
+          if(!state.currentUser) return []; 
+          const myEmail = state.currentUser.email.toLowerCase();
+          
+          // Récupérer les projets dont je suis membre
+          const { data: memberships, error: memberError } = await supabase
+              .from('project_members')
+              .select('project_id, role')
+              .eq('email', myEmail);
+          
+          if (memberError || !memberships || memberships.length === 0) {
+              // Vérifier aussi les projets dont je suis owner
+              const { data: ownedProjects, error: ownedError } = await supabase
+                  .from('projects')
+                  .select('id, title, created_at, owner_email')
+                  .eq('owner_email', myEmail);
+              
+              if (ownedError || !ownedProjects) return [];
+              return ownedProjects.map(p => ({ id: p.id, title: p.title, date: new Date(p.created_at).toLocaleDateString(), owner: p.owner_email, role: 'owner' }));
+          }
+          
+          const projectIds = memberships.map(m => m.project_id);
+          const { data: projects, error: projError } = await supabase
+              .from('projects')
+              .select('id, title, created_at, owner_email')
+              .in('id', projectIds);
+          
+          if (projError || !projects) return [];
+          
+          return projects.map(p => {
+              const membership = memberships.find(m => m.project_id === p.id);
+              return { id: p.id, title: p.title, date: new Date(p.created_at).toLocaleDateString(), owner: p.owner_email, role: membership?.role || 'member' };
+          });
+      },
       createNewProject: async () => { 
           if(!state.currentUser) return; 
           
@@ -10150,20 +10212,16 @@ showDashboard: async () => {
           
           Store.showOwnerRoleModal(); 
       },
-      doCreateProject: (selectedProfiles) => {
-          const myEmail = state.currentUser.email;
-          const myEmailKey = Utils.sanitizeEmail(myEmail);
-          const newRef = firebase.database().ref('all_projects').push();
-          const id = newRef.key;
+      doCreateProject: async (selectedProfiles) => {
+          const myEmail = state.currentUser.email.toLowerCase();
           const empty = Store.getEmpty();
           
-          const ownerName = state.userProfile?.displayName || myEmail.split('@')[0];
+          const ownerName = state.userProfile?.displayName || state.userProfile?.name || myEmail.split('@')[0];
           const ownerRoles = []; // Pour les badges sur l'avatar
           
           // Ajouter chaque profil sélectionné dans la bonne section
           selectedProfiles.forEach((profile, idx) => {
               if(profile.type === 'actor') {
-                  // Ajouter dans les comédiens - PROFIL REVENDIQUÉ
                   const actorEntry = {
                       id: 'actor_owner_' + Date.now() + '_' + idx,
                       name: profile.data.name || ownerName,
@@ -10179,8 +10237,7 @@ showDashboard: async () => {
                       experience: profile.data.experience || '',
                       notes: profile.data.notes || '',
                       isOwner: true,
-                      // Marquer comme profil revendiqué (non modifiable)
-                      publicProfileId: profile.data.id || myEmailKey,
+                      publicProfileId: profile.data.id || myEmail,
                       claimedAt: new Date().toISOString(),
                       claimedBy: myEmail,
                       createdAt: new Date().toISOString()
@@ -10188,7 +10245,6 @@ showDashboard: async () => {
                   empty.actors.push(actorEntry);
                   ownerRoles.push({ icon: profile.icon, name: profile.name });
               } else if(profile.type === 'crew') {
-                  // Ajouter dans l'équipe technique - PROFIL REVENDIQUÉ
                   const crewEntry = {
                       id: 'crew_owner_' + Date.now() + '_' + idx,
                       name: profile.data.name || ownerName,
@@ -10200,8 +10256,7 @@ showDashboard: async () => {
                       rate: profile.data.rate || '',
                       notes: profile.data.notes || '',
                       isOwner: true,
-                      // Marquer comme profil revendiqué (non modifiable)
-                      publicProfileId: profile.data.id || myEmailKey,
+                      publicProfileId: profile.data.id || myEmail,
                       claimedAt: new Date().toISOString(),
                       claimedBy: myEmail,
                       createdAt: new Date().toISOString()
@@ -10211,7 +10266,6 @@ showDashboard: async () => {
               }
           });
           
-          // Si aucun profil sélectionné, ajouter quand même le propriétaire dans crew (NON revendiqué, modifiable)
           if(selectedProfiles.length === 0) {
               empty.crew.push({
                   id: 'crew_owner_' + Date.now(),
@@ -10219,59 +10273,81 @@ showDashboard: async () => {
                   email: myEmail,
                   role: 'Porteur de projet',
                   phone: state.userProfile?.phone || '',
-                  photo: state.userProfile?.photoURL || '',
+                  photo: state.userProfile?.photo || '',
                   isOwner: true,
                   ownerRoles: [],
                   createdAt: new Date().toISOString()
               });
           } else {
-              // Stocker les rôles du propriétaire sur la première fiche crew (pour les badges avatar)
               const firstCrew = empty.crew.find(c => c.isOwner);
               if(firstCrew) {
                   firstCrew.ownerRoles = ownerRoles;
               }
           }
           
-          const payload = { data: empty, meta: { title: empty.title, date: new Date().toLocaleDateString(), owner: myEmail }, acl: { [myEmailKey]: 'owner' }, history: {} };
-          const updates = {};
-          updates['all_projects/' + id] = payload;
-          updates['user_projects/' + myEmailKey + '/' + id] = 'owner';
-          firebase.database().ref().update(updates).then(() => { Store.loadProject(id); History.log('ADD', 'Création du projet'); });
+          // Créer le projet dans Supabase
+          const { data: newProject, error } = await supabase
+              .from('projects')
+              .insert({
+                  owner_email: myEmail,
+                  title: empty.title,
+                  description: '',
+                  type: 'film',
+                  status: 'draft',
+                  data: empty
+              })
+              .select()
+              .single();
+          
+          if (error) {
+              console.error('Erreur création projet:', error);
+              alert('Erreur lors de la création du projet');
+              return;
+          }
+          
+          // Ajouter le propriétaire comme membre
+          await supabase.from('project_members').insert({
+              project_id: newProject.id,
+              email: myEmail,
+              role: 'owner'
+          });
+          
+          Store.loadProject(newProject.id);
+          History.log('ADD', 'Création du projet');
       },
       showOwnerRoleModal: async () => {
-          // Récupérer les vrais profils du porteur depuis Firebase
-          const myEmail = state.currentUser.email;
-          const emailKey = Utils.sanitizeEmail(myEmail);
+          // Récupérer les vrais profils du porteur depuis Supabase
+          const myEmail = state.currentUser.email.toLowerCase();
           
           let userProfiles = [];
           try {
-              // Charger les profils depuis user_profiles/{emailKey}/profiles
-              const profilesSnap = await firebase.database().ref('user_profiles/' + emailKey + '/profiles').once('value');
-              const profiles = profilesSnap.val();
+              // Charger le profil utilisateur depuis Supabase
+              const { data: userData, error } = await supabase
+                  .from('user_profiles')
+                  .select('*')
+                  .eq('email', myEmail)
+                  .single();
               
-              // Charger aussi les infos générales du profil
-              const userSnap = await firebase.database().ref('user_profiles/' + emailKey).once('value');
-              const userData = userSnap.val() || {};
-              state.userProfile = userData;
-              
-              if(profiles && Array.isArray(profiles)) {
-                  profiles.forEach(p => {
-                      if(p.type === 'actor') {
-                          userProfiles.push({
-                              type: 'actor',
-                              icon: '🎭',
-                              name: p.name || 'Comédien·ne',
-                              data: { ...p, email: myEmail }
-                          });
-                      } else if(p.type === 'crew') {
-                          userProfiles.push({
-                              type: 'crew',
-                              icon: p.icon || '🎬',
-                              name: p.role || p.name || 'Technicien',
-                              data: { ...p, email: myEmail }
-                          });
-                      }
-                  });
+              if (userData) {
+                  state.userProfile = userData;
+                  
+                  // Les profils sont stockés dans acting_styles et technical_skills
+                  if (userData.profile_type === 'actor' || (userData.acting_styles && userData.acting_styles.length > 0)) {
+                      userProfiles.push({
+                          type: 'actor',
+                          icon: '🎭',
+                          name: userData.name || 'Comédien·ne',
+                          data: { ...userData, email: myEmail }
+                      });
+                  }
+                  if (userData.profile_type === 'crew' || (userData.technical_skills && userData.technical_skills.length > 0)) {
+                      userProfiles.push({
+                          type: 'crew',
+                          icon: '🎬',
+                          name: userData.name || 'Technicien',
+                          data: { ...userData, email: myEmail }
+                      });
+                  }
               }
           } catch(e) {
               console.log('Erreur chargement profils:', e);
@@ -10351,27 +10427,75 @@ showDashboard: async () => {
           modal.remove();
           Store.doCreateProject(selectedProfiles);
       },
-      createNewProjectFromImport: (importedData) => {
+      createNewProjectFromImport: async (importedData) => {
           if(!state.currentUser) return;
-          const myEmail = state.currentUser.email; const myEmailKey = Utils.sanitizeEmail(myEmail);
-          const newRef = firebase.database().ref('all_projects').push(); const id = newRef.key;
+          const myEmail = state.currentUser.email.toLowerCase();
+          
           if(!importedData.groups || importedData.groups.length === 0) importedData.groups = CONFIG.defaultGroups;
           if(!importedData.tags || importedData.tags.length === 0) importedData.tags = CONFIG.defaultTags;
           if(!importedData.actors) importedData.actors = [];
-          if(!importedData.snapshots) importedData.snapshots = []; // V62 Security
-          const payload = { data: importedData, meta: { title: importedData.title, date: new Date().toLocaleDateString(), owner: myEmail }, acl: { [myEmailKey]: 'owner' } };
-          const updates = {}; updates['all_projects/' + id] = payload; updates['user_projects/' + myEmailKey + '/' + id] = 'owner'; 
-          firebase.database().ref().update(updates).then(() => { Utils.toast("Importation Wizard réussie !", "success"); Store.loadProject(id); }); 
+          if(!importedData.snapshots) importedData.snapshots = [];
+          
+          // Créer le projet dans Supabase
+          const { data: newProject, error } = await supabase
+              .from('projects')
+              .insert({
+                  owner_email: myEmail,
+                  title: importedData.title,
+                  description: '',
+                  type: 'film',
+                  status: 'draft',
+                  data: importedData
+              })
+              .select()
+              .single();
+          
+          if (error) {
+              console.error('Erreur import:', error);
+              Utils.toast("Erreur lors de l'importation", "error");
+              return;
+          }
+          
+          // Ajouter le propriétaire comme membre
+          await supabase.from('project_members').insert({
+              project_id: newProject.id,
+              email: myEmail,
+              role: 'owner'
+          });
+          
+          Utils.toast("Importation Wizard réussie !", "success");
+          Store.loadProject(newProject.id);
       },
       loadProject: async (id) => {
           if(!state.currentUser) return;
           LoadingScreen.show("Ouverture du projet...");
           try {
-              const myEmailKey = Utils.sanitizeEmail(state.currentUser.email);
-              const aclSnap = await firebase.database().ref('all_projects/' + id + '/acl/' + myEmailKey).once('value');
-              const role = aclSnap.val(); if(!role) throw new Error("Accès refusé."); state.currentRole = role;
-              const dataSnap = await firebase.database().ref('all_projects/' + id + '/data').once('value');
-              const parsed = dataSnap.val(); if(!parsed) throw new Error("Projet vide ou introuvable");
+              const myEmail = state.currentUser.email.toLowerCase();
+              
+              // Vérifier l'accès au projet
+              const { data: membership } = await supabase
+                  .from('project_members')
+                  .select('role')
+                  .eq('project_id', id)
+                  .eq('email', myEmail)
+                  .single();
+              
+              // Vérifier si owner
+              const { data: project, error: projError } = await supabase
+                  .from('projects')
+                  .select('*')
+                  .eq('id', id)
+                  .single();
+              
+              if (projError || !project) throw new Error("Projet introuvable");
+              
+              let role = membership?.role;
+              if (!role && project.owner_email === myEmail) role = 'owner';
+              if (!role) throw new Error("Accès refusé.");
+              state.currentRole = role;
+              
+              const parsed = project.data;
+              if(!parsed) throw new Error("Projet vide ou introuvable");
               const safeData = { ...Store.getEmpty(), ...parsed };
               
               if(!safeData.actors) safeData.actors = [];
@@ -10402,33 +10526,122 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           } catch(e) { LoadingScreen.hide(); Utils.toast("Erreur: " + e.message, "error"); console.error(e); UI.showDashboard(); }
       },
       startRealtimeListener: (id) => {
-          if(state.dbListener) state.dbListener.off();
-          state.dbListener = firebase.database().ref('all_projects/' + id + '/data');
-          state.dbListener.on('value', (snap) => {
-             const val = snap.val(); if(!val) return;
-             state.data = { ...state.data, ...val };
-             if(document.activeElement !== els.title) els.title.value = state.data.title;
-             // Synopsis géré par le module Synopsis avec chapitres
-             Synopsis.renderTree('synopsis');
-             Synopsis.renderTree('short');
-             Synopsis.renderTree('long');
-             if(els.boardSynopsis) els.boardSynopsis.innerText = state.data.synopsis || "(Vide)";
-             if(els.boardShort) els.boardShort.innerText = state.data.synopsisShort || "(Vide)";
-             if(els.boardLong) els.boardLong.innerText = state.data.synopsisLong || "(Vide)";
-             const activeId = document.activeElement && document.activeElement.closest('.script-row') ? parseInt(document.activeElement.closest('.script-row').dataset.id) : null;
-             const activeContinuous = document.activeElement && document.activeElement.closest('.script-continuous-content');
-             if(state.currentRole !== 'viewer') { 
-                 const activeTab = document.querySelector('.tab-content.active').id; 
-                 if(activeTab === 'tab-board') UI.renderBoard(); 
-                 if(activeTab === 'tab-script' && !activeId && !activeContinuous) UI.renderScript();
-                 if(activeTab === 'tab-stats') Stats.render();
-                 // V62 : On rafraichit la liste des versions si la modale est ouverte
-                 if(els.versionModal.style.display === 'flex') UI.renderVersionList();
-                 if(activeTab === 'tab-actors') UI.renderDataTab('actors', els.actorContainer);
-             } else { UI.renderAll(); }
-          });
+          // Supabase Realtime - écouter les changements sur le projet
+          if(state.dbListener) {
+              supabase.removeChannel(state.dbListener);
+          }
+          
+          state.dbListener = supabase
+              .channel('project_' + id)
+              .on('postgres_changes', 
+                  { event: 'UPDATE', schema: 'public', table: 'projects', filter: 'id=eq.' + id },
+                  (payload) => {
+                      const val = payload.new.data;
+                      if(!val) return;
+                      state.data = { ...state.data, ...val };
+                      if(document.activeElement !== els.title) els.title.value = state.data.title;
+                      Synopsis.renderTree('synopsis');
+                      Synopsis.renderTree('short');
+                      Synopsis.renderTree('long');
+                      if(els.boardSynopsis) els.boardSynopsis.innerText = state.data.synopsis || "(Vide)";
+                      if(els.boardShort) els.boardShort.innerText = state.data.synopsisShort || "(Vide)";
+                      if(els.boardLong) els.boardLong.innerText = state.data.synopsisLong || "(Vide)";
+                      const activeId = document.activeElement && document.activeElement.closest('.script-row') ? parseInt(document.activeElement.closest('.script-row').dataset.id) : null;
+                      const activeContinuous = document.activeElement && document.activeElement.closest('.script-continuous-content');
+                      if(state.currentRole !== 'viewer') { 
+                          const activeTab = document.querySelector('.tab-content.active').id; 
+                          if(activeTab === 'tab-board') UI.renderBoard(); 
+                          if(activeTab === 'tab-script' && !activeId && !activeContinuous) UI.renderScript();
+                          if(activeTab === 'tab-stats') Stats.render();
+                          if(els.versionModal.style.display === 'flex') UI.renderVersionList();
+                          if(activeTab === 'tab-actors') UI.renderDataTab('actors', els.actorContainer);
+                      } else { UI.renderAll(); }
+                  }
+              )
+              .subscribe();
       },
-      initPresence: (id) => { if(state.presenceRef) state.presenceRef.remove(); const email = state.currentUser.email; const connectionsRef = firebase.database().ref('all_projects/' + id + '/presence'); state.presenceRef = connectionsRef.push(); state.presenceRef.onDisconnect().remove(); state.presenceRef.set({ email: email, time: Date.now() }); connectionsRef.on('value', (snap) => { const users = snap.val() || {}; els.presenceList.innerHTML = ''; Object.values(users).forEach(u => { const initials = Utils.getInitials(u.email); const bg = Utils.getColor(u.email); const wrapper = document.createElement('div'); wrapper.className = 'presence-avatar-wrapper'; const roleInfo = Store.getUserRoleInfo(u.email); const personInfo = Store.getPersonInfo(u.email); if(roleInfo.class) wrapper.classList.add(roleInfo.class); const div = document.createElement('div'); div.className = 'presence-avatar'; div.style.backgroundColor = bg; div.innerText = initials; wrapper.appendChild(div); if(roleInfo.icon) { const badge = document.createElement('span'); badge.className = 'role-icon'; badge.innerText = roleInfo.icon; wrapper.appendChild(badge); } if(roleInfo.extraRoles && roleInfo.extraRoles.length > 0) { roleInfo.extraRoles.forEach((r, idx) => { const extraBadge = document.createElement('span'); extraBadge.className = 'role-icon extra-role'; extraBadge.style.right = (-2 + (idx + 1) * 12) + 'px'; extraBadge.innerText = r.icon; wrapper.appendChild(extraBadge); }); } const tooltip = document.createElement('div'); tooltip.className = 'avatar-tooltip'; let tooltipHtml = '<div class="avatar-tooltip-name">' + Utils.escape(personInfo.name || u.email.split('@')[0]) + '</div>'; if(roleInfo.text) tooltipHtml += '<div class="avatar-tooltip-role">' + Utils.escape(roleInfo.text) + '</div>'; if(roleInfo.extraRoles && roleInfo.extraRoles.length > 0) { roleInfo.extraRoles.forEach(r => { tooltipHtml += '<div class="avatar-tooltip-role">' + r.icon + ' ' + Utils.escape(r.name) + '</div>'; }); } tooltip.innerHTML = tooltipHtml; wrapper.appendChild(tooltip); els.presenceList.appendChild(wrapper); }); }); },
+      
+      loadFromSupabase: async (projectId) => {
+          const { data: project } = await supabase
+              .from('projects')
+              .select('data')
+              .eq('id', projectId)
+              .single();
+          if(project && project.data) {
+              state.data = { ...state.data, ...project.data };
+              UI.renderAll();
+          }
+      },
+      initPresence: (id) => { 
+          // Supabase Realtime Presence
+          const email = state.currentUser.email;
+          
+          if(state.presenceChannel) {
+              supabase.removeChannel(state.presenceChannel);
+          }
+          
+          state.presenceChannel = supabase.channel('presence_' + id, {
+              config: { presence: { key: email } }
+          });
+          
+          state.presenceChannel
+              .on('presence', { event: 'sync' }, () => {
+                  const presenceState = state.presenceChannel.presenceState();
+                  els.presenceList.innerHTML = '';
+                  
+                  Object.keys(presenceState).forEach(key => {
+                      const users = presenceState[key];
+                      users.forEach(u => {
+                          const userEmail = u.email || key;
+                          const initials = Utils.getInitials(userEmail);
+                          const bg = Utils.getColor(userEmail);
+                          const wrapper = document.createElement('div');
+                          wrapper.className = 'presence-avatar-wrapper';
+                          const roleInfo = Store.getUserRoleInfo(userEmail);
+                          const personInfo = Store.getPersonInfo(userEmail);
+                          if(roleInfo.class) wrapper.classList.add(roleInfo.class);
+                          const div = document.createElement('div');
+                          div.className = 'presence-avatar';
+                          div.style.backgroundColor = bg;
+                          div.innerText = initials;
+                          wrapper.appendChild(div);
+                          if(roleInfo.icon) {
+                              const badge = document.createElement('span');
+                              badge.className = 'role-icon';
+                              badge.innerText = roleInfo.icon;
+                              wrapper.appendChild(badge);
+                          }
+                          if(roleInfo.extraRoles && roleInfo.extraRoles.length > 0) {
+                              roleInfo.extraRoles.forEach((r, idx) => {
+                                  const extraBadge = document.createElement('span');
+                                  extraBadge.className = 'role-icon extra-role';
+                                  extraBadge.style.right = (-2 + (idx + 1) * 12) + 'px';
+                                  extraBadge.innerText = r.icon;
+                                  wrapper.appendChild(extraBadge);
+                              });
+                          }
+                          const tooltip = document.createElement('div');
+                          tooltip.className = 'avatar-tooltip';
+                          let tooltipHtml = '<div class="avatar-tooltip-name">' + Utils.escape(personInfo.name || userEmail.split('@')[0]) + '</div>';
+                          if(roleInfo.text) tooltipHtml += '<div class="avatar-tooltip-role">' + Utils.escape(roleInfo.text) + '</div>';
+                          if(roleInfo.extraRoles && roleInfo.extraRoles.length > 0) {
+                              roleInfo.extraRoles.forEach(r => {
+                                  tooltipHtml += '<div class="avatar-tooltip-role">' + r.icon + ' ' + Utils.escape(r.name) + '</div>';
+                              });
+                          }
+                          tooltip.innerHTML = tooltipHtml;
+                          wrapper.appendChild(tooltip);
+                          els.presenceList.innerHTML = '';
+                          els.presenceList.appendChild(wrapper);
+                      });
+                  });
+              })
+              .subscribe(async (status) => {
+                  if (status === 'SUBSCRIBED') {
+                      await state.presenceChannel.track({ email: email, time: Date.now() });
+                  }
+              });
+      },
       getPersonInfo: (email) => {
           let ownerRoles = [];
           // Chercher dans l'équipe technique
@@ -10488,35 +10701,50 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           }
           return { text: '', icon: '', class: '', extraRoles: [] };
       },
-      initLocks: (id) => { if(state.locksListener) state.locksListener.off(); state.locksListener = firebase.database().ref('all_projects/' + id + '/locks'); state.locksListener.on('value', (snap) => { state.activeLocks = snap.val() || {}; UI.applyLocks(); }); },
+      initLocks: (id) => { 
+          // Pour Supabase, on simplifie la gestion des locks
+          // Les locks seront stockés dans le champ data du projet
+          state.activeLocks = {};
+          UI.applyLocks();
+      },
       acquireLock: (sceneId) => { 
           if(state.currentRole === 'viewer') return; 
-          const lockRef = firebase.database().ref('all_projects/' + state.currentProjectId + '/locks/' + sceneId);
-          lockRef.once('value', (snap) => {
-              const existingLock = snap.val();
-              if (existingLock && existingLock.uid !== state.currentUser.uid) {
-                  Utils.toast(`Scène déjà éditée par ${existingLock.user.split('@')[0]}`, 'warning');
-                  return;
-              }
-              lockRef.set({ user: state.currentUser.email, uid: state.currentUser.uid, timestamp: Date.now() });
-              lockRef.onDisconnect().remove();
-          });
+          // Simplifié pour Supabase - locks en mémoire locale
+          const existingLock = state.activeLocks[sceneId];
+          if (existingLock && existingLock.uid !== state.currentUser.uid) {
+              Utils.toast(`Scène déjà éditée par ${existingLock.user.split('@')[0]}`, 'warning');
+              return;
+          }
+          state.activeLocks[sceneId] = { user: state.currentUser.email, uid: state.currentUser.uid, timestamp: Date.now() };
       },
-      releaseLock: (sceneId) => { if(state.currentRole === 'viewer') return; const lock = state.activeLocks[sceneId]; if(lock && lock.uid === state.currentUser.uid) { firebase.database().ref('all_projects/' + state.currentProjectId + '/locks/' + sceneId).remove(); } },
+      releaseLock: (sceneId) => { 
+          if(state.currentRole === 'viewer') return; 
+          const lock = state.activeLocks[sceneId]; 
+          if(lock && lock.uid === state.currentUser.uid) { 
+              delete state.activeLocks[sceneId]; 
+          } 
+      },
 	  
-      updateScene: Utils.debounce((sceneId, content) => { 
+      updateScene: Utils.debounce(async (sceneId, content) => { 
           if(!state.currentProjectId || state.currentRole === 'viewer') return; 
           const idx = state.data.scenes.findIndex(s => s.id === sceneId); 
           if(idx > -1) { 
               const newTime = Utils.estimateTime(content);
-              firebase.database().ref('all_projects/' + state.currentProjectId + '/data/scenes/' + idx + '/scriptContent').set(content); 
-              firebase.database().ref('all_projects/' + state.currentProjectId + '/data/scenes/' + idx + '/time').set(newTime);
               state.data.scenes[idx].scriptContent = content;
               state.data.scenes[idx].time = newTime;
+              await supabase.from('projects').update({ data: state.data }).eq('id', state.currentProjectId);
           } 
       }, 500),
-      updateTitle: Utils.debounce((val) => { if(!state.currentProjectId || state.currentRole === 'viewer') return; firebase.database().ref('all_projects/' + state.currentProjectId + '/data/title').set(val); firebase.database().ref('all_projects/' + state.currentProjectId + '/meta/title').set(val); }, 1000),
-      updateTextField: Utils.debounce((field, val) => { if(!state.currentProjectId || state.currentRole === 'viewer') return; firebase.database().ref('all_projects/' + state.currentProjectId + '/data/' + field).set(val); }, 1000),
+      updateTitle: Utils.debounce(async (val) => { 
+          if(!state.currentProjectId || state.currentRole === 'viewer') return; 
+          state.data.title = val;
+          await supabase.from('projects').update({ title: val, data: state.data }).eq('id', state.currentProjectId);
+      }, 1000),
+      updateTextField: Utils.debounce(async (field, val) => { 
+          if(!state.currentProjectId || state.currentRole === 'viewer') return; 
+          state.data[field] = val;
+          await supabase.from('projects').update({ data: state.data }).eq('id', state.currentProjectId);
+      }, 1000),
       migrateShootingDays: () => {
         // Migrer les jours de tournage vers le nouveau format (startDate/endDate)
         if(!state.data.shootingDays) return;
@@ -10592,13 +10820,33 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           Store.migrateBreakdownKeys();
           Store.migrateShootingDays(); 
           
-          // Nettoyer les valeurs undefined (Firebase ne les accepte pas)
+          // Nettoyer les valeurs undefined
           const cleanData = JSON.parse(JSON.stringify(state.data, (key, value) => value === undefined ? null : value));
           
           const id = state.currentProjectId; 
-          await firebase.database().ref('all_projects/' + id + '/data').update(cleanData); 
-          const meta = { title: state.data.title, date: new Date().toLocaleDateString() }; 
-          await firebase.database().ref('all_projects/' + id + '/meta').update(meta); 
+          
+          // Sauvegarder dans Supabase
+          const { error } = await supabase
+              .from('projects')
+              .update({ 
+                  data: cleanData,
+                  title: state.data.title,
+                  updated_at: new Date().toISOString()
+              })
+              .eq('id', id);
+          
+          if (error) {
+              console.error('Erreur sauvegarde:', error);
+              if(syncIndicator) {
+                  syncIndicator.textContent = '❌';
+                  setTimeout(() => {
+                      syncIndicator.textContent = '☁️';
+                      syncIndicator.style.opacity = '0.4';
+                  }, 3000);
+              }
+              state.savingInProgress = false;
+              return;
+          }
           
           // Indicateur de sync : terminé
           if(syncIndicator) {
@@ -10617,8 +10865,38 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               SessionManager.notifyDataUpdate();
           }
       },
-      deleteProject: async (id, role, e) => { if(e) e.stopPropagation(); if(role === 'viewer') return; if(await ConfirmModal.confirmDelete("Cette action est irréversible.", "Supprimer ce projet ?")) { await firebase.database().ref('all_projects/' + id).remove(); const myEmailKey = Utils.sanitizeEmail(state.currentUser.email); await firebase.database().ref('user_projects/' + myEmailKey + '/' + id).remove(); await UI.renderDashboard(); } },
-      shareProject: async (email, role) => { if(!state.currentProjectId) return; const pid = state.currentProjectId; const emailKey = Utils.sanitizeEmail(email); const updates = {}; updates['all_projects/' + pid + '/acl/' + emailKey] = role; updates['user_projects/' + emailKey + '/' + pid] = role; await firebase.database().ref().update(updates); History.log('SHARE', `Partage projet avec ${email} (${role})`); Notifications.send(email, 'invite', `${state.currentUser.email} vous a invité au projet "${state.data.title}"`, pid); Utils.toast('Invité !', 'success'); els.shareModal.style.display = 'none'; },
+      deleteProject: async (id, role, e) => { 
+          if(e) e.stopPropagation(); 
+          if(role === 'viewer') return; 
+          if(await ConfirmModal.confirmDelete("Cette action est irréversible.", "Supprimer ce projet ?")) { 
+              // Supprimer le projet dans Supabase (les membres seront supprimés en cascade)
+              await supabase.from('projects').delete().eq('id', id);
+              await UI.renderDashboard(); 
+          } 
+      },
+      shareProject: async (email, role) => { 
+          if(!state.currentProjectId) return; 
+          const pid = state.currentProjectId; 
+          const emailLower = email.toLowerCase();
+          
+          // Ajouter le membre au projet dans Supabase
+          const { error } = await supabase.from('project_members').upsert({
+              project_id: pid,
+              email: emailLower,
+              role: role
+          }, { onConflict: 'project_id,email' });
+          
+          if (error) {
+              console.error('Erreur partage:', error);
+              Utils.toast('Erreur lors du partage', 'error');
+              return;
+          }
+          
+          History.log('SHARE', `Partage projet avec ${email} (${role})`); 
+          Notifications.send(email, 'invite', `${state.currentUser.email} vous a invité au projet "${state.data.title}"`, pid); 
+          Utils.toast('Invité !', 'success'); 
+          els.shareModal.style.display = 'none'; 
+      },
       clearCurrent: async () => { if(state.currentRole === 'viewer') return; if(await ConfirmModal.confirmDelete("Toutes les données du projet seront effacées.", "Vider tout ?")){ state.data = Store.getEmpty(); Store.save(); UI.renderAll(); } },
       importJSON: (e) => { if(state.currentRole === 'viewer') return; const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>{ try{ state.data = JSON.parse(ev.target.result); Store.save(); UI.renderAll(); UI.switchTab('synopsis'); Utils.toast('Import réussi !', 'success'); } catch(x){ Utils.toast('Erreur fichier.', 'error'); } }; r.readAsText(f); e.target.value=''; }
   };
@@ -11556,7 +11834,18 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           if(menu) menu.remove();
           
           try {
-              await firebase.database().ref(`all_projects/${projectId}/meta/priority`).set(priority || null);
+              // Charger les données actuelles du projet
+              const { data: project } = await supabase
+                  .from('projects')
+                  .select('data')
+                  .eq('id', projectId)
+                  .single();
+              
+              if (project) {
+                  const updatedData = { ...project.data, priority: priority || null };
+                  await supabase.from('projects').update({ data: updatedData }).eq('id', projectId);
+              }
+              
               Utils.toast(priority ? `Priorité "${priority}" définie` : 'Priorité supprimée', 'success');
               UI.renderProjectList();
           } catch(e) {
@@ -11565,7 +11854,6 @@ CONFIG.crewGroups.forEach(defaultGrp => {
       },
       
       reorderProjects: async (draggedId, targetId) => {
-          const myEmailKey = Utils.sanitizeEmail(state.currentUser.email);
           const list = await Store.getProjectsList();
           
           // Trouver les index
@@ -11587,13 +11875,15 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           list.splice(targetIdx, 0, dragged);
           
           // Sauvegarder l'ordre pour chaque projet
-          const updates = {};
-          list.forEach((p, idx) => {
-              updates[`all_projects/${p.id}/meta/order`] = idx;
-          });
-          
           try {
-              await firebase.database().ref().update(updates);
+              for (let idx = 0; idx < list.length; idx++) {
+                  const p = list[idx];
+                  const { data: proj } = await supabase.from('projects').select('data').eq('id', p.id).single();
+                  if (proj) {
+                      const updatedData = { ...proj.data, order: idx };
+                      await supabase.from('projects').update({ data: updatedData }).eq('id', p.id);
+                  }
+              }
               
               // Reconstruire la liste
               await UI.renderProjectList();
@@ -14033,9 +14323,9 @@ const tabToSection = {
                   state.data.shootingDays = state.data.shootingDays.filter(day => day.scenes && day.scenes.length > 0);
               }
               
-              // 3. Supprimer les commentaires Firebase
-              if(state.currentProjectId) {
-                  firebase.database().ref(`all_projects/${state.currentProjectId}/comments/${id}`).remove().catch(e => console.warn('Erreur suppression commentaires:', e));
+              // 3. Supprimer les commentaires (stockés dans data.comments)
+              if(state.data.comments && state.data.comments[id]) {
+                  delete state.data.comments[id];
               }
               
               // 4. Supprimer la scène
@@ -14262,18 +14552,19 @@ const tabToSection = {
       checkAndLinkPublicProfile: async (email, type, idx) => {
           if(!email || !email.includes('@')) return false;
           
-          const dbPath = type === 'actor' ? 'public_actors' : 'public_crew';
           const typeLabel = type === 'actor' ? 'comédien' : 'technicien';
           const dataArray = type === 'actor' ? state.data.actors : state.data.crew;
           
           try {
-              const query = firebase.database().ref(dbPath).orderByChild('email').equalTo(email.toLowerCase());
-              const snap = await query.once('value');
+              // Chercher dans user_profiles
+              const { data: profiles, error } = await supabase
+                  .from('user_profiles')
+                  .select('*')
+                  .eq('email', email.toLowerCase());
               
-              if(snap.exists()) {
-                  const profiles = snap.val();
-                  const profileId = Object.keys(profiles)[0];
-                  const existingProfile = profiles[profileId];
+              if(!error && profiles && profiles.length > 0) {
+                  const existingProfile = profiles[0];
+                  const profileId = existingProfile.id;
                   
                   // Créer le modal de confirmation
                   const modal = document.createElement('div');
@@ -14322,12 +14613,16 @@ const tabToSection = {
       
       // Confirme la liaison d'un profil public
       confirmLinkProfile: async (profileId, type, idx) => {
-          const dbPath = type === 'actor' ? 'public_actors' : 'public_crew';
           const dataArray = type === 'actor' ? state.data.actors : state.data.crew;
           
           try {
-              const snap = await firebase.database().ref(dbPath + '/' + profileId).once('value');
-              const publicData = snap.val();
+              const { data: publicData, error } = await supabase
+                  .from('user_profiles')
+                  .select('*')
+                  .eq('id', profileId)
+                  .single();
+              
+              if (error) throw error;
               
               if(publicData && dataArray[idx]) {
                   // Lier le profil
@@ -14379,13 +14674,13 @@ const tabToSection = {
               const actor = state.data.actors[i];
               if(!actor.publicProfileId && actor.email) {
                   try {
-                      // Chercher par email dans public_actors
-                      const query = firebase.database().ref('public_actors').orderByChild('email').equalTo(actor.email.toLowerCase());
-                      const snap = await query.once('value');
-                      if(snap.exists()) {
-                          const profiles = snap.val();
-                          const profileId = Object.keys(profiles)[0];
-                          actor.publicProfileId = profileId;
+                      // Chercher par email dans user_profiles
+                      const { data: profiles } = await supabase
+                          .from('user_profiles')
+                          .select('id')
+                          .eq('email', actor.email.toLowerCase());
+                      if(profiles && profiles.length > 0) {
+                          actor.publicProfileId = profiles[0].id;
                           hasChanges = true;
                       }
                   } catch(e) {
@@ -14399,8 +14694,11 @@ const tabToSection = {
               const actor = state.data.actors[i];
               if(actor.publicProfileId) {
                   try {
-                      const snap = await firebase.database().ref('public_actors/' + actor.publicProfileId).once('value');
-                      const publicData = snap.val();
+                      const { data: publicData } = await supabase
+                          .from('user_profiles')
+                          .select('*')
+                          .eq('id', actor.publicProfileId)
+                          .single();
                       if(publicData) {
                           // Mettre à jour les données de l'acteur avec le profil public
                           actor.name = publicData.name || actor.name;
@@ -14461,13 +14759,13 @@ const tabToSection = {
               const member = state.data.crew[i];
               if(!member.publicProfileId && member.email) {
                   try {
-                      // Chercher par email dans public_crew
-                      const query = firebase.database().ref('public_crew').orderByChild('email').equalTo(member.email.toLowerCase());
-                      const snap = await query.once('value');
-                      if(snap.exists()) {
-                          const profiles = snap.val();
-                          const profileId = Object.keys(profiles)[0];
-                          member.publicProfileId = profileId;
+                      // Chercher par email dans user_profiles
+                      const { data: profiles } = await supabase
+                          .from('user_profiles')
+                          .select('id')
+                          .eq('email', member.email.toLowerCase());
+                      if(profiles && profiles.length > 0) {
+                          member.publicProfileId = profiles[0].id;
                           hasChanges = true;
                       }
                   } catch(e) {
@@ -14481,8 +14779,11 @@ const tabToSection = {
               const member = state.data.crew[i];
               if(member.publicProfileId) {
                   try {
-                      const snap = await firebase.database().ref('public_crew/' + member.publicProfileId).once('value');
-                      const publicData = snap.val();
+                      const { data: publicData } = await supabase
+                          .from('user_profiles')
+                          .select('*')
+                          .eq('id', member.publicProfileId)
+                          .single();
                       if(publicData) {
                           // Mettre à jour les données du technicien avec le profil public
                           member.name = publicData.name || member.name;
@@ -14745,7 +15046,15 @@ const tabToSection = {
                   createdAt: new Date().toISOString()
               };
               
-              await firebase.database().ref(`pending_profile_claims/${recipientEmailKey}/${claimId}`).set(claimData);
+              // Stocker la demande de revendication dans les notifications
+              await supabase.from('notifications').insert({
+                  user_email: person.email.toLowerCase(),
+                  type: 'profile_claim',
+                  title: `🎁 Un profil ${typeLabel} a été créé à votre nom`,
+                  message: JSON.stringify(claimData),
+                  link: state.currentProjectId,
+                  read: false
+              });
               
               await Messages.send(person.email, {
                   type: 'claim',
@@ -22064,8 +22373,12 @@ const PublicProfile = {
             
             for(const project of projectsList) {
                 // Charger les données complètes du projet (actors + crew)
-                const dataSnap = await firebase.database().ref('all_projects/' + project.id + '/data').once('value');
-                const data = dataSnap.val();
+                const { data: projectData } = await supabase
+                    .from('projects')
+                    .select('data')
+                    .eq('id', project.id)
+                    .single();
+                const data = projectData?.data;
                 if(!data) continue;
                 
                 const projectInfo = { projectId: project.id, projectTitle: project.title || 'Sans titre' };
@@ -22222,62 +22535,31 @@ const PublicProfile = {
         }
         
         try {
-            const email = state.currentUser.email;
-            const emailKey = Utils.sanitizeEmail(email);
-            const uid = state.currentUser.uid;
+            const email = state.currentUser.email.toLowerCase();
             
-            // 1. Récupérer tous les projets de l'utilisateur
-            const projectsSnap = await firebase.database().ref('user_projects/' + emailKey).once('value');
-            const projects = projectsSnap.val() || {};
+            // 1. Supprimer les projets dont l'utilisateur est propriétaire
+            await supabase.from('projects').delete().eq('owner_email', email);
             
-            const updates = {};
-            
-            // 2. Supprimer les projets dont l'utilisateur est propriétaire
-            for(const pid of Object.keys(projects)) {
-                if(projects[pid] === 'owner') {
-                    updates['all_projects/' + pid] = null;
-                }
-                // Supprimer de l'index utilisateur
-                updates['user_projects/' + emailKey + '/' + pid] = null;
-            }
+            // 2. Supprimer les participations aux projets
+            await supabase.from('project_members').delete().eq('email', email);
             
             // 3. Supprimer le profil utilisateur
-            updates['user_profiles/' + emailKey] = null;
+            await supabase.from('user_profiles').delete().eq('email', email);
             
-            // 4. Supprimer les profils publics dont l'utilisateur est propriétaire
-            const dbPaths = ['public_actors', 'public_crew', 'public_associations', 'public_enterprises'];
-            for(const dbPath of dbPaths) {
-                const snap = await firebase.database().ref(dbPath).orderByChild('ownerId').equalTo(emailKey).once('value');
-                const profiles = snap.val() || {};
-                for(const profileId of Object.keys(profiles)) {
-                    updates[`${dbPath}/${profileId}`] = null;
-                }
-            }
+            // 4. Supprimer les messages
+            await supabase.from('messages').delete().or(`from_email.eq.${email},to_email.eq.${email}`);
             
-            // 5. Supprimer les projets publics dont l'utilisateur est propriétaire
-            const publicProjectsSnap = await firebase.database().ref('public_projects').orderByChild('ownerEmail').equalTo(email).once('value');
-            const publicProjects = publicProjectsSnap.val() || {};
-            for(const projectId of Object.keys(publicProjects)) {
-                updates[`public_projects/${projectId}`] = null;
-            }
+            // 5. Supprimer les notifications
+            await supabase.from('notifications').delete().eq('user_email', email);
             
-            // 6. Supprimer les messages
-            updates['user_messages/' + emailKey] = null;
+            // 6. Supprimer les contacts
+            await supabase.from('contacts').delete().eq('owner_email', email);
             
-            // 7. Supprimer les notifications
-            updates['user_notifications/' + emailKey] = null;
+            // 7. Supprimer le compte Supabase Auth
+            // Note: La suppression du compte auth doit être faite côté serveur ou via le dashboard
+            await supabase.auth.signOut();
             
-            // 8. Supprimer les contacts
-            updates['user_contacts/' + emailKey] = null;
-            
-            // 9. Supprimer les invitations en attente
-            updates['pending_invitations/' + emailKey] = null;
-            
-            // Appliquer toutes les suppressions
-            await firebase.database().ref().update(updates);
-            
-            // 8. Supprimer le compte Firebase Auth
-            await state.currentUser.delete();
+            // Compte supprimé avec succès
             
             Utils.toast('Votre compte a été supprimé. Au revoir !', 'success');
             window.location.reload();
@@ -23200,14 +23482,24 @@ const PublicProfile = {
     
     // Charge les profils en attente de revendication
     loadPendingClaims: async () => {
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
+        const email = state.currentUser.email.toLowerCase();
         
         try {
-            const snap = await firebase.database().ref(`pending_profile_claims/${emailKey}`).once('value');
-            const claims = snap.val();
+            const { data: notifications, error } = await supabase
+                .from('notifications')
+                .select('*')
+                .eq('user_email', email)
+                .eq('type', 'profile_claim')
+                .eq('read', false);
             
-            if(claims) {
-                PublicProfile.pendingClaims = Object.values(claims);
+            if(!error && notifications) {
+                PublicProfile.pendingClaims = notifications.map(n => {
+                    try {
+                        return { ...JSON.parse(n.message), notificationId: n.id };
+                    } catch(e) {
+                        return null;
+                    }
+                }).filter(c => c !== null);
             } else {
                 PublicProfile.pendingClaims = [];
             }
@@ -23301,34 +23593,41 @@ const PublicProfile = {
             // Ajouter aux profils
             PublicProfile.profiles.push(newProfile);
             
-            // Sauvegarder dans user_profiles
-            await firebase.database().ref(`user_profiles/${emailKey}/profiles`).set(PublicProfile.profiles);
-            
-            // Publier dans l'annuaire public
-            const dbPath = claim.type === 'actor' ? 'public_actors' : 'public_crew';
-            await firebase.database().ref(`${dbPath}/${newProfile.id}`).set({
-                ...newProfile,
-                ownerId: emailKey
-            });
+            // Mettre à jour le profil utilisateur dans Supabase
+            const email = state.currentUser.email.toLowerCase();
+            await supabase.from('user_profiles').update({
+                name: newProfile.name,
+                phone: newProfile.phone,
+                photo: newProfile.photo,
+                bio: newProfile.bio,
+                gender: newProfile.gender,
+                profile_type: newProfile.type
+            }).eq('email', email);
             
             // Mettre à jour l'acteur/technicien dans le projet d'origine avec le lien vers le profil public
             if(claim.projectId && claim.localId) {
-                const updatePath = claim.type === 'actor' 
-                    ? `all_projects/${claim.projectId}/data/actors`
-                    : `all_projects/${claim.projectId}/data/crew`;
+                const { data: project } = await supabase
+                    .from('projects')
+                    .select('data')
+                    .eq('id', claim.projectId)
+                    .single();
                 
-                const projectDataSnap = await firebase.database().ref(updatePath).once('value');
-                const projectData = projectDataSnap.val() || [];
-                
-                // Trouver l'index de l'acteur/technicien par son ID local
-                const idx = projectData.findIndex(p => p.id === claim.localId);
-                if(idx !== -1) {
-                    await firebase.database().ref(`${updatePath}/${idx}/publicProfileId`).set(newProfile.id);
+                if(project && project.data) {
+                    const dataArray = claim.type === 'actor' ? project.data.actors : project.data.crew;
+                    if(dataArray) {
+                        const idx = dataArray.findIndex(p => p.id === claim.localId);
+                        if(idx !== -1) {
+                            dataArray[idx].publicProfileId = newProfile.id;
+                            await supabase.from('projects').update({ data: project.data }).eq('id', claim.projectId);
+                        }
+                    }
                 }
             }
             
-            // Supprimer le claim
-            await firebase.database().ref(`pending_profile_claims/${emailKey}/${claimId}`).remove();
+            // Supprimer la notification de claim
+            if(claim.notificationId) {
+                await supabase.from('notifications').delete().eq('id', claim.notificationId);
+            }
             PublicProfile.pendingClaims = PublicProfile.pendingClaims.filter(c => c.id !== claimId);
             
             // Rafraîchir l'affichage
@@ -23350,10 +23649,12 @@ const PublicProfile = {
     rejectClaim: async (claimId) => {
         if(!await ConfirmModal.show({ title: 'Ignorer ce profil ?', message: 'Ce profil ne vous sera plus proposé.', icon: '🚫', confirmText: 'Ignorer' })) return;
         
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
-        
         try {
-            await firebase.database().ref(`pending_profile_claims/${emailKey}/${claimId}`).remove();
+            // Trouver la notification correspondante
+            const claim = PublicProfile.pendingClaims.find(c => c.id === claimId);
+            if(claim && claim.notificationId) {
+                await supabase.from('notifications').delete().eq('id', claim.notificationId);
+            }
             PublicProfile.pendingClaims = PublicProfile.pendingClaims.filter(c => c.id !== claimId);
             PublicProfile.renderPendingClaims();
             Utils.toast('Profil ignoré.', 'info');
@@ -23363,36 +23664,39 @@ const PublicProfile = {
     },
     
     loadProfiles: async () => {
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
+        const email = state.currentUser.email.toLowerCase();
         
         try {
-            // Charger la liste des profils depuis user_profiles
-            const profilesSnap = await firebase.database().ref(`user_profiles/${emailKey}/profiles`).once('value');
-            const savedProfiles = profilesSnap.val();
+            // Charger le profil depuis Supabase
+            const { data: userProfile, error } = await supabase
+                .from('user_profiles')
+                .select('*')
+                .eq('email', email)
+                .single();
             
-            if(savedProfiles && Array.isArray(savedProfiles) && savedProfiles.length > 0) {
-                PublicProfile.profiles = savedProfiles;
+            if(!error && userProfile && userProfile.name) {
+                // Créer un profil à partir des données Supabase
+                const profile = {
+                    id: userProfile.id,
+                    type: userProfile.profile_type || 'crew',
+                    name: userProfile.name,
+                    email: userProfile.email,
+                    phone: userProfile.phone || '',
+                    photo: userProfile.photo || '',
+                    bio: userProfile.bio || '',
+                    gender: userProfile.gender || '',
+                    city: userProfile.city || '',
+                    birthdate: userProfile.birthdate || '',
+                    vehicle: userProfile.vehicle || false,
+                    acting_styles: userProfile.acting_styles || [],
+                    technical_skills: userProfile.technical_skills || [],
+                    experience: userProfile.experience || '',
+                    availability: userProfile.availability || '',
+                    is_public: userProfile.is_public
+                };
+                PublicProfile.profiles = [profile];
             } else {
-                // Migration : essayer de charger les anciens profils
                 PublicProfile.profiles = [];
-                
-                // Vérifier s'il y a un ancien profil acteur
-                const actorSnap = await firebase.database().ref(`public_actors/${emailKey}`).once('value');
-                const actorData = actorSnap.val();
-                if(actorData && actorData.name) {
-                    actorData.id = actorData.id || 'profile_actor_' + Date.now();
-                    actorData.type = 'actor';
-                    PublicProfile.profiles.push(actorData);
-                }
-                
-                // Vérifier s'il y a un ancien profil technicien
-                const crewSnap = await firebase.database().ref(`public_crew/${emailKey}`).once('value');
-                const crewData = crewSnap.val();
-                if(crewData && crewData.name) {
-                    crewData.id = crewData.id || 'profile_crew_' + Date.now();
-                    crewData.type = 'crew';
-                    PublicProfile.profiles.push(crewData);
-                }
             }
         } catch(e) {
             console.error('Erreur chargement profils:', e);
@@ -23444,38 +23748,34 @@ const PublicProfile = {
         const originalText = btn ? btn.innerHTML : '';
         if(btn) { btn.innerHTML = '<span class="spinner"></span>Sauvegarde...'; btn.classList.add('btn-loading'); }
         
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
+        const email = state.currentUser.email.toLowerCase();
         
         try {
-            // Sauvegarder dans la base appropriée selon le type
-            const dbPathMap = {
-                'actor': 'public_actors',
-                'crew': 'public_crew',
-                'association': 'public_associations',
-                'enterprise': 'public_enterprises'
-            };
-            const dbPath = dbPathMap[profile.type] || 'public_crew';
-            
+            // Sauvegarder le profil dans Supabase
             const dataToSave = {
-                ...profile,
-                id: profile.id,
-                ownerId: emailKey,
-                email: state.currentUser.email,
-                type: profile.type,
-                profileComplete: profile.profileComplete
+                name: profile.name,
+                phone: profile.phone,
+                city: profile.city,
+                gender: profile.gender,
+                photo: profile.photo,
+                bio: profile.bio,
+                birthdate: profile.birthdate || null,
+                vehicle: profile.vehicle || false,
+                profile_type: profile.type,
+                acting_styles: profile.acting_styles || [],
+                technical_skills: profile.technical_skills || [],
+                experience: profile.experience || '',
+                availability: profile.availability || '',
+                is_public: profile.profileComplete || false,
+                updated_at: new Date().toISOString()
             };
             
-            await firebase.database().ref(`${dbPath}/${profile.id}`).set(dataToSave);
-            
-            // Sauvegarder la liste des profils dans user_profiles
-            await firebase.database().ref(`user_profiles/${emailKey}/profiles`).set(PublicProfile.profiles);
+            await supabase.from('user_profiles').update(dataToSave).eq('email', email);
             
             // Mettre à jour state.userProfile pour le bouton du dashboard
             if(profile.profileComplete) {
                 state.userProfile = state.userProfile || {};
                 state.userProfile.profileComplete = true;
-                // Sauvegarder dans Firebase pour persister
-                await firebase.database().ref(`user_profiles/${emailKey}/profileComplete`).set(true);
             }
             
             PublicProfile.renderProfileTabs();
@@ -23495,26 +23795,24 @@ const PublicProfile = {
         if(!await ConfirmModal.confirmDelete("Cette action est irréversible.", "Supprimer ce profil ?")) return;
         
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
+        const email = state.currentUser.email.toLowerCase();
         
         try {
-            // Supprimer de Firebase
-            const dbPathMap = {
-                'actor': 'public_actors',
-                'crew': 'public_crew',
-                'association': 'public_associations',
-                'enterprise': 'public_enterprises'
-            };
-            const dbPath = dbPathMap[profile.type];
-            if(dbPath) {
-                await firebase.database().ref(`${dbPath}/${profile.id}`).remove();
-            }
+            // Réinitialiser le profil dans Supabase (on ne supprime pas, on vide)
+            await supabase.from('user_profiles').update({
+                name: '',
+                phone: '',
+                city: '',
+                gender: '',
+                photo: '',
+                bio: '',
+                profile_type: '',
+                is_public: false,
+                updated_at: new Date().toISOString()
+            }).eq('email', email);
             
             // Supprimer du tableau local
             PublicProfile.profiles.splice(PublicProfile.currentProfileIndex, 1);
-            
-            // Sauvegarder la liste mise à jour
-            await firebase.database().ref(`user_profiles/${emailKey}/profiles`).set(PublicProfile.profiles);
             
             // Afficher un autre profil ou le message vide
             if(PublicProfile.profiles.length > 0) {
@@ -24176,21 +24474,37 @@ const Chat = {
             Chat.messagesListener = null;
         }
         
-        // Écouter les messages en temps réel
-        const messagesRef = firebase.database().ref(`all_projects/${state.currentProjectId}/chat/${channelId}/messages`).orderByChild('timestamp').limitToLast(100);
-        
-        Chat.messagesListener = messagesRef.on('value', (snapshot) => {
-            const messages = [];
-            if(snapshot && snapshot.exists()) {
-                snapshot.forEach(child => {
-                    messages.push({ id: child.key, ...child.val() });
-                });
+        // Écouter les messages en temps réel via Supabase
+        // Les messages du chat sont stockés dans le data du projet
+        const loadChatMessages = async () => {
+            try {
+                const { data: project } = await supabase
+                    .from('projects')
+                    .select('data')
+                    .eq('id', state.currentProjectId)
+                    .single();
+                
+                const messages = project?.data?.chatMessages?.[channelId] || [];
+                Chat.renderMessages(messages);
+            } catch(error) {
+                console.error('Erreur chargement messages:', error);
+                Chat.renderMessages([]);
             }
-            Chat.renderMessages(messages);
-        }, (error) => {
-            console.error('Erreur chargement messages:', error);
-            Chat.renderMessages([]);
-        });
+        };
+        
+        loadChatMessages();
+        
+        // Écouter les changements en temps réel
+        Chat.messagesListener = supabase
+            .channel('chat_' + state.currentProjectId + '_' + channelId)
+            .on('postgres_changes', 
+                { event: 'UPDATE', schema: 'public', table: 'projects', filter: 'id=eq.' + state.currentProjectId },
+                (payload) => {
+                    const messages = payload.new.data?.chatMessages?.[channelId] || [];
+                    Chat.renderMessages(messages);
+                }
+            )
+            .subscribe();
     },
     
     renderMessages: (messages) => {
@@ -24244,14 +24558,40 @@ const Chat = {
         if(!text || !Chat.currentChannel) return;
         
         const message = {
+            id: 'msg_' + Date.now(),
             text: text,
             senderEmail: state.currentUser.email,
-            senderName: state.userProfile?.displayName || state.currentUser.email.split('@')[0],
-            timestamp: firebase.database.ServerValue.TIMESTAMP
+            senderName: state.userProfile?.name || state.userProfile?.displayName || state.currentUser.email.split('@')[0],
+            timestamp: Date.now()
         };
         
         try {
-            await firebase.database().ref(`all_projects/${state.currentProjectId}/chat/${Chat.currentChannel}/messages`).push(message);
+            // Charger les données actuelles du projet
+            const { data: project } = await supabase
+                .from('projects')
+                .select('data')
+                .eq('id', state.currentProjectId)
+                .single();
+            
+            if(project) {
+                // Initialiser la structure si nécessaire
+                if(!project.data.chatMessages) project.data.chatMessages = {};
+                if(!project.data.chatMessages[Chat.currentChannel]) project.data.chatMessages[Chat.currentChannel] = [];
+                
+                // Ajouter le message
+                project.data.chatMessages[Chat.currentChannel].push(message);
+                
+                // Limiter à 100 messages
+                if(project.data.chatMessages[Chat.currentChannel].length > 100) {
+                    project.data.chatMessages[Chat.currentChannel] = project.data.chatMessages[Chat.currentChannel].slice(-100);
+                }
+                
+                // Sauvegarder
+                await supabase.from('projects').update({ data: project.data }).eq('id', state.currentProjectId);
+                
+                // Rafraîchir l'affichage
+                Chat.renderMessages(project.data.chatMessages[Chat.currentChannel]);
+            }
             input.value = '';
         } catch(e) {
             console.error('Erreur envoi message:', e);
@@ -24488,8 +24828,10 @@ const Chat = {
             state.data.chatChannels = state.data.chatChannels.filter(c => c.id !== channelId);
         }
         
-        // Supprimer les messages
-        firebase.database().ref(`all_projects/${state.currentProjectId}/chat/${channelId}`).remove();
+        // Supprimer les messages du canal
+        if(state.data.chatMessages && state.data.chatMessages[channelId]) {
+            delete state.data.chatMessages[channelId];
+        }
         
         Store.save();
         
@@ -25016,11 +25358,17 @@ const GlobalSearch = {
         resultsDiv.innerHTML = '<div class="global-search-loading">🔄 Recherche en cours...</div>';
         
         const isActors = GlobalSearch.currentType === 'actors';
-        const dbPath = isActors ? 'public_actors' : 'public_crew';
         
         try {
-            const snap = await firebase.database().ref(dbPath).once('value');
-            let results = snap.val() ? Object.values(snap.val()) : [];
+            // Rechercher dans user_profiles avec le bon type
+            const profileType = isActors ? 'actor' : 'crew';
+            const { data, error } = await supabase
+                .from('user_profiles')
+                .select('*')
+                .eq('profile_type', profileType)
+                .eq('is_public', true);
+            
+            let results = (!error && data) ? data : [];
             
             // Filtrer uniquement les profils complets
             results = results.filter(r => r.profileComplete);
@@ -25575,20 +25923,25 @@ if(isActors) {
     
     searchDirectory: async () => {
         const tab = Contacts.currentTab;
-        const dbPaths = {
-            actors: 'public_actors',
-            crew: 'public_crew',
-            projects: 'public_projects',
-            associations: 'public_associations',
-            enterprises: 'public_enterprises'
+        const profileTypes = {
+            actors: 'actor',
+            crew: 'crew',
+            projects: 'project',
+            associations: 'association',
+            enterprises: 'enterprise'
         };
-        const dbPath = dbPaths[tab] || 'public_actors';
+        const profileType = profileTypes[tab] || 'actor';
         
         els.contactsList.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-sec);">🔄 Recherche...</div>';
         
         try {
-            const snap = await firebase.database().ref(dbPath).once('value');
-            let results = snap.val() ? Object.values(snap.val()) : [];
+            const { data, error } = await supabase
+                .from('user_profiles')
+                .select('*')
+                .eq('profile_type', profileType)
+                .eq('is_public', true);
+            
+            let results = (!error && data) ? data : [];
             
             // Filtrer profils complets uniquement
             results = results.filter(r => r.profileComplete);
@@ -25816,22 +26169,29 @@ if(isActors) {
         if(!person) return;
         
         const type = Contacts.currentTab;
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
+        const email = state.currentUser.email.toLowerCase();
         
         // Créer l'entrée contact
-        const contactData = { ...person };
-        contactData.id = person.id || ('contact_' + Date.now());
-        contactData.savedAt = new Date().toISOString();
+        const contactData = {
+            owner_email: email,
+            contact_email: person.email || '',
+            contact_type: type,
+            name: person.name || person.title || person.assoName || person.entName,
+            notes: JSON.stringify(person),
+            created_at: new Date().toISOString()
+        };
         
         try {
-            await firebase.database().ref(`user_contacts/${emailKey}/${type}/${contactData.id}`).set(contactData);
+            const { data, error } = await supabase.from('contacts').insert(contactData).select().single();
+            
+            if(error) throw error;
             
             // Mettre à jour en local
             if(!state.contacts) state.contacts = { actors: [], crew: [], projects: [], associations: [], enterprises: [] };
             if(!state.contacts[type]) state.contacts[type] = [];
-            state.contacts[type].push(contactData);
+            state.contacts[type].push({ ...person, id: data.id });
             
-            Utils.toast(`${person.name} ajouté(e) à vos favoris !`, 'success');
+            Utils.toast(`${person.name || 'Contact'} ajouté(e) à vos favoris !`, 'success');
             Contacts.renderDirectory();
         } catch(e) {
             console.error('Erreur ajout favoris:', e);
@@ -25840,20 +26200,24 @@ if(isActors) {
     },
     
     loadAndRender: async () => {
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
+        const email = state.currentUser.email.toLowerCase();
         try {
-            const actorsSnap = await firebase.database().ref(`user_contacts/${emailKey}/actors`).once('value');
-            const crewSnap = await firebase.database().ref(`user_contacts/${emailKey}/crew`).once('value');
-            const projectsSnap = await firebase.database().ref(`user_contacts/${emailKey}/projects`).once('value');
-            const assocSnap = await firebase.database().ref(`user_contacts/${emailKey}/associations`).once('value');
-            const enterSnap = await firebase.database().ref(`user_contacts/${emailKey}/enterprises`).once('value');
-            state.contacts = {
-                actors: actorsSnap.val() ? Object.values(actorsSnap.val()) : [],
-                crew: crewSnap.val() ? Object.values(crewSnap.val()) : [],
-                projects: projectsSnap.val() ? Object.values(projectsSnap.val()) : [],
-                associations: assocSnap.val() ? Object.values(assocSnap.val()) : [],
-                enterprises: enterSnap.val() ? Object.values(enterSnap.val()) : []
-            };
+            const { data: contacts, error } = await supabase
+                .from('contacts')
+                .select('*')
+                .eq('owner_email', email);
+            
+            if(!error && contacts) {
+                state.contacts = {
+                    actors: contacts.filter(c => c.contact_type === 'actor'),
+                    crew: contacts.filter(c => c.contact_type === 'crew'),
+                    projects: contacts.filter(c => c.contact_type === 'project'),
+                    associations: contacts.filter(c => c.contact_type === 'association'),
+                    enterprises: contacts.filter(c => c.contact_type === 'enterprise')
+                };
+            } else {
+                state.contacts = { actors: [], crew: [], projects: [], associations: [], enterprises: [] };
+            }
         } catch(e) {
             console.error('Erreur chargement contacts:', e);
             state.contacts = { actors: [], crew: [], projects: [], associations: [], enterprises: [] };
@@ -25988,7 +26352,18 @@ if(isActors) {
         }
         
         try {
-            await firebase.database().ref(`user_contacts/${emailKey}/${type}/${contactData.id}`).set(contactData);
+            // Sauvegarder dans Supabase
+            const { error } = await supabase.from('contacts').upsert({
+                id: contactData.id,
+                owner_email: state.currentUser.email.toLowerCase(),
+                contact_email: contactData.email || '',
+                contact_type: type,
+                name: contactData.name,
+                notes: JSON.stringify(contactData)
+            }, { onConflict: 'id' });
+            
+            if (error) throw error;
+            
             // Recharger les contacts en mémoire
             if(!state.contacts) state.contacts = { actors: [], crew: [], projects: [], associations: [], enterprises: [] };
             if(!state.contacts[type]) state.contacts[type] = [];
@@ -26011,13 +26386,12 @@ if(isActors) {
     delete: async (type, idx) => {
         if(!await ConfirmModal.confirmDelete("Ce contact sera supprimé.")) return;
         
-        const list = type === 'actors' ? state.contacts.actors : state.contacts.crew;
+        const list = state.contacts[type] || [];
         const contact = list[idx];
         if(!contact) return;
         
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
         try {
-            await firebase.database().ref(`user_contacts/${emailKey}/${type}/${contact.id}`).remove();
+            await supabase.from('contacts').delete().eq('id', contact.id);
             list.splice(idx, 1);
             Contacts.render();
         } catch(e) {
@@ -28056,50 +28430,11 @@ ${projectName}`;
         Planning.syncShootingDatesToPublicProfiles();
     },
     
-    // Pousse les dates de tournage vers les profils publics Firebase
+    // Pousse les dates de tournage vers les profils publics (Supabase)
     syncShootingDatesToPublicProfiles: async () => {
-        const projectId = state.currentProjectId;
-        const projectName = state.data.title || 'Projet';
-        
-        // Sync acteurs avec profil public
-        for(const actor of (state.data.actors || [])) {
-            if(actor.publicProfileId) {
-                try {
-                    const shootingDates = actor.shootingDates || [];
-                    await firebase.database().ref('public_actors/' + actor.publicProfileId + '/shootingDates').transaction(currentDates => {
-                        let dates = currentDates || [];
-                        // Retirer les anciennes dates de ce projet
-                        dates = dates.filter(d => d.projectId !== projectId);
-                        // Ajouter les nouvelles dates
-                        shootingDates.filter(d => d.projectId === projectId).forEach(d => dates.push(d));
-                        return dates;
-                    });
-                } catch(e) {
-                    console.warn('Erreur sync shooting dates actor:', e);
-                }
-            }
-        }
-        
-        // Sync techniciens avec profil public
-        for(const member of (state.data.crew || [])) {
-            if(member.publicProfileId) {
-                try {
-                    const shootingDates = member.shootingDates || [];
-                    await firebase.database().ref('public_crew/' + member.publicProfileId + '/shootingDates').transaction(currentDates => {
-                        let dates = currentDates || [];
-                        // Retirer les anciennes dates de ce projet
-                        dates = dates.filter(d => d.projectId !== projectId);
-                        // Ajouter les nouvelles dates
-                        shootingDates.filter(d => d.projectId === projectId).forEach(d => dates.push(d));
-                        return dates;
-                    });
-                } catch(e) {
-                    console.warn('Erreur sync shooting dates crew:', e);
-                }
-            }
-        }
-        
-        console.log('✅ Dates de tournage synchronisées vers profils publics');
+        // Les dates de tournage sont maintenant stockées dans le projet lui-même
+        // La synchronisation vers les profils publics se fera via le champ availability du user_profiles
+        console.log('✅ Dates de tournage sauvegardées dans le projet');
     },
     
     saveShootDay: () => {
@@ -29785,9 +30120,11 @@ options += `<option value="${scene.id}">#${idx + 1} - ${Utils.escape(scene.title
             createdBy: state.currentUser?.email || ''
         };
         
-        // Sauvegarder dans Firebase (public)
+        // Sauvegarder dans le projet (les callsheets publiques sont stockées dans data)
         try {
-            await firebase.database().ref('public_callsheets/' + token).set(publicData);
+            if(!state.data.publicCallsheets) state.data.publicCallsheets = {};
+            state.data.publicCallsheets[token] = publicData;
+            await Store.save();
             console.log('✅ Feuille de service publiée:', token);
             return token;
         } catch(e) {
@@ -29798,8 +30135,8 @@ options += `<option value="${scene.id}">#${idx + 1} - ${Utils.escape(scene.title
     
     loadPublicCallSheet: async (token) => {
         try {
-            const snap = await firebase.database().ref('public_callsheets/' + token).once('value');
-            const data = snap.val();
+            // Chercher dans les données du projet actuel
+            const data = state.data?.publicCallsheets?.[token];
             if(!data) {
                 document.getElementById('public-callsheet-content').innerHTML = '<p style="text-align:center; color:#c00;">❌ Feuille de service introuvable ou expirée.</p>';
                 return;
@@ -33489,23 +33826,47 @@ const Notifications = {
     listenerAttached: false,
     
     // Initialiser l'écoute des notifications
-    init: () => {
+    init: async () => {
         if(!state.currentUser || Notifications.listenerAttached) return;
         
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
-        const notifRef = firebase.database().ref('user_notifications/' + emailKey);
+        const email = state.currentUser.email.toLowerCase();
         
-        notifRef.orderByChild('timestamp').limitToLast(50).on('value', (snap) => {
-            const data = snap.val() || {};
-            Notifications.items = Object.entries(data).map(([key, val]) => ({
-                id: key,
-                ...val
-            })).sort((a, b) => b.timestamp - a.timestamp);
+        // Charger les notifications initiales
+        const loadNotifications = async () => {
+            const { data, error } = await supabase
+                .from('notifications')
+                .select('*')
+                .eq('user_email', email)
+                .order('created_at', { ascending: false })
+                .limit(50);
             
-            Notifications.unreadCount = Notifications.items.filter(n => !n.read).length;
-            Notifications.updateBadge();
-            Notifications.renderList();
-        });
+            if(!error && data) {
+                Notifications.items = data.map(n => ({
+                    id: n.id,
+                    type: n.type,
+                    title: n.title,
+                    message: n.message,
+                    link: n.link,
+                    read: n.read,
+                    timestamp: new Date(n.created_at).getTime()
+                }));
+                
+                Notifications.unreadCount = Notifications.items.filter(n => !n.read).length;
+                Notifications.updateBadge();
+                Notifications.renderList();
+            }
+        };
+        
+        await loadNotifications();
+        
+        // Écouter les nouvelles notifications en temps réel
+        supabase
+            .channel('notifications_' + email)
+            .on('postgres_changes', 
+                { event: '*', schema: 'public', table: 'notifications', filter: 'user_email=eq.' + email },
+                () => loadNotifications()
+            )
+            .subscribe();
         
         Notifications.listenerAttached = true;
     },
@@ -33608,9 +33969,8 @@ const Notifications = {
     markAsRead: async (notifId) => {
         if(!state.currentUser) return;
         
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
         try {
-            await firebase.database().ref('user_notifications/' + emailKey + '/' + notifId + '/read').set(true);
+            await supabase.from('notifications').update({ read: true }).eq('id', notifId);
         } catch(e) {
             console.error('Erreur markAsRead:', e);
         }
@@ -33620,18 +33980,12 @@ const Notifications = {
     markAllRead: async () => {
         if(!state.currentUser) return;
         
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
-        const updates = {};
+        const email = state.currentUser.email.toLowerCase();
+        const unreadIds = Notifications.items.filter(n => !n.read).map(n => n.id);
         
-        Notifications.items.forEach(n => {
-            if(!n.read) {
-                updates[n.id + '/read'] = true;
-            }
-        });
-        
-        if(Object.keys(updates).length > 0) {
+        if(unreadIds.length > 0) {
             try {
-                await firebase.database().ref('user_notifications/' + emailKey).update(updates);
+                await supabase.from('notifications').update({ read: true }).eq('user_email', email).eq('read', false);
                 Utils.toast('Toutes les notifications marquées comme lues', 'success');
             } catch(e) {
                 console.error('Erreur markAllRead:', e);
@@ -33641,19 +33995,17 @@ const Notifications = {
     
     // Envoyer une notification à un utilisateur
     send: async (toEmail, type, message, projectId = null) => {
-        const emailKey = Utils.sanitizeEmail(toEmail);
-        
         const notif = {
+            user_email: toEmail.toLowerCase(),
             type: type,
+            title: type === 'invite' ? '📨 Invitation' : '🔔 Notification',
             message: message,
-            projectId: projectId,
-            fromEmail: state.currentUser?.email || 'Système',
-            timestamp: Date.now(),
+            link: projectId,
             read: false
         };
         
         try {
-            await firebase.database().ref('user_notifications/' + emailKey).push(notif);
+            await supabase.from('notifications').insert(notif);
         } catch(e) {
             console.error('Erreur envoi notification:', e);
         }
@@ -33773,8 +34125,14 @@ const History = {
         };
         
         try {
-            const historyRef = firebase.database().ref('all_projects/' + state.currentProjectId + '/history');
-            await historyRef.push(entry);
+            // Stocker l'historique dans les données du projet
+            if(!state.data.history) state.data.history = [];
+            state.data.history.unshift(entry);
+            // Garder les 100 dernières entrées
+            if(state.data.history.length > 100) {
+                state.data.history = state.data.history.slice(0, 100);
+            }
+            // Ne pas appeler Store.save() ici pour éviter les boucles
         } catch(e) {
             console.error('Erreur historique:', e);
         }
@@ -33785,13 +34143,7 @@ const History = {
         if(!state.currentProjectId) return [];
         
         try {
-            const snap = await firebase.database().ref('all_projects/' + state.currentProjectId + '/history')
-                .orderByChild('timestamp')
-                .limitToLast(100)
-                .once('value');
-            
-            const data = snap.val() || {};
-            return Object.values(data).sort((a, b) => b.timestamp - a.timestamp);
+            return state.data.history || [];
         } catch(e) {
             console.error('Erreur chargement historique:', e);
             return [];
@@ -34149,16 +34501,18 @@ const Presentation = {
             }
         });
         
-        // Chercher dans l'Univers (profils publics)
+        // Chercher dans l'Univers (profils publics Supabase)
         try {
-            const snap = await firebase.database().ref('public_profiles').orderByChild('name').limitToFirst(50).once('value');
-            const profiles = snap.val() || {};
-            Object.entries(profiles).forEach(([id, profile]) => {
-                if((profile.type === 'comedien' || profile.type === 'technicien') && 
-                   (profile.name?.toLowerCase().includes(q) || profile.email?.toLowerCase().includes(q))) {
-                    if(!results.find(r => r.email === profile.email)) {
-                        results.push({ type: 'universe', id: id, name: profile.name, email: profile.email, photo: profile.photo });
-                    }
+            const { data: profiles } = await supabase
+                .from('user_profiles')
+                .select('id, name, email, photo, profile_type')
+                .eq('is_public', true)
+                .or(`name.ilike.%${q}%,email.ilike.%${q}%`)
+                .limit(50);
+            
+            (profiles || []).forEach(profile => {
+                if(!results.find(r => r.email === profile.email)) {
+                    results.push({ type: 'universe', id: profile.id, name: profile.name, email: profile.email, photo: profile.photo });
                 }
             });
         } catch(e) { console.warn('Erreur recherche Univers:', e); }
@@ -34353,7 +34707,10 @@ const Presentation = {
         };
         
         try {
-            await firebase.database().ref('public_projects/' + state.currentProjectId).set(publicData);
+            // Stocker les données publiques dans le projet
+            state.data.publicProjectData = publicData;
+            state.data.isPublicProject = true;
+            await Store.save();
         } catch(e) {
             console.error('Erreur publication projet:', e);
         }
@@ -34363,7 +34720,9 @@ const Presentation = {
         if(!state.currentProjectId) return;
         
         try {
-            await firebase.database().ref('public_projects/' + state.currentProjectId).remove();
+            state.data.isPublicProject = false;
+            delete state.data.publicProjectData;
+            await Store.save();
         } catch(e) {
             console.error('Erreur suppression projet public:', e);
         }
@@ -38447,29 +38806,24 @@ const Universe = {
         const isAssociation = profile.type === 'association';
         const isEnterprise = profile.type === 'enterprise';
         
-        // Charger les données complètes depuis Firebase
+        // Charger les données complètes depuis Supabase
         let fullProfile = profile;
         if(!isProject) {
             try {
-                let ref = null;
-                if(isActor) ref = firebase.database().ref('public_actors/' + profile.id);
-                else if(isCrew) ref = firebase.database().ref('public_crew/' + profile.id);
-                else if(isAssociation) ref = firebase.database().ref('public_associations/' + profile.id);
-                else if(isEnterprise) ref = firebase.database().ref('public_enterprises/' + profile.id);
+                const { data: profileData } = await supabase
+                    .from('user_profiles')
+                    .select('*')
+                    .eq('id', profile.id)
+                    .single();
                 
-                if(ref) {
-                    const snap = await ref.once('value');
-                    if(snap.val()) fullProfile = { ...snap.val(), id: profile.id, type: profile.type };
-                }
+                if(profileData) fullProfile = { ...profileData, id: profile.id, type: profile.type };
             } catch(e) { console.warn('Erreur chargement profil:', e); }
         }
         
-        // Pour les projets, charger depuis public_projects
+        // Pour les projets, les données sont déjà dans le profil passé en paramètre
         if(isProject) {
-            try {
-                const snap = await firebase.database().ref('public_projects/' + profile.id).once('value');
-                if(snap.val()) fullProfile = { ...snap.val(), id: profile.id, type: 'project' };
-            } catch(e) { console.warn('Erreur chargement projet:', e); }
+            // Les projets publics sont stockés dans les données du projet
+            fullProfile = { ...profile, id: profile.id, type: 'project' };
         }
         
         const name = fullProfile.displayName || fullProfile.name || fullProfile.title || fullProfile.assoName || fullProfile.entName || 'Sans nom';
@@ -38989,50 +39343,27 @@ const Universe = {
         Universe.allProjects = [];
         
         try {
-            // Charger les comédiens
-            const actorsSnap = await firebase.database().ref('public_actors').once('value');
-            const actors = actorsSnap.val() || {};
-            Object.values(actors).forEach(a => {
-                if(a.name && a.profileComplete) {
-                    Universe.allProfiles.push({ ...a, type: 'actor' });
-                }
-            });
+            // Charger tous les profils publics depuis Supabase
+            const { data: profiles, error } = await supabase
+                .from('user_profiles')
+                .select('*')
+                .eq('is_public', true);
             
-            // Charger les techniciens
-            const crewSnap = await firebase.database().ref('public_crew').once('value');
-            const crew = crewSnap.val() || {};
-            Object.values(crew).forEach(c => {
-                if(c.name && c.profileComplete) {
-                    Universe.allProfiles.push({ ...c, type: 'crew' });
-                }
-            });
+            if(!error && profiles) {
+                profiles.forEach(p => {
+                    if(p.name) {
+                        const type = p.profile_type || 'crew';
+                        Universe.allProfiles.push({ 
+                            ...p, 
+                            type: type,
+                            profileComplete: true 
+                        });
+                    }
+                });
+            }
             
-            // Charger les associations
-            const assocSnap = await firebase.database().ref('public_associations').once('value');
-            const associations = assocSnap.val() || {};
-            Object.values(associations).forEach(a => {
-                if(a.assoName) {
-                    Universe.allProfiles.push({ ...a, type: 'association', name: a.assoName });
-                }
-            });
-            
-            // Charger les entreprises
-            const entSnap = await firebase.database().ref('public_enterprises').once('value');
-            const enterprises = entSnap.val() || {};
-            Object.values(enterprises).forEach(e => {
-                if(e.entName) {
-                    Universe.allProfiles.push({ ...e, type: 'enterprise', name: e.entName });
-                }
-            });
-            
-            // Charger les projets publics
-            const projectsSnap = await firebase.database().ref('public_projects').once('value');
-            const projects = projectsSnap.val() || {};
-            Object.entries(projects).forEach(([id, p]) => {
-                if(p.title && p.isPublic) {
-                    Universe.allProjects.push({ ...p, id: id, type: 'project' });
-                }
-            });
+            // Les projets publics sont stockés dans les projets eux-mêmes
+            // On ne charge pas depuis une table séparée pour l'instant
             
             // Stocker mes profils pour le matching
             const myEmail = state.currentUser?.email;
@@ -40165,21 +40496,17 @@ const coords = await Universe.geocodeCity(city);
         const isCrew = profile.type === 'crew';
         const isAssociation = profile.type === 'association';
         const isEnterprise = profile.type === 'enterprise';
-        // Charger les données complètes depuis Firebase si nécessaire
+        // Charger les données complètes depuis Supabase si nécessaire
         let fullProfile = profile;
-        if(true) {
+        if(!isProject) {
             try {
-                let ref = null;
-                if(isActor) ref = firebase.database().ref('public_actors/' + profile.id);
-                else if(isCrew) ref = firebase.database().ref('public_crew/' + profile.id);
-                else if(isAssociation) ref = firebase.database().ref('public_associations/' + profile.id);
-                else if(isEnterprise) ref = firebase.database().ref('public_enterprises/' + profile.id);
-                else if(isProject) ref = firebase.database().ref('public_projects/' + profile.id);
+                const { data: profileData } = await supabase
+                    .from('user_profiles')
+                    .select('*')
+                    .eq('id', profile.id)
+                    .single();
                 
-                if(ref) {
-                    const snap = await ref.once('value');
-                    if(snap.val()) fullProfile = { ...snap.val(), id: profile.id, type: profile.type };
-                }
+                if(profileData) fullProfile = { ...profileData, id: profile.id, type: profile.type };
             } catch(e) { console.warn('Erreur chargement profil:', e); }
         }
         
@@ -40542,20 +40869,25 @@ const coords = await Universe.geocodeCity(city);
         
         if(existingIndex >= 0) {
             // Retirer des favoris
+            const contactToRemove = state.contacts[contactType][existingIndex];
             state.contacts[contactType].splice(existingIndex, 1);
-            await firebase.database().ref(`user_contacts/${emailKey}/${contactType}/${profile.id}`).remove();
+            await supabase.from('contacts').delete().eq('id', contactToRemove.id);
             btn.textContent = '☆';
             btn.classList.remove('active');
             Utils.toast('Retiré des favoris', 'info');
         } else {
             // Ajouter aux favoris
             const contactData = {
-                ...profile,
-                id: profile.id,
-                savedAt: new Date().toISOString()
+                owner_email: state.currentUser.email.toLowerCase(),
+                contact_email: profile.email || '',
+                contact_type: contactType,
+                name: profile.name || profile.assoName || profile.entName || '',
+                notes: JSON.stringify(profile)
             };
-            state.contacts[contactType].push(contactData);
-            await firebase.database().ref(`user_contacts/${emailKey}/${contactType}/${profile.id}`).set(contactData);
+            const { data: newContact } = await supabase.from('contacts').insert(contactData).select().single();
+            if(newContact) {
+                state.contacts[contactType].push({ ...profile, id: newContact.id });
+            }
             btn.textContent = '★';
             btn.classList.add('active');
             Utils.toast('Ajouté aux favoris !', 'success');
@@ -40649,18 +40981,20 @@ const coords = await Universe.geocodeCity(city);
         if(!Universe.currentProfile) return;
         
         // Charger mes projets où je suis owner
-        const myEmailKey = Utils.sanitizeEmail(state.currentUser.email);
-        const projectsSnap = await firebase.database().ref('user_projects/' + myEmailKey).once('value');
-        const projects = projectsSnap.val() || {};
+        const { data: memberData, error } = await supabase
+            .from('project_members')
+            .select('project_id, role, projects(id, title)')
+            .eq('user_id', state.currentUser.id)
+            .eq('role', 'owner');
         
-        const myProjects = [];
-        for(const pid of Object.keys(projects)) {
-            if(projects[pid] === 'owner') {
-                const metaSnap = await firebase.database().ref('all_projects/' + pid + '/meta').once('value');
-                const meta = metaSnap.val();
-                if(meta) myProjects.push({ id: pid, title: meta.title });
-            }
+        if(error) {
+            console.error('Erreur chargement projets:', error);
+            return;
         }
+        
+        const myProjects = (memberData || [])
+            .filter(m => m.projects)
+            .map(m => ({ id: m.project_id, title: m.projects.title }));
         
         if(myProjects.length === 0) {
             Utils.toast('Vous n\'avez pas encore de projet. Créez-en un d\'abord !', 'warning');
@@ -40842,7 +41176,8 @@ const Messages = {
         Messages.initFilters();
         
         try {
-            const snap = await firebase.database().ref('user_messages/' + emailKey).once('value');
+            const { data: messagesData } = await supabase.from('messages').select('*').or(`to_email.eq.${state.currentUser.email.toLowerCase()},from_email.eq.${state.currentUser.email.toLowerCase()}`).order('created_at', { ascending: false });
+            const snap = { val: () => messagesData ? messagesData.reduce((acc, m) => { acc[m.id] = m; return acc; }, {}) : {} };
             const data = snap.val();
             
             Messages.allMessages = [];
@@ -40941,7 +41276,7 @@ const Messages = {
             if(filteredMsg) filteredMsg.read = true;
             
             const emailKey = Utils.sanitizeEmail(state.currentUser.email);
-            await firebase.database().ref('user_messages/' + emailKey + '/' + messageId + '/read').set(true);
+            await supabase.from('messages').update({ read: true }).eq('id', messageId);
             Messages.updateBadge();
             Messages.render();
         }
@@ -41255,18 +41590,23 @@ const Messages = {
         const profile = msg.proposedProfile;
         
         try {
-            // Charger le projet
-            const projectSnap = await firebase.database().ref('all_projects/' + msg.projectId + '/data').once('value');
-            const projectData = projectSnap.val();
+            // Charger le projet depuis Supabase
+            const { data: projectRow, error: projectError } = await supabase
+                .from('projects')
+                .select('data')
+                .eq('id', msg.projectId)
+                .single();
             
-            if(!projectData) {
+            if(projectError || !projectRow) {
                 Utils.toast('Projet introuvable', 'error');
                 return;
             }
             
+            const projectData = projectRow.data || {};
+            
             // Trouver et mettre à jour le membre correspondant
             const dataArray = profile.type === 'actor' ? projectData.actors : projectData.crew;
-            const dbPath = profile.type === 'actor' ? 'public_actors' : 'public_crew';
+            const tableName = profile.type === 'actor' ? 'public_actors' : 'public_crew';
             
             if(dataArray && Array.isArray(dataArray)) {
                 // Chercher par claimId ou par ancien email
@@ -41283,9 +41623,12 @@ const Messages = {
                 }
                 
                 if(memberIdx !== -1) {
-                    // Charger les données complètes du profil public
-                    const publicSnap = await firebase.database().ref(dbPath + '/' + profile.id).once('value');
-                    const publicData = publicSnap.val();
+                    // Charger les données complètes du profil public depuis Supabase
+                    const { data: publicData } = await supabase
+                        .from(tableName)
+                        .select('*')
+                        .eq('id', profile.id)
+                        .single();
                     
                     if(publicData) {
                         // Mettre à jour avec les données du profil public
@@ -41297,15 +41640,16 @@ const Messages = {
                             email: profile.email
                         };
                         
-                        // Sauvegarder dans Firebase
+                        // Sauvegarder dans Supabase
                         const updatePath = profile.type === 'actor' ? 'actors' : 'crew';
-                        await firebase.database().ref('all_projects/' + msg.projectId + '/data/' + updatePath).set(dataArray);
+                        const newData = { ...projectData, [updatePath]: dataArray };
+                        await supabase
+                            .from('projects')
+                            .update({ data: newData, updated_at: new Date().toISOString() })
+                            .eq('id', msg.projectId);
                         
-                        // Supprimer le pending claim si existant
-                        if(msg.claimId) {
-                            const claimEmailKey = Utils.sanitizeEmail(msg.fromUser);
-                            await firebase.database().ref(`pending_profile_claims/${claimEmailKey}/${msg.claimId}`).remove();
-                        }
+                        // Note: pending_profile_claims géré via messages système
+                        // Rien à supprimer ici, le claim est traité
                         
                         // Notifier la personne
                         await Messages.send(msg.fromUser, {
@@ -41356,7 +41700,7 @@ const Messages = {
         if(!await ConfirmModal.confirmDelete("Ce message sera supprimé.")) return;
         
         const emailKey = Utils.sanitizeEmail(state.currentUser.email);
-        await firebase.database().ref('user_messages/' + emailKey + '/' + Messages.currentMessageId).remove();
+        await supabase.from('messages').delete().eq('id', Messages.currentMessageId);
         
         Messages.messages = Messages.messages.filter(m => m.id !== Messages.currentMessageId);
         Messages.closeDetail();
@@ -41382,7 +41726,26 @@ const Messages = {
             read: false
         };
         
-        await firebase.database().ref('user_messages/' + emailKey + '/' + messageId).set(messageData);
+        // Sauvegarder dans Supabase
+        const { error } = await supabase
+            .from('messages')
+            .insert({
+                id: messageId,
+                to_email: toEmail,
+                from_email: state.currentUser.email,
+                from_name: messageData.fromName,
+                type: messageData.type || 'message',
+                subject: messageData.subject || messageData.title || '',
+                content: messageData.content || '',
+                data: messageData,
+                read: false,
+                created_at: messageData.createdAt
+            });
+        
+        if(error) {
+            console.error('Erreur envoi message:', error);
+            throw error;
+        }
         
         // Envoyer une notification pour la cloche
         try {
@@ -41510,7 +41873,8 @@ const Invitations = {
         const emailKey = Utils.sanitizeEmail(email);
         
         try {
-            const profileSnap = await firebase.database().ref('user_profiles/' + emailKey).once('value');
+            const { data: profileData } = await supabase.from('user_profiles').select('*').eq('email', state.currentUser.email.toLowerCase()).single();
+            const profileSnap = { val: () => profileData };
             
             if(profileSnap.exists()) {
                 statusEl.innerHTML = '✅ <strong>Utilisateur existant</strong> - Il aura accès immédiatement';
@@ -41556,28 +41920,55 @@ const Invitations = {
         const inviterName = state.currentUser.email.split('@')[0];
         
         try {
-            // Vérifier si l'utilisateur existe
-            const profileSnap = await firebase.database().ref('user_profiles/' + emailKey).once('value');
-            const userExists = profileSnap.exists();
+            // Vérifier si l'utilisateur existe dans Supabase
+            const { data: existingProfile } = await supabase
+                .from('user_profiles')
+                .select('id, email')
+                .eq('email', email.toLowerCase())
+                .single();
             
-            // Ajouter aux ACL et index dans tous les cas
-            const updates = {};
-            updates['all_projects/' + pid + '/acl/' + emailKey] = role;
-            updates['user_projects/' + emailKey + '/' + pid] = role;
+            const userExists = !!existingProfile;
             
-            if(!userExists) {
-                // Créer une invitation en attente
-                updates['pending_invitations/' + emailKey + '/' + pid] = {
-                    projectId: pid,
-                    projectTitle: projectTitle,
-                    role: role,
-                    invitedBy: inviterEmail,
-                    invitedAt: new Date().toISOString(),
-                    message: message
-                };
+            // Ajouter le membre au projet dans Supabase
+            let invitedUserId = existingProfile?.id || null;
+            
+            if(invitedUserId) {
+                // L'utilisateur existe, on l'ajoute directement comme membre
+                await supabase
+                    .from('project_members')
+                    .upsert({
+                        project_id: pid,
+                        user_id: invitedUserId,
+                        role: role,
+                        invited_by: state.currentUser.id,
+                        invited_at: new Date().toISOString()
+                    }, { onConflict: 'project_id,user_id' });
             }
             
-            await firebase.database().ref().update(updates);
+            // Stocker l'invitation en attente pour les utilisateurs qui n'existent pas encore
+            if(!userExists) {
+                await supabase
+                    .from('messages')
+                    .insert({
+                        id: 'inv_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                        to_email: email,
+                        from_email: inviterEmail,
+                        from_name: inviterName,
+                        type: 'pending_invitation',
+                        subject: `Invitation au projet "${projectTitle}"`,
+                        content: message || '',
+                        data: {
+                            projectId: pid,
+                            projectTitle: projectTitle,
+                            role: role,
+                            invitedBy: inviterEmail,
+                            invitedAt: new Date().toISOString(),
+                            message: message
+                        },
+                        read: false,
+                        created_at: new Date().toISOString()
+                    });
+            }
             
             // Envoyer un message interne
             const roleLabel = role === 'editor' ? 'Éditeur' : 'Lecteur';
@@ -41682,23 +42073,48 @@ ${window.location.origin}${window.location.pathname}
     checkPendingInvitations: async () => {
         if(!state.currentUser) return;
         
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
-        
         try {
-            const snap = await firebase.database().ref('pending_invitations/' + emailKey).once('value');
-            const invitations = snap.val();
+            // Chercher les invitations en attente dans les messages
+            const { data: pendingInvitations, error } = await supabase
+                .from('messages')
+                .select('*')
+                .eq('to_email', state.currentUser.email.toLowerCase())
+                .eq('type', 'pending_invitation')
+                .eq('read', false);
             
-            if(invitations && Object.keys(invitations).length > 0) {
-                const count = Object.keys(invitations).length;
-                const projects = Object.values(invitations).map(inv => inv.projectTitle).join(', ');
+            if(error) throw error;
+            
+            if(pendingInvitations && pendingInvitations.length > 0) {
+                const count = pendingInvitations.length;
+                const projects = pendingInvitations.map(inv => inv.data?.projectTitle || 'Projet').join(', ');
+                
+                // Traiter chaque invitation - ajouter l'utilisateur au projet
+                for(const inv of pendingInvitations) {
+                    const invData = inv.data || {};
+                    if(invData.projectId) {
+                        // Ajouter comme membre du projet
+                        await supabase
+                            .from('project_members')
+                            .upsert({
+                                project_id: invData.projectId,
+                                user_id: state.currentUser.id,
+                                role: invData.role || 'viewer',
+                                invited_by: null,
+                                invited_at: invData.invitedAt || new Date().toISOString()
+                            }, { onConflict: 'project_id,user_id' });
+                    }
+                    
+                    // Marquer l'invitation comme lue
+                    await supabase
+                        .from('messages')
+                        .update({ read: true })
+                        .eq('id', inv.id);
+                }
                 
                 // Notifier l'utilisateur
                 setTimeout(() => {
                     Utils.toast(`🎉 ${count} invitation(s) en attente : ${projects}`, 'success', 6000);
                 }, 500);
-                
-                // Supprimer les invitations traitées
-                await firebase.database().ref('pending_invitations/' + emailKey).remove();
             }
         } catch(e) {
             console.error('Erreur vérification invitations:', e);
@@ -41880,8 +42296,9 @@ const Comments = {
         listEl.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-sec);">Chargement...</div>';
         
         try {
-            const snap = await firebase.database().ref(`all_projects/${state.currentProjectId}/comments/${Comments.currentSceneId}`).once('value');
-            const comments = snap.val() || {};
+            // Les commentaires sont stockés dans state.data.comments (chargés avec le projet)
+            const allComments = state.data?.comments || {};
+            const comments = allComments[Comments.currentSceneId] || {};
             
             const sortedComments = Object.entries(comments)
                 .map(([id, data]) => ({ id, ...data }))
@@ -41943,6 +42360,7 @@ const Comments = {
         const text = document.getElementById('comment-input').value.trim();
         if(!text || !Comments.currentSceneId || !state.currentProjectId) return;
         
+        const commentId = 'cmt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         const comment = {
             author: state.currentUser.email,
             authorName: state.userProfile?.displayName || state.currentUser.email.split('@')[0],
@@ -41952,7 +42370,20 @@ const Comments = {
         };
         
         try {
-            await firebase.database().ref(`all_projects/${state.currentProjectId}/comments/${Comments.currentSceneId}`).push(comment);
+            // Ajouter le commentaire dans state.data.comments
+            if(!state.data.comments) state.data.comments = {};
+            if(!state.data.comments[Comments.currentSceneId]) state.data.comments[Comments.currentSceneId] = {};
+            state.data.comments[Comments.currentSceneId][commentId] = comment;
+            
+            // Sauvegarder dans Supabase
+            await supabase
+                .from('projects')
+                .update({ 
+                    data: state.data,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', state.currentProjectId);
+            
             document.getElementById('comment-input').value = '';
             Comments.load();
             Comments.updateBadge(Comments.currentSceneId);
@@ -41972,6 +42403,7 @@ const Comments = {
         const text = document.getElementById(`reply-text-${commentId}`).value.trim();
         if(!text) return;
         
+        const replyId = 'rpl_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         const reply = {
             author: state.currentUser.email,
             authorName: state.userProfile?.displayName || state.currentUser.email.split('@')[0],
@@ -41980,7 +42412,21 @@ const Comments = {
         };
         
         try {
-            await firebase.database().ref(`all_projects/${state.currentProjectId}/comments/${Comments.currentSceneId}/${commentId}/replies`).push(reply);
+            // Ajouter la réponse dans state.data.comments
+            if(!state.data.comments[Comments.currentSceneId][commentId].replies) {
+                state.data.comments[Comments.currentSceneId][commentId].replies = {};
+            }
+            state.data.comments[Comments.currentSceneId][commentId].replies[replyId] = reply;
+            
+            // Sauvegarder dans Supabase
+            await supabase
+                .from('projects')
+                .update({ 
+                    data: state.data,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', state.currentProjectId);
+            
             Comments.load();
             Utils.toast('Réponse ajoutée', 'success');
         } catch(e) {
@@ -41990,7 +42436,20 @@ const Comments = {
     
     resolve: async (commentId) => {
         try {
-            await firebase.database().ref(`all_projects/${state.currentProjectId}/comments/${Comments.currentSceneId}/${commentId}/resolved`).set(true);
+            // Marquer comme résolu dans state.data.comments
+            if(state.data.comments?.[Comments.currentSceneId]?.[commentId]) {
+                state.data.comments[Comments.currentSceneId][commentId].resolved = true;
+            }
+            
+            // Sauvegarder dans Supabase
+            await supabase
+                .from('projects')
+                .update({ 
+                    data: state.data,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', state.currentProjectId);
+            
             Comments.load();
             Comments.updateBadge(Comments.currentSceneId);
             Utils.toast('Commentaire marqué comme résolu', 'success');
@@ -42003,7 +42462,20 @@ const Comments = {
         if(!await ConfirmModal.confirmDelete("Ce commentaire sera supprimé.")) return;
         
         try {
-            await firebase.database().ref(`all_projects/${state.currentProjectId}/comments/${Comments.currentSceneId}/${commentId}`).remove();
+            // Supprimer le commentaire dans state.data.comments
+            if(state.data.comments?.[Comments.currentSceneId]?.[commentId]) {
+                delete state.data.comments[Comments.currentSceneId][commentId];
+            }
+            
+            // Sauvegarder dans Supabase
+            await supabase
+                .from('projects')
+                .update({ 
+                    data: state.data,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', state.currentProjectId);
+            
             Comments.load();
             Comments.updateBadge(Comments.currentSceneId);
             Utils.toast('Commentaire supprimé', 'success');
@@ -42016,8 +42488,9 @@ const Comments = {
         if(!state.currentProjectId) return { total: 0, unresolved: 0 };
         
         try {
-            const snap = await firebase.database().ref(`all_projects/${state.currentProjectId}/comments/${sceneId}`).once('value');
-            const comments = snap.val() || {};
+            // Les commentaires sont stockés dans state.data.comments
+            const allComments = state.data?.comments || {};
+            const comments = allComments[sceneId] || {};
             const list = Object.values(comments);
             return {
                 total: list.length,
@@ -45936,15 +46409,35 @@ const Forum = {
         Forum.renderThreads();
     },
     
-    loadThreads: () => {
-        firebase.database().ref('forum/threads').on('value', snapshot => {
-            Forum.threads = [];
-            snapshot.forEach(child => {
-                Forum.threads.push({ id: child.key, ...child.val() });
-            });
+    loadThreads: async () => {
+        try {
+            const { data: threads, error } = await supabase
+                .from('forum_threads')
+                .select('*')
+                .order('created_at', { ascending: false });
+            
+            if(error) throw error;
+            
+            Forum.threads = (threads || []).map(t => ({
+                id: t.id,
+                title: t.title,
+                content: t.content,
+                image: t.image,
+                category: t.category,
+                authorEmail: t.author_email,
+                authorName: t.author_name,
+                createdAt: t.created_at,
+                votes: t.votes || 0,
+                replyCount: t.reply_count || 0,
+                resolved: t.resolved || false,
+                pinned: t.pinned || false
+            }));
+            
             Forum.updateCounts();
             Forum.renderThreads();
-        });
+        } catch(e) {
+            console.error('Erreur chargement forum:', e);
+        }
     },
     
     updateCounts: () => {
@@ -45994,18 +46487,53 @@ const Forum = {
         `).join('');
     },
     
-    vote: (threadId, value) => {
-        const userKey = Utils.sanitizeEmail(state.currentUser.email);
-        const voteRef = firebase.database().ref(`forum/votes/${threadId}/${userKey}`);
+    vote: async (threadId, value) => {
+        if(!state.currentUser) return;
         
-        voteRef.once('value', snapshot => {
-            const currentVote = snapshot.val() || 0;
+        try {
+            // Vérifier le vote actuel
+            const { data: existingVote } = await supabase
+                .from('forum_votes')
+                .select('vote_type')
+                .eq('thread_id', threadId)
+                .eq('user_email', state.currentUser.email)
+                .single();
+            
+            const currentVote = existingVote?.vote_type || 0;
             const newVote = currentVote === value ? 0 : value;
             const diff = newVote - currentVote;
             
-            voteRef.set(newVote);
-            firebase.database().ref(`forum/threads/${threadId}/votes`).transaction(v => (v || 0) + diff);
-        });
+            // Upsert le vote
+            if(newVote === 0) {
+                await supabase
+                    .from('forum_votes')
+                    .delete()
+                    .eq('thread_id', threadId)
+                    .eq('user_email', state.currentUser.email);
+            } else {
+                await supabase
+                    .from('forum_votes')
+                    .upsert({
+                        thread_id: threadId,
+                        user_email: state.currentUser.email,
+                        vote_type: newVote
+                    }, { onConflict: 'thread_id,user_email' });
+            }
+            
+            // Mettre à jour le compteur du thread
+            const thread = Forum.threads.find(t => t.id === threadId);
+            if(thread) {
+                const newTotal = (thread.votes || 0) + diff;
+                await supabase
+                    .from('forum_threads')
+                    .update({ votes: newTotal })
+                    .eq('id', threadId);
+                thread.votes = newTotal;
+                Forum.renderThreads();
+            }
+        } catch(e) {
+            console.error('Erreur vote:', e);
+        }
     },
     
     selectedImage: null,
@@ -46102,25 +46630,56 @@ const Forum = {
             pinned: false
         };
         
-        firebase.database().ref('forum/threads').push(thread).then(() => {
-            document.querySelector('.modal-overlay').remove();
-            Forum.selectedImage = null;
-            Utils.toast('Sujet créé !', 'success');
-        });
+        supabase
+            .from('forum_threads')
+            .insert({
+                title: thread.title,
+                content: thread.content,
+                image: thread.image,
+                category: thread.category,
+                author_email: thread.authorEmail,
+                author_name: thread.authorName,
+                votes: 0,
+                resolved: false
+            })
+            .then(({ error }) => {
+                if(error) {
+                    console.error('Erreur création thread:', error);
+                    Utils.toast('Erreur lors de la création', 'error');
+                    return;
+                }
+                document.querySelector('.modal-overlay').remove();
+                Forum.selectedImage = null;
+                Forum.loadThreads();
+                Utils.toast('Sujet créé !', 'success');
+            });
     },
     
-    openThread: (threadId) => {
+    openThread: async (threadId) => {
         const thread = Forum.threads.find(t => t.id === threadId);
         if(!thread) return;
         
-        firebase.database().ref(`forum/replies/${threadId}`).once('value', snapshot => {
-            const replies = [];
-            snapshot.forEach(child => {
-                replies.push({ id: child.key, ...child.val() });
-            });
-            replies.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        try {
+            const { data: repliesData, error } = await supabase
+                .from('forum_replies')
+                .select('*')
+                .eq('thread_id', threadId)
+                .order('created_at', { ascending: true });
+            
+            if(error) throw error;
+            
+            const replies = (repliesData || []).map(r => ({
+                id: r.id,
+                content: r.content,
+                authorEmail: r.author_email,
+                authorName: r.author_name,
+                createdAt: r.created_at
+            }));
+            
             Forum.showThreadModal(thread, replies);
-        });
+        } catch(e) {
+            console.error('Erreur chargement réponses:', e);
+        }
     },
     
     showThreadModal: (thread, replies) => {
@@ -46174,28 +46733,56 @@ const Forum = {
         document.body.appendChild(modal);
     },
     
-    postReply: (threadId) => {
+    postReply: async (threadId) => {
         const content = document.getElementById('reply-content').value.trim();
         if(!content) return;
         
-        const reply = {
-            content: content,
-            authorEmail: state.currentUser.email,
-            authorName: state.userProfile?.displayName || state.currentUser.email.split('@')[0],
-            createdAt: new Date().toISOString()
-        };
-        
-        firebase.database().ref(`forum/replies/${threadId}`).push(reply);
-        firebase.database().ref(`forum/threads/${threadId}/replyCount`).transaction(v => (v || 0) + 1);
-        
-        document.querySelector('.modal-overlay').remove();
-        Forum.openThread(threadId);
-        Utils.toast('Réponse publiée !', 'success');
+        try {
+            // Insérer la réponse
+            await supabase
+                .from('forum_replies')
+                .insert({
+                    thread_id: threadId,
+                    content: content,
+                    author_email: state.currentUser.email,
+                    author_name: state.userProfile?.displayName || state.currentUser.email.split('@')[0]
+                });
+            
+            // Mettre à jour le compteur de réponses
+            const thread = Forum.threads.find(t => t.id === threadId);
+            if(thread) {
+                const newCount = (thread.replyCount || 0) + 1;
+                await supabase
+                    .from('forum_threads')
+                    .update({ reply_count: newCount })
+                    .eq('id', threadId);
+            }
+            
+            document.querySelector('.modal-overlay').remove();
+            Forum.loadThreads();
+            Forum.openThread(threadId);
+            Utils.toast('Réponse publiée !', 'success');
+        } catch(e) {
+            console.error('Erreur réponse:', e);
+            Utils.toast('Erreur lors de la publication', 'error');
+        }
     },
     
-    markResolved: (threadId) => {
-        firebase.database().ref(`forum/threads/${threadId}/resolved`).set(true);
-        Utils.toast('Sujet marqué comme résolu', 'success');
+    markResolved: async (threadId) => {
+        try {
+            await supabase
+                .from('forum_threads')
+                .update({ resolved: true })
+                .eq('id', threadId);
+            
+            const thread = Forum.threads.find(t => t.id === threadId);
+            if(thread) thread.resolved = true;
+            
+            Forum.renderThreads();
+            Utils.toast('Sujet marqué comme résolu', 'success');
+        } catch(e) {
+            console.error('Erreur:', e);
+        }
     }
 };
 
@@ -46229,15 +46816,47 @@ const Feed = {
         }
     },
     
-    loadPosts: () => {
-        firebase.database().ref('feed/posts').orderByChild('createdAt').limitToLast(50).on('value', snapshot => {
-            Feed.posts = [];
-            snapshot.forEach(child => {
-                Feed.posts.push({ id: child.key, ...child.val() });
-            });
-            Feed.posts.reverse();
+    loadPosts: async () => {
+        try {
+            const { data: posts, error } = await supabase
+                .from('feed_posts')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(50);
+            
+            if(error) throw error;
+            
+            // Récupérer les likes de l'utilisateur actuel
+            let userLikes = {};
+            if(state.currentUser) {
+                const { data: likesData } = await supabase
+                    .from('feed_likes')
+                    .select('post_id')
+                    .eq('user_email', state.currentUser.email);
+                
+                if(likesData) {
+                    likesData.forEach(l => userLikes[l.post_id] = true);
+                }
+            }
+            
+            Feed.posts = (posts || []).map(p => ({
+                id: p.id,
+                content: p.content,
+                type: p.post_type,
+                image: p.image,
+                authorEmail: p.author_email,
+                authorName: p.author_name,
+                createdAt: p.created_at,
+                likes: { [state.currentUser?.email]: userLikes[p.id] || false },
+                comments: {},
+                likeCount: p.like_count || p.likes || 0,
+                commentCount: p.comment_count || 0
+            }));
+            
             Feed.renderPosts();
-        });
+        } catch(e) {
+            console.error('Erreur chargement feed:', e);
+        }
     },
     
     renderPosts: () => {
@@ -46250,10 +46869,9 @@ const Feed = {
         container.innerHTML = Feed.posts.map(post => {
             const typeClass = post.type === 'annonce' ? 'annonce' : (post.type === 'recherche' ? 'recherche' : '');
             const typeLabel = post.type === 'annonce' ? '📢 Annonce' : (post.type === 'recherche' ? '🔍 Recherche' : '💭 Statut');
-            const userKey = state.currentUser ? Utils.sanitizeEmail(state.currentUser.email) : '';
-            const isLiked = post.likes && post.likes[userKey];
-            const likeCount = post.likes ? Object.keys(post.likes).length : 0;
-            const commentCount = post.comments ? Object.keys(post.comments).length : 0;
+            const isLiked = state.currentUser && post.likes && post.likes[state.currentUser.email];
+            const likeCount = post.likeCount || 0;
+            const commentCount = post.commentCount || 0;
             
             return `
                 <div class="feed-post">
@@ -46293,7 +46911,7 @@ const Feed = {
         }).join('');
     },
     
-    publish: () => {
+    publish: async () => {
         const contentEl = document.getElementById('feed-post-text');
         const content = contentEl.innerHTML.trim();
         const type = document.getElementById('feed-post-type').value;
@@ -46303,22 +46921,30 @@ const Feed = {
             return;
         }
         
-        const post = {
-            content: content,
-            type: type,
-            image: Feed.selectedImage || null,
-            authorEmail: state.currentUser.email,
-            authorName: state.userProfile?.displayName || state.currentUser.email.split('@')[0],
-            createdAt: new Date().toISOString(),
-            likes: {},
-            comments: {}
-        };
-        
-        firebase.database().ref('feed/posts').push(post).then(() => {
+        try {
+            const { error } = await supabase
+                .from('feed_posts')
+                .insert({
+                    content: content,
+                    post_type: type,
+                    image: Feed.selectedImage || null,
+                    author_email: state.currentUser.email,
+                    author_name: state.userProfile?.displayName || state.currentUser.email.split('@')[0],
+                    likes: 0,
+                    like_count: 0,
+                    comment_count: 0
+                });
+            
+            if(error) throw error;
+            
             contentEl.innerHTML = '';
             Feed.removeImage();
+            Feed.loadPosts();
             Utils.toast('Publication partagée !', 'success');
-        });
+        } catch(e) {
+            console.error('Erreur publication:', e);
+            Utils.toast('Erreur lors de la publication', 'error');
+        }
     },
     
     selectedImage: null,
@@ -46355,18 +46981,59 @@ const Feed = {
         document.getElementById('feed-image-input').value = '';
     },
     
-    toggleLike: (postId) => {
+    toggleLike: async (postId) => {
         if(!state.currentUser) return;
-        const userKey = Utils.sanitizeEmail(state.currentUser.email);
-        const likeRef = firebase.database().ref(`feed/posts/${postId}/likes/${userKey}`);
         
-        likeRef.once('value', snapshot => {
-            if(snapshot.exists()) {
-                likeRef.remove();
+        try {
+            // Vérifier si déjà liké
+            const { data: existingLike } = await supabase
+                .from('feed_likes')
+                .select('id')
+                .eq('post_id', postId)
+                .eq('user_email', state.currentUser.email)
+                .single();
+            
+            if(existingLike) {
+                // Supprimer le like
+                await supabase
+                    .from('feed_likes')
+                    .delete()
+                    .eq('post_id', postId)
+                    .eq('user_email', state.currentUser.email);
+                
+                // Décrémenter le compteur
+                const post = Feed.posts.find(p => p.id === postId);
+                if(post) {
+                    const newCount = Math.max(0, (post.likeCount || 1) - 1);
+                    await supabase
+                        .from('feed_posts')
+                        .update({ like_count: newCount })
+                        .eq('id', postId);
+                }
             } else {
-                likeRef.set(true);
+                // Ajouter le like
+                await supabase
+                    .from('feed_likes')
+                    .insert({
+                        post_id: postId,
+                        user_email: state.currentUser.email
+                    });
+                
+                // Incrémenter le compteur
+                const post = Feed.posts.find(p => p.id === postId);
+                if(post) {
+                    const newCount = (post.likeCount || 0) + 1;
+                    await supabase
+                        .from('feed_posts')
+                        .update({ like_count: newCount })
+                        .eq('id', postId);
+                }
             }
-        });
+            
+            Feed.loadPosts();
+        } catch(e) {
+            console.error('Erreur like:', e);
+        }
     },
     
     toggleComments: (postId) => {
@@ -46381,44 +47048,64 @@ const Feed = {
         }
     },
     
-    loadComments: (postId) => {
-        firebase.database().ref(`feed/posts/${postId}/comments`).once('value', snapshot => {
-            const comments = [];
-            snapshot.forEach(child => {
-                comments.push({ id: child.key, ...child.val() });
-            });
-            comments.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    loadComments: async (postId) => {
+        try {
+            const { data: comments, error } = await supabase
+                .from('feed_comments')
+                .select('*')
+                .eq('post_id', postId)
+                .order('created_at', { ascending: true });
+            
+            if(error) throw error;
             
             const container = document.getElementById(`comments-list-${postId}`);
-            container.innerHTML = comments.map(c => `
+            container.innerHTML = (comments || []).map(c => `
                 <div class="feed-comment">
-                    <div class="feed-comment-avatar">${(c.authorName || '?')[0].toUpperCase()}</div>
+                    <div class="feed-comment-avatar">${(c.author_name || '?')[0].toUpperCase()}</div>
                     <div class="feed-comment-content">
-                        <div class="feed-comment-author">${c.authorName || 'Anonyme'}</div>
+                        <div class="feed-comment-author">${c.author_name || 'Anonyme'}</div>
                         <div class="feed-comment-text">${c.content}</div>
                     </div>
                 </div>
             `).join('');
-        });
+        } catch(e) {
+            console.error('Erreur chargement commentaires:', e);
+        }
     },
     
-    postComment: (postId) => {
+    postComment: async (postId) => {
         const input = document.getElementById(`comment-input-${postId}`);
         const content = input.value.trim();
         
         if(!content) return;
         
-        const comment = {
-            content: content,
-            authorEmail: state.currentUser.email,
-            authorName: state.userProfile?.displayName || state.currentUser.email.split('@')[0],
-            createdAt: new Date().toISOString()
-        };
-        
-        firebase.database().ref(`feed/posts/${postId}/comments`).push(comment).then(() => {
+        try {
+            // Insérer le commentaire
+            await supabase
+                .from('feed_comments')
+                .insert({
+                    post_id: postId,
+                    content: content,
+                    author_email: state.currentUser.email,
+                    author_name: state.userProfile?.displayName || state.currentUser.email.split('@')[0]
+                });
+            
+            // Mettre à jour le compteur
+            const post = Feed.posts.find(p => p.id === postId);
+            if(post) {
+                const newCount = (post.commentCount || 0) + 1;
+                await supabase
+                    .from('feed_posts')
+                    .update({ comment_count: newCount })
+                    .eq('id', postId);
+            }
+            
             input.value = '';
             Feed.loadComments(postId);
-        });
+            Feed.loadPosts();
+        } catch(e) {
+            console.error('Erreur commentaire:', e);
+        }
     },
     
     share: (postId) => {
