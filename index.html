@@ -27,7 +27,39 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+V1.9.9.7 - Actualités & Limitations Pré-Alpha (Jan. 2025)
+  • Système d'actualités de profil
+    - Publication d'une actualité par jour sur son profil
+    - Visible par tous sur le profil public (défilement horizontal)
+    - Historique des 5 dernières actualités dans "Mon Profil"
+  • Limitations pré-alpha
+    - Le Fil : limité à 1 publication par semaine (dimanche à dimanche)
+    - Invitation par email : désactivée (popup informatif)
+  • Correction bug favoris
+    - L'étoile sur les profils fonctionne correctement
+    - Synchronisation avec la liste des contacts
 
+V1.9.9.6 - Migration Supabase (Jan. 2025)
+  • Migration complète Firebase → Supabase
+    - Base de données PostgreSQL hébergée en Europe (RGPD)
+    - Authentification Supabase (inscription, connexion, reset password)
+    - 12 tables optimisées avec Row Level Security (RLS)
+  • Modules migrés
+    - Auth : connexion, inscription, déconnexion, mot de passe oublié
+    - Projets : création, chargement, sauvegarde, suppression, partage
+    - Profils utilisateurs : création, mise à jour, photo
+    - Messages : envoi, réception, notifications
+    - Contacts : ajout, suppression, gestion
+    - Forum : threads, réponses, votes, résolution
+    - Feed (Le Fil) : publications, likes, commentaires
+    - Commentaires : sur les scènes du séquencier
+    - Invitations : partage de projets, invitations en attente
+  • Avantages Supabase
+    - Données hébergées en Europe (conformité RGPD)
+    - PostgreSQL robuste et scalable
+    - Coûts réduits pour la mise à l'échelle
+    - Dashboard d'administration puissant
+	
 V1.9.9.5 - Forum Communautaire & Mur Social (Jan. 2025)
   • Système de liste blanche pré-alpha
     - Inscription limitée aux emails autorisés
@@ -460,7 +492,7 @@ V1.0 - Base solide (Déc. 2024)
 ================================================================================
 -->
 <head>
-<title>Moteur - Gestion de production audiovisuelle - 1.9.9.6</title>
+<title>Moteur - Gestion de production audiovisuelle - 1.9.9.7</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -4709,7 +4741,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v1.9.9.6</p>
+      <p>v1.9.9.</p>
       
       <form id="login-form" onsubmit="event.preventDefault(); app.Auth.login()">
         <input type="email" id="login-email" name="email" class="auth-input" placeholder="Email" autocomplete="username">
@@ -5940,6 +5972,23 @@ body.presentation-mode .presentation-bar {
             </div>
         </div>
         
+        <!-- Section Actualité du profil -->
+        <div class="profile-section" data-section="actualite">
+            <h3>
+                <span class="section-title">📰 Mon Actualité</span>
+            </h3>
+            <p style="font-size: 0.85rem; color: var(--text-sec); margin-bottom: 15px;">
+                Publiez une actualité visible sur votre profil public. Limitée à 1 publication par jour.
+            </p>
+            <div id="profile-actualite-status" style="margin-bottom: 15px; padding: 10px; border-radius: 8px; display: none;"></div>
+            <textarea class="profile-input" id="profile-actualite-content" placeholder="Partagez une actualité, une disponibilité, un projet en cours..." style="min-height: 80px; resize: vertical; margin-bottom: 10px;"></textarea>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <button type="button" onclick="app.PublicProfile.publishActualite()" style="padding: 10px 20px; background: var(--primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">📤 Publier mon actualité</button>
+                <span style="font-size: 0.8rem; color: var(--text-sec);">Visible sur votre profil pendant 24h</span>
+            </div>
+            <div id="profile-my-actualites" style="margin-top: 20px;"></div>
+        </div>
+        
         <!-- Zone Danger - Suppression profil et compte -->
         <div class="profile-section" style="border-color: var(--danger); margin-top: 30px;">
             <h3 style="color: var(--danger);">⚠️ Zone Danger</h3>
@@ -6024,6 +6073,12 @@ body.presentation-mode .presentation-bar {
       <div class="profile-modal-section" id="pm-demoreel-section" style="display:none;">
         <h4>🎬 Bande Démo</h4>
         <div id="pm-demoreel"></div>
+      </div>
+      <div class="profile-modal-section" id="pm-actualite-section" style="display:none;">
+        <h4>📰 Actualité</h4>
+        <div id="pm-actualite" style="overflow-x: auto; white-space: nowrap; padding: 10px 0;">
+          <p style="color: var(--text-sec); font-style: italic;">Aucune actualité publiée</p>
+        </div>
       </div>
     </div>
     <div class="profile-modal-actions">
@@ -22517,6 +22572,9 @@ const PublicProfile = {
         }
         // Afficher le conteneur maintenant que tout est chargé
         document.getElementById('current-profile-content').style.display = 'block';
+        
+        // Charger mes actualités
+        PublicProfile.loadMyActualites();
     },
     
     close: () => {
@@ -24335,6 +24393,117 @@ const PublicProfile = {
         if(document.getElementById('profile-collab-benevole')?.checked) collabTypes.push('benevole');
         
         profile.collabTypes = collabTypes;
+    },
+    
+    // Publier une actualité (limite 1 par jour)
+    publishActualite: async () => {
+        const content = document.getElementById('profile-actualite-content')?.value?.trim();
+        if(!content) {
+            Utils.toast('Écrivez quelque chose avant de publier', 'warning');
+            return;
+        }
+        
+        if(!state.currentUser) return;
+        
+        // Vérifier si déjà publié aujourd'hui
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const { data: existing, error: checkError } = await supabase
+            .from('profile_actualites')
+            .select('id, created_at')
+            .eq('author_email', state.currentUser.email)
+            .gte('created_at', today.toISOString());
+        
+        if(!checkError && existing && existing.length > 0) {
+            Utils.toast('🚫 Vous avez déjà publié une actualité aujourd\'hui. Revenez demain !', 'warning', 5000);
+            return;
+        }
+        
+        // Publier
+        const { error } = await supabase
+            .from('profile_actualites')
+            .insert({
+                author_email: state.currentUser.email,
+                author_name: state.userProfile?.displayName || state.currentUser.email.split('@')[0],
+                content: content
+            });
+        
+        if(error) {
+            console.error('Erreur publication actualité:', error);
+            Utils.toast('Erreur lors de la publication', 'error');
+            return;
+        }
+        
+        document.getElementById('profile-actualite-content').value = '';
+        Utils.toast('📰 Actualité publiée !', 'success');
+        PublicProfile.loadMyActualites();
+    },
+    
+    // Charger mes actualités
+    loadMyActualites: async () => {
+        if(!state.currentUser) return;
+        
+        const container = document.getElementById('profile-my-actualites');
+        if(!container) return;
+        
+        const { data: actualites } = await supabase
+            .from('profile_actualites')
+            .select('*')
+            .eq('author_email', state.currentUser.email)
+            .order('created_at', { ascending: false })
+            .limit(5);
+        
+        if(!actualites || actualites.length === 0) {
+            container.innerHTML = '<p style="color: var(--text-sec); font-style: italic;">Aucune actualité publiée</p>';
+            return;
+        }
+        
+        container.innerHTML = '<h4 style="margin-bottom: 10px; font-size: 0.9rem; color: var(--text-sec);">Mes dernières actualités :</h4>' +
+            actualites.map(a => `
+                <div style="padding: 12px; background: var(--bg); border-radius: 8px; margin-bottom: 8px; border: 1px solid var(--border);">
+                    <div style="display: flex; justify-content: space-between; align-items: start; gap: 10px;">
+                        <div style="flex: 1;">
+                            <div style="font-size: 0.8rem; color: var(--text-sec); margin-bottom: 5px;">${Utils.timeAgo(a.created_at)}</div>
+                            <div>${Utils.escape(a.content)}</div>
+                        </div>
+                        <button onclick="app.PublicProfile.deleteActualite('${a.id}')" style="background: none; border: none; color: var(--danger); cursor: pointer; padding: 5px;" title="Supprimer">🗑️</button>
+                    </div>
+                </div>
+            `).join('');
+        
+        // Mettre à jour le statut
+        const statusEl = document.getElementById('profile-actualite-status');
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayPost = actualites.find(a => new Date(a.created_at) >= today);
+        
+        if(todayPost) {
+            statusEl.style.display = 'block';
+            statusEl.style.background = 'var(--warning-bg, #fff3cd)';
+            statusEl.style.color = 'var(--warning-text, #856404)';
+            statusEl.innerHTML = '⏳ Vous avez déjà publié aujourd\'hui. Prochaine publication possible demain.';
+        } else {
+            statusEl.style.display = 'none';
+        }
+    },
+    
+    // Supprimer une actualité
+    deleteActualite: async (id) => {
+        if(!confirm('Supprimer cette actualité ?')) return;
+        
+        const { error } = await supabase
+            .from('profile_actualites')
+            .delete()
+            .eq('id', id);
+        
+        if(error) {
+            Utils.toast('Erreur lors de la suppression', 'error');
+            return;
+        }
+        
+        Utils.toast('Actualité supprimée', 'success');
+        PublicProfile.loadMyActualites();
     }
 };
 
@@ -26208,12 +26377,24 @@ if(isActors) {
                 .eq('owner_email', email);
             
             if(!error && contacts) {
+                // Enrichir chaque contact avec publicProfileId depuis notes
+                const enrichedContacts = contacts.map(c => {
+                    let enriched = { ...c };
+                    try {
+                        const notesData = JSON.parse(c.notes || '{}');
+                        if(notesData.publicProfileId) {
+                            enriched.publicProfileId = notesData.publicProfileId;
+                        }
+                    } catch(e) {}
+                    return enriched;
+                });
+                
                 state.contacts = {
-                    actors: contacts.filter(c => c.contact_type === 'actor'),
-                    crew: contacts.filter(c => c.contact_type === 'crew'),
-                    projects: contacts.filter(c => c.contact_type === 'project'),
-                    associations: contacts.filter(c => c.contact_type === 'association'),
-                    enterprises: contacts.filter(c => c.contact_type === 'enterprise')
+                    actors: enrichedContacts.filter(c => c.contact_type === 'actor'),
+                    crew: enrichedContacts.filter(c => c.contact_type === 'crew'),
+                    projects: enrichedContacts.filter(c => c.contact_type === 'project'),
+                    associations: enrichedContacts.filter(c => c.contact_type === 'association'),
+                    enterprises: enrichedContacts.filter(c => c.contact_type === 'enterprise')
                 };
             } else {
                 state.contacts = { actors: [], crew: [], projects: [], associations: [], enterprises: [] };
@@ -40702,6 +40883,33 @@ const coords = await Universe.geocodeCity(city);
             demoreelEl.innerHTML = '';
         }
         
+        // Actualité du profil (dernière publication du jour)
+        const actualiteSection = document.getElementById('pm-actualite-section');
+        const actualiteEl = document.getElementById('pm-actualite');
+        try {
+            const { data: actualites } = await supabase
+                .from('profile_actualites')
+                .select('*')
+                .eq('author_email', fullProfile.email)
+                .order('created_at', { ascending: false })
+                .limit(5);
+            
+            if(actualites && actualites.length > 0) {
+                actualiteSection.style.display = 'block';
+                actualiteEl.innerHTML = actualites.map(a => `
+                    <div style="display: inline-block; min-width: 250px; max-width: 300px; padding: 15px; margin-right: 10px; background: var(--bg); border-radius: 10px; border: 1px solid var(--border); white-space: normal; vertical-align: top;">
+                        <div style="font-size: 0.8rem; color: var(--text-sec); margin-bottom: 8px;">${Utils.timeAgo(a.created_at)}</div>
+                        <div style="font-size: 0.95rem;">${a.content}</div>
+                        ${a.image ? `<img src="${a.image}" style="width: 100%; border-radius: 6px; margin-top: 10px;">` : ''}
+                    </div>
+                `).join('');
+            } else {
+                actualiteSection.style.display = 'none';
+            }
+        } catch(e) {
+            actualiteSection.style.display = 'none';
+        }
+        
         document.getElementById('profile-modal-overlay').style.display = 'flex';
         Universe.updateFavoriteButton();
     },
@@ -40840,7 +41048,7 @@ const coords = await Universe.geocodeCity(city);
         };
         const contactType = typeMap[profileType] || 'actors';
         if(!state.contacts[contactType]) return false;
-        return state.contacts[contactType].some(c => c.id === profileId);
+        return state.contacts[contactType].some(c => c.publicProfileId === profileId || c.contact_email === profileId);
     },
     
     toggleFavorite: async () => {
@@ -40865,7 +41073,7 @@ const coords = await Universe.geocodeCity(city);
         if(!state.contacts[contactType]) state.contacts[contactType] = [];
         
         // Vérifier si déjà en favoris
-        const existingIndex = state.contacts[contactType].findIndex(c => c.id === profile.id);
+        const existingIndex = state.contacts[contactType].findIndex(c => c.publicProfileId === profile.id || c.contact_email === profile.id);
         
         if(existingIndex >= 0) {
             // Retirer des favoris
@@ -40879,14 +41087,14 @@ const coords = await Universe.geocodeCity(city);
             // Ajouter aux favoris
             const contactData = {
                 owner_email: state.currentUser.email.toLowerCase(),
-                contact_email: profile.email || '',
+                contact_email: profile.email || profile.id || '',
                 contact_type: contactType,
                 name: profile.name || profile.assoName || profile.entName || '',
-                notes: JSON.stringify(profile)
+                notes: JSON.stringify({ ...profile, publicProfileId: profile.id })
             };
             const { data: newContact } = await supabase.from('contacts').insert(contactData).select().single();
             if(newContact) {
-                state.contacts[contactType].push({ ...profile, id: newContact.id });
+                state.contacts[contactType].push({ ...profile, id: newContact.id, publicProfileId: profile.id });
             }
             btn.textContent = '★';
             btn.classList.add('active');
@@ -41897,6 +42105,19 @@ const Invitations = {
     
     // Envoie l'invitation
     sendInvitation: async () => {
+        // Vérifier si l'email est dans la whitelist
+        const email = document.getElementById('share-email')?.value?.trim()?.toLowerCase();
+        
+        if(!email || !email.includes('@')) {
+            Utils.toast('Veuillez entrer un email valide.', 'warning');
+            return;
+        }
+        
+        // Si l'email n'est pas dans la whitelist, bloquer
+        if(!CONFIG.preAlpha.whitelist.includes(email)) {
+            Utils.toast('🚧 Fonction limitée en pré-alpha. Seuls les utilisateurs de la whitelist peuvent être invités.', 'warning', 5000);
+            return;
+        }
         const email = document.getElementById('share-email').value.trim().toLowerCase();
         const role = document.getElementById('share-role').value;
         const message = document.getElementById('share-message')?.value?.trim() || '';
@@ -46918,6 +47139,27 @@ const Feed = {
         
         if(!content || content === '<br>') {
             Utils.toast('Écrivez quelque chose avant de publier', 'warning');
+            return;
+        }
+        
+        // Vérifier la limite d'une publication par semaine (dimanche à dimanche)
+        const now = new Date();
+        const dayOfWeek = now.getDay(); // 0 = dimanche
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - dayOfWeek);
+        startOfWeek.setHours(0, 0, 0, 0);
+        
+        const { data: recentPosts, error: checkError } = await supabase
+            .from('feed_posts')
+            .select('id, created_at')
+            .eq('author_email', state.currentUser.email)
+            .gte('created_at', startOfWeek.toISOString());
+        
+        if(!checkError && recentPosts && recentPosts.length > 0) {
+            const nextSunday = new Date(startOfWeek);
+            nextSunday.setDate(startOfWeek.getDate() + 7);
+            const joursRestants = Math.ceil((nextSunday - now) / (1000 * 60 * 60 * 24));
+            Utils.toast(`🚫 Vous avez déjà publié cette semaine. Prochaine publication possible dans ${joursRestants} jour(s).`, 'warning', 5000);
             return;
         }
         
