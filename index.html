@@ -8725,6 +8725,10 @@ body.presentation-mode .presentation-bar {
             <button onclick="app.DrawingEditor.undo()" style="padding: 8px 12px; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">↶ Annuler</button>
             <button onclick="app.DrawingEditor.redo()" style="padding: 8px 12px; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">↷ Refaire</button>
             <button onclick="app.DrawingEditor.clear()" style="padding: 8px 12px; background: var(--danger); color: white; border: none; border-radius: 4px; cursor: pointer;">🗑️ Effacer Tout</button>
+            <label style="display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.85rem;">
+                <input type="checkbox" id="drawTransparentBg" onchange="app.DrawingEditor.toggleTransparent(this.checked)">
+                🔲 Fond transparent
+            </label>
             <select id="drawBrushSize" onchange="app.DrawingEditor.setBrushSize(this.value)" style="padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
                 <option value="2">Très fin</option>
                 <option value="5">Fin</option>
@@ -16717,11 +16721,50 @@ const ColorWheel = {
         monochromatic: { name: 'Monochrome', angles: [0, 0, 0, 0, 0], saturations: [100, 80, 60, 40, 20] }
     },
     
-    open: (callback) => {
+    existingName: null,
+    
+    hexToHsl: (hex) => {
+        // Convertir hex en RGB puis HSL
+        let r = 0, g = 0, b = 0;
+        if(hex.length === 4) {
+            r = parseInt(hex[1] + hex[1], 16);
+            g = parseInt(hex[2] + hex[2], 16);
+            b = parseInt(hex[3] + hex[3], 16);
+        } else if(hex.length === 7) {
+            r = parseInt(hex.slice(1, 3), 16);
+            g = parseInt(hex.slice(3, 5), 16);
+            b = parseInt(hex.slice(5, 7), 16);
+        }
+        r /= 255; g /= 255; b /= 255;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h = 0, s = 0, l = (max + min) / 2;
+        if(max !== min) {
+            const d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            switch(max) {
+                case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+                case g: h = ((b - r) / d + 2) / 6; break;
+                case b: h = ((r - g) / d + 4) / 6; break;
+            }
+        }
+        return { h: h * 360, s: s * 100, l: l * 100 };
+    },
+    
+    open: (callback, existingColors = null, existingName = null) => {
         ColorWheel.onComplete = callback;
-        ColorWheel.baseHue = Math.random() * 360;
-        ColorWheel.baseSaturation = 100;
-        ColorWheel.brightness = 50;
+        ColorWheel.existingName = existingName;
+        
+        // Si des couleurs existantes sont fournies, extraire la teinte de base
+        if(existingColors && existingColors.length > 0) {
+            const hsl = ColorWheel.hexToHsl(existingColors[0]);
+            ColorWheel.baseHue = hsl.h;
+            ColorWheel.baseSaturation = hsl.s;
+            ColorWheel.brightness = hsl.l;
+        } else {
+            ColorWheel.baseHue = Math.random() * 360;
+            ColorWheel.baseSaturation = 100;
+            ColorWheel.brightness = 50;
+        }
         ColorWheel.harmony = 'analogous';
         
         const modal = document.createElement('div');
@@ -16763,13 +16806,19 @@ const ColorWheel = {
                     </div>
                 </div>
                 <div class="color-wheel-actions">
+                    <input type="text" id="paletteNameInput" placeholder="Nom de la palette..." style="flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-main);">
                     <button class="cancel" onclick="ColorWheel.close()">Annuler</button>
-                    <button class="confirm" onclick="ColorWheel.addToBoard()">Ajouter au moodboard</button>
+                    <button class="confirm" onclick="ColorWheel.addToBoard()">${existingColors ? 'Modifier' : 'Ajouter au moodboard'}</button>
                 </div>
             </div>
         `;
         
         document.body.appendChild(modal);
+        
+        // Pré-remplir le nom si existant
+        if(ColorWheel.existingName) {
+            document.getElementById('paletteNameInput').value = ColorWheel.existingName;
+        }
         
         ColorWheel.canvas = document.getElementById('colorWheelCanvas');
         ColorWheel.ctx = ColorWheel.canvas.getContext('2d');
@@ -16962,12 +17011,13 @@ const ColorWheel = {
     
     addToBoard: () => {
         const hexColors = ColorWheel.colors.map(c => c.hex);
-        const harmonyName = ColorWheel.harmonies[ColorWheel.harmony].name;
+        const nameInput = document.getElementById('paletteNameInput');
+        const paletteName = nameInput && nameInput.value.trim() ? nameInput.value.trim() : ColorWheel.harmonies[ColorWheel.harmony].name;
         
         ColorWheel.close();
         
         if(ColorWheel.onComplete) {
-            ColorWheel.onComplete(hexColors, harmonyName);
+            ColorWheel.onComplete(hexColors, paletteName);
         }
     }
 };
@@ -18023,14 +18073,17 @@ const MoodBoard = {
         }
         
         if(element.type === 'palette') {
-            const colorsStr = await ConfirmModal.prompt('Entrez les couleurs (séparées par des virgules) :', 'Modifier la palette', '#264653, #2a9d8f...', (element.colors || []).join(', '));
-            if(colorsStr === null) return;
-            
-            element.colors = colorsStr.split(',').map(c => c.trim()).filter(c => c);
-            board.modifiedAt = Date.now();
-            Store.save();
-            MoodBoard.renderCanvas();
-            Utils.toast('Palette modifiée', 'success');
+            // Ouvrir l'éditeur de palette avec les couleurs existantes
+            ColorWheel.open((colors, name) => {
+                if(colors && colors.length > 0) {
+                    element.colors = colors;
+                    if(name) element.paletteName = name;
+                    board.modifiedAt = Date.now();
+                    Store.save();
+                    MoodBoard.renderCanvas();
+                    Utils.toast('Palette modifiée', 'success');
+                }
+            }, element.colors, element.paletteName);
         }
         
         if(element.type === 'link') {
@@ -18592,11 +18645,6 @@ const MoodBoard = {
         // Ajouter option couleur pour les formes
         if(element && element.type === 'shape') {
             items.splice(4, 0, { icon: '🎨', label: 'Couleur', action: () => MoodBoard.changeShapeColor(elementId) });
-        }
-        
-        // Ajouter option renommer pour les palettes
-        if(element && element.type === 'palette') {
-            items.splice(4, 0, { icon: '✏️', label: 'Renommer', action: () => MoodBoard.renamePalette(elementId) });
         }
         
         // Ajouter option renommer pour les palettes
@@ -20537,8 +20585,14 @@ const DrawingEditor = {
     opacity: 100,
     history: [],
     historyStep: -1,
+    transparentBg: false,
     
     colors: ['#000000', '#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#800080'],
+    
+    toggleTransparent: (checked) => {
+        DrawingEditor.transparentBg = checked;
+        DrawingEditor.redraw();
+    },
     
     open: (shotId, moodboardCallback = null) => {
         DrawingEditor.currentShotId = shotId;
@@ -20624,9 +20678,11 @@ const DrawingEditor = {
         composite.height = 600;
         const ctx = composite.getContext('2d');
         
-        // Fond blanc
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, composite.width, composite.height);
+        // Fond blanc seulement si pas transparent
+        if(!DrawingEditor.transparentBg) {
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, composite.width, composite.height);
+        }
         
         // Superposer les calques visibles
         DrawingEditor.layers.forEach(layer => {
