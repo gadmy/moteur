@@ -24,12 +24,13 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
-V2.1.4 - Dashboard Admin Avancé & Tutoriel (Jan. 2025)
+V2.1.4 - Dashboard Admin Avancé & Tutoriel & SEO (Jan. 2025)
   • Graphique d'évolution interactif
     - Courbes avec période sélectionnable (7j, 30j, 3 mois, 12 mois)
     - Stats principales : Profils, Projets, Comédiens, Connexions, Signalements
     - Stats détaillées par métier tech (Image, Son, Régie, etc.)
     - Stats par type d'association et d'entreprise
+    - Fix mapping rôles vers départements pour stats correctes
   • Tableau utilisateurs enrichi
     - Colonnes : Email, Nom, Types de profils, Inscription, Projets + dates
     - Liste des projets de chaque utilisateur avec dates de création
@@ -37,6 +38,17 @@ V2.1.4 - Dashboard Admin Avancé & Tutoriel (Jan. 2025)
     - Guide complet sur l'écran de connexion (👁️ Tutoriel)
     - 17 sections couvrant toutes les fonctionnalités
     - Remplace l'ancien Guide (code allégé de ~1300 lignes)
+  • Optimisation SEO complète
+    - Meta tags (description, keywords, author, robots)
+    - Open Graph pour Facebook/LinkedIn
+    - Twitter Card pour partages Twitter
+    - Favicon emoji 🎬 en SVG inline
+    - Theme color #3b82f6
+    - Canonical URL
+  • Fichiers SEO générés
+    - sitemap.xml pour référencement Google
+    - robots.txt pour crawlers
+    - og-image.png (1200x630) pour partages sociaux
   • Correction critique Supabase
     - Fix AbortError sur initialisation (Web Locks API)
     - Options auth explicites pour stabilité
@@ -40905,9 +40917,9 @@ const Admin = {
     
     loadStats: async () => {
         try {
-            // Charger les profils avec dates
-            const { data: profiles } = await supabase.from('user_profiles').select('created_at, profile_data');
-            Admin.statsData.profiles = profiles?.map(p => p.created_at) || [];
+            // Charger les profils
+            const { data: profiles } = await supabase.from('user_profiles').select('*');
+            Admin.statsData.profiles = profiles || [];
             
             // Réinitialiser les compteurs détaillés
             Object.keys(Admin.statsData).forEach(k => {
@@ -40916,31 +40928,58 @@ const Admin = {
                 }
             });
             
+            // Mapping des rôles vers départements
+            const roleToDept = {
+                'Réalisateur-rice': 'gc3', '1er assistant réalisateur': 'gc3', '2ème assistant réalisateur': 'gc3', 'Scripte': 'gc3',
+                'Directeur-rice de la photo': 'gc1', 'Cadreur-se': 'gc1', '1er assistant caméra': 'gc1', '2ème assistant caméra': 'gc1', 'Steadicamer': 'gc1', 'Chef opérateur drone': 'gc1',
+                'Chef électro': 'gc2', 'Electricien-ne': 'gc2', 'Chef machino': 'gc2', 'Machiniste': 'gc2',
+                'Chef opérateur son': 'gc4', 'Perchiste': 'gc4', 'Ingénieur du son': 'gc4',
+                'Chef décorateur': 'gc5', 'Ensemblier': 'gc5', 'Accessoiriste': 'gc5', 'Régisseur plateau': 'gc5',
+                'Chef costumier': 'gc6', 'Costumier-ère': 'gc6', 'Habilleur-se': 'gc6',
+                'Chef maquilleur': 'gc7', 'Maquilleur-se': 'gc7', 'Coiffeur-se': 'gc7',
+                'Script/Continuité': 'gc8',
+                'Régisseur général': 'gc9', 'Régisseur adjoint': 'gc9',
+                'Directeur de production': 'gc10', 'Directeur de post-production': 'gc10', 'Producteur-rice': 'gc10',
+                'Chef cuisinier': 'gc11', 'Intendant': 'gc11',
+                'Chauffeur': 'gc12', 'Régisseur transport': 'gc12',
+                'Monteur-se': 'gc13', 'Etalonneur-se': 'gc13', 'Infographiste': 'gc13',
+                'Scénariste': 'gc14', 'Dialoguiste': 'gc14',
+                'Compositeur-rice': 'gc15', 'Musicien-ne': 'gc15',
+                'Cascadeur-se': 'gc16', 'Coordinateur cascades': 'gc16'
+            };
+            
             // Compter les types de profils
-            let actorDates = [];
+            let actorCount = 0;
             profiles?.forEach(p => {
-                const data = p.profile_data || {};
-                if(data.actor) actorDates.push(p.created_at);
-                if(data.crew) {
-                    const dept = data.crew.department;
-                    if(dept && Admin.statsData['crew_' + dept] !== undefined) {
-                        Admin.statsData['crew_' + dept].push(p.created_at);
+                const profileType = p.profile_type;
+                const data = p.data || {};
+                const created = p.created_at || p.updated_at || new Date().toISOString();
+                
+                if(profileType === 'actor') actorCount++;
+                if(profileType === 'crew') {
+                    let dept = data.department;
+                    if(!dept && data.role) {
+                        dept = roleToDept[data.role] || 'gc17';
+                    }
+                    if(dept) {
+                        const key = 'crew_' + dept;
+                        if(Admin.statsData[key] !== undefined) {
+                            Admin.statsData[key].push(created);
+                        }
                     }
                 }
-                if(data.association) {
-                    const type = data.association.assoType;
-                    if(type && Admin.statsData[type] !== undefined) {
-                        Admin.statsData[type].push(p.created_at);
+                if(profileType === 'association' && data.assoType) {
+                    if(Admin.statsData[data.assoType] !== undefined) {
+                        Admin.statsData[data.assoType].push(created);
                     }
                 }
-                if(data.enterprise) {
-                    const type = data.enterprise.entType;
-                    if(type && Admin.statsData[type] !== undefined) {
-                        Admin.statsData[type].push(p.created_at);
+                if(profileType === 'enterprise' && data.entType) {
+                    if(Admin.statsData[data.entType] !== undefined) {
+                        Admin.statsData[data.entType].push(created);
                     }
                 }
             });
-            Admin.statsData.actors = actorDates;
+            Admin.statsData.actors = new Array(actorCount);
             
             // Charger les projets avec dates
             const { data: projects } = await supabase.from('projects').select('created_at');
