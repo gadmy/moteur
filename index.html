@@ -6071,7 +6071,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.3.4</p>
+      <p>v2.3.5</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -25731,7 +25731,18 @@ const PublicProfile = {
         profile.gender = document.getElementById('profile-gender').value;
         profile.phone = document.getElementById('profile-phone').value.trim();
         profile.city = document.getElementById('profile-city').value.trim();
-        profile.address = document.getElementById('profile-address')?.value.trim() || '';
+        const addressInput = document.getElementById('profile-address');
+        const previousAddress = profile.address || '';
+        profile.address = addressInput?.value.trim() || '';
+        // Récupérer les coords fournies par BAN via selectAddress (stockées dans dataset)
+        if(addressInput?.dataset.lat && addressInput?.dataset.lng) {
+            profile.latitude = parseFloat(addressInput.dataset.lat);
+            profile.longitude = parseFloat(addressInput.dataset.lng);
+        } else if(profile.address !== previousAddress) {
+            // Si l'adresse a changé à la main sans passer par l'autocomplétion, on invalide les anciennes coords
+            profile.latitude = null;
+            profile.longitude = null;
+        }
         profile.hideAddress = document.getElementById('profile-hide-address')?.checked || false;
         profile.hideAddressInProjects = document.getElementById('profile-hide-address-projects')?.checked || false;
         profile.website = document.getElementById('profile-website').value.trim();
@@ -25903,6 +25914,38 @@ const PublicProfile = {
     },
     
     // Recherche d'adresse avec autocomplétion (API adresse.data.gouv.fr)
+    // Géocodage international via Nominatim (fallback si BAN ne trouve pas + profils étrangers)
+    // Utilise la file d'attente Universe._nominatimQueue pour respecter 1 req/s
+    geocodeAddressInternational: async (address) => {
+        if(!address || !address.trim()) return null;
+        
+        // Réutilise la file d'attente globale de Universe pour respecter le rate limit OSM
+        if(typeof Universe === 'undefined') return null;
+        if(!Universe._nominatimQueue) Universe._nominatimQueue = Promise.resolve();
+        
+        const task = Universe._nominatimQueue.then(async () => {
+            try {
+                const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1&addressdetails=0`, {
+                    headers: { 'Accept': 'application/json' }
+                });
+                if(!response.ok) {
+                    console.warn(`Nominatim HTTP ${response.status} pour "${address}"`);
+                    return null;
+                }
+                const data = await response.json();
+                if(data && data.length > 0) {
+                    return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+                }
+            } catch(e) {
+                console.warn('Nominatim error:', e);
+            }
+            return null;
+        });
+        
+        Universe._nominatimQueue = task.then(() => new Promise(r => setTimeout(r, 1100)));
+        return task;
+    },
+    
     searchAddress: async (query) => {
         const suggestions = document.getElementById('profile-address-suggestions');
         if(!suggestions) return;
@@ -25921,7 +25964,11 @@ const PublicProfile = {
                     const props = f.properties;
                     const label = props.label || '';
                     const context = props.context || '';
-                    return `<div class="address-suggestion" onclick="app.PublicProfile.selectAddress('${Utils.escape(label).replace(/'/g, "\\'")}', '${props.city || ''}')">
+                    // Les coords BAN sont dans geometry.coordinates = [lng, lat]
+                    const coords = f.geometry && f.geometry.coordinates ? f.geometry.coordinates : [null, null];
+                    const lng = coords[0];
+                    const lat = coords[1];
+                    return `<div class="address-suggestion" onclick="app.PublicProfile.selectAddress('${Utils.escape(label).replace(/'/g, "\\'")}', '${props.city || ''}', ${lat}, ${lng})">
                         <div class="address-suggestion-main">${Utils.escape(props.name || label.split(',')[0])}</div>
                         <div class="address-suggestion-secondary">${Utils.escape(context)}</div>
                     </div>`;
@@ -25937,9 +25984,18 @@ const PublicProfile = {
         }
     },
     
-    // Sélectionner une adresse
-    selectAddress: (address, city) => {
-        document.getElementById('profile-address').value = address;
+    // Sélectionner une adresse (stocke aussi lat/lng via dataset pour sauvegarde ultérieure)
+    selectAddress: (address, city, lat, lng) => {
+        const addressInput = document.getElementById('profile-address');
+        addressInput.value = address;
+        // Stocker les coordonnées dans le dataset de l'input pour que saveFormToCurrentProfile les récupère
+        if(lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
+            addressInput.dataset.lat = lat;
+            addressInput.dataset.lng = lng;
+        } else {
+            delete addressInput.dataset.lat;
+            delete addressInput.dataset.lng;
+        }
         if(city && !document.getElementById('profile-city').value) {
             document.getElementById('profile-city').value = city;
         }
@@ -26425,6 +26481,20 @@ const PublicProfile = {
         const email = state.currentUser.email.toLowerCase();
         
         try {
+            // Si on a une adresse mais pas de coords (édition manuelle, ou adresse étrangère non BAN) :
+            // fallback Nominatim international avant sauvegarde
+            if(profile.address && (profile.latitude == null || profile.longitude == null)) {
+                try {
+                    const intlCoords = await PublicProfile.geocodeAddressInternational(profile.address);
+                    if(intlCoords) {
+                        profile.latitude = intlCoords.lat;
+                        profile.longitude = intlCoords.lng;
+                    }
+                } catch(e) {
+                    console.warn('Fallback géocodage international échoué:', e);
+                }
+            }
+            
             // Sauvegarder le profil dans Supabase
             const dataToSave = {
                 name: profile.name,
@@ -26440,6 +26510,8 @@ const PublicProfile = {
                 technical_skills: profile.technical_skills || [],
                 experience: profile.experience || '',
                 availability: profile.availabilityText || profile.availability || '',
+                latitude: profile.latitude != null ? profile.latitude : null,
+                longitude: profile.longitude != null ? profile.longitude : null,
                 is_public: true,
                 updated_at: new Date().toISOString(),
                 data: {
@@ -44004,9 +44076,19 @@ const Universe = {
             
             await Promise.all(batch.map(async (item) => {
                 const city = item.city || item.location || '';
-                if(!city) return;
                 
-                const coords = await Universe.geocodeCity(city);
+                // Priorité 1 : coordonnées précises stockées directement sur le profil
+                let coords = null;
+                if(item.latitude != null && item.longitude != null) {
+                    coords = { lat: item.latitude, lng: item.longitude };
+                }
+                
+                // Priorité 2 : géocodage via la ville (DB → cache → Nominatim)
+                if(!coords && city) {
+                    coords = await Universe.geocodeCity(city);
+                }
+                
+                if(!city && !coords) return;
                 if(coords) {
                     // Décalage déterministe basé sur l'ID du profil (fixe, pas aléatoire)
                     const shouldHide = Universe.shouldHideAddress(item);
@@ -44969,9 +45051,19 @@ const Universe = {
             
             await Promise.all(batch.map(async (item) => {
                 const city = item.city || item.location || '';
-                if(!city) return;
                 
-const coords = await Universe.geocodeCity(city);
+                // Priorité 1 : coordonnées précises stockées directement sur le profil
+                let coords = null;
+                if(item.latitude != null && item.longitude != null) {
+                    coords = { lat: item.latitude, lng: item.longitude };
+                }
+                
+                // Priorité 2 : géocodage via la ville (DB → cache → Nominatim)
+                if(!coords && city) {
+                    coords = await Universe.geocodeCity(city);
+                }
+                
+                if(!city && !coords) return;
                 if(coords) {
                     // Décalage déterministe basé sur l'ID du profil (fixe, pas aléatoire)
                     const shouldHide = Universe.shouldHideAddress(item);
