@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.3.11</p>
+      <p>v2.3.12</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10671,7 +10671,7 @@ crewRoles: {
       // Affiche une modale de confirmation
       show: (options) => {
           return new Promise((resolve) => {
-              const { title = 'Confirmation', message = 'Êtes-vous sûr ?', icon = '❓', confirmText = 'Confirmer', cancelText = 'Annuler', type = 'confirm', inputPlaceholder = '', inputValue = '', dangerous = false } = options;
+              const { title = 'Confirmation', message = 'Êtes-vous sûr ?', icon = '❓', confirmText = 'Confirmer', cancelText = 'Annuler', type = 'confirm', inputPlaceholder = '', inputValue = '', dangerous = false, hideCancel = false } = options;
               
               const overlay = document.createElement('div');
               overlay.className = 'confirm-modal-overlay';
@@ -10687,7 +10687,7 @@ crewRoles: {
                       <div class="confirm-modal-message">${message}</div>
                       ${inputHtml}
                       <div class="confirm-modal-buttons">
-                          <button class="confirm-modal-btn cancel" id="confirm-modal-cancel">${cancelText}</button>
+                          ${hideCancel ? '' : `<button class="confirm-modal-btn cancel" id="confirm-modal-cancel">${cancelText}</button>`}
                           <button class="confirm-modal-btn ${btnClass}" id="confirm-modal-ok">${confirmText}</button>
                       </div>
                   </div>
@@ -10699,10 +10699,10 @@ crewRoles: {
               const okBtn = overlay.querySelector('#confirm-modal-ok');
               const cancelBtn = overlay.querySelector('#confirm-modal-cancel');
               
-              if(input) { input.focus(); input.select(); input.onkeydown = (e) => { if(e.key === 'Enter') okBtn.click(); if(e.key === 'Escape') cancelBtn.click(); }; }
+              if(input) { input.focus(); input.select(); input.onkeydown = (e) => { if(e.key === 'Enter') okBtn.click(); if(e.key === 'Escape' && cancelBtn) cancelBtn.click(); }; }
               
               okBtn.onclick = () => { overlay.remove(); resolve(type === 'prompt' ? (input ? input.value : true) : true); };
-              cancelBtn.onclick = () => { overlay.remove(); resolve(type === 'prompt' ? null : false); };
+              if(cancelBtn) cancelBtn.onclick = () => { overlay.remove(); resolve(type === 'prompt' ? null : false); };
               
               // Focus sur le bouton OK si pas d'input
               if(!input) okBtn.focus();
@@ -45636,9 +45636,38 @@ const Universe = {
         if(result) {
             const reason = document.getElementById('report-reason')?.value || 'other';
             const details = document.getElementById('report-details')?.value || '';
+            const reporterEmail = state.currentUser.email.toLowerCase();
             
+            // 1) Vérifier le quota : max 5 signalements / 7 jours glissants
+            try {
+                const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+                const { count: recentCount, error: countErr } = await supabase
+                    .from('reports')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('reporter_email', reporterEmail)
+                    .gte('created_at', sevenDaysAgo);
+                
+                if(!countErr && recentCount !== null && recentCount >= 5) {
+                    await ConfirmModal.show({
+                        title: '⚠️ Quota atteint',
+                        message: `
+                            <p>Vous avez atteint la limite de <strong>5 signalements par semaine</strong>.</p>
+                            <p class="mt-15">Veuillez réessayer plus tard. En cas d'urgence, contactez l'administrateur du site.</p>
+                        `,
+                        confirmText: 'OK',
+                        icon: '⏳',
+                        hideCancel: true
+                    });
+                    return;
+                }
+            } catch(e) {
+                console.warn('Impossible de vérifier le quota de signalements:', e);
+                // On continue quand même, la DB gardera la trace
+            }
+            
+            // 2) Insérer le signalement
             const { error } = await supabase.from('reports').insert({
-                reporter_email: state.currentUser.email.toLowerCase(),
+                reporter_email: reporterEmail,
                 reported_type: profile.type || 'profile',
                 reported_id: profile.id || profile.publicProfileId,
                 reported_name: profile.name || 'Sans nom',
@@ -45650,8 +45679,19 @@ const Universe = {
             });
             
             if(error) {
-                console.error('Erreur signalement:', error);
-                Utils.toast('Erreur lors du signalement', 'error');
+                // Code 23505 = violation de contrainte UNIQUE (= déjà signalé)
+                if(error.code === '23505') {
+                    await ConfirmModal.show({
+                        title: 'Déjà signalé',
+                        message: `<p>Vous avez déjà signalé ce profil. Votre signalement précédent est en cours de traitement par l'administrateur.</p>`,
+                        confirmText: 'OK',
+                        icon: '👁️',
+                        hideCancel: true
+                    });
+                } else {
+                    console.error('Erreur signalement:', error);
+                    Utils.toast('Erreur lors du signalement', 'error');
+                }
             } else {
                 Utils.toast('Signalement envoyé. Merci !', 'success');
             }
