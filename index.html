@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.3.8</p>
+      <p>v2.3.9</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -8179,7 +8179,7 @@ body.presentation-mode .presentation-bar {
   <div id="app-view">
     <header>
       <div class="project-info">
-        <button onclick="app.UI.showDashboard()" style="background:var(--border); color:var(--text-main); border:none; padding:5px 10px; border-radius:4px; margin-right:10px; font-weight:bold; cursor:pointer">⬅ Dashboard</button>
+        <button onclick="app.Store.exitToDashboard()" style="background:var(--border); color:var(--text-main); border:none; padding:5px 10px; border-radius:4px; margin-right:10px; font-weight:bold; cursor:pointer">⬅ Dashboard</button>
         <input id="projectTitle" type="text" value="Mon Film">
         <span id="sync-indicator" data-tooltip="Synchronisation" data-tooltip-pos="bottom" style="margin-left:8px; font-size:1rem; opacity:0.4; transition: all 0.3s;">☁️</span>
         <span id="role-badge" style="margin-left:10px; font-size:0.8rem; padding:4px 8px; background:var(--highlight); border-radius:4px; color:var(--text-main); border:1px solid var(--border)">PROPRIÉTAIRE</span>
@@ -11618,48 +11618,12 @@ crewRoles: {
               state.currentUser.email = session.user.email.toLowerCase();
               state.currentUser.uid = session.user.id;
               state.currentUser.emailVerified = session.user.email_confirmed_at !== null;
-              
-              // Restauration navigation : si on était dans un projet au dernier chargement, le rouvrir
-              const lastProjectId = NavMemory.getProject();
-              if(lastProjectId) {
-                  try {
-                      // On passe d'abord par showDashboard pour charger le user_profile, puis on ouvre le projet
-                      // Mais showDashboard reset NavMemory, donc on garde l'info dans une variable locale
-                      const savedNav = NavMemory.getTab();
-                      await Auth.showDashboard();
-                      // Petit délai pour laisser le dashboard se stabiliser
-                      setTimeout(async () => {
-                          try {
-                              await Store.loadProject(lastProjectId);
-                              // Restaurer l'onglet après l'ouverture du projet
-                              if(savedNav.tab) {
-                                  setTimeout(() => {
-                                      try {
-                                          if(savedNav.tab) UI.switchCategory(savedNav.tab);
-                                          if(savedNav.subtab) {
-                                              setTimeout(() => UI.switchTab(savedNav.subtab), 150);
-                                          }
-                                      } catch(e) { console.warn('Restauration onglet échouée:', e); }
-                                  }, 300);
-                              }
-                          } catch(e) {
-                              console.warn('Impossible de restaurer le projet ' + lastProjectId + ':', e);
-                              NavMemory.clear();
-                          }
-                      }, 100);
-                  } catch(e) {
-                      console.warn('Restauration nav échouée:', e);
-                      NavMemory.clear();
-                      Auth.showDashboard();
-                  }
-              } else {
-                  Auth.showDashboard();
-              }
+              Auth.showDashboard();
           } else {
               Auth.showAuth();
           }
       },
-      showAuth: () => { Landing.show(); els.dashboardView.style.display = 'none'; els.appView.style.display = 'none'; NavMemory.clear(); if(Notifications._channel) { try { supabase.removeChannel(Notifications._channel); } catch(e) {} Notifications._channel = null; } },
+      showAuth: () => { Landing.show(); els.dashboardView.style.display = 'none'; els.appView.style.display = 'none'; if(Notifications._channel) { try { supabase.removeChannel(Notifications._channel); } catch(e) {} Notifications._channel = null; } },
 showDashboard: async () => { 
     els.authView.style.display = 'none'; 
     // Charger le profil utilisateur depuis Supabase
@@ -11860,6 +11824,7 @@ showDashboard: async () => {
           }
       },
       logout: async () => { 
+          NavMemory.clear(); // Vraie déconnexion : on oublie tout
           await supabase.auth.signOut();
           location.reload();
       }
@@ -12601,6 +12566,12 @@ showDashboard: async () => {
           Utils.toast("Importation Wizard réussie !", "success");
           Store.loadProject(newProject.id);
       },
+      // Sortir volontairement d'un projet vers le dashboard (oublie la mémoire de navigation)
+      exitToDashboard: () => {
+          NavMemory.clear();
+          UI.showDashboard();
+      },
+      
       loadProject: async (id) => {
           if(!state.currentUser) return;
           LoadingScreen.show("Ouverture du projet...");
@@ -14091,9 +14062,36 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           UI.hideAllViews();
           els.authView.style.display = 'none'; 
           els.dashboardView.style.display = 'flex';
-          // On est de retour au dashboard : on oublie le projet précédent pour que le prochain F5 reste au dashboard
+          
+          // Restauration du projet après F5 (capture AVANT de nettoyer NavMemory)
+          const _lastProjectId = NavMemory.getProject();
+          const _savedNav = NavMemory.getTab();
+          
+          // On est de retour au dashboard : on oublie le projet précédent
           NavMemory.setProject(null);
           NavMemory.setTab(null, null);
+          
+          // Si on avait un projet en mémoire, le rouvrir après que le dashboard soit chargé
+          if(_lastProjectId) {
+              setTimeout(async () => {
+                  try {
+                      await Store.loadProject(_lastProjectId);
+                      // Restaurer l'onglet après l'ouverture du projet
+                      if(_savedNav.tab) {
+                          setTimeout(() => {
+                              try {
+                                  if(_savedNav.tab) UI.switchCategory(_savedNav.tab);
+                                  if(_savedNav.subtab) {
+                                      setTimeout(() => UI.switchTab(_savedNav.subtab), 150);
+                                  }
+                              } catch(e) { console.warn('Restauration onglet échouée:', e); }
+                          }, 300);
+                      }
+                  } catch(e) {
+                      console.warn('Impossible de restaurer le projet ' + _lastProjectId + ':', e);
+                  }
+              }, 500);
+          }
           
           // Nettoyer le chat
           if(typeof Chat !== 'undefined') Chat.cleanup();
