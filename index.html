@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.3.15</p>
+      <p>v2.3.16</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -7795,7 +7795,7 @@ body.presentation-mode .presentation-bar {
     </div>
     <div class="profile-modal-actions">
       <button onclick="app.Universe.closeProfileModal()" style="background: var(--border); color: var(--text-main); border: none;">Fermer</button>
-      <button onclick="app.Universe.contactProfile()" style="background: #e94560; color: white; border: none;">📧 Contacter</button>
+      <button id="pm-contact-btn" onclick="app.Universe.contactProfile()" style="background: #e94560; color: white; border: none;">📧 Contacter</button>
       <button onclick="app.Universe.exportProfilePDF()" style="background: var(--success); color: white; border: none;">📄 Export PDF</button>
       <button onclick="app.Universe.addToProject()" style="background: var(--primary); color: white; border: none;">📁 Ajouter à un projet</button>
     </div>
@@ -11344,6 +11344,122 @@ crewRoles: {
               localStorage.removeItem(NavMemory.KEY_TAB);
               localStorage.removeItem(NavMemory.KEY_SUBTAB);
           } catch(e) {}
+      }
+  };
+
+  // ============================================================
+  // Moderation - logique de blocage des badgés noirs
+  // Un profil badgé noir ne peut plus communiquer avec des
+  // personnes qui ne sont pas déjà en relation (projet commun
+  // ou message échangé précédemment). Bidirectionnel.
+  // ============================================================
+  const Moderation = {
+      // Cache des badges récemment consultés (évite de requêter 50 fois)
+      _badgeCache: new Map(),
+      _cacheTTL: 60000, // 1 minute
+      
+      // Récupère le badge d'un email (avec cache)
+      getBadge: async (email) => {
+          if(!email) return null;
+          const key = email.toLowerCase();
+          const cached = Moderation._badgeCache.get(key);
+          if(cached && (Date.now() - cached.ts) < Moderation._cacheTTL) {
+              return cached.badge;
+          }
+          try {
+              const { data } = await supabase
+                  .from('user_profiles')
+                  .select('moderation_badge')
+                  .eq('email', key)
+                  .maybeSingle();
+              const badge = data?.moderation_badge || null;
+              Moderation._badgeCache.set(key, { badge, ts: Date.now() });
+              return badge;
+          } catch(e) {
+              console.warn('[Moderation] Erreur getBadge:', e);
+              return null;
+          }
+      },
+      
+      // Invalide le cache pour un email (à appeler après setProfileBadge)
+      invalidateCache: (email) => {
+          if(email) Moderation._badgeCache.delete(email.toLowerCase());
+      },
+      
+      // Vérifie si deux emails ont déjà une "relation" (message passé OU projet commun)
+      haveRelation: async (emailA, emailB) => {
+          if(!emailA || !emailB) return false;
+          const a = emailA.toLowerCase();
+          const b = emailB.toLowerCase();
+          if(a === b) return true; // Soi-même
+          
+          try {
+              // 1) Message échangé dans un sens ou l'autre ?
+              const { count: msgCount } = await supabase
+                  .from('messages')
+                  .select('id', { count: 'exact', head: true })
+                  .or(`and(from_email.eq.${a},to_email.eq.${b}),and(from_email.eq.${b},to_email.eq.${a})`);
+              if(msgCount && msgCount > 0) return true;
+              
+              // 2) Projet commun ?
+              const { data: projA } = await supabase
+                  .from('project_members')
+                  .select('project_id')
+                  .eq('email', a);
+              if(!projA || projA.length === 0) return false;
+              
+              const projectIds = projA.map(p => p.project_id);
+              const { count: commonCount } = await supabase
+                  .from('project_members')
+                  .select('project_id', { count: 'exact', head: true })
+                  .eq('email', b)
+                  .in('project_id', projectIds);
+              
+              return (commonCount && commonCount > 0);
+          } catch(e) {
+              console.warn('[Moderation] Erreur haveRelation:', e);
+              // En cas d'erreur réseau, on laisse passer pour ne pas bloquer l'utilisateur
+              return true;
+          }
+      },
+      
+      // Vérifie si fromEmail peut communiquer avec toEmail
+      // Retourne { allowed: bool, reason: string | null }
+      canCommunicate: async (fromEmail, toEmail) => {
+          if(!fromEmail || !toEmail) return { allowed: true, reason: null };
+          
+          // Charger les 2 badges en parallèle
+          const [fromBadge, toBadge] = await Promise.all([
+              Moderation.getBadge(fromEmail),
+              Moderation.getBadge(toEmail)
+          ]);
+          
+          // Si aucun des deux n'est noir, communication libre
+          if(fromBadge !== 'black' && toBadge !== 'black') {
+              return { allowed: true, reason: null };
+          }
+          
+          // Un des deux (ou les deux) est noir : vérifier relation existante
+          const related = await Moderation.haveRelation(fromEmail, toEmail);
+          if(related) return { allowed: true, reason: null };
+          
+          // Bloqué : déterminer le message selon qui est badgé
+          if(fromBadge === 'black' && toBadge === 'black') {
+              return {
+                  allowed: false,
+                  reason: 'Votre compte est en cours de vérification. Vous ne pouvez pas contacter de nouvelles personnes pour le moment.'
+              };
+          } else if(fromBadge === 'black') {
+              return {
+                  allowed: false,
+                  reason: 'Votre compte est en cours de vérification. Vous ne pouvez pas contacter de nouvelles personnes pour le moment.'
+              };
+          } else {
+              return {
+                  allowed: false,
+                  reason: 'Ce profil est en cours de vérification et ne peut pas être contacté pour le moment.'
+              };
+          }
       }
   };
 
@@ -42783,6 +42899,9 @@ const Admin = {
             
             if(error) throw error;
             
+            // G5b: invalider le cache de modération
+            Moderation.invalidateCache(reportedEmail);
+            
             const labels = { yellow: '🟡 Jaune', red: '🔴 Rouge', black: '⚫ Noir' };
             if(badge) {
                 Utils.toast(`Badge ${labels[badge]} appliqué à ${reportedEmail}`, 'success');
@@ -46571,11 +46690,20 @@ const Universe = {
     
     
     // Contacter un profil
-    contactProfile: () => {
+    contactProfile: async () => {
         if(!Universe.currentProfile) return;
         
         const profile = Universe.currentProfile;
         const profileName = profile.name || profile.assoName || profile.entName || 'ce profil';
+        
+        // G5b: Vérifier le blocage badge noir avant d'ouvrir la modale de contact
+        if(state.currentUser?.email && profile.email) {
+            const check = await Moderation.canCommunicate(state.currentUser.email, profile.email);
+            if(!check.allowed) {
+                Utils.toast(check.reason, 'warning', 6000);
+                return;
+            }
+        }
         
         // Créer le modal de contact
         const modal = document.createElement('div');
@@ -47400,6 +47528,15 @@ const Messages = {
         const emailKey = Utils.sanitizeEmail(toEmail.toLowerCase());
         const messageId = Utils.generateUniqueId();
         
+        // G5b: Vérifier le blocage badge noir
+        if(state.currentUser?.email) {
+            const check = await Moderation.canCommunicate(state.currentUser.email, toEmail);
+            if(!check.allowed) {
+                Utils.toast(check.reason, 'warning', 6000);
+                throw new Error('MODERATION_BLOCKED: ' + check.reason);
+            }
+        }
+        
         // Trouver le profil de l'expéditeur actuel
         const fromProfileId = Messages.currentProfileId || (PublicProfile.profiles[0]?.id) || null;
         
@@ -47605,6 +47742,15 @@ const Invitations = {
         if(!CONFIG.preAlpha.whitelist.includes(email)) {
             Utils.toast('🚧 Fonction limitée en pré-alpha. Seuls les utilisateurs de la whitelist peuvent être invités.', 'warning', 5000);
             return;
+        }
+        
+        // G5b: Vérifier le blocage badge noir
+        if(state.currentUser?.email) {
+            const check = await Moderation.canCommunicate(state.currentUser.email, email);
+            if(!check.allowed) {
+                Utils.toast(check.reason, 'warning', 6000);
+                return;
+            }
         }
         
         const role = document.getElementById('share-role').value;
