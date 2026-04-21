@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.3.12</p>
+      <p>v2.3.13</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -6207,7 +6207,7 @@ body.presentation-mode .presentation-bar {
                 </div>
             </div>
         </div>
-        <button id="admin-btn" onclick="app.Admin.show()" style="display:none; background:linear-gradient(135deg, #e94560, #8b5cf6); color:white; border:none; padding:10px 15px; border-radius:6px; font-weight:bold; cursor:pointer; margin-right: 10px;">🛡️ Admin</button>
+        <button id="admin-btn" onclick="app.Admin.show()" style="display:none; background:linear-gradient(135deg, #e94560, #8b5cf6); color:white; border:none; padding:10px 15px; border-radius:6px; font-weight:bold; cursor:pointer; margin-right: 10px; position: relative;">🛡️ Admin<span id="admin-pending-badge" style="display:none; position:absolute; top:-6px; right:-6px; background:#dc2626; color:white; font-size:0.7rem; font-weight:bold; min-width:20px; height:20px; padding:0 5px; border-radius:10px; line-height:20px; text-align:center; box-shadow:0 2px 4px rgba(0,0,0,0.3); border:2px solid white;">0</span></button>
         <button onclick="app.Auth.logout()" style="background:var(--border); color:var(--text-main); border:none; padding:10px 15px; border-radius:6px; font-weight:bold; cursor:pointer">Déconnexion</button>
       </div>
     </div>
@@ -42258,6 +42258,37 @@ const Admin = {
         if(btn) {
             btn.style.display = Admin.isAdmin() ? 'inline-block' : 'none';
         }
+        // Rafraîchir la pastille de signalements en attente
+        if(Admin.isAdmin()) {
+            Admin.refreshPendingBadge();
+            // Rafraîchir périodiquement toutes les 2 minutes
+            if(Admin._pendingInterval) clearInterval(Admin._pendingInterval);
+            Admin._pendingInterval = setInterval(() => Admin.refreshPendingBadge(), 120000);
+        }
+    },
+    
+    // Met à jour la pastille rouge avec le nombre de signalements 'pending'
+    refreshPendingBadge: async () => {
+        if(!Admin.isAdmin()) return;
+        const badge = document.getElementById('admin-pending-badge');
+        if(!badge) return;
+        
+        try {
+            const { count, error } = await supabase
+                .from('reports')
+                .select('id', { count: 'exact', head: true })
+                .eq('status', 'pending');
+            
+            if(!error && count !== null && count > 0) {
+                badge.textContent = count > 99 ? '99+' : String(count);
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+        } catch(e) {
+            console.warn('Impossible de rafraîchir la pastille admin:', e);
+            badge.style.display = 'none';
+        }
     },
     
     show: async () => {
@@ -42708,6 +42739,7 @@ const Admin = {
             Utils.toast('Statut mis à jour', 'success');
             await Admin.loadReports();
             await Admin.loadStats();
+            Admin.refreshPendingBadge();
         } catch(e) {
             console.error('Erreur mise à jour:', e);
             Utils.toast('Erreur', 'error');
@@ -42724,6 +42756,7 @@ const Admin = {
             Utils.toast('Signalement supprimé', 'success');
             await Admin.loadReports();
             await Admin.loadStats();
+            Admin.refreshPendingBadge();
         } catch(e) {
             console.error('Erreur suppression:', e);
             Utils.toast('Erreur', 'error');
