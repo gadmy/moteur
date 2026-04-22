@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.5.6</p>
+      <p>v2.5.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -44250,6 +44250,69 @@ const Universe = {
     geoCache: {}, // Cache des géolocalisations
     hoverCard: null,
     
+    // I6: Index des "frères" (profils partageant le même owner_email) + tracé des lignes
+    brothersByEmail: {}, // { "user@mail.com": [profile1, profile2, ...] }
+    brotherLines: [], // Polylines Leaflet actuellement affichées
+    
+    // I6: Reconstruit l'index des frères à partir de Universe.allProfiles
+    rebuildBrothersIndex: () => {
+        Universe.brothersByEmail = {};
+        (Universe.allProfiles || []).forEach(p => {
+            const key = (p.owner_email || '').toLowerCase();
+            if(!key) return;
+            if(!Universe.brothersByEmail[key]) Universe.brothersByEmail[key] = [];
+            Universe.brothersByEmail[key].push(p);
+        });
+    },
+    
+    // I6: Récupère les profils "frères" d'un profil donné (sans lui-même)
+    getBrothers: (profile) => {
+        if(!profile || !profile.owner_email) return [];
+        const key = profile.owner_email.toLowerCase();
+        const group = Universe.brothersByEmail[key] || [];
+        return group.filter(p => p.id !== profile.id);
+    },
+    
+    // I6: Dessine des lignes pointillées du profil vers ses frères
+    showBrotherLines: (profile) => {
+        Universe.clearBrotherLines();
+        if(!Universe.map || !profile) return;
+        
+        const brothers = Universe.getBrothers(profile);
+        if(brothers.length === 0) return;
+        
+        const srcLat = parseFloat(profile.latitude);
+        const srcLng = parseFloat(profile.longitude);
+        if(isNaN(srcLat) || isNaN(srcLng)) return;
+        
+        brothers.forEach(bro => {
+            const broLat = parseFloat(bro.latitude);
+            const broLng = parseFloat(bro.longitude);
+            if(isNaN(broLat) || isNaN(broLng)) return;
+            
+            const line = L.polyline(
+                [[srcLat, srcLng], [broLat, broLng]],
+                {
+                    color: '#8b5cf6',
+                    weight: 2.5,
+                    opacity: 0.8,
+                    dashArray: '6, 8',
+                    className: 'brother-line'
+                }
+            ).addTo(Universe.map);
+            Universe.brotherLines.push(line);
+        });
+    },
+    
+    // I6: Efface les lignes de frères actuellement affichées
+    clearBrotherLines: () => {
+        Universe.brotherLines.forEach(line => {
+            if(Universe.map && Universe.map.hasLayer(line)) {
+                Universe.map.removeLayer(line);
+            }
+        });
+        Universe.brotherLines = [];
+    },
     
     // Initialiser la carte
     initMap: () => {
@@ -44490,10 +44553,14 @@ const Universe = {
         // Événements hover
         marker.on('mouseover', (e) => {
             Universe.showHoverCard(profile, e.originalEvent);
+            // I6: au survol, tracer des lignes vers les profils frères (si ce n'est pas un projet)
+            if(!isProject) Universe.showBrotherLines(profile);
         });
         
         marker.on('mouseout', () => {
             Universe.hideHoverCard();
+            // I6: effacer les lignes
+            Universe.clearBrotherLines();
         });
         
         // Clic pour ouvrir le profil ou projet
@@ -45139,6 +45206,9 @@ const Universe = {
             
             // Initialiser le sélecteur de profils pour le matching
             MatchingEngine.initProfileSelector();
+            
+            // I6: indexer les profils par owner_email pour retrouver les "frères"
+            Universe.rebuildBrothersIndex();
             
         } catch(e) {
             console.error('Erreur chargement profils:', e);
