@@ -12939,14 +12939,14 @@ showDashboard: async () => {
           LoadingScreen.show("Ouverture du projet...");
           try {
               const myEmail = state.currentUser.email.toLowerCase();
+              const activeProfileId = ActiveProfile.getId();
               
-              // Vérifier l'accès au projet
-              const { data: membership } = await supabase
+              // I5g: récupérer TOUTES les memberships (peut y en avoir plusieurs pour le même email)
+              const { data: memberships } = await supabase
                   .from('project_members')
-                  .select('role')
+                  .select('role, profile_id')
                   .eq('project_id', id)
-                  .eq('email', myEmail)
-                  .maybeSingle();
+                  .eq('email', myEmail);
               
               // Vérifier si owner
               const { data: project, error: projError } = await supabase
@@ -12957,7 +12957,34 @@ showDashboard: async () => {
               
               if (projError || !project) throw new Error("Projet introuvable");
               
-              let role = membership?.role;
+              // I5g: déterminer le rôle effectif selon le profil actif
+              // Priorité 1: membership qui correspond exactement au profil actif
+              // Priorité 2: membership owner (le plus permissif)
+              // Priorité 3: n'importe quelle membership (fallback)
+              // Priorité 4: owner si owner_email match (legacy)
+              let role = null;
+              let matchedProfileId = null;
+              
+              if(memberships && memberships.length > 0) {
+                  // Chercher match exact avec profil actif
+                  const exactMatch = memberships.find(m => m.profile_id === activeProfileId);
+                  if(exactMatch) {
+                      role = exactMatch.role;
+                      matchedProfileId = exactMatch.profile_id;
+                  } else {
+                      // Prendre la plus permissive (owner > editor > viewer)
+                      const roleOrder = { owner: 3, editor: 2, viewer: 1 };
+                      memberships.sort((a, b) => (roleOrder[b.role] || 0) - (roleOrder[a.role] || 0));
+                      role = memberships[0].role;
+                      matchedProfileId = memberships[0].profile_id;
+                      
+                      // Si le profil actif n'est pas le bon, basculer dessus
+                      if(matchedProfileId && matchedProfileId !== activeProfileId) {
+                          ActiveProfile.setId(matchedProfileId);
+                      }
+                  }
+              }
+              
               if (!role && project.owner_email === myEmail) role = 'owner';
               if (!role) throw new Error("Accès refusé.");
               state.currentRole = role;
