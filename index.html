@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.4.3</p>
+      <p>v2.4.5</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -27657,18 +27657,21 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         const profileId = activeProfile.id;
         
         // Vérifier si déjà publié aujourd'hui SUR CE PROFIL PRÉCIS
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        const { data: existing, error: checkError } = await supabase
-            .from('profile_actualites')
-            .select('id, created_at')
-            .eq('profile_id', profileId)
-            .gte('created_at', today.toISOString());
-        
-        if(!checkError && existing && existing.length > 0) {
-            Utils.toast('🚫 Vous avez déjà publié une actualité aujourd\'hui sur ce profil. Revenez demain !', 'warning', 5000);
-            return;
+        // (bypass pour les admins, utile pour les tests)
+        if(!Admin.isAdmin()) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            const { data: existing, error: checkError } = await supabase
+                .from('profile_actualites')
+                .select('id, created_at')
+                .eq('profile_id', profileId)
+                .gte('created_at', today.toISOString());
+            
+            if(!checkError && existing && existing.length > 0) {
+                Utils.toast('🚫 Vous avez déjà publié une actualité aujourd\'hui sur ce profil. Revenez demain !', 'warning', 5000);
+                return;
+            }
         }
         
         // Publier (lié au profil précis)
@@ -47760,27 +47763,41 @@ const Messages = {
             }
         }
         
-        // Trouver le profil de l'expéditeur actuel
-        const fromProfileId = Messages.currentProfileId || (PublicProfile.profiles[0]?.id) || null;
+        // I4b: utiliser le profil actif global comme expéditeur
+        // Fallback : Messages.currentProfileId (legacy) ou premier profil
+        const fromProfileId = ActiveProfile.getId() 
+            || Messages.currentProfileId 
+            || (PublicProfile.profiles[0]?.id) 
+            || null;
+        
+        // Nom d'expéditeur : celui du profil actif si disponible, sinon displayName / email
+        const fromProfile = PublicProfile.profiles?.find(p => p.id === fromProfileId);
+        const fromName = fromProfile?.name 
+            || fromProfile?.assoName 
+            || fromProfile?.entName 
+            || state.userProfile?.displayName 
+            || state.currentUser.email.split('@')[0];
         
         const messageData = {
             ...message,
             fromUser: state.currentUser.email,
-            fromName: state.userProfile?.displayName || state.currentUser.email.split('@')[0],
+            fromName: fromName,
             fromProfileId: fromProfileId,
-            profileId: toProfileId, // Profil destinataire
+            profileId: toProfileId, // Profil destinataire (legacy data)
             createdAt: new Date().toISOString(),
             read: false
         };
         
-        // Sauvegarder dans Supabase
+        // Sauvegarder dans Supabase (avec les vraies colonnes I4a)
         const { error } = await supabase
             .from('messages')
             .insert({
                 id: messageId,
                 to_email: toEmail,
                 from_email: state.currentUser.email,
-                from_name: messageData.fromName,
+                from_name: fromName,
+                from_profile_id: fromProfileId,
+                to_profile_id: toProfileId,
                 type: messageData.type || 'message',
                 subject: messageData.subject || messageData.title || '',
                 content: messageData.content || '',
