@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.4.7</p>
+      <p>v2.4.8</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -11579,6 +11579,11 @@ crewRoles: {
           const profile = PublicProfile.profiles.find(p => p.id === profileId);
           const name = profile ? (profile.name || profile.assoName || profile.entName || 'Profil') : 'Profil';
           Utils.toast(`Profil actif : ${name}`, 'info', 2000);
+          
+          // I4d: recharger la messagerie pour appliquer le filtre par nouveau profil actif
+          try {
+              if(typeof Messages?.load === 'function') Messages.load();
+          } catch(e) { /* silencieux */ }
       },
       
       // Injecte le sélecteur à côté de tous les boutons "🌓 Mode" du DOM
@@ -47214,7 +47219,27 @@ const Messages = {
         Messages.initFilters();
         
         try {
-            const { data: messagesData } = await supabase.from('messages').select('*').or(`to_email.eq.${state.currentUser.email.toLowerCase()},from_email.eq.${state.currentUser.email.toLowerCase()}`).order('created_at', { ascending: false });
+            // I4c: filtrer par profil actif
+            const activeProfileId = ActiveProfile.getId();
+            const currentEmail = state.currentUser.email.toLowerCase();
+            
+            let query = supabase.from('messages').select('*');
+            
+            if(activeProfileId) {
+                // Filtrer : messages envoyés AU profil actif OU depuis le profil actif
+                // (fallback email pour les messages anciens/sans profile_id)
+                query = query.or(
+                    `to_profile_id.eq.${activeProfileId},` +
+                    `from_profile_id.eq.${activeProfileId},` +
+                    `and(to_email.eq.${currentEmail},to_profile_id.is.null),` +
+                    `and(from_email.eq.${currentEmail},from_profile_id.is.null)`
+                );
+            } else {
+                // Aucun profil actif : fallback sur l'ancien comportement (par email)
+                query = query.or(`to_email.eq.${currentEmail},from_email.eq.${currentEmail}`);
+            }
+            
+            const { data: messagesData } = await query.order('created_at', { ascending: false });
             const snap = { val: () => messagesData ? messagesData.reduce((acc, m) => { acc[m.id] = m; return acc; }, {}) : {} };
             const data = snap.val();
             
