@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.3.18</p>
+      <p>v2.3.19</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -25489,21 +25489,35 @@ const PublicProfile = {
             </div>`;
         });
         
-        // Bouton ajouter un profil
-        html += `<div class="profile-tab-card add-profile" onclick="app.PublicProfile.createNewProfile()">
-            <div class="profile-tab-header">➕ Nouveau profil</div>
-        </div>`;
+        // Bouton ajouter un profil (I2 : max 3)
+        if(PublicProfile.profiles.length < 3) {
+            html += `<div class="profile-tab-card add-profile" onclick="app.PublicProfile.createNewProfile()">
+                <div class="profile-tab-header">➕ Nouveau profil</div>
+                <div style="font-size:0.75rem; color:var(--text-sec); margin-top:4px;">${PublicProfile.profiles.length}/3</div>
+            </div>`;
+        } else {
+            html += `<div class="profile-tab-card add-profile" style="opacity:0.4; cursor:not-allowed;" title="Limite de 3 profils atteinte">
+                <div class="profile-tab-header">🔒 Limite atteinte</div>
+                <div style="font-size:0.75rem; color:var(--text-sec); margin-top:4px;">3/3 profils</div>
+            </div>`;
+        }
         
         container.innerHTML = html;
     },
     
     // Crée un nouveau profil
     createNewProfile: () => {
+        // I2 : vérifier la limite de 3 profils
+        if(PublicProfile.profiles.length >= 3) {
+            Utils.toast('Limite de 3 profils atteinte. Supprimez un profil avant d\'en créer un nouveau.', 'warning', 5000);
+            return;
+        }
+        
         // Générer les disponibilités par défaut (lun-ven pour les 3 prochains mois)
         const defaultAvailability = PublicProfile.generateDefaultAvailability();
         
         const newProfile = {
-            id: 'profile_' + Date.now(),
+            id: crypto.randomUUID(),
             type: '', // sera défini par l'utilisateur
             name: '',
             photo: '',
@@ -26536,118 +26550,131 @@ const PublicProfile = {
         const email = state.currentUser.email.toLowerCase();
         
         try {
-            // Charger le profil depuis Supabase
-            const { data: userProfile, error } = await supabase
+            // I2 : charger TOUS les profils où je suis owner (tableau au lieu d'un seul)
+            const { data: userProfiles, error } = await supabase
                 .from('user_profiles')
                 .select('*')
-                .eq('email', email)
-                .maybeSingle();
+                .eq('owner_email', email)
+                .order('created_at', { ascending: true });
             
-            if(!error && userProfile && userProfile.name) {
-                // Extraire les données supplémentaires du champ JSONB
-                const extraData = userProfile.data || {};
-                
-                // Créer un profil complet à partir des données Supabase
-                const profile = {
-                    id: userProfile.id,
-                    type: userProfile.profile_type || 'crew',
-                    name: userProfile.name,
-                    email: userProfile.email,
-                    phone: userProfile.phone || '',
-                    photo: userProfile.photo || '',
-                    bio: userProfile.bio || '',
-                    gender: userProfile.gender || '',
-                    city: userProfile.city || '',
-                    birthdate: userProfile.birthdate || '',
-                    hasVehicle: userProfile.vehicle || false,
-                    vehicle: userProfile.vehicle || false,
-                    acting_styles: userProfile.acting_styles || [],
-                    technical_skills: userProfile.technical_skills || [],
-                    experience: userProfile.experience || '',
-                    availabilityText: userProfile.availability || '',
-                    is_public: userProfile.is_public,
-                    profileComplete: userProfile.is_public,
-                    // Commun
-                    address: extraData.address || '',
-                    hideAddress: extraData.hideAddress || false,
-                    hideAddressInProjects: extraData.hideAddressInProjects || false,
-                    website: extraData.website || '',
-                    dailyRate: extraData.dailyRate || '',
-                    rateCurrency: extraData.rateCurrency || '€',
-                    rateNegotiable: extraData.rateNegotiable || false,
-                    collabTypes: extraData.collabTypes || [],
-                    availabilityDates: extraData.availabilityDates || [],
-                    unavailabilityDates: extraData.unavailabilityDates || [],
-                    // Véhicule
-                    vehicleType: extraData.vehicleType || '',
-                    vehiclePlate: extraData.vehiclePlate || '',
-                    vehicleSeats: extraData.vehicleSeats || '',
-                    vehicleTrunk: extraData.vehicleTrunk || false,
-                    vehicleNotes: extraData.vehicleNotes || '',
-                    // Comédien
-                    height: extraData.height || '',
-                    weight: extraData.weight || '',
-                    age: extraData.age || '',
-                    eyeColor: extraData.eyeColor || '',
-                    hairColor: extraData.hairColor || '',
-                    hairLength: extraData.hairLength || '',
-                    ethnicity: extraData.ethnicity || '',
-                    corpulence: extraData.corpulence || '',
-                    sports: extraData.sports || '',
-                    languages: extraData.languages || '',
-                    languagesWithLevels: extraData.languagesWithLevels || [],
-                    sportsWithLevels: extraData.sportsWithLevels || [],
-                    galleryPhotos: extraData.galleryPhotos || [],
-                    demoreel: extraData.demoreel || '',
-                    // Technicien
-                    department: extraData.department || '',
-                    role: extraData.role || '',
-                    cameras: extraData.cameras || [],
-                    lenses: extraData.lenses || [],
-                    lights: extraData.lights || [],
-                    sounds: extraData.sounds || [],
-                    grips: extraData.grips || [],
-                    makeups: extraData.makeups || [],
-                    otherEquipment: extraData.otherEquipment || [],
-                    crewGalleryPhotos: extraData.crewGalleryPhotos || [],
-                    // Association
-                    assoName: extraData.assoName || '',
-                    assoType: extraData.assoType || '',
-                    assoSiret: extraData.assoSiret || '',
-                    assoMembers: extraData.assoMembers || '',
-                    assoYear: extraData.assoYear || '',
-                    assoPresident: extraData.assoPresident || '',
-                    assoMission: extraData.assoMission || '',
-                    assoActivities: extraData.assoActivities || '',
-                    assoServices: extraData.assoServices || {},
-                    assoFacebook: extraData.assoFacebook || '',
-                    assoInstagram: extraData.assoInstagram || '',
-                    assoYoutube: extraData.assoYoutube || '',
-                    assoLinkedin: extraData.assoLinkedin || '',
-                    assoDemoreel: extraData.assoDemoreel || '',
-                    // Entreprise
-                    entName: extraData.entName || '',
-                    entType: extraData.entType || '',
-                    entSiret: extraData.entSiret || '',
-                    entLegal: extraData.entLegal || '',
-                    entYear: extraData.entYear || '',
-                    entEmployees: extraData.entEmployees || '',
-                    entDirector: extraData.entDirector || '',
-                    entContact: extraData.entContact || '',
-                    entDescription: extraData.entDescription || '',
-                    entServices: extraData.entServices || '',
-                    entSpecialties: extraData.entSpecialties || {},
-                    entFacebook: extraData.entFacebook || '',
-                    entInstagram: extraData.entInstagram || '',
-                    entYoutube: extraData.entYoutube || '',
-                    entLinkedin: extraData.entLinkedin || '',
-                    entVimeo: extraData.entVimeo || '',
-                    entImdb: extraData.entImdb || '',
-                    entDemoreel: extraData.entDemoreel || ''
-                };
-                PublicProfile.profiles = [profile];
-            } else {
+            if(error) {
+                console.error('Erreur chargement profils:', error);
                 PublicProfile.profiles = [];
+                return;
+            }
+            
+            if(!userProfiles || userProfiles.length === 0) {
+                PublicProfile.profiles = [];
+                return;
+            }
+            
+            // Mapper chaque ligne DB vers un objet profil utilisable par le front
+            PublicProfile.profiles = userProfiles
+                .filter(up => up.name)  // ignorer les profils sans nom (brouillons)
+                .map(userProfile => {
+                    const extraData = userProfile.data || {};
+                    return {
+                        id: userProfile.id,
+                        type: userProfile.profile_type || 'crew',
+                        name: userProfile.name,
+                        email: userProfile.email,
+                        phone: userProfile.phone || '',
+                        photo: userProfile.photo || '',
+                        bio: userProfile.bio || '',
+                        gender: userProfile.gender || '',
+                        city: userProfile.city || '',
+                        birthdate: userProfile.birthdate || '',
+                        hasVehicle: userProfile.vehicle || false,
+                        vehicle: userProfile.vehicle || false,
+                        acting_styles: userProfile.acting_styles || [],
+                        technical_skills: userProfile.technical_skills || [],
+                        experience: userProfile.experience || '',
+                        availabilityText: userProfile.availability || '',
+                        is_public: userProfile.is_public,
+                        profileComplete: userProfile.is_public,
+                        // Commun
+                        address: extraData.address || '',
+                        hideAddress: extraData.hideAddress || false,
+                        hideAddressInProjects: extraData.hideAddressInProjects || false,
+                        website: extraData.website || '',
+                        dailyRate: extraData.dailyRate || '',
+                        rateCurrency: extraData.rateCurrency || '€',
+                        rateNegotiable: extraData.rateNegotiable || false,
+                        collabTypes: extraData.collabTypes || [],
+                        availabilityDates: extraData.availabilityDates || [],
+                        unavailabilityDates: extraData.unavailabilityDates || [],
+                        // Véhicule
+                        vehicleType: extraData.vehicleType || '',
+                        vehiclePlate: extraData.vehiclePlate || '',
+                        vehicleSeats: extraData.vehicleSeats || '',
+                        vehicleTrunk: extraData.vehicleTrunk || false,
+                        vehicleNotes: extraData.vehicleNotes || '',
+                        // Comédien
+                        height: extraData.height || '',
+                        weight: extraData.weight || '',
+                        age: extraData.age || '',
+                        eyeColor: extraData.eyeColor || '',
+                        hairColor: extraData.hairColor || '',
+                        hairLength: extraData.hairLength || '',
+                        ethnicity: extraData.ethnicity || '',
+                        corpulence: extraData.corpulence || '',
+                        sports: extraData.sports || '',
+                        languages: extraData.languages || '',
+                        languagesWithLevels: extraData.languagesWithLevels || [],
+                        sportsWithLevels: extraData.sportsWithLevels || [],
+                        galleryPhotos: extraData.galleryPhotos || [],
+                        demoreel: extraData.demoreel || '',
+                        // Technicien
+                        department: extraData.department || '',
+                        role: extraData.role || '',
+                        cameras: extraData.cameras || [],
+                        lenses: extraData.lenses || [],
+                        lights: extraData.lights || [],
+                        sounds: extraData.sounds || [],
+                        grips: extraData.grips || [],
+                        makeups: extraData.makeups || [],
+                        otherEquipment: extraData.otherEquipment || [],
+                        crewGalleryPhotos: extraData.crewGalleryPhotos || [],
+                        // Association
+                        assoName: extraData.assoName || '',
+                        assoType: extraData.assoType || '',
+                        assoSiret: extraData.assoSiret || '',
+                        assoMembers: extraData.assoMembers || '',
+                        assoYear: extraData.assoYear || '',
+                        assoPresident: extraData.assoPresident || '',
+                        assoMission: extraData.assoMission || '',
+                        assoActivities: extraData.assoActivities || '',
+                        assoServices: extraData.assoServices || {},
+                        assoFacebook: extraData.assoFacebook || '',
+                        assoInstagram: extraData.assoInstagram || '',
+                        assoYoutube: extraData.assoYoutube || '',
+                        assoLinkedin: extraData.assoLinkedin || '',
+                        assoDemoreel: extraData.assoDemoreel || '',
+                        // Entreprise
+                        entName: extraData.entName || '',
+                        entType: extraData.entType || '',
+                        entSiret: extraData.entSiret || '',
+                        entLegal: extraData.entLegal || '',
+                        entYear: extraData.entYear || '',
+                        entEmployees: extraData.entEmployees || '',
+                        entDirector: extraData.entDirector || '',
+                        entContact: extraData.entContact || '',
+                        entDescription: extraData.entDescription || '',
+                        entServices: extraData.entServices || '',
+                        entSpecialties: extraData.entSpecialties || {},
+                        entFacebook: extraData.entFacebook || '',
+                        entInstagram: extraData.entInstagram || '',
+                        entYoutube: extraData.entYoutube || '',
+                        entLinkedin: extraData.entLinkedin || '',
+                        entVimeo: extraData.entVimeo || '',
+                        entImdb: extraData.entImdb || '',
+                        entDemoreel: extraData.entDemoreel || ''
+                    };
+                });
+            
+            // S'assurer que currentProfileIndex est valide
+            if(PublicProfile.currentProfileIndex >= PublicProfile.profiles.length) {
+                PublicProfile.currentProfileIndex = PublicProfile.profiles.length > 0 ? 0 : -1;
             }
         } catch(e) {
             console.error('Erreur chargement profils:', e);
@@ -26816,11 +26843,24 @@ const PublicProfile = {
                 }
             };
             
+            // I2 : upsert par id (UUID du profil) et non plus par email,
+            // pour supporter plusieurs profils par utilisateur.
+            // owner_email = compte propriétaire, email = email public du profil (peut différer)
             const {error: upErr} = await supabase.from('user_profiles').upsert({
-                email: email,
+                id: profile.id,
+                owner_email: email,
+                email: profile.email || email,  // email public du profil, par défaut = email du compte
                 ...dataToSave
-            }, { onConflict: 'email' });
-            if(upErr) { Utils.toast('Erreur sauvegarde profil', 'error'); console.error('Profil upsert:', upErr); }
+            }, { onConflict: 'id' });
+            if(upErr) {
+                // Détection du trigger de limite 3 profils
+                if((upErr.message || '').includes('LIMIT_3_PROFILES')) {
+                    Utils.toast('Limite de 3 profils atteinte.', 'warning', 5000);
+                } else {
+                    Utils.toast('Erreur sauvegarde profil', 'error');
+                }
+                console.error('Profil upsert:', upErr);
+            }
             
             // Mettre à jour state.userProfile pour le bouton du dashboard
             if(profile.profileComplete) {
