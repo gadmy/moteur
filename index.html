@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.5.5</p>
+      <p>v2.5.6</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10222,8 +10222,15 @@ body.presentation-mode .presentation-bar {
   <div id="share-modal" class="modal-overlay">
     <div class="modal-box" style="max-width:450px">
         <h3>📤 Partager ce projet</h3>
-        <input type="email" id="share-email" placeholder="Email (ex: ami@gmail.com)" class="mb-10" oninput="app.Invitations.checkEmail(this.value)">
+        <input type="email" id="share-email" placeholder="Email (ex: ami@gmail.com)" class="mb-10" oninput="app.Invitations.checkEmail(this.value); app.Invitations.loadTargetProfiles(this.value);">
         <div id="share-email-status" style="font-size:0.85rem; margin-bottom:10px; padding:8px; border-radius:4px; display:none;"></div>
+        <!-- I5f: sélecteur du profil destinataire (chargé dynamiquement quand un email est saisi) -->
+        <div id="share-target-profile-section" style="display:none; margin-bottom:15px;">
+            <label class="form-label-alt">Quel profil de cette personne invitez-vous ?</label>
+            <select id="share-target-profile" style="width:100%; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--input-bg); color:var(--text-main)">
+                <option value="">-- Choisir un profil --</option>
+            </select>
+        </div>
         <select id="share-role" style="width:100%; padding:8px; margin-bottom:15px; border-radius:4px; border:1px solid var(--border); background:var(--input-bg); color:var(--text-main)">
             <option value="viewer">👁️ Lecture Seule</option>
             <option value="editor">✏️ Éditeur (peut modifier)</option>
@@ -48033,6 +48040,62 @@ const Invitations = {
     },
     
     // Envoie l'invitation
+    // I5f: charge dynamiquement les profils publics de l'email saisi
+    loadTargetProfiles: async (emailInput) => {
+        const email = (emailInput || '').trim().toLowerCase();
+        const section = document.getElementById('share-target-profile-section');
+        const select = document.getElementById('share-target-profile');
+        if(!section || !select) return;
+        
+        // Si email invalide ou vide, on masque la section
+        if(!email || !email.includes('@') || email.length < 5) {
+            section.style.display = 'none';
+            select.innerHTML = '<option value="">-- Choisir un profil --</option>';
+            return;
+        }
+        
+        // Charger les profils publics liés à cet email
+        try {
+            const { data: profiles, error } = await supabase
+                .from('user_profiles')
+                .select('id, name, profile_type')
+                .eq('owner_email', email);
+            
+            if(error || !profiles || profiles.length === 0) {
+                // Aucun profil trouvé : on masque, l'invitation partira sans to_profile_id
+                section.style.display = 'none';
+                select.innerHTML = '<option value="">-- Aucun profil public pour cet email --</option>';
+                return;
+            }
+            
+            // Remplir le select avec les profils trouvés
+            let html = '';
+            if(profiles.length > 1) {
+                html += '<option value="">-- Choisir un profil --</option>';
+            }
+            profiles.forEach(p => {
+                const icon = p.profile_type === 'actor' ? '🎭' 
+                           : p.profile_type === 'crew' ? '🎥' 
+                           : p.profile_type === 'association' ? '🏛️' 
+                           : p.profile_type === 'enterprise' ? '🏢' 
+                           : '👤';
+                const displayName = p.name || '(sans nom)';
+                html += `<option value="${p.id}">${icon} ${Utils.escape(displayName)}</option>`;
+            });
+            select.innerHTML = html;
+            
+            // Si un seul profil, pré-sélectionné automatiquement
+            if(profiles.length === 1) {
+                select.value = profiles[0].id;
+            }
+            
+            section.style.display = 'block';
+        } catch(e) {
+            console.warn('Erreur chargement profils destinataires:', e);
+            section.style.display = 'none';
+        }
+    },
+    
     sendInvitation: async () => {
         // Vérifier si l'email est dans la whitelist
         const email = document.getElementById('share-email')?.value?.trim()?.toLowerCase();
@@ -48059,6 +48122,20 @@ const Invitations = {
         
         const role = document.getElementById('share-role').value;
         const message = document.getElementById('share-message')?.value?.trim() || '';
+        
+        // I5f: profil destinataire sélectionné (peut être vide si user sans profil public)
+        const targetProfileId = document.getElementById('share-target-profile')?.value || null;
+        
+        // I5f: si plusieurs profils disponibles mais aucun choisi, bloquer
+        const profileSection = document.getElementById('share-target-profile-section');
+        const profileSelect = document.getElementById('share-target-profile');
+        if(profileSection && profileSection.style.display === 'block' && profileSelect && profileSelect.options.length > 1 && !targetProfileId) {
+            Utils.toast('Veuillez choisir quel profil de cette personne inviter.', 'warning');
+            return;
+        }
+        
+        // I5f: profil propriétaire (depuis le profil actif)
+        const fromProfileId = ActiveProfile.getId() || null;
         
         if(!state.currentProjectId) return;
         
@@ -48088,12 +48165,15 @@ const Invitations = {
             
             if(invitedUserId) {
                 // L'utilisateur existe, on l'ajoute directement comme membre
+                // I5f: on lie au profil cible choisi
                 await supabase
                     .from('project_members')
                     .upsert({
                         project_id: pid,
                         user_id: invitedUserId,
                         role: role,
+                        profile_id: targetProfileId, // I5f
+                        email: email, // pour le filtrage futur
                         invited_by: state.currentUser.id,
                         invited_at: new Date().toISOString()
                     }, { onConflict: 'project_id,user_id' });
@@ -48101,13 +48181,15 @@ const Invitations = {
             
             // Stocker l'invitation en attente pour les utilisateurs qui n'existent pas encore
             if(!userExists) {
+                // I5f: id auto-généré par Postgres (gen_random_uuid)
                 await supabase
                     .from('messages')
                     .insert({
-                        id: 'inv_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
                         to_email: email,
                         from_email: inviterEmail,
                         from_name: inviterName,
+                        from_profile_id: fromProfileId, // I5f : signé par profil propriétaire
+                        to_profile_id: targetProfileId, // I5f : ciblé sur le profil choisi
                         type: 'pending_invitation',
                         subject: `Invitation au projet "${projectTitle}"`,
                         content: message || '',
@@ -48117,7 +48199,9 @@ const Invitations = {
                             role: role,
                             invitedBy: inviterEmail,
                             invitedAt: new Date().toISOString(),
-                            message: message
+                            message: message,
+                            targetProfileId: targetProfileId,
+                            fromProfileId: fromProfileId
                         },
                         read: false,
                         created_at: new Date().toISOString()
@@ -48125,6 +48209,7 @@ const Invitations = {
             }
             
             // Envoyer un message interne
+            // I5f: Messages.send prend un 3e param toProfileId
             const roleLabel = role === 'editor' ? 'Éditeur' : 'Lecteur';
             await Messages.send(email, {
                 type: 'invitation',
@@ -48132,7 +48217,7 @@ const Invitations = {
                 content: `${inviterName} vous invite à rejoindre le projet "${projectTitle}" en tant que ${roleLabel}.\n\n${message ? 'Message : ' + message : ''}\n\nVous trouverez ce projet dans votre liste de projets.`,
                 projectId: pid,
                 projectTitle: projectTitle
-            });
+            }, targetProfileId);
             
             // Envoyer un ping email
             if(!userExists) {
@@ -48154,6 +48239,11 @@ const Invitations = {
             document.getElementById('share-message').value = '';
             document.getElementById('share-email-status').style.display = 'none';
             document.getElementById('share-message-section').style.display = 'none';
+            // I5f: reset du sélecteur profil cible
+            const tps = document.getElementById('share-target-profile-section');
+            if(tps) tps.style.display = 'none';
+            const tp = document.getElementById('share-target-profile');
+            if(tp) tp.innerHTML = '<option value="">-- Choisir un profil --</option>';
             
         } catch(e) {
             Utils.toast('Erreur: ' + e.message, 'error');
