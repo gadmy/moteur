@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.4.10</p>
+      <p>v2.5.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -12684,42 +12684,26 @@ showDashboard: async () => {
           History.log('ADD', 'Création du projet');
       },
       showOwnerRoleModal: async () => {
-          // Récupérer les vrais profils du porteur depuis Supabase
-          const myEmail = state.currentUser.email.toLowerCase();
-          
-          let userProfiles = [];
-          try {
-              // Charger le profil utilisateur depuis Supabase
-              const { data: userData, error } = await supabase
-                  .from('user_profiles')
-                  .select('*')
-                  .eq('email', myEmail)
-                  .maybeSingle();
-              
-              if (userData) {
-                  state.userProfile = userData;
-                  
-                  // Les profils sont stockés dans acting_styles et technical_skills
-                  if (userData.profile_type === 'actor' || (userData.acting_styles && userData.acting_styles.length > 0)) {
-                      userProfiles.push({
-                          type: 'actor',
-                          icon: '🎭',
-                          name: userData.name || 'Comédien·ne',
-                          data: { ...userData, email: myEmail }
-                      });
-                  }
-                  if (userData.profile_type === 'crew' || (userData.technical_skills && userData.technical_skills.length > 0)) {
-                      userProfiles.push({
-                          type: 'crew',
-                          icon: '🎬',
-                          name: userData.name || 'Technicien',
-                          data: { ...userData, email: myEmail }
-                      });
-                  }
-              }
-          } catch(e) {
-              console.error('Erreur chargement profils:', e);
+          // I5c : utiliser PublicProfile.profiles (multi-profils)
+          // S'assurer qu'ils sont chargés
+          if(!PublicProfile.profiles || PublicProfile.profiles.length === 0) {
+              try { await PublicProfile.loadProfiles(); } catch(e) {}
           }
+          
+          const userProfiles = (PublicProfile.profiles || []).map(p => {
+              const icon = p.type === 'actor' ? '🎭' 
+                        : p.type === 'crew' ? '🎥' 
+                        : p.type === 'association' ? '🏛️' 
+                        : p.type === 'enterprise' ? '🏢' 
+                        : '👤';
+              const label = p.type === 'actor' ? 'Comédien·ne'
+                         : p.type === 'crew' ? 'Technicien·ne'
+                         : p.type === 'association' ? 'Association'
+                         : p.type === 'enterprise' ? 'Entreprise'
+                         : 'Profil';
+              const name = p.name || p.assoName || p.entName || 'Sans nom';
+              return { type: p.type, icon, name, label, profileId: p.id, data: p };
+          });
           
           const modal = document.createElement('div');
           modal.id = 'owner-role-modal';
@@ -12727,24 +12711,29 @@ showDashboard: async () => {
           
           let contentHtml = '';
           if(userProfiles.length === 0) {
-              // Pas de profil créé
+              // Pas de profil créé : on autorise quand même la création, mais sans owner_profile_id
               contentHtml = `
-                  <p class="text-sec-mb20">Vous n'avez pas encore créé de profil métier.</p>
-                  <p style="color:var(--text-sec); margin-bottom:20px; font-size:0.9rem;">Le projet sera créé et vous pourrez ajouter vos rôles plus tard via "Mon Profil".</p>
+                  <div style="padding:15px; background:rgba(245, 158, 11, 0.1); border-left:3px solid #f59e0b; border-radius:6px; margin-bottom:15px;">
+                      <p style="margin:0 0 8px; font-weight:bold; color:#78350f;">⚠️ Aucun profil public trouvé</p>
+                      <p style="margin:0; font-size:0.85rem; color:var(--text-sec);">Le projet sera créé sans être rattaché à un profil précis. Pour une meilleure expérience, créez d'abord votre profil dans "Mon Profil".</p>
+                  </div>
               `;
           } else {
+              // I5c : radio unique (un seul propriétaire)
+              const preselectedId = ActiveProfile.getId() || userProfiles[0].profileId;
               contentHtml = `
-                  <p style="color:var(--text-sec); margin-bottom:15px; font-size:0.9rem;">Sélectionnez le(s) profil(s) que vous utiliserez sur ce projet :</p>
+                  <p style="color:var(--text-sec); margin-bottom:15px; font-size:0.9rem;">Depuis quel profil créez-vous ce projet ?</p>
                   <div style="display:flex; flex-direction:column; gap:10px; max-height:300px; overflow-y:auto; padding:5px;">
               `;
               userProfiles.forEach((p, idx) => {
+                  const isSelected = p.profileId === preselectedId;
                   contentHtml += `
-                      <label style="display:flex; align-items:center; gap:12px; cursor:pointer; padding:12px; border-radius:8px; border:1px solid var(--border); background:var(--bg); transition: all 0.2s;">
-                          <input type="checkbox" class="owner-profile-checkbox" data-index="${idx}" style="width:18px; height:18px;">
+                      <label style="display:flex; align-items:center; gap:12px; cursor:pointer; padding:12px; border-radius:8px; border:1px solid ${isSelected ? 'var(--primary)' : 'var(--border)'}; background:${isSelected ? 'rgba(43, 110, 246, 0.1)' : 'var(--bg)'}; transition: all 0.2s;">
+                          <input type="radio" name="owner-profile" class="owner-profile-radio" data-index="${idx}" data-profile-id="${p.profileId}" ${isSelected ? 'checked' : ''} style="width:18px; height:18px;">
                           <span class="fs-15">${p.icon}</span>
                           <div>
                               <div class="fw-600">${Utils.escape(p.name)}</div>
-                              <div style="font-size:0.8rem; color:var(--text-sec);">${p.type === 'actor' ? 'Fiche comédien' : 'Fiche équipe technique'}</div>
+                              <div style="font-size:0.8rem; color:var(--text-sec);">${p.label}</div>
                           </div>
                       </label>
                   `;
@@ -12767,33 +12756,46 @@ showDashboard: async () => {
           `;
           
           document.body.appendChild(modal);
-          
-          // Stocker les profils pour confirmOwnerRole
           modal.userProfiles = userProfiles;
           
-          // Style visuel pour les sélectionnés
-          modal.querySelectorAll('.owner-profile-checkbox').forEach(cb => {
-              cb.addEventListener('change', () => {
-                  cb.closest('label').style.background = cb.checked ? 'rgba(43, 110, 246, 0.1)' : 'var(--bg)';
-                  cb.closest('label').style.borderColor = cb.checked ? 'var(--primary)' : 'var(--border)';
+          // Style visuel pour le radio sélectionné
+          modal.querySelectorAll('.owner-profile-radio').forEach(rb => {
+              rb.addEventListener('change', () => {
+                  // Réinitialiser tous les labels
+                  modal.querySelectorAll('.owner-profile-radio').forEach(r => {
+                      const lbl = r.closest('label');
+                      lbl.style.background = 'var(--bg)';
+                      lbl.style.borderColor = 'var(--border)';
+                  });
+                  // Activer le sélectionné
+                  if(rb.checked) {
+                      const lbl = rb.closest('label');
+                      lbl.style.background = 'rgba(43, 110, 246, 0.1)';
+                      lbl.style.borderColor = 'var(--primary)';
+                  }
               });
           });
       },
       confirmOwnerRole: () => {
           const modal = document.getElementById('owner-role-modal');
           const userProfiles = modal.userProfiles || [];
-          const checked = modal.querySelectorAll('.owner-profile-checkbox:checked');
+          const checkedRadio = modal.querySelector('.owner-profile-radio:checked');
           
-          const selectedProfiles = [];
-          checked.forEach(cb => {
-              const idx = parseInt(cb.dataset.index);
+          let ownerProfile = null;
+          if(checkedRadio) {
+              const idx = parseInt(checkedRadio.dataset.index);
               if(userProfiles[idx]) {
-                  selectedProfiles.push(userProfiles[idx]);
+                  ownerProfile = userProfiles[idx];
               }
-          });
+          }
           
           modal.remove();
-          Store.doCreateProject(selectedProfiles);
+          // Si aucun profil n'a été sélectionné mais qu'il y en a, prendre le premier
+          // Si aucun profil du tout, ownerProfile reste null (création sans owner_profile_id)
+          if(!ownerProfile && userProfiles.length > 0) {
+              ownerProfile = userProfiles[0];
+          }
+          Store.doCreateProject(ownerProfile ? [ownerProfile] : []);
       },
       createNewProjectFromImport: async (importedData) => {
           if(!state.currentUser) return;
