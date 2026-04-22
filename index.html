@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.3.16</p>
+      <p>v2.3.17</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -27453,25 +27453,34 @@ const PublicProfile = {
         
         if(!state.currentUser) return;
         
-        // Vérifier si déjà publié aujourd'hui
+        // H2: récupérer le profil actif (celui dont l'onglet est sélectionné)
+        const activeProfile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!activeProfile || !activeProfile.id) {
+            Utils.toast('Vous devez d\'abord créer ou sélectionner un profil public avant de publier une actualité.', 'warning', 5000);
+            return;
+        }
+        const profileId = activeProfile.id;
+        
+        // Vérifier si déjà publié aujourd'hui SUR CE PROFIL PRÉCIS
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         
         const { data: existing, error: checkError } = await supabase
             .from('profile_actualites')
             .select('id, created_at')
-            .eq('author_email', state.currentUser.email)
+            .eq('profile_id', profileId)
             .gte('created_at', today.toISOString());
         
         if(!checkError && existing && existing.length > 0) {
-            Utils.toast('🚫 Vous avez déjà publié une actualité aujourd\'hui. Revenez demain !', 'warning', 5000);
+            Utils.toast('🚫 Vous avez déjà publié une actualité aujourd\'hui sur ce profil. Revenez demain !', 'warning', 5000);
             return;
         }
         
-        // Publier
+        // Publier (lié au profil précis)
         const { error } = await supabase
             .from('profile_actualites')
             .insert({
+                profile_id: profileId,
                 author_email: state.currentUser.email,
                 author_name: state.userProfile?.displayName || state.currentUser.email.split('@')[0],
                 content: content
@@ -27488,26 +27497,33 @@ const PublicProfile = {
         PublicProfile.loadMyActualites();
     },
     
-    // Charger mes actualités
+    // Charger mes actualités (filtrées sur le profil actif)
     loadMyActualites: async () => {
         if(!state.currentUser) return;
         
         const container = document.getElementById('profile-my-actualites');
         if(!container) return;
         
+        // H3: filtrer sur le profil actif, pas juste l'email
+        const activeProfile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!activeProfile || !activeProfile.id) {
+            container.innerHTML = '<p class="text-sec-italic">Sélectionnez un profil pour voir ses actualités.</p>';
+            return;
+        }
+        
         const { data: actualites } = await supabase
             .from('profile_actualites')
             .select('*')
-            .eq('author_email', state.currentUser.email)
+            .eq('profile_id', activeProfile.id)
             .order('created_at', { ascending: false })
             .limit(5);
         
         if(!actualites || actualites.length === 0) {
-            container.innerHTML = '<p class="text-sec-italic">Aucune actualité publiée</p>';
+            container.innerHTML = '<p class="text-sec-italic">Aucune actualité publiée sur ce profil</p>';
             return;
         }
         
-        container.innerHTML = '<h4 style="margin-bottom: 10px; font-size: 0.9rem; color: var(--text-sec);">Mes dernières actualités :</h4>' +
+        container.innerHTML = '<h4 style="margin-bottom: 10px; font-size: 0.9rem; color: var(--text-sec);">Dernières actualités de ce profil :</h4>' +
             actualites.map(a => `
                 <div style="padding: 12px; background: var(--bg); border-radius: 8px; margin-bottom: 8px; border: 1px solid var(--border);">
                     <div style="display: flex; justify-content: space-between; align-items: start; gap: 10px;">
@@ -46288,14 +46304,14 @@ const Universe = {
             demoreelEl.innerHTML = '';
         }
         
-        // Actualité du profil (dernière publication du jour)
+        // Actualité du profil (filtrée sur le profil précis, H3)
         const actualiteSection = document.getElementById('pm-actualite-section');
         const actualiteEl = document.getElementById('pm-actualite');
         try {
             const { data: actualites } = await supabase
                 .from('profile_actualites')
                 .select('*')
-                .eq('author_email', fullProfile.email)
+                .eq('profile_id', fullProfile.id)
                 .order('created_at', { ascending: false })
                 .limit(5);
             
