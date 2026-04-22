@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.3.19</p>
+      <p>v2.4.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -11467,6 +11467,144 @@ crewRoles: {
       }
   };
 
+// ============================================================
+  // ActiveProfile - gestion du profil actif global (I3)
+  // L'utilisateur peut avoir plusieurs profils publics. Le "profil actif"
+  // est celui utilisé pour ses interactions sur le site :
+  // messages, forum, feed, actualités, etc.
+  // Persiste en localStorage, réinitialisé à la déconnexion.
+  // ============================================================
+  const ActiveProfile = {
+      KEY: 'moteur_active_profile_id',
+      _currentId: null,
+      
+      // Renvoie l'id du profil actif (localStorage ou premier profil si rien)
+      getId: () => {
+          try { return localStorage.getItem(ActiveProfile.KEY); } catch(e) { return null; }
+      },
+      
+      setId: (profileId) => {
+          try {
+              if(profileId) localStorage.setItem(ActiveProfile.KEY, profileId);
+              else localStorage.removeItem(ActiveProfile.KEY);
+          } catch(e) {}
+          ActiveProfile._currentId = profileId;
+          ActiveProfile.renderAllSelectors();
+      },
+      
+      clear: () => {
+          ActiveProfile.setId(null);
+      },
+      
+      // Récupère l'objet profil actif depuis PublicProfile.profiles
+      getCurrent: () => {
+          const id = ActiveProfile.getId();
+          if(!PublicProfile || !PublicProfile.profiles || PublicProfile.profiles.length === 0) return null;
+          if(id) {
+              const found = PublicProfile.profiles.find(p => p.id === id);
+              if(found) return found;
+          }
+          // Fallback : premier profil
+          return PublicProfile.profiles[0];
+      },
+      
+      // S'assure qu'un profil actif est bien défini (au minimum le premier)
+      ensureValid: () => {
+          if(!PublicProfile || !PublicProfile.profiles || PublicProfile.profiles.length === 0) return;
+          const currentId = ActiveProfile.getId();
+          const exists = PublicProfile.profiles.some(p => p.id === currentId);
+          if(!exists) {
+              ActiveProfile.setId(PublicProfile.profiles[0].id);
+          }
+      },
+      
+      // Génère le HTML du bouton+menu à injecter
+      buildSelectorHtml: () => {
+          const profiles = PublicProfile?.profiles || [];
+          if(profiles.length === 0) return '';
+          
+          const current = ActiveProfile.getCurrent();
+          const currentName = current ? (current.name || current.assoName || current.entName || 'Profil') : 'Profil';
+          const currentType = current ? current.type : '';
+          const typeIcon = { actor: '🎭', crew: '🎥', association: '🏛️', enterprise: '🏢' }[currentType] || '👤';
+          
+          // Si un seul profil, pas besoin de menu
+          if(profiles.length === 1) {
+              return `<button class="theme-btn" disabled style="opacity:0.9; cursor:default;" title="Profil actif (unique)">${typeIcon} ${Utils.escape(currentName)}</button>`;
+          }
+          
+          // Plusieurs profils : menu déroulant
+          const options = profiles.map(p => {
+              const name = p.name || p.assoName || p.entName || 'Sans nom';
+              const icon = { actor: '🎭', crew: '🎥', association: '🏛️', enterprise: '🏢' }[p.type] || '👤';
+              const isActive = current && p.id === current.id;
+              return `<div class="active-profile-option" data-profile-id="${p.id}" onclick="app.ActiveProfile.selectAndClose('${p.id}')" style="padding:10px 14px; cursor:pointer; border-bottom:1px solid var(--border); ${isActive ? 'background:var(--bg); font-weight:bold;' : ''}">${icon} ${Utils.escape(name)} ${isActive ? ' ✓' : ''}</div>`;
+          }).join('');
+          
+          return `
+              <div class="active-profile-selector" style="position:relative; display:inline-block;">
+                  <button class="theme-btn" onclick="app.ActiveProfile.toggleMenu(this)" title="Choisir le profil actif utilisé sur le site">${typeIcon} ${Utils.escape(currentName)} ▾</button>
+                  <div class="active-profile-menu" style="display:none; position:absolute; top:100%; right:0; margin-top:4px; min-width:240px; background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:10000;">
+                      <div style="padding:8px 12px; font-size:0.75rem; color:var(--text-sec); border-bottom:1px solid var(--border); font-weight:bold;">PROFIL ACTIF</div>
+                      ${options}
+                  </div>
+              </div>
+          `;
+      },
+      
+      toggleMenu: (btn) => {
+          const menu = btn.parentElement.querySelector('.active-profile-menu');
+          if(!menu) return;
+          const isOpen = menu.style.display === 'block';
+          // Fermer tous les menus ouverts d'abord
+          document.querySelectorAll('.active-profile-menu').forEach(m => m.style.display = 'none');
+          menu.style.display = isOpen ? 'none' : 'block';
+          if(!isOpen) {
+              // Fermer au clic extérieur
+              setTimeout(() => {
+                  const closeOnClickOutside = (e) => {
+                      if(!menu.parentElement.contains(e.target)) {
+                          menu.style.display = 'none';
+                          document.removeEventListener('click', closeOnClickOutside);
+                      }
+                  };
+                  document.addEventListener('click', closeOnClickOutside);
+              }, 0);
+          }
+      },
+      
+      selectAndClose: (profileId) => {
+          ActiveProfile.setId(profileId);
+          document.querySelectorAll('.active-profile-menu').forEach(m => m.style.display = 'none');
+          const profile = PublicProfile.profiles.find(p => p.id === profileId);
+          const name = profile ? (profile.name || profile.assoName || profile.entName || 'Profil') : 'Profil';
+          Utils.toast(`Profil actif : ${name}`, 'info', 2000);
+      },
+      
+      // Injecte le sélecteur à côté de tous les boutons "🌓 Mode" du DOM
+      renderAllSelectors: () => {
+          const html = ActiveProfile.buildSelectorHtml();
+          // On ne ré-injecte QUE dans des conteneurs marqués pour éviter les doublons
+          document.querySelectorAll('.active-profile-slot').forEach(slot => {
+              slot.innerHTML = html;
+          });
+      },
+      
+      // Crée (si absent) un slot à côté de chaque bouton Mode et y injecte le sélecteur
+      // Appelé après le chargement des profils
+      attachToDom: () => {
+          document.querySelectorAll('button.theme-btn[onclick*="toggleTheme"]').forEach(btn => {
+              // Vérifier qu'il n'y a pas déjà un slot juste après
+              if(btn.nextElementSibling && btn.nextElementSibling.classList && btn.nextElementSibling.classList.contains('active-profile-slot')) return;
+              const slot = document.createElement('span');
+              slot.className = 'active-profile-slot';
+              slot.style.marginLeft = '8px';
+              btn.parentElement.insertBefore(slot, btn.nextSibling);
+          });
+          ActiveProfile.renderAllSelectors();
+      }
+  };
+
   // ========== SESSION MANAGER ==========
   // Gère la session unique par compte (multi-onglets OK, multi-ordinateurs bloqué)
   const SessionManager = {
@@ -11946,6 +12084,7 @@ showDashboard: async () => {
       },
       logout: async () => { 
           NavMemory.clear(); // Vraie déconnexion : on oublie tout
+          ActiveProfile.clear();
           await supabase.auth.signOut();
           location.reload();
       }
@@ -25156,10 +25295,12 @@ const PublicProfile = {
         // Afficher l'onglet profil par défaut
         PublicProfile.showTab('profile');
         
-        document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics';
+document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics';
         
         // Charger les profils depuis Firebase
         await PublicProfile.loadProfiles();
+        ActiveProfile.ensureValid();
+        setTimeout(() => ActiveProfile.attachToDom(), 100);
         
         // Charger les projets liés aux profils
         await PublicProfile.loadProfileProjects();
@@ -26682,9 +26823,11 @@ const PublicProfile = {
         }
     },
     
-    // Ancienne fonction load pour compatibilité
+// Ancienne fonction load pour compatibilité
     load: async () => {
         await PublicProfile.loadProfiles();
+        ActiveProfile.ensureValid();
+        setTimeout(() => ActiveProfile.attachToDom(), 100);
     },
     
     // Sauvegarde le profil actuel
@@ -47372,7 +47515,8 @@ const Messages = {
         
         // Charger les profils de l'utilisateur
         if(!PublicProfile.profiles || PublicProfile.profiles.length === 0) {
-            await PublicProfile.loadProfiles();
+            ActiveProfile.ensureValid();
+        setTimeout(() => ActiveProfile.attachToDom(), 100);
         }
         
         if(PublicProfile.profiles.length === 0) {
@@ -54894,7 +55038,7 @@ const Weather = {
       }
   };
 
-  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer };
+  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile };
 })();
 </script>
 
