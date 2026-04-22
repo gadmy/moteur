@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.5.2</p>
+      <p>v2.5.3</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -12544,35 +12544,63 @@ showDashboard: async () => {
       getProjectsList: async () => { 
           if(!state.currentUser) return []; 
           const myEmail = state.currentUser.email.toLowerCase();
+          const activeProfileId = ActiveProfile.getId();
           
-          // Récupérer les projets dont je suis membre
-          const { data: memberships, error: memberError } = await supabase
+          // I5e : récupérer les projets où je suis membre AVEC le profil actif
+          // (fallback sur email si profile_id est NULL pour les anciens projets)
+          let membershipQuery = supabase
               .from('project_members')
-              .select('project_id, role')
+              .select('project_id, role, profile_id')
               .eq('email', myEmail);
           
-          if (memberError || !memberships || memberships.length === 0) {
-              // Vérifier aussi les projets dont je suis owner
-              const { data: ownedProjects, error: ownedError } = await supabase
+          const { data: memberships, error: memberError } = await membershipQuery;
+          
+          if (memberError || !memberships) return [];
+          
+          // Filtrer par profil actif : garder les memberships où profile_id matche OU où profile_id est NULL (legacy)
+          const filteredMemberships = activeProfileId
+              ? memberships.filter(m => m.profile_id === activeProfileId || m.profile_id == null)
+              : memberships;
+          
+          if (filteredMemberships.length === 0) {
+              // Fallback : projets dont je suis owner mais pas encore dans project_members
+              const { data: ownedProjects } = await supabase
                   .from('projects')
-                  .select('id, title, created_at, owner_email')
+                  .select('id, title, created_at, owner_email, owner_profile_id')
                   .eq('owner_email', myEmail);
               
-              if (ownedError || !ownedProjects) return [];
-              return ownedProjects.map(p => ({ id: p.id, title: p.title, date: new Date(p.created_at).toLocaleDateString(), owner: p.owner_email, role: 'owner' }));
+              if (!ownedProjects) return [];
+              
+              const filtered = activeProfileId
+                  ? ownedProjects.filter(p => p.owner_profile_id === activeProfileId || p.owner_profile_id == null)
+                  : ownedProjects;
+              
+              return filtered.map(p => ({ 
+                  id: p.id, 
+                  title: p.title, 
+                  date: new Date(p.created_at).toLocaleDateString(), 
+                  owner: p.owner_email, 
+                  role: 'owner' 
+              }));
           }
           
-          const projectIds = memberships.map(m => m.project_id);
+          const projectIds = filteredMemberships.map(m => m.project_id);
           const { data: projects, error: projError } = await supabase
               .from('projects')
-              .select('id, title, created_at, owner_email')
+              .select('id, title, created_at, owner_email, owner_profile_id')
               .in('id', projectIds);
           
           if (projError || !projects) return [];
           
           return projects.map(p => {
-              const membership = memberships.find(m => m.project_id === p.id);
-              return { id: p.id, title: p.title, date: new Date(p.created_at).toLocaleDateString(), owner: p.owner_email, role: membership?.role || 'member' };
+              const membership = filteredMemberships.find(m => m.project_id === p.id);
+              return { 
+                  id: p.id, 
+                  title: p.title, 
+                  date: new Date(p.created_at).toLocaleDateString(), 
+                  owner: p.owner_email, 
+                  role: membership?.role || 'member' 
+              };
           });
       },
       createNewProject: async () => { 
