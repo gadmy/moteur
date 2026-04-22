@@ -11523,18 +11523,59 @@ crewRoles: {
       },
       
       // Génère le HTML du bouton+menu à injecter
-      buildSelectorHtml: () => {
-          const profiles = PublicProfile?.profiles || [];
+      // I5f fix: si on est dans un projet, ne montrer que les profils qui y sont membres
+      buildSelectorHtml: async () => {
+          let profiles = PublicProfile?.profiles || [];
           if(profiles.length === 0) return '';
           
-          const current = ActiveProfile.getCurrent();
+          // Si on est dans un projet ouvert, filtrer sur les profils qui sont membres
+          let inProject = false;
+          if(state.currentProjectId && state.currentUser?.email) {
+              try {
+                  const { data: memberships } = await supabase
+                      .from('project_members')
+                      .select('profile_id')
+                      .eq('project_id', state.currentProjectId)
+                      .eq('email', state.currentUser.email.toLowerCase());
+                  
+                  if(memberships && memberships.length > 0) {
+                      inProject = true;
+                      const allowedIds = memberships
+                          .map(m => m.profile_id)
+                          .filter(id => id != null);
+                      
+                      if(allowedIds.length > 0) {
+                          profiles = profiles.filter(p => allowedIds.includes(p.id));
+                      }
+                      // Si memberships existent mais tous avec profile_id NULL (ancien projet),
+                      // on laisse tous les profils dispo (fallback legacy)
+                  }
+              } catch(e) {
+                  console.warn('Erreur filtrage profils projet:', e);
+              }
+          }
+          
+          if(profiles.length === 0) {
+              // Cas rare : on est dans un projet mais aucun de nos profils n'y est lié
+              return `<button class="theme-btn" disabled style="opacity:0.7; cursor:default;" title="Aucun profil rattaché à ce projet">👤 —</button>`;
+          }
+          
+          // Si le profil actif n'est plus dans la liste filtrée, le remplacer par le premier dispo
+          const activeId = ActiveProfile.getId();
+          if(inProject && activeId && !profiles.some(p => p.id === activeId)) {
+              ActiveProfile.setId(profiles[0].id);
+          }
+          
+          // Prendre le profil actif dans la liste filtrée
+          const current = profiles.find(p => p.id === ActiveProfile.getId()) || profiles[0];
           const currentName = current ? (current.name || current.assoName || current.entName || 'Profil') : 'Profil';
           const currentType = current ? current.type : '';
           const typeIcon = { actor: '🎭', crew: '🎥', association: '🏛️', enterprise: '🏢' }[currentType] || '👤';
           
           // Si un seul profil, pas besoin de menu
           if(profiles.length === 1) {
-              return `<button class="theme-btn" disabled style="opacity:0.9; cursor:default;" title="Profil actif (unique)">${typeIcon} ${Utils.escape(currentName)}</button>`;
+              const title = inProject ? 'Seul profil rattaché à ce projet' : 'Profil actif (unique)';
+              return `<button class="theme-btn" disabled style="opacity:0.9; cursor:default;" title="${title}">${typeIcon} ${Utils.escape(currentName)}</button>`;
           }
           
           // Plusieurs profils : menu déroulant
@@ -11545,11 +11586,14 @@ crewRoles: {
               return `<div class="active-profile-option" data-profile-id="${p.id}" onclick="app.ActiveProfile.selectAndClose('${p.id}')" style="padding:10px 14px; cursor:pointer; border-bottom:1px solid var(--border); ${isActive ? 'background:var(--bg); font-weight:bold;' : ''}">${icon} ${Utils.escape(name)} ${isActive ? ' ✓' : ''}</div>`;
           }).join('');
           
+          const titleText = inProject ? 'Profils rattachés à ce projet' : 'Profil actif utilisé sur le site';
+          const headerText = inProject ? 'PROFILS DU PROJET' : 'PROFIL ACTIF';
+          
           return `
               <div class="active-profile-selector" style="position:relative; display:inline-block;">
-                  <button class="theme-btn" onclick="app.ActiveProfile.toggleMenu(this)" title="Choisir le profil actif utilisé sur le site">${typeIcon} ${Utils.escape(currentName)} ▾</button>
+                  <button class="theme-btn" onclick="app.ActiveProfile.toggleMenu(this)" title="${titleText}">${typeIcon} ${Utils.escape(currentName)} ▾</button>
                   <div class="active-profile-menu" style="display:none; position:absolute; top:100%; right:0; margin-top:4px; min-width:240px; background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:10000;">
-                      <div style="padding:8px 12px; font-size:0.75rem; color:var(--text-sec); border-bottom:1px solid var(--border); font-weight:bold;">PROFIL ACTIF</div>
+                      <div style="padding:8px 12px; font-size:0.75rem; color:var(--text-sec); border-bottom:1px solid var(--border); font-weight:bold;">${headerText}</div>
                       ${options}
                   </div>
               </div>
@@ -11596,8 +11640,8 @@ crewRoles: {
       },
       
       // Injecte le sélecteur à côté de tous les boutons "🌓 Mode" du DOM
-      renderAllSelectors: () => {
-          const html = ActiveProfile.buildSelectorHtml();
+      renderAllSelectors: async () => {
+          const html = await ActiveProfile.buildSelectorHtml();
           // On ne ré-injecte QUE dans des conteneurs marqués pour éviter les doublons
           document.querySelectorAll('.active-profile-slot').forEach(slot => {
               slot.innerHTML = html;
@@ -12886,6 +12930,8 @@ showDashboard: async () => {
       exitToDashboard: () => {
           NavMemory.clear();
           UI.showDashboard();
+          // I5f: rafraîchir le sélecteur de profils (sortie du contexte projet)
+          try { ActiveProfile.renderAllSelectors(); } catch(e) {}
       },
       
       loadProject: async (id) => {
@@ -12946,6 +12992,8 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               LoadingScreen.setProgress(95);
               UI.launchEditor(); Store.startRealtimeListener(id); Store.initPresence(id); Store.initLocks(id);
               LoadingScreen.hide();
+              // I5f: rafraîchir le sélecteur (on est maintenant dans un projet, filtrage profils)
+              setTimeout(() => { try { ActiveProfile.renderAllSelectors(); } catch(e){} }, 100);
           } catch(e) { LoadingScreen.hide(); Utils.toast("Erreur: " + e.message, "error"); console.error(e); UI.showDashboard(); }
       },
       startRealtimeListener: (id) => {
@@ -48336,12 +48384,17 @@ ${window.location.origin}${window.location.pathname}
                 for(const inv of pendingInvitations) {
                     const invData = inv.data || {};
                     if(invData.projectId) {
-                        // Ajouter comme membre du projet
+                        // I5f: récupérer le profil cible depuis la colonne DB ou le JSON data
+                        const targetProfileId = inv.to_profile_id || invData.targetProfileId || null;
+                        
+                        // Ajouter comme membre du projet avec email + profil
                         await supabase
                             .from('project_members')
                             .upsert({
                                 project_id: invData.projectId,
                                 user_id: state.currentUser.id,
+                                email: state.currentUser.email.toLowerCase(), // I5f: pour filtrage
+                                profile_id: targetProfileId, // I5f: profil ciblé
                                 role: invData.role || 'viewer',
                                 invited_by: null,
                                 invited_at: invData.invitedAt || new Date().toISOString()
