@@ -6347,7 +6347,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.7.4</p>
+      <p>v2.7.5</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -15842,6 +15842,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           if(tabName === 'breakdown') { Crew.syncEssentialCrewToScenes(); Store.save(); Breakdown.init(); } 
           if(tabName === 'planning') { Planning.init(); Planning.applyPermissions(); }
           if(tabName === 'scriptreport') { ScriptReport.init(); }
+          if(tabName === 'episodes') { Episodes.render(); }
           if(tabName === 'stats') Stats.render();
           if(tabName === 'titlepage') TitlePage.load(); 
           if(tabName === 'storyboard') Storyboard.init();
@@ -53640,6 +53641,234 @@ const SceneVersions = {
     }
 };
 
+// ============================================================
+// Episodes — Gestion des épisodes d'une série (Phase S3)
+// ============================================================
+const Episodes = {
+    
+    // Rend la grille d'épisodes
+    render: () => {
+        const grid = document.getElementById('episodes-grid');
+        const countLabel = document.getElementById('episodes-count-label');
+        if(!grid) return;
+        
+        // Init : si state.data.episodes n'existe pas, le créer
+        if(!state.data.episodes) state.data.episodes = [];
+        
+        const episodes = state.data.episodes;
+        const canEdit = state.currentRole === 'owner' || state.currentRole === 'editor';
+        
+        // Compteur
+        if(countLabel) {
+            countLabel.textContent = episodes.length === 0 ? '0 épisode' : (episodes.length === 1 ? '1 épisode' : episodes.length + ' épisodes');
+        }
+        
+        // Carte "Ajouter" à la fin (si canEdit)
+        const addCard = canEdit ? `
+            <div class="episode-add-card" onclick="app.Episodes.add()">
+                <div class="episode-add-icon">➕</div>
+                <div class="episode-add-label">Ajouter un épisode</div>
+            </div>
+        ` : '';
+        
+        // Rendu des cartes d'épisodes
+        const cards = episodes.map((ep, idx) => {
+            const statusLabels = { draft: '📝 Brouillon', 'in-progress': '🎬 En cours', done: '✅ Terminé' };
+            const status = ep.status || 'draft';
+            const thumb = ep.thumb 
+                ? `<img src="${Utils.escape(ep.thumb)}" alt="Vignette">` 
+                : '🎬';
+            
+            return `
+                <div class="episode-card" 
+                     data-episode-id="${ep.id}"
+                     draggable="${canEdit}"
+                     ondragstart="app.Episodes._onDragStart(event, '${ep.id}')"
+                     ondragover="app.Episodes._onDragOver(event)"
+                     ondragleave="app.Episodes._onDragLeave(event)"
+                     ondrop="app.Episodes._onDrop(event, '${ep.id}')"
+                     ondragend="app.Episodes._onDragEnd(event)">
+                    <div class="episode-thumb">
+                        ${thumb}
+                        ${canEdit ? `<button class="episode-thumb-upload" onclick="event.stopPropagation(); app.Episodes.uploadThumb('${ep.id}')">📷 Changer</button>` : ''}
+                        <div class="episode-number-badge">E${String(ep.number).padStart(2,'0')}</div>
+                        <div class="episode-status-badge ${status}">${statusLabels[status] || status}</div>
+                    </div>
+                    <div class="episode-body">
+                        <input type="text" class="episode-title-input" 
+                               value="${Utils.escape(ep.title || '')}"
+                               placeholder="Titre de l'épisode (optionnel)"
+                               ${canEdit ? `onchange="app.Episodes.setTitle('${ep.id}', this.value)"` : 'readonly'}>
+                        ${canEdit ? `
+                            <select class="episode-status-select" onchange="app.Episodes.setStatus('${ep.id}', this.value)">
+                                <option value="draft" ${status==='draft'?'selected':''}>📝 Brouillon</option>
+                                <option value="in-progress" ${status==='in-progress'?'selected':''}>🎬 En cours</option>
+                                <option value="done" ${status==='done'?'selected':''}>✅ Terminé</option>
+                            </select>
+                        ` : ''}
+                    </div>
+                    ${canEdit ? `
+                        <div class="episode-actions">
+                            <button class="episode-action-btn" onclick="app.Episodes.openEpisode('${ep.id}')">📂 Ouvrir</button>
+                            <button class="episode-action-btn danger" onclick="app.Episodes.remove('${ep.id}')">🗑️</button>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+        
+        grid.innerHTML = cards + addCard;
+    },
+    
+    // Ajoute un nouvel épisode à la fin
+    add: () => {
+        if(!state.data.episodes) state.data.episodes = [];
+        const nextNumber = state.data.episodes.length + 1;
+        state.data.episodes.push({
+            id: crypto.randomUUID(),
+            number: nextNumber,
+            title: '',
+            synopsis: '',
+            status: 'draft',
+            thumb: ''
+        });
+        Store.save();
+        Episodes.render();
+        Utils.toast('Épisode ajouté', 'success');
+    },
+    
+    // Supprime un épisode (avec confirmation, supprime aussi ses scènes)
+    remove: async (episodeId) => {
+        const ep = state.data.episodes.find(e => e.id === episodeId);
+        if(!ep) return;
+        
+        // Compter les scènes liées
+        const linkedScenes = (state.data.scenes || []).filter(s => s.episodeId === episodeId);
+        const sceneCountMsg = linkedScenes.length > 0 
+            ? `\n\n⚠️ ${linkedScenes.length} scène${linkedScenes.length>1?'s':''} seront aussi supprimée${linkedScenes.length>1?'s':''}.`
+            : '';
+        
+        const confirmed = await ConfirmModal.confirmDelete(
+            `Supprimer l'épisode E${String(ep.number).padStart(2,'0')}${ep.title ? ' — ' + ep.title : ''} ?${sceneCountMsg}`
+        );
+        if(!confirmed) return;
+        
+        // Supprimer les scènes liées
+        state.data.scenes = (state.data.scenes || []).filter(s => s.episodeId !== episodeId);
+        
+        // Supprimer l'épisode
+        state.data.episodes = state.data.episodes.filter(e => e.id !== episodeId);
+        
+        // Re-numéroter les épisodes restants dans l'ordre du tableau
+        state.data.episodes.forEach((e, i) => { e.number = i + 1; });
+        
+        Store.save();
+        Episodes.render();
+        Utils.toast('Épisode supprimé', 'success');
+    },
+    
+    // Modifie le titre
+    setTitle: (episodeId, title) => {
+        const ep = state.data.episodes.find(e => e.id === episodeId);
+        if(!ep) return;
+        ep.title = (title || '').trim();
+        Store.save();
+        // Pas de re-render (on ne veut pas perdre le focus du champ)
+    },
+    
+    // Change le statut
+    setStatus: (episodeId, status) => {
+        const ep = state.data.episodes.find(e => e.id === episodeId);
+        if(!ep) return;
+        if(!['draft','in-progress','done'].includes(status)) return;
+        ep.status = status;
+        Store.save();
+        Episodes.render(); // Re-render pour mettre à jour le badge
+    },
+    
+    // Upload d'une vignette (image en base64)
+    uploadThumb: (episodeId) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if(!file) return;
+            if(file.size > 2 * 1024 * 1024) {
+                Utils.toast('Image trop lourde (max 2 Mo)', 'warning');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const ep = state.data.episodes.find(e => e.id === episodeId);
+                if(!ep) return;
+                ep.thumb = ev.target.result;
+                Store.save();
+                Episodes.render();
+                Utils.toast('Vignette mise à jour', 'success');
+            };
+            reader.readAsDataURL(file);
+        };
+        input.click();
+    },
+    
+    // Ouvrir un épisode : bascule vers l'onglet Scénario sur cet épisode
+    // (pour l'instant juste un toast, la bascule arrivera en Phase S4)
+    openEpisode: (episodeId) => {
+        const ep = state.data.episodes.find(e => e.id === episodeId);
+        if(!ep) return;
+        Utils.toast(`Ouvrir E${String(ep.number).padStart(2,'0')} — fonctionnalité à venir (Phase S4)`, 'info');
+    },
+    
+    // ---- Drag & Drop pour réordonner ----
+    _draggedId: null,
+    
+    _onDragStart: (e, episodeId) => {
+        Episodes._draggedId = episodeId;
+        e.currentTarget.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+    },
+    
+    _onDragOver: (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        e.currentTarget.classList.add('drag-over');
+    },
+    
+    _onDragLeave: (e) => {
+        e.currentTarget.classList.remove('drag-over');
+    },
+    
+    _onDrop: (e, targetId) => {
+        e.preventDefault();
+        e.currentTarget.classList.remove('drag-over');
+        
+        const sourceId = Episodes._draggedId;
+        if(!sourceId || sourceId === targetId) return;
+        
+        const episodes = state.data.episodes;
+        const sourceIdx = episodes.findIndex(ep => ep.id === sourceId);
+        const targetIdx = episodes.findIndex(ep => ep.id === targetId);
+        if(sourceIdx === -1 || targetIdx === -1) return;
+        
+        // Déplacer
+        const [moved] = episodes.splice(sourceIdx, 1);
+        episodes.splice(targetIdx, 0, moved);
+        
+        // Re-numéroter
+        episodes.forEach((ep, i) => { ep.number = i + 1; });
+        
+        Store.save();
+        Episodes.render();
+    },
+    
+    _onDragEnd: (e) => {
+        e.currentTarget.classList.remove('dragging');
+        Episodes._draggedId = null;
+        document.querySelectorAll('.episode-card.drag-over').forEach(el => el.classList.remove('drag-over'));
+    }
+};
+
 const Synopsis = {
     getEditor: (type) => {
         const id = type === 'synopsis' ? 'synopsisEditor' : (type === 'short' ? 'shortEditor' : 'longEditor');
@@ -56156,7 +56385,7 @@ const Weather = {
       }
   };
 
-  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation };
+  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes };
 })();
 </script>
 
