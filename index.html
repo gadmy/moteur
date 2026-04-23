@@ -26,6 +26,44 @@ HTML actuel
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v2.6.6 — Fix Séquencier invisible (23 Avr. 2026)
+- hideAllViews masquait à tort beatboard-view et sequencer-view qui sont
+  des sous-vues de l'onglet Séquencier d'un projet (pas des vues top-level)
+- Symptôme : scènes invisibles à l'arrivée sur l'onglet Séquencier
+  obligeait à faire "Beat Board" puis "Séquencier" pour voir les cartes
+- Fix : suppression des 2 lignes fautives dans UI.hideAllViews
+
+v2.6.5 — Page Synopsis en 2 colonnes (23 Avr. 2026)
+- Sidebar gauche avec 3 boutons : Synopsis / Résumé court / Résumé long
+- Une seule section affichée à la fois (plus de scroll long)
+- Compteurs de caractères dans chaque bouton (mis à jour au switch)
+- Synopsis.switchSection(target) et Synopsis.updateCounts()
+- Layout cohérent avec BeatBoard/Moodboard (pattern .board-sidebar)
+- Responsive : sidebar passe en colonne sur écrans < 900px
+
+v2.6.4 — Polices & erreurs console (23 Avr. 2026)
+- Retrait de 'Roboto' dans body font-family (n'était pas chargée en CDN
+  Firefox strict la bloquait anti-fingerprinting)
+- Liste finale : system-ui, -apple-system, BlinkMacSystemFont, Segoe UI,
+  Helvetica Neue, Arial, sans-serif (toutes polices système natives)
+- Aucun impact visuel (system-ui résout vers Roboto sur Android)
+
+v2.6.3 — Fix PreferencesSync multi-profils (23 Avr. 2026)
+- Erreur "JSON object requested, multiple (or no) rows returned"
+  causée par .maybeSingle() sur user_profiles qui ramène maintenant N lignes
+- Load : requête .or(owner_email,email) avec .limit(1) pour prendre
+  les préférences du premier profil qui en a
+- pushAll : update avec .or(owner_email,email) pour synchroniser les
+  préférences sur tous les profils du compte
+
+v2.6.2 — Fix CGU multi-profils (23 Avr. 2026)
+- La modale CGU s'affichait à chaque connexion car Terms.check regardait
+  state.userProfile.terms_accepted qui pouvait être sur un profil non accepté
+- Terms.check vérifie maintenant tous les profils du compte :
+  accepté si AU MOINS UN des profils a terms_accepted = true
+- SQL régularisation : UPDATE terms_accepted=true sur tous les profils
+  de chaque user qui avait accepté sur au moins un
+
 v2.6.1 — Multi-profils bout-en-bout (22 Avr. 2026)
 - I1 SQL : colonne owner_email sur user_profiles, contrainte UNIQUE email supprimée
 - I1 SQL : trigger check_max_profiles_per_user (limite 3 profils par compte)
@@ -6176,7 +6214,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.6.6</p>
+      <p>v2.6.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -53949,6 +53987,14 @@ const ScriptReport = {
         Store.save();
     },
     
+    // Fix: shotId contient des underscores (Utils.generateUniqueId = timestamp_hash),
+    // donc on split uniquement sur le premier _ pour reconstituer shotId complet
+    splitKey: (key) => {
+        const idx = (key || '').indexOf('_');
+        if(idx === -1) return [key, ''];
+        return [key.substring(0, idx), key.substring(idx + 1)];
+    },
+    
     addTake: (key, reportIdx) => {
         if(!state.data.scriptReports[key]) return;
         if(!state.data.scriptReports[key][reportIdx]) return;
@@ -53964,7 +54010,11 @@ const ScriptReport = {
         });
         
         Store.save();
-        const [sceneId, shotId] = key.split('_');
+        // Fix : shotId contient des underscores (format '1776858_f8pjm8key'), 
+        // on split uniquement sur le premier _ pour reconstituer shotId complet
+        const idx = key.indexOf('_');
+        const sceneId = key.substring(0, idx);
+        const shotId = key.substring(idx + 1);
         ScriptReport.renderSheet(sceneId, shotId);
     },
     
@@ -53978,7 +54028,10 @@ const ScriptReport = {
         if(!state.data.scriptReports[key]?.[reportIdx]?.takes?.[takeIdx]) return;
         state.data.scriptReports[key][reportIdx].takes[takeIdx].star = value;
         Store.save();
-        const [sceneId, shotId] = key.split('_');
+        // Fix : split uniquement sur le premier _ pour reconstituer shotId complet
+        const idx = key.indexOf('_');
+        const sceneId = key.substring(0, idx);
+        const shotId = key.substring(idx + 1);
         ScriptReport.renderSheet(sceneId, shotId);
     },
     
@@ -54023,7 +54076,7 @@ const ScriptReport = {
         if(!state.data.scriptReports[key]?.[reportIdx]?.takes) return;
         state.data.scriptReports[key][reportIdx].takes.splice(takeIdx, 1);
         Store.save();
-        const [sceneId, shotId] = key.split('_');
+        const [sceneId, shotId] = ScriptReport.splitKey(key);
         ScriptReport.renderSheet(sceneId, shotId);
     },
     
