@@ -26,6 +26,70 @@ HTML actuel
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+HISTORIQUE DES VERSIONS
+================================================================================
+v2.6.9 — Lignes acteurs → personnages dans le dépouillement (23 Avr. 2026)
+- Survol d'un tag COMEDIENS dans le dépouillement trace une ligne jaune
+  vers le personnage que l'acteur joue dans le script
+- Match "flou" : les noms raccourcis dans le script ("NORA") sont liés
+  aux fiches personnage complètes ("Nora Bellamy") via le prénom
+- Breakdown.setupLinkHovers : ajout paramètre charTerm
+- drawLink : chaîne de fallback (nom complet → prénom → startsWith)
+- data-linked-char ajouté sur les tags cat=COMEDIENS via state.data.actors
+
+v2.6.8 — Guide / Tutoriel mis à jour (23 Avr. 2026)
+- Nouvelle section Multi-profils dans le guide
+- (Détails à compléter par le dev selon les choix finaux)
+
+v2.6.7 — Fix ajout de prise dans rapports de script (23 Avr. 2026)
+- Bug : + Prise n'affichait pas la nouvelle prise, il fallait basculer
+  vers un autre rapport puis revenir pour la voir
+- Cause : key = sceneId + '_' + shotId, mais shotId contient déjà un
+  underscore (Utils.generateUniqueId = timestamp + '_' + hash), donc
+  key.split('_') retournait un shotId tronqué
+- Fix : nouveau helper ScriptReport.splitKey qui split sur le PREMIER _
+  Utilisé dans addTake, setTakeStar, deleteTake et l'export PDF
+
+v2.6.6 — Fix Séquencier invisible à l'arrivée (23 Avr. 2026)
+- hideAllViews masquait à tort beatboard-view et sequencer-view qui
+  sont des sous-vues de l'onglet Séquencier d'un projet (pas top-level)
+- Symptôme : scènes invisibles sur l'onglet, obligation de basculer
+  Beat Board puis Séquencier pour les voir
+- Fix : suppression des 2 lignes fautives dans UI.hideAllViews
+
+v2.6.5 — Page Synopsis en 2 colonnes (23 Avr. 2026)
+- Sidebar gauche avec 3 boutons : Synopsis / Résumé court / Résumé long
+- Une seule section affichée à la fois (plus de scroll long)
+- Compteurs de caractères dans chaque bouton (mis à jour au switch)
+- Synopsis.switchSection(target) et Synopsis.updateCounts()
+- Layout cohérent avec BeatBoard/Moodboard (pattern .board-sidebar)
+- Responsive : sidebar passe en colonne sur écrans < 900px
+
+v2.6.4 — Polices & erreurs console (23 Avr. 2026)
+- Retrait de 'Roboto' dans body font-family (n'était pas chargée en CDN
+  Firefox strict la bloquait anti-fingerprinting)
+- Liste finale : system-ui, -apple-system, BlinkMacSystemFont, Segoe UI,
+  Helvetica Neue, Arial, sans-serif (toutes polices système natives)
+- Aucun impact visuel (system-ui résout vers Roboto sur Android)
+
+v2.6.3 — Fix PreferencesSync multi-profils (23 Avr. 2026)
+- Erreur "JSON object requested, multiple (or no) rows returned"
+  causée par .maybeSingle() sur user_profiles qui ramène maintenant N lignes
+- Load : requête .or(owner_email,email) avec .limit(1) pour prendre
+  les préférences du premier profil qui en a
+- pushAll : update avec .or(owner_email,email) pour synchroniser les
+  préférences sur tous les profils du compte
+
+v2.6.2 — Fix CGU multi-profils (23 Avr. 2026)
+- La modale CGU s'affichait à chaque connexion car Terms.check regardait
+  state.userProfile.terms_accepted qui pouvait être sur un profil non accepté
+- Terms.check vérifie maintenant tous les profils du compte :
+  accepté si AU MOINS UN des profils a terms_accepted = true
+- SQL régularisation : UPDATE terms_accepted=true sur tous les profils
+  de chaque user qui avait accepté sur au moins un
+
+v2.6.1 — Multi-profils bout-en-bout (22 Avr. 2026)
+
 v2.6.7 — Fix ajout de prise dans les rapports de script (23 Avr. 2026)
 - Bug : après clic "+ Prise", la nouvelle prise ne s'affichait pas
   (il fallait basculer vers un autre rapport puis revenir)
@@ -6224,7 +6288,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.6.9</p>
+      <p>v2.7.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -11560,12 +11624,23 @@ crewRoles: {
               return cached.badge;
           }
           try {
+              // Multi-profils : un email peut avoir plusieurs lignes
+              // On prend le badge le plus restrictif (black > red > yellow > null)
               const { data } = await supabase
                   .from('user_profiles')
                   .select('moderation_badge')
-                  .eq('email', key)
-                  .maybeSingle();
-              const badge = data?.moderation_badge || null;
+                  .or(`email.eq.${key},owner_email.eq.${key}`)
+                  .not('moderation_badge', 'is', null);
+              
+              let badge = null;
+              if(data && data.length > 0) {
+                  const order = { black: 3, red: 2, yellow: 1 };
+                  const sorted = data.slice().sort((a, b) => 
+                      (order[b.moderation_badge] || 0) - (order[a.moderation_badge] || 0)
+                  );
+                  badge = sorted[0].moderation_badge || null;
+              }
+              
               Moderation._badgeCache.set(key, { badge, ts: Date.now() });
               return badge;
           } catch(e) {
@@ -48818,10 +48893,21 @@ ${window.location.origin}${window.location.pathname}
         title: '🎬 Introduction',
         content: `
           <h3>Bienvenue dans Moteur !</h3>
-          <p>Moteur est l'application tout-en-un pour gérer ton projet de film. Que tu sois réalisateur, producteur, ou passionné de cinéma, Moteur centralise tout : écriture du scénario, casting, planning, budget, storyboard...</p>
+          <p>Moteur est l'application tout-en-un pour gérer ton projet de film. Que tu sois <strong>réalisateur·ice, producteur·ice, comédien·ne, technicien·ne</strong> ou passionné·e de cinéma, Moteur centralise tout : écriture du scénario, casting, planning, budget, storyboard, dépouillement, rapport de production...</p>
           <p>Plus besoin de jongler entre dix logiciels différents. Moteur gère tout, du premier mot à la dernière prise.</p>
-          <div class="tuto-tip"><strong>💡 Astuce :</strong> Sur le dashboard, clique sur "Nouveau projet" pour commencer. Tu arrives sur l'espace de travail avec tous les onglets à gauche et les menus en haut.</div>
-          <p>Et le plus cool ? Tu peux collaborer en temps réel avec toute ton équipe !</p>
+          
+          <h3>Les 3 espaces principaux</h3>
+          <p><strong>🏠 Dashboard :</strong> Ton hub personnel. Raccourcis vers tes projets, l'Univers, ta messagerie, le forum, tes cours, tes contacts.</p>
+          <p><strong>📁 Mes Projets :</strong> L'espace de travail sur un film. Onglets à gauche (scénario, séquencier, dépouillement...), menus en haut, équipe connectée en temps réel.</p>
+          <p><strong>🌍 Univers :</strong> L'annuaire communautaire. Tous les profils et projets publics géolocalisés sur une carte.</p>
+          
+          <h3>Collaboration dans l'ADN</h3>
+          <p>Tu peux collaborer en temps réel avec toute ton équipe. Synchronisation instantanée, chat intégré, commentaires, permissions fines. Et grâce au <strong>multi-profils</strong>, tu peux cumuler plusieurs casquettes sur ton compte (ex : réalisateur·ice + comédien·ne).</p>
+          
+          <div class="tuto-tip"><strong>🚧 Pré-alpha ouverte :</strong> Moteur est en développement actif. Des bugs peuvent survenir, des fonctionnalités sont incomplètes. Tes données peuvent évoluer. Utilise à des fins de test et d'exploration !</div>
+          <div class="tuto-tip"><strong>💬 Feedback bienvenu :</strong> Trouvé un bug ? Une fonctionnalité à suggérer ? Va dans le Forum ou contacte directement via la messagerie. L'app grandit avec vous !</div>
+          
+          <p><strong>Commence par :</strong> compléter ton profil public (pour apparaître dans l'Univers), puis crée ton premier projet via le bouton "Nouveau projet" sur le dashboard.</p>
         `
       },
       {
@@ -48829,11 +48915,26 @@ ${window.location.origin}${window.location.pathname}
         title: '🌍 L\'Univers',
         content: `
           <h3>L'annuaire de la communauté</h3>
-          <p>L'Univers, c'est l'annuaire de la communauté Moteur ! Tu y trouves des profils et projets sur une carte interactive.</p>
-          <p>Tu vois les professionnels du cinéma géolocalisés : comédiens, techniciens, associations, boîtes de prod... Clique sur un marqueur pour voir la fiche complète.</p>
-          <div class="tuto-tip"><strong>💡 Filtres :</strong> Tu peux filtrer par métier, par compétence, par zone géographique. Trouve le perchman ou le chef op de tes rêves !</div>
-          <p>Les projets publics apparaissent aussi sur la carte. Tu vois qui tourne quoi, et où.</p>
-          <p>L'étoile sur les fiches ajoute la personne ou le projet à tes favoris. Tu les retrouves dans Contacts.</p>
+          <p>L'Univers, c'est l'annuaire de la communauté Moteur ! Tu y trouves des profils et projets sur une carte interactive centrée sur la France et ouverte sur le monde.</p>
+          <p>Tu vois les professionnels du cinéma géolocalisés : <strong>comédien·ne·s, technicien·ne·s, associations, boîtes de prod</strong>... Survole un marqueur pour voir un aperçu rapide, clique pour ouvrir la fiche complète.</p>
+          
+          <h3>Recherche & filtres</h3>
+          <div class="tuto-tip"><strong>💡 Filtres puissants :</strong> Métier, compétences, langues, niveau sportif, zone géographique, avec ou sans véhicule, distance depuis ta ville... Trouve le perchman ou la chef op de tes rêves !</div>
+          <p><strong>🎯 Projets pour moi :</strong> En haut à gauche, choisis ton profil puis clique <em>Matcher</em>. L'Univers ne te montre plus que les projets qui cherchent un talent comme le tien (métier, compétences, zone...).</p>
+          <p><strong>📋 Vue Carte / Liste :</strong> Bascule entre la carte et une liste triable (nom, ville, distance). Pratique quand tu veux scroller les profils sans zoomer.</p>
+          
+          <h3>Profils multiples d'un même user</h3>
+          <p>Si une personne a plusieurs profils (ex : Réalisatrice + Comédienne), tu le découvres visuellement :</p>
+          <p><strong>🔗 Lignes au survol :</strong> Passe la souris sur un marqueur → des lignes pointillées violettes relient automatiquement tous les profils de ce user sur la carte.</p>
+          <p><strong>‹ Carrousel › :</strong> Dans la fiche, une bannière apparaît si le user a plusieurs profils. Utilise les flèches pour naviguer entre eux sans fermer la fiche.</p>
+          
+          <h3>Interactions sur une fiche</h3>
+          <p><strong>☆ Favori :</strong> Ajoute la personne ou le projet à tes favoris. Retrouve-les dans <em>Contacts</em>.</p>
+          <p><strong>✉️ Contacter :</strong> Envoie un message direct. Le destinataire reçoit ton message sur le profil précis que tu consultes (pas "Guillaume en général", mais bien "Guillaume comédien" par exemple).</p>
+          <p><strong>🚩 Signaler :</strong> Si un contenu est inapproprié, signale le profil. L'équipe de modération est alertée.</p>
+          
+          <h3>Projets dans l'Univers</h3>
+          <p>Les projets publics apparaissent aussi sur la carte avec leurs besoins en casting et équipe. Tu vois qui tourne quoi, et où. Clique sur un projet pour voir le détail et te proposer.</p>
         `
       },
       {
@@ -48855,9 +48956,27 @@ ${window.location.origin}${window.location.pathname}
         title: '📄 Synopsis & Titre',
         content: `
           <h3>Les bases de ton projet</h3>
-          <p><strong>Synopsis :</strong> C'est ton pitch, ton résumé. Écris quelques lignes qui donnent envie. C'est ce que les producteurs liront en premier !</p>
-          <p><strong>Page de Titre :</strong> Ta couverture pro avec titre, auteur, contact, version, date... Ces infos apparaissent automatiquement à l'export.</p>
-          <div class="tuto-tip"><strong>💡 Pro tip :</strong> Ajoute un copyright et des notes. Tout est prêt pour envoyer ton scénario !</div>
+          <p>Cet onglet regroupe <strong>trois versions de ton pitch</strong>, adaptées à chaque usage. Une sidebar à gauche te permet de basculer entre les trois en un clic — tu ne vois qu'un seul texte à la fois pour rester concentré·e.</p>
+          
+          <h3>📖 Synopsis</h3>
+          <p>Le résumé "moyen" de ton film, 1 à 2 pages en général. Il décrit l'intrigue, les enjeux, les personnages principaux et l'arc narratif. C'est le document envoyé aux producteurs, aux commissions, aux partenaires financiers.</p>
+          
+          <h3>⚡ Résumé court</h3>
+          <p>Le pitch express, 3-5 lignes maximum. Ce que tu racontes à quelqu'un qui te demande "ça parle de quoi ?" en soirée. Sert pour les flyers, les affiches, les posts réseaux sociaux.</p>
+          
+          <h3>📚 Résumé long</h3>
+          <p>Le traitement détaillé, 5 à 20 pages. Scène par scène, avec plus de détails sur les lieux, les ambiances, les dialogues clés. C'est le document pour les lectures approfondies et les analyses dramaturgiques.</p>
+          
+          <h3>Éditeur pro</h3>
+          <p>Chaque section a son <strong>éditeur de texte complet</strong> : styles (titre 1/2/3, citation), gras/italique/souligné, listes à puces ou numérotées, alignement, insertion d'images, tableaux, ligne horizontale.</p>
+          <p><strong>Format A4 :</strong> L'édition se fait au format page (210mm), comme dans un traitement de texte. Tu vois directement à quoi ressemble le rendu final.</p>
+          
+          <div class="tuto-tip"><strong>💡 Compteur de caractères :</strong> Sous chaque bouton de la sidebar, tu vois en temps réel combien de caractères contient ta section. Pratique pour calibrer un résumé aux bonnes dimensions.</div>
+          
+          <h3>📜 Page de Titre</h3>
+          <p>Ta couverture pro avec titre, auteur, contact, version, date, source... Ces infos apparaissent automatiquement sur tous tes exports PDF (scénario, documents de prod). Ajoute un copyright et des notes de production pour boucler la présentation.</p>
+          
+          <div class="tuto-tip"><strong>💡 Pro tip :</strong> Tes trois résumés sont sauvegardés en permanence, tu peux basculer entre eux sans jamais perdre de texte. Le style et les images sont préservés.</div>
         `
       },
       {
@@ -48877,11 +48996,28 @@ ${window.location.origin}${window.location.pathname}
         title: '🔍 Dépouillement',
         content: `
           <h3>L'étape clé entre écriture et production</h3>
-          <p>On analyse chaque scène pour identifier tous les éléments nécessaires au tournage.</p>
-          <div class="tuto-tip"><strong>⚠️ Important :</strong> Une scène doit être finalisée pour être dépouillée (sinon le texte peut encore changer).</div>
-          <p><strong>Comment faire :</strong> Surligne un mot dans le texte, clic droit, choisis la catégorie (personnage, accessoire, costume...).</p>
-          <p>Le système est intelligent : si "épée" apparaît dans d'autres scènes, il propose de les lier automatiquement.</p>
-          <p>Les personnages des dialogues sont ajoutés automatiquement. Tout ce que tu dépouilles remonte dans les autres onglets : Ressources, Casting, Planning...</p>
+          <p>Le dépouillement, c'est analyser chaque scène pour identifier <strong>tout ce qu'il faut préparer pour tourner</strong> : personnages, accessoires, costumes, décors, véhicules, figurants, effets spéciaux...</p>
+          <div class="tuto-tip"><strong>⚠️ Finaliser d'abord :</strong> Une scène doit être finalisée pour être dépouillée. Tant qu'une scène est en brouillon, le texte peut encore changer — inutile de dépouiller dans le vide.</div>
+          
+          <h3>Comment dépouiller</h3>
+          <p><strong>Surligne</strong> un mot ou une portion de texte dans le scénario, <strong>clic droit</strong>, choisis la catégorie (accessoire, costume, véhicule, FX, figurant...). L'élément est ajouté à la fiche de la scène sur la droite.</p>
+          <p><strong>🧠 Détection intelligente :</strong> Si "épée" apparaît dans d'autres scènes, le système te propose de les lier automatiquement. Tu gagnes un temps fou.</p>
+          
+          <h3>Auto-remplissage</h3>
+          <p><strong>🎭 Personnages :</strong> Détectés automatiquement depuis les dialogues. Pas besoin de les ajouter à la main.</p>
+          <p><strong>👥 Comédiens :</strong> Si tu as lié un personnage à un comédien (dans l'onglet Personnages), celui-ci apparaît automatiquement dans la catégorie COMEDIENS de chaque scène où son personnage joue.</p>
+          
+          <h3>Ligne jaune au survol</h3>
+          <p>Dans le panneau de droite, <strong>passe la souris sur n'importe quel tag</strong> : une ligne jaune relie le tag à l'endroit où il est marqué dans le script à gauche. Pratique pour retrouver instantanément le contexte.</p>
+          <div class="tuto-tip"><strong>💡 Pour les comédiens :</strong> Même si le nom du comédien (ex : "Laure Perrin") n'apparaît pas dans le script, la ligne pointe vers le personnage qu'il·elle joue (ex : "NORA"). Le système fait le lien automatiquement.</div>
+          
+          <h3>Tout remonte automatiquement</h3>
+          <p>Chaque élément dépouillé s'ajoute aux autres onglets de l'app :</p>
+          <p><strong>📦 Ressources :</strong> Accessoires, costumes, véhicules agrégés pour gérer la liste à préparer.</p>
+          <p><strong>🎬 Casting :</strong> Comédiens et figurants classés par scène.</p>
+          <p><strong>📅 Planning :</strong> Tu sais quel comédien est nécessaire quel jour, pour calculer les jours de tournage.</p>
+          <p><strong>💰 Budget :</strong> Les éléments dépouillés nourrissent les devis.</p>
+          <div class="tuto-tip"><strong>⚡ Gain de temps énorme :</strong> En dépouillant bien ton scénario, tu prépares déjà 60% du travail de production. Les feuilles de service, les listes d'accessoires, le planning... tout se déduit du dépouillement.</div>
         `
       },
       {
@@ -48968,14 +49104,50 @@ ${window.location.origin}${window.location.pathname}
       },
       {
         id: 'profil',
-        title: '👤 Mon Profil Public',
+        title: '👤 Mes Profils Publics',
         content: `
           <h3>Ta carte de visite pro</h3>
-          <p>Pour apparaître dans l'Univers, crée un profil : Comédien, Technicien, Association, ou Entreprise.</p>
-          <p><strong>Profil Comédien :</strong> Mensurations, compétences, langues, sports (avec niveaux). Jusqu'à 3 photos.</p>
-          <p><strong>Profil Technicien :</strong> Métiers, matos, expériences, showreel.</p>
-          <div class="tuto-tip"><strong>💡 Visibilité :</strong> Chaque section a un bouton pour masquer ce que tu ne veux pas montrer publiquement.</div>
+          <p>Pour apparaître dans l'Univers, crée un profil : <strong>Comédien·ne, Technicien·ne, Association, ou Entreprise</strong>. Chaque profil te rend visible auprès des autres membres de la communauté.</p>
+          <div class="tuto-tip"><strong>💡 Jusqu'à 3 profils :</strong> Tu peux cumuler plusieurs casquettes (ex : réalisateur·ice ET comédien·ne). Chaque profil vit indépendamment — il a ses propres messages, actualités et projets.</div>
+          <p><strong>Profil Comédien·ne :</strong> Nom de scène, mensurations, compétences, langues, sports (avec niveaux). Jusqu'à 3 photos (profil, plein-pied, portrait).</p>
+          <p><strong>Profil Technicien·ne :</strong> Métiers (perche, lumière, machino...), matos perso, expériences, showreel.</p>
+          <p><strong>Profil Association / Entreprise :</strong> Nom de structure, description, membres référents, zone d'action.</p>
+          <div class="tuto-tip"><strong>🔒 Visibilité :</strong> Chaque section a un bouton pour masquer ce que tu ne veux pas montrer publiquement. Tu contrôles ton image.</div>
+          <p><strong>📰 Fil d'actualités :</strong> Chaque profil a son propre fil. Publie une dispo, un projet en cours, une recherche de rôle... Les autres membres voient tes actus quand ils consultent ta fiche.</p>
+          <p><strong>📍 Géolocalisation :</strong> Ajoute ta ville et tu apparais pile au bon endroit sur la carte de l'Univers.</p>
           <p>Tarif, zone de mobilité, calendrier de dispos... Tout pour faciliter les contacts !</p>
+        `
+      },
+      {
+        id: 'multi-profils',
+        title: '🎭 Jongler entre tes profils',
+        content: `
+          <h3>Plusieurs identités, un seul compte</h3>
+          <p>Tu peux créer <strong>jusqu'à 3 profils publics</strong> sur le même compte. C'est idéal si tu portes plusieurs casquettes dans le cinéma : réalisateur·ice qui joue aussi, technicien·ne qui gère sa propre boîte de prod, comédien·ne qui porte une association...</p>
+          <p><strong>Créer un nouveau profil :</strong> Va dans <em>Mes Profils Publics</em>, clique sur <em>+ Nouveau profil</em>. Le compteur N/3 t'indique combien il t'en reste à créer.</p>
+          
+          <h3>Le sélecteur "Profil actif"</h3>
+          <p>En haut à droite de toutes les pages, à côté du bouton Mode, tu trouves le <strong>sélecteur de profil actif</strong>. Il affiche le profil avec lequel tu interagis en ce moment. Clique dessus pour basculer d'un profil à l'autre.</p>
+          <div class="tuto-tip"><strong>💡 Pourquoi c'est important :</strong> Le profil actif détermine tout ! Tes messages, tes projets, tes actualités... tout ce que tu vois et tout ce que tu envoies est lié au profil choisi à ce moment-là.</div>
+          
+          <h3>Qu'est-ce qui change selon le profil actif ?</h3>
+          <p><strong>💬 Messagerie :</strong> Tu ne vois que les messages reçus/envoyés par ce profil. Bascule pour voir la boîte de l'autre.</p>
+          <p><strong>📁 Mes projets :</strong> Tu ne vois que les projets où ce profil est owner ou invité. Chaque profil a sa propre liste de projets.</p>
+          <p><strong>📰 Actualités :</strong> Chaque profil publie et gère son propre fil.</p>
+          <p><strong>✉️ Nouveaux messages :</strong> Quand tu écris à quelqu'un, le destinataire voit que ton profil X t'a contacté·e, pas "Guillaume en général".</p>
+          
+          <h3>Inviter quelqu'un sur un projet</h3>
+          <p>Quand tu invites une personne dans ton projet, une modale te demande <strong>quel profil de cette personne tu vises</strong>. Exemple : Bob a un profil Comédien et un profil Chef-op. Tu veux l'inviter comme comédien pour jouer, pas comme chef-op ? Tu choisis à la source.</p>
+          <div class="tuto-tip"><strong>💡 Bob ne voit l'invitation que sur son profil Comédien.</strong> Quand il bascule sur son profil Chef-op, rien n'apparaît. C'est propre et ciblé.</div>
+          
+          <h3>Plusieurs casquettes sur le même projet</h3>
+          <p>Tu es <strong>réalisateur·ice ET comédien·ne</strong> de ton film ? Tu peux t'inviter toi-même avec ton autre profil. Ton projet te verra alors avec deux étiquettes : propriétaire (réal) et acteur (casting). Parfait pour l'auto-distribution ou les micro-budgets.</p>
+          
+          <h3>Dans l'Univers</h3>
+          <p>Quand tu survoles un profil sur la carte, des <strong>lignes pointillées violettes</strong> relient automatiquement tous les profils du même user. Tu vois d'un coup d'œil qui a plusieurs identités et où ils sont.</p>
+          <p>Quand tu cliques sur une fiche, une <strong>bannière ‹ ›</strong> apparaît en haut si la personne a d'autres profils. Tu peux naviguer directement entre ses profils sans fermer la fiche.</p>
+          
+          <div class="tuto-tip"><strong>⚡ Astuce :</strong> Le profil actif se mémorise entre tes sessions. Tu reviens là où tu étais. Il est aussi <strong>verrouillé dans un projet ouvert</strong> : tu ne peux basculer que vers les profils qui sont invités dans ce projet.</div>
         `
       },
       {
@@ -48983,11 +49155,92 @@ ${window.location.origin}${window.location.pathname}
         title: '👥 Collaboration',
         content: `
           <h3>Travaille en équipe</h3>
-          <p>Invite des collaborateurs par email avec un rôle : Lecteur, Contributeur, ou Admin.</p>
-          <p>Les modifications se synchronisent en temps réel. Tout le monde voit les changements instantanément.</p>
-          <p><strong>Chat intégré :</strong> Discutez sans quitter l'application.</p>
-          <p><strong>Commentaires :</strong> Sur les scènes du séquencier pour garder l'historique des discussions créatives.</p>
-          <div class="tuto-tip"><strong>💡 Contrôle :</strong> Seul le propriétaire peut supprimer le projet ou changer les permissions.</div>
+          <p>Moteur est pensé pour la collaboration. Invite des collaborateurs par email via le bouton <em>📤 Partager</em> de ton projet, choisis leur rôle, et ils reçoivent une invitation directe dans leur messagerie.</p>
+          
+          <h3>Les 3 rôles</h3>
+          <p><strong>👑 Propriétaire (owner) :</strong> C'est toi, qui as créé le projet. Tu peux tout faire : inviter, modifier, supprimer, exporter. Un seul propriétaire par projet.</p>
+          <p><strong>✏️ Éditeur :</strong> Peut modifier tous les contenus (scénario, séquencier, dépouillement, planning, budget...). Ne peut pas supprimer le projet ni changer les permissions des autres.</p>
+          <p><strong>👁️ Lecteur :</strong> Lecture seule. Voit tout mais ne peut rien modifier. Idéal pour les producteurs ou partenaires que tu veux tenir informés.</p>
+          
+          <h3>Invitations ciblées multi-profils</h3>
+          <p>Quand tu invites quelqu'un, tu vois automatiquement tous ses profils publics (ex : Comédien + Chef-op). <strong>Choisis lequel tu vises</strong> à l'invitation. L'invitation arrive sur ce profil précis, pas "en général".</p>
+          <div class="tuto-tip"><strong>💡 Plusieurs casquettes sur un projet :</strong> Tu peux inviter la même personne avec deux profils différents. Exemple : tu montes un film, tu joues aussi dedans → tu t'invites toi-même avec ton profil acteur. Ton projet te voit alors avec deux étiquettes.</div>
+          
+          <h3>Temps réel</h3>
+          <p>Les modifications se synchronisent instantanément entre tous les membres connectés. Si quelqu'un modifie une scène pendant que tu la regardes, tu vois le changement apparaître.</p>
+          <p><strong>🔒 Verrous automatiques :</strong> Pour éviter les conflits d'édition simultanée, le système pose un verrou visuel quand quelqu'un est en train de modifier un élément. Tu vois qui travaille sur quoi.</p>
+          <p><strong>👁 Présence :</strong> Les avatars des membres en ligne apparaissent en haut. Tu sais qui est sur le projet en même temps que toi.</p>
+          
+          <h3>Communication interne</h3>
+          <p><strong>💬 Chat intégré :</strong> Canaux de discussion par projet (général + canaux personnalisés). Mentions, historique, notifications. Plus besoin de jongler avec WhatsApp ou Discord.</p>
+          <p><strong>💭 Commentaires :</strong> Sur chaque scène du séquencier pour les discussions créatives. L'historique reste attaché à la scène, tu retrouves facilement pourquoi telle décision a été prise.</p>
+          
+          <h3>Gestion des permissions</h3>
+          <p>Le propriétaire peut à tout moment <strong>changer le rôle</strong> d'un membre (editor → viewer par exemple), ou <strong>retirer l'accès</strong>. Il peut aussi définir des permissions fines par onglet (qui peut éditer quoi).</p>
+          <div class="tuto-tip"><strong>⚠️ Contrôle :</strong> Seul le propriétaire peut supprimer le projet ou changer les permissions. Les autres membres peuvent quitter le projet à tout moment.</div>
+        `
+      },
+      {
+        id: 'messages',
+        title: '💬 Messages & Notifications',
+        content: `
+          <h3>Ta messagerie Moteur</h3>
+          <p>Tous les échanges avec les autres membres passent par ta messagerie intégrée, accessible depuis le dashboard ou l'icône 📬 en haut.</p>
+          
+          <h3>Types de messages</h3>
+          <p><strong>💌 Messages directs :</strong> Quelqu'un t'a contacté via ta fiche dans l'Univers.</p>
+          <p><strong>🎬 Invitations projet :</strong> On t'invite à rejoindre un projet (accepte/refuse).</p>
+          <p><strong>📅 Convocations :</strong> Dates de tournage, horaires, lieux (issues du planning).</p>
+          <p><strong>ℹ️ Infos :</strong> Notifications automatiques (scène modifiée, commentaire sur ton travail, etc.).</p>
+          
+          <h3>Filtrage automatique par profil</h3>
+          <p>Si tu as plusieurs profils (comédien + technicien par exemple), ta messagerie <strong>filtre automatiquement</strong> selon le profil actif choisi en haut à droite. Tu ne vois que les messages adressés à ce profil-là.</p>
+          <div class="tuto-tip"><strong>💡 Pour voir l'autre boîte :</strong> Bascule simplement de profil via le sélecteur en haut à droite. Les messages de l'autre profil apparaissent instantanément.</div>
+          
+          <h3>Envoyer un message</h3>
+          <p>Depuis l'Univers, clique sur une fiche puis <em>✉️ Contacter</em>. Le message part <strong>de ton profil actif</strong> (celui sélectionné en haut à droite) vers <strong>le profil consulté</strong>. Le destinataire voit bien quel profil t'a écrit.</p>
+          
+          <h3>Notifications</h3>
+          <p>Une <strong>cloche 🔔</strong> dans le header t'alerte des nouveautés en temps réel :</p>
+          <ul>
+            <li>Nouveau message reçu</li>
+            <li>Invitation à un projet</li>
+            <li>Commentaire sur une de tes scènes</li>
+            <li>Modification majeure sur un projet où tu es membre</li>
+          </ul>
+          <p>Clique sur la cloche pour voir l'historique. Les non-lues sont signalées par une pastille rouge.</p>
+          
+          <div class="tuto-tip"><strong>🛡️ Modération :</strong> En cas de contenu inapproprié, signale le profil via le bouton 🚩 sur sa fiche. L'équipe Moteur modère et peut attribuer des avertissements (jaune), suspensions (rouge) ou bannissements (noir).</div>
+        `
+      },
+      {
+        id: 'rapports',
+        title: '📊 Rapports de script',
+        content: `
+          <h3>Le journal de tournage</h3>
+          <p>Le <strong>rapport de script</strong> (ou "script continuity") est un outil essentiel pendant le tournage. Il consigne pour chaque plan tourné : les prises réalisées, leur qualité, les raccords, les choix de la réal...</p>
+          
+          <h3>Organisation</h3>
+          <p>Dans l'onglet <em>Rapports</em>, tu retrouves à gauche <strong>toutes les scènes et leurs plans</strong>. Clique sur un plan pour remplir sa fiche.</p>
+          <p>Les plans proviennent automatiquement du storyboard. Si tu as pensé ton découpage, le rapport est déjà structuré.</p>
+          
+          <h3>Fiche d'un plan</h3>
+          <p>Pour chaque plan, tu remplis :</p>
+          <ul>
+            <li><strong>Infos générales</strong> (numéro, type, description) — auto-remplies depuis le storyboard</li>
+            <li><strong>Dialogues</strong> de la scène — auto-remplis depuis le scénario</li>
+            <li><strong>Caméra/Son/Lumière</strong> : matos, réglages, remarques techniques</li>
+            <li><strong>Prises :</strong> ajoute autant de prises que nécessaire avec le bouton <em>+ Prise</em></li>
+          </ul>
+          
+          <h3>Gestion des prises</h3>
+          <p>Pour chaque prise : <strong>numéro son, numéro image, qualité son, qualité image, qualité du jeu, notes</strong>. Tu peux aussi <strong>⭐ étoiler</strong> la prise qui est la bonne (celle à monter).</p>
+          <div class="tuto-tip"><strong>💡 Sur le plateau :</strong> La script rempli le rapport en temps réel pendant les tournages. Chaque prise est ajoutée instantanément, visible par l'équipe entière grâce à la synchronisation.</div>
+          
+          <h3>Exports pro</h3>
+          <p><strong>📄 Export PDF (plan par plan) :</strong> Le rapport complet d'un plan pour archive.</p>
+          <p><strong>📦 Export Tous :</strong> Tous les rapports du projet en un seul PDF, prêt pour la régie ou le montage.</p>
+          <div class="tuto-tip"><strong>⚡ Gain de temps montage :</strong> Le monteur reçoit un document complet avec les bonnes prises étoilées. Il sait exactement quoi charger dans sa timeline.</div>
         `
       },
       {
@@ -55725,7 +55978,7 @@ const Weather = {
       }
   };
 
-  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile };
+  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation };
 })();
 </script>
 
