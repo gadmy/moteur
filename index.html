@@ -26,6 +26,87 @@ HTML actuel
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v2.6.1 — Multi-profils bout-en-bout (22 Avr. 2026)
+- I1 SQL : colonne owner_email sur user_profiles, contrainte UNIQUE email supprimée
+- I1 SQL : trigger check_max_profiles_per_user (limite 3 profils par compte)
+- I1 SQL : RLS policies mises à jour (viewable/insertable/updatable + admin override)
+- I2 : refactor save/load, crypto.randomUUID(), upsert par id, loadProfiles charge
+       tous les profils via owner_email (tableau au lieu de maybeSingle)
+- I2 : bouton "+ Nouveau profil" affiche compteur N/3 et se désactive à 3
+- I3 : module ActiveProfile (localStorage moteur_active_profile_id)
+       sélecteur "Profil actif" global injecté à côté de chaque bouton Mode
+       menu déroulant si plusieurs profils, bouton disabled si 1 seul
+- I3 : ActiveProfile.clear() à la déconnexion
+- I4a SQL : colonnes from_profile_id, to_profile_id sur messages + FK + index
+- I4b : Messages.send utilise ActiveProfile.getId() comme expéditeur
+       from_name = nom du profil actif (plus authentique)
+       id auto-généré DB (gen_random_uuid) au lieu de Utils.generateUniqueId
+- I4c : chargement messages filtré par to_profile_id/from_profile_id
+- I4c : suppression du select "Tous les profils" dans HTML messagerie (redondant)
+- I4d : ActiveProfile.selectAndClose rafraîchit messagerie + liste projets auto
+- I5a SQL : colonne owner_profile_id sur projects, FK SET NULL, index partiel
+- I5a : migration best-effort projets existants vers owner_profile_id
+- I5b SQL : colonne profile_id sur project_members + FK + index
+- I5b SQL : contrainte UNIQUE NULLS NOT DISTINCT (project_id,email,profile_id)
+       permet à un user d'être membre d'un projet via plusieurs de ses profils
+       (ex : owner Réalisateur + acteur dans son propre film)
+- I5c : refactor showOwnerRoleModal (radio unique, pré-sélection profil actif)
+- I5d : doCreateProject stocke owner_profile_id + ajoute owner au project_members
+       avec profile_id + email
+- I5e : getProjectsList filtre par profil actif (match ou NULL legacy)
+- I5f HTML : select #share-target-profile dans modale Partager
+- I5f : Invitations.loadTargetProfiles(email) charge les profils publics de l'email
+       et remplit le sélecteur dynamiquement
+- I5f : sendInvitation utilise targetProfileId dans messages et project_members
+       invitation signée du profil propriétaire (from_profile_id)
+- I5f : checkPendingInvitations upsert avec email + profile_id du cible
+- I5g : loadProject récupère toutes les memberships, détermine rôle par profil actif
+       match exact si possible, sinon bascule auto sur le profil membre
+- I5g : buildSelectorHtml async, filtre profils disponibles quand dans un projet
+- I6a : index brothersByEmail (owner_email → liste profils), markerPositions
+- I6b : polylignes pointillées violettes au survol vers les profils frères
+- I6c : clearBrotherLines au mouseout
+- I6d : bannière carrousel ‹ › dans la fiche profil (navigation entre frères)
+- H SQL : colonne profile_id sur profile_actualites + FK CASCADE + index
+- H : publishActualite utilise le profil actif comme auteur
+       bypass admin de la limite 1 publication/jour/profil (tests)
+- H : loadMyActualites filtre par profil_id (onglet courant)
+       switchToProfile rafraîchit les actualités
+- Fix : normalisation created_at / createdAt (snake_case DB vs camelCase JSON)
+- Fix : policy INSERT manquante sur table notifications (auth non-null)
+- Fix : addCoordOffset avec positions mémorisées (lignes frères précises)
+
+v2.5 — Modération & Profils démo (22 Avr. 2026)
+- G1 SQL : table reports avec contrainte UNIQUE (reporter_email, reported_id)
+       index idx_reports_reporter_recent + partiel idx_reports_status_pending
+- G1 SQL : user_profiles.moderation_badge (yellow/red/black/NULL)
+       badge_reason, badge_set_at, badge_set_by + index partiel
+- G2 : reportProfile vérifie quota ≤5 signalements/7j avant INSERT
+       gestion erreur 23505 (doublon)
+- G2 : ConfirmModal supporte option hideCancel: true
+- G3 : span admin-pending-badge sur bouton Admin
+       Admin.refreshPendingBadge + setInterval 2 min + après chaque updateReportStatus
+- G4 : fonctions setProfileBadge / applyBadgeFromReport / removeBadgeFromReport
+- G4 : Admin.loadReports charge badges via .in('email', reportedEmails)
+- G4 : rendu MODÉRATION DU PROFIL avec boutons 🟡🔴⚫ + ⚪Retirer
+- G5a : pm-moderation-badge encart coloré dans modale profil
+       config couleurs yellow #f59e0b, red #dc2626, black #1f2937
+- RLS : policy "Admins can update any profile" (auth.jwt email ∈ adminEmails)
+- Fix : tooltips boutons ☆ et 🚩 coupés par overflow (ajout data-tooltip-pos bottom)
+- J1 SQL : colonne is_demo boolean sur user_profiles
+       380 profils démo marqués, 3 réels + index partiel
+- J2 : checkbox "Exclure les profils démo" à côté bouton stats
+       Admin.excludeDemoProfiles + toggleExcludeDemo + filtre loadStats
+
+v2.4 — Persistance navigation & UX (21 Avr. 2026)
+- F : module NavMemory (localStorage moteur_nav_project_id/tab/subtab)
+- F : capture dans UI.switchCategory/switchTab + Store.loadProject
+- F : Store.exitToDashboard (appelé par bouton ⬅ Dashboard) pour NavMemory.clear
+- F : restauration dans UI.showDashboard (capture avant clear + setTimeout 500ms)
+- F Fix racine : UI.hideAllViews n'éteignait pas #landing-view (z-index 9998)
+       ajout display:none pour corriger le bug "écran blanc après F5"
+- F : Auth.logout fait NavMemory.clear()
+
 v2.3.6 — Univers & géocodage
 - Univers : catégories Associations/Entreprises visibles, plafond 15→20
 - Migration SQL : colonnes user_profiles.latitude/longitude + index partiel
@@ -6079,7 +6160,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.6.1</p>
+      <p>v2.6.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -55446,9 +55527,22 @@ const Weather = {
       },
       
       check: async () => {
-          // Vérifier si l'utilisateur a déjà accepté
+          // Vérifier si l'utilisateur a déjà accepté (sur le profil courant)
           if(state.userProfile && state.userProfile.terms_accepted) {
               return true;
+          }
+          // Multi-profils : considérer accepté si AU MOINS UN des profils du compte l'a accepté
+          if(state.currentUser?.email) {
+              try {
+                  const email = state.currentUser.email.toLowerCase();
+                  const { data, error } = await supabase
+                      .from('user_profiles')
+                      .select('id')
+                      .or(`owner_email.eq.${email},email.eq.${email}`)
+                      .eq('terms_accepted', true)
+                      .limit(1);
+                  if(!error && data && data.length > 0) return true;
+              } catch(e) {}
           }
           return false;
       }
