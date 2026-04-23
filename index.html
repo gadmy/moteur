@@ -1086,7 +1086,7 @@ V1.0 - Base solide (Déc. 2024)
 
   /* Brutalist supprimé */
   * { box-sizing: border-box; }
-  body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; margin: 0; background: var(--bg); color: var(--text-main); display: -webkit-box; display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; height: 100vh; height: calc(var(--vh, 1vh) * 100); min-height: -webkit-fill-available; overflow: hidden; -webkit-overflow-scrolling: touch; }
+  body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; margin: 0; background: var(--bg); color: var(--text-main); display: -webkit-box; display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; height: 100vh; height: calc(var(--vh, 1vh) * 100); min-height: -webkit-fill-available; overflow: hidden; -webkit-overflow-scrolling: touch; }
 
   /* --- AUTH & DASHBOARD --- */
   #auth-view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); z-index: 9999; display: flex; justify-content: center; align-items: center; flex-direction: column; }
@@ -6160,7 +6160,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.6.2</p>
+      <p>v2.6.3</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -11355,13 +11355,16 @@ crewRoles: {
       load: async () => {
           if (!state.currentUser?.email) return;
           try {
+              // Multi-profils : plusieurs lignes possibles, on prend la première qui a des préférences
+              const email = state.currentUser.email.toLowerCase();
               const { data, error } = await supabase
                   .from('user_profiles')
                   .select('preferences')
-                  .eq('email', state.currentUser.email.toLowerCase())
-                  .maybeSingle();
+                  .or(`owner_email.eq.${email},email.eq.${email}`)
+                  .not('preferences', 'is', null)
+                  .limit(1);
               if (error) { console.warn('[PreferencesSync] load error:', error.message); return; }
-              const remote = data?.preferences;
+              const remote = data && data.length > 0 ? data[0].preferences : null;
               if (remote && Object.keys(remote).length > 0) {
                   PreferencesSync.SYNC_KEYS.forEach(key => {
                       if (remote[key] !== undefined) {
@@ -11390,10 +11393,12 @@ crewRoles: {
               } catch(e) {}
           });
           try {
+              // Multi-profils : mettre à jour tous les profils du compte pour garder les préférences synchrones
+              const email = state.currentUser.email.toLowerCase();
               const { error } = await supabase
                   .from('user_profiles')
                   .update({ preferences: prefs })
-                  .eq('email', state.currentUser.email.toLowerCase());
+                  .or(`owner_email.eq.${email},email.eq.${email}`);
               if (error) console.warn('[PreferencesSync] push error:', error.message);
           } catch(e) { console.warn('[PreferencesSync] push exception:', e); }
       }
