@@ -6079,7 +6079,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.5.9</p>
+      <p>v2.6.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -7765,6 +7765,17 @@ body.presentation-mode .presentation-bar {
       <div class="profile-modal-role" id="pm-role">Métier</div>
       <div class="profile-modal-city" id="pm-city">📍 Ville</div>
       <div id="pm-moderation-badge" style="display:none; margin-top:12px; padding:10px 14px; border-radius:8px; font-size:0.85rem; text-align:left;"></div>
+      <!-- I6d: carrousel pour naviguer entre les profils du même user -->
+      <div id="pm-brothers-banner" style="display:none; margin-top:14px; padding:10px 12px; border-radius:8px; background:linear-gradient(135deg, rgba(139,92,246,0.1), rgba(236,72,153,0.08)); border:1px solid rgba(139,92,246,0.25); font-size:0.85rem;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+              <button id="pm-brothers-prev" onclick="app.Universe.switchToBrother(-1)" style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; cursor:pointer; padding:4px 10px; font-size:1rem; color:var(--text-main);" title="Profil précédent de cette personne">‹</button>
+              <div style="flex:1; text-align:center; color:var(--text-sec);">
+                  <div style="font-size:0.75rem; opacity:0.8;">👥 Cette personne a plusieurs profils</div>
+                  <div id="pm-brothers-label" style="font-weight:600; margin-top:2px;">Profil 1 / 1</div>
+              </div>
+              <button id="pm-brothers-next" onclick="app.Universe.switchToBrother(1)" style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; cursor:pointer; padding:4px 10px; font-size:1rem; color:var(--text-main);" title="Profil suivant de cette personne">›</button>
+          </div>
+      </div>
     </div>
     <div class="profile-modal-body">
       <div class="profile-modal-section" id="pm-bio-section">
@@ -44318,6 +44329,71 @@ const Universe = {
         Universe.brotherLines = [];
     },
     
+    // I6d: met à jour la bannière carrousel dans la fiche profil
+    updateBrothersBanner: (profile) => {
+        const banner = document.getElementById('pm-brothers-banner');
+        const label = document.getElementById('pm-brothers-label');
+        const prevBtn = document.getElementById('pm-brothers-prev');
+        const nextBtn = document.getElementById('pm-brothers-next');
+        if(!banner || !label) return;
+        
+        if(!profile || !profile.owner_email) {
+            banner.style.display = 'none';
+            return;
+        }
+        
+        // Récupérer les profils frères (depuis l'index)
+        const brothers = Universe.getBrothers(profile);
+        if(brothers.length === 0) {
+            banner.style.display = 'none';
+            return;
+        }
+        
+        // Grouper tous les profils du même user (y compris celui affiché)
+        const key = profile.owner_email.toLowerCase();
+        const allSiblings = (Universe.brothersByEmail[key] || []).slice();
+        // Tri stable : par nom
+        allSiblings.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        
+        const currentIndex = allSiblings.findIndex(p => p.id === profile.id);
+        const total = allSiblings.length;
+        
+        if(total <= 1) {
+            banner.style.display = 'none';
+            return;
+        }
+        
+        // Afficher
+        label.textContent = `Profil ${currentIndex + 1} / ${total}`;
+        banner.style.display = 'block';
+        
+        // Mémoriser pour la navigation
+        Universe._brothersList = allSiblings;
+        Universe._brothersIndex = currentIndex;
+        
+        // Désactiver les boutons en bout de liste (optionnel) ou permettre la rotation
+        if(prevBtn) prevBtn.disabled = false;
+        if(nextBtn) nextBtn.disabled = false;
+    },
+    
+    // I6d: navigue vers le profil frère précédent (-1) ou suivant (+1)
+    switchToBrother: (direction) => {
+        const list = Universe._brothersList;
+        if(!list || list.length === 0) return;
+        
+        let idx = (Universe._brothersIndex || 0) + direction;
+        // Rotation cyclique : -1 revient à la fin, +N revient au début
+        if(idx < 0) idx = list.length - 1;
+        if(idx >= list.length) idx = 0;
+        
+        const target = list[idx];
+        if(!target) return;
+        
+        Universe._brothersIndex = idx;
+        // Ouvrir la modale pour ce profil (recharge complète depuis DB pour données à jour)
+        Universe.openProfileModal(target);
+    },
+    
     // Initialiser la carte
     initMap: () => {
         if(Universe.map) return; // Déjà initialisée
@@ -46498,6 +46574,9 @@ const Universe = {
         }
         
         Universe.currentProfile = fullProfile;
+        
+        // I6d: mettre à jour la bannière des profils frères
+        Universe.updateBrothersBanner(fullProfile);
         
         // Photo
         const photoEl = document.getElementById('pm-photo');
