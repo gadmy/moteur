@@ -27,6 +27,75 @@ HTML actuel
                          HISTORIQUE DES VERSIONS
 ================================================================================
 
+HISTORIQUE DES VERSIONS
+================================================================================
+v2.9.4 — Séries multi-saisons : filtrage, saisons, numérotation (24 Avr. 2026)
+
+===== S4 — Scénario par épisode =====
+- Sélecteur d'épisode placé dans le header global (📺 S01 / 🎬 E01)
+  après expérimentations dans scénario/séquencier : plus pratique,
+  visible depuis toutes les vues, un seul source of truth
+- state.currentEpisodeId et ScriptEditor.switchEpisode gèrent l'état
+- Création de scène : episodeId auto-rattaché à l'épisode actif
+- Filtrage de l'affichage dans 4 vues :
+  * Scénario Vue Scènes (UI.renderScript)
+  * Scénario Vue Script continu (ScriptEditor.renderContinuous)
+  * Séquencier (UI.renderBoard)
+  * Storyboard (Storyboard.renderScenesList)
+- Helper UI.getScenesForCurrentView : filtre selon épisode actif
+- Messages adaptés pour les épisodes vides ("Aucune scène dans cet épisode")
+
+===== S6 — BeatBoard par épisode =====
+- BeatBoard.render utilise UI.getScenesForCurrentView
+- Rafraîchi automatiquement au switch d'épisode via switchEpisode
+
+===== S7 — Saisons multi-niveaux =====
+- Architecture : data.seasons = [{id, number, title, description}]
+  Chaque épisode a un seasonId obligatoire
+- Migration automatique douce : à l'ouverture d'une série sans saisons,
+  création de Saison 1 et rattachement de tous les épisodes existants
+  (setTimeout + Store.save pour persister la migration en DB)
+
+- S7.2 Header : double sélecteur 📺 S01 ▼ 🎬 E01 ▼
+  Episodes.switchSeason + ScriptEditor.switchEpisode synchronisés
+  Le dropdown épisode est filtré par saison active
+
+- S7.3 Onglet '📺 Saisons' :
+  * Module Seasons complet (render, add, remove, setTitle, openSeason,
+    drag&drop pour réordonner)
+  * CSS gradient violet/rose pour distinguer visuellement des épisodes
+  * Badge "N épisodes" sur chaque carte saison
+  * Suppression en cascade avec confirmation (saison + épisodes + scènes)
+  * Re-numérotation automatique après suppression/drag&drop
+  * Protection : impossible de supprimer la dernière saison
+
+- S7.4 Onglet Épisodes filtré par saison active :
+  * Episodes.render filtre par state.currentSeasonId
+  * Compteur affiche "N épisodes (S01 — Titre)"
+  * Ajout d'épisode rattaché à la saison active (numéro = epsInSeason+1)
+  * Suppression re-numérote uniquement les eps de la même saison
+  * Drag & drop limité à la saison active (bloqué sinon avec toast)
+
+- S7.5 Création projet Série :
+  * Modale : 2 champs "Nombre de saisons" + "Épisodes par saison"
+  * doCreateProject crée N saisons × M épisodes
+  * _pendingSeasonCount et _pendingEpisodeCount
+
+- S7 Numérotation des scènes :
+  * Helper UI.formatSceneNumber(scene, idx)
+    - Film : "#17"
+    - Série : "S01E03-SC05" (saison + épisode + index dans l'épisode)
+  * Appliqué dans 5 vues : séquencier, scénario (2 vues), storyboard,
+    beatboard
+
+- S7 Fiches personnage/acteur/décor :
+  * Section "Apparaît dans" modernisée avec format S01E01-SC01
+  * Nouvelle section "🎬 Joue dans" pour les comédiens
+    (via breakdown.COMEDIENS)
+  * CSS .appearance-tag : pilules monospace pour les numéros de scène
+
+v2.7.8 — Projets Séries — Phases S1 à S3 (24 Avr. 2026)
+
 v2.7.8 — Projets Séries — Phases S1 à S3 (24 Avr. 2026)
 - Nouvelle architecture : un projet peut être un film OU une série
   Les séries partagent nativement casting/décors/ressources/planning
@@ -10713,6 +10782,138 @@ body.presentation-mode .presentation-bar {
   </div>
   
   <script>
+// =====================================================================
+// ErrorLogger — capteur global d'erreurs JS pour diagnostic des bugs
+// =====================================================================
+const ErrorLogger = {
+    STORAGE_KEY: 'moteur_error_log',
+    MAX_ERRORS: 20,
+    _lastToastTime: 0,
+    _toastThrottle: 3000, // max 1 toast toutes les 3 secondes pour éviter le spam
+    
+    // Récupère la liste des erreurs stockées
+    getErrors: () => {
+        try {
+            const raw = localStorage.getItem(ErrorLogger.STORAGE_KEY);
+            return raw ? JSON.parse(raw) : [];
+        } catch(e) { return []; }
+    },
+    
+    // Ajoute une erreur au log
+    addError: (type, message, source, line, col, stack) => {
+        try {
+            const errors = ErrorLogger.getErrors();
+            const entry = {
+                ts: new Date().toISOString(),
+                url: (window.location.pathname || '') + (window.location.hash || ''),
+                type: type,
+                message: String(message || 'Erreur inconnue').substring(0, 500),
+                source: source ? String(source).substring(0, 200) : '',
+                line: line || 0,
+                col: col || 0,
+                stack: stack ? String(stack).substring(0, 2000) : ''
+            };
+            errors.unshift(entry);
+            // Limiter à MAX_ERRORS
+            if(errors.length > ErrorLogger.MAX_ERRORS) errors.length = ErrorLogger.MAX_ERRORS;
+            localStorage.setItem(ErrorLogger.STORAGE_KEY, JSON.stringify(errors));
+            return entry;
+        } catch(e) {
+            console.error('ErrorLogger.addError failed:', e);
+            return null;
+        }
+    },
+    
+    // Vide le log
+    clear: () => {
+        localStorage.removeItem(ErrorLogger.STORAGE_KEY);
+        console.log('[ErrorLogger] Log vidé');
+    },
+    
+    // Affiche un résumé dans la console
+    show: () => {
+        const errors = ErrorLogger.getErrors();
+        if(errors.length === 0) {
+            console.log('%c[ErrorLogger] ✅ Aucune erreur enregistrée', 'color:green; font-weight:bold');
+            return;
+        }
+        console.log(`%c[ErrorLogger] ${errors.length} erreur(s) récente(s)`, 'color:red; font-weight:bold; font-size:14px');
+        errors.forEach((e, i) => {
+            console.group(`#${i+1} - ${e.ts} - ${e.type}`);
+            console.log('Message:', e.message);
+            console.log('Source:', e.source + ':' + e.line + ':' + e.col);
+            if(e.stack) console.log('Stack:', e.stack);
+            console.groupEnd();
+        });
+        console.log('%cCommandes utiles:', 'font-weight:bold');
+        console.log('  ErrorLogger.clear()  - Vider le log');
+        console.log('  ErrorLogger.copy()   - Copier le log dans le presse-papier');
+    },
+    
+    // Copie le log dans le presse-papier (pour envoyer facilement)
+    copy: async () => {
+        const errors = ErrorLogger.getErrors();
+        const text = errors.map((e, i) => 
+            `#${i+1} [${e.ts}] ${e.type}\n  ${e.message}\n  ${e.source}:${e.line}:${e.col}\n  ${e.url}\n${e.stack ? '  Stack:\n' + e.stack.split('\n').map(l => '    '+l).join('\n') : ''}`
+        ).join('\n\n');
+        try {
+            await navigator.clipboard.writeText(text || 'Aucune erreur enregistrée');
+            console.log('%c✅ Log copié dans le presse-papier', 'color:green');
+        } catch(e) {
+            console.log('Copie impossible, voici le texte :');
+            console.log(text);
+        }
+    },
+    
+    // Affiche un toast d'alerte visible dans l'UI
+    showToast: (message) => {
+        const now = Date.now();
+        if(now - ErrorLogger._lastToastTime < ErrorLogger._toastThrottle) return; // throttling
+        ErrorLogger._lastToastTime = now;
+        
+        // Essayer d'utiliser Utils.toast si disponible
+        try {
+            if(typeof app !== 'undefined' && app.Utils && app.Utils.toast) {
+                app.Utils.toast('⚠️ Erreur JS détectée — Tape ErrorLogger.show() en console (F12)', 'error', 6000);
+                return;
+            }
+        } catch(e) {}
+        
+        // Fallback : toast custom si Utils.toast pas encore dispo
+        const div = document.createElement('div');
+        div.style.cssText = 'position:fixed; top:20px; right:20px; background:#dc2626; color:white; padding:12px 20px; border-radius:8px; z-index:99999; box-shadow:0 4px 15px rgba(0,0,0,0.3); font-family:system-ui, sans-serif; font-size:14px; max-width:400px;';
+        div.innerHTML = '⚠️ <strong>Erreur JS détectée</strong><br><span style="font-size:0.85em; opacity:0.9;">Tape <code>ErrorLogger.show()</code> en console (F12)</span>';
+        document.body.appendChild(div);
+        setTimeout(() => div.remove(), 6000);
+    }
+};
+
+// Installer le capteur global d'erreurs JS
+window.addEventListener('error', function(event) {
+    const entry = ErrorLogger.addError(
+        'JS Error',
+        event.message,
+        event.filename,
+        event.lineno,
+        event.colno,
+        event.error && event.error.stack ? event.error.stack : null
+    );
+    if(entry) ErrorLogger.showToast();
+});
+
+// Installer le capteur des promesses rejetées non gérées
+window.addEventListener('unhandledrejection', function(event) {
+    const reason = event.reason;
+    const msg = reason && reason.message ? reason.message : String(reason);
+    const stack = reason && reason.stack ? reason.stack : null;
+    const entry = ErrorLogger.addError('Promise rejetée', msg, '', 0, 0, stack);
+    if(entry) ErrorLogger.showToast();
+});
+
+// Exposer en global pour usage console
+window.ErrorLogger = ErrorLogger;
+console.log('%c[ErrorLogger] ✅ Capteur d\'erreurs actif - tape ErrorLogger.show() pour voir le log', 'color:#2b6ef6; font-weight:bold');
+
 const app = (function(){
 
   // --- CONFIGURATION SUPABASE ---
