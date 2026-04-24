@@ -4046,6 +4046,14 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .board-main { flex-grow: 1; overflow-y: auto; }
   
   .seq-header-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .seq-episode-banner { display: flex; align-items: center; gap: 12px; padding: 10px 15px; margin-bottom: 12px; background: linear-gradient(135deg, rgba(139,92,246,0.12), rgba(236,72,153,0.08)); border: 1px solid rgba(139,92,246,0.25); border-radius: 8px; font-size: 0.9rem; }
+  .seq-ep-label { font-weight: 600; color: var(--text-main); white-space: nowrap; }
+  .seq-episode-selector { padding: 6px 12px; border: 1px solid var(--primary); background: var(--panel-bg); color: var(--text-main); border-radius: 6px; font-weight: 600; font-size: 0.9rem; cursor: pointer; min-width: 140px; }
+  .seq-ep-hint { font-size: 0.8rem; color: var(--text-sec); flex: 1; text-align: right; }
+  @media (max-width: 700px) {
+    .seq-episode-banner { flex-wrap: wrap; }
+    .seq-ep-hint { display: none; }
+  }
   .seq-input-group { display: flex; gap: 5px; flex-grow: 1; align-items: center; }
   #inpPre { width: 100px; text-transform: uppercase; font-weight: bold; text-align: center; }
   #inpLoc { flex-grow: 1; text-transform: uppercase; font-weight: bold; }
@@ -6391,7 +6399,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.8.2</p>
+      <p>v2.8.3</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -9324,6 +9332,12 @@ body.presentation-mode .presentation-bar {
                 </div>
             </div>
             <div class="board-main" id="sequencer-view">
+                <!-- S4 : bannière d'épisode actif (séries uniquement) -->
+                <div id="seq-episode-banner" class="seq-episode-banner" style="display:none;">
+                    <span class="seq-ep-label">🎬 Épisode actif :</span>
+                    <select id="seq-episode-selector" class="seq-episode-selector" onchange="app.ScriptEditor.switchEpisode(this.value, 'sequencer')"></select>
+                    <span class="seq-ep-hint">Les scènes créées ci-dessous seront rattachées à cet épisode.</span>
+                </div>
                 <div id="edit-scene-form" class="controls-row" style="background:var(--panel-bg); padding:15px; border-radius:8px; border:1px solid var(--border); margin-bottom:15px; display:block">
                   <div class="seq-header-row">
                       <div class="seq-input-group">
@@ -15897,7 +15911,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               els.quickNav.style.display = 'none';
           }
           if(tabName === 'script') { ScriptEditor.initEpisodeSelector(); UI.renderScript(); } 
-          if(tabName === 'board') UI.renderBoard(); 
+          if(tabName === 'board') { ScriptEditor.initEpisodeSelector(); UI.renderBoard(); } 
           if(tabName === 'chars') { Actions.syncCharacters(); Store.save(); UI.renderDataTab('characters', els.charContainer); } 
           if(tabName === 'actors') { Actions.syncActorsFromPublicProfiles().then(() => UI.renderDataTab('actors', els.actorContainer)); } 
           if(tabName === 'locs') { Actions.syncLocations(); Store.save(); UI.renderDataTab('locations', els.locContainer); } 
@@ -24121,50 +24135,67 @@ const DrawingEditor = {
           }
       },
       
-      // S4 : gestion du sélecteur d'épisode (séries uniquement)
+      // S4 : gestion des sélecteurs d'épisode (scénario + séquencier, séries uniquement)
       initEpisodeSelector: () => {
-          const sel = document.getElementById('script-episode-selector');
-          if(!sel) return;
+          const selScript = document.getElementById('script-episode-selector');
+          const selSeq = document.getElementById('seq-episode-selector');
+          const bannerSeq = document.getElementById('seq-episode-banner');
           
-          // Pour les films : masquer le sélecteur, pas d'épisode actif
+          // Pour les films : masquer les sélecteurs, pas d'épisode actif
           if(state.currentProjectType !== 'series') {
-              sel.style.display = 'none';
+              if(selScript) selScript.style.display = 'none';
+              if(bannerSeq) bannerSeq.style.display = 'none';
               state.currentEpisodeId = null;
               return;
           }
           
           const episodes = state.data.episodes || [];
           if(episodes.length === 0) {
-              sel.style.display = 'none';
+              if(selScript) selScript.style.display = 'none';
+              if(bannerSeq) bannerSeq.style.display = 'none';
               return;
           }
           
-          // Peupler le dropdown avec les épisodes
-          sel.innerHTML = episodes.map(ep => {
+          // Peupler les dropdowns avec les épisodes
+          const optionsHtml = episodes.map(ep => {
               const num = String(ep.number).padStart(2,'0');
               const title = ep.title ? ' — ' + Utils.escape(ep.title) : '';
               return `<option value="${ep.id}">E${num}${title}</option>`;
           }).join('');
           
+          if(selScript) selScript.innerHTML = optionsHtml;
+          if(selSeq) selSeq.innerHTML = optionsHtml;
+          
           // Sélectionner l'épisode courant (déjà actif ou premier)
           if(!state.currentEpisodeId || !episodes.find(e => e.id === state.currentEpisodeId)) {
               state.currentEpisodeId = episodes[0].id;
           }
-          sel.value = state.currentEpisodeId;
-          sel.style.display = 'inline-block';
+          
+          if(selScript) { selScript.value = state.currentEpisodeId; selScript.style.display = 'inline-block'; }
+          if(selSeq) selSeq.value = state.currentEpisodeId;
+          if(bannerSeq) bannerSeq.style.display = 'flex';
       },
       
       // Bascule sur un autre épisode : change l'épisode actif et re-rend les vues
-      switchEpisode: (episodeId) => {
+      // Le paramètre 'source' optionnel indique qui a déclenché le switch ('script' ou 'sequencer')
+      switchEpisode: (episodeId, source) => {
           if(!episodeId) return;
           state.currentEpisodeId = episodeId;
           
-          // Re-render de la vue courante (scènes ou continu)
+          // Synchroniser les 2 sélecteurs
+          const selScript = document.getElementById('script-episode-selector');
+          const selSeq = document.getElementById('seq-episode-selector');
+          if(selScript && selScript.value !== episodeId) selScript.value = episodeId;
+          if(selSeq && selSeq.value !== episodeId) selSeq.value = episodeId;
+          
+          // Re-render de la vue courante
           if(ScriptEditor.viewMode === 'continuous') {
               ScriptEditor.renderContinuous();
           } else {
               UI.renderScript();
           }
+          // Re-render aussi le séquencier (filtrage à venir en phase S5, pour l'instant pas d'effet)
+          if(typeof UI.renderBoard === 'function') UI.renderBoard();
       },
       
       renderContinuous: () => {
