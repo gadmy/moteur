@@ -4049,8 +4049,9 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   /* S4 : sélecteur global d'épisode dans le header */
   .header-episode-wrapper { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; padding: 3px 8px; background: linear-gradient(135deg, rgba(139,92,246,0.15), rgba(236,72,153,0.1)); border: 1px solid rgba(139,92,246,0.3); border-radius: 6px; }
   .header-ep-label { font-size: 1rem; }
-  .header-episode-selector { padding: 4px 8px; border: 1px solid var(--primary); background: var(--panel-bg); color: var(--text-main); border-radius: 4px; font-weight: 600; font-size: 0.85rem; cursor: pointer; min-width: 120px; max-width: 220px; }
+  .header-episode-selector { padding: 4px 8px; border: 1px solid var(--primary); background: var(--panel-bg); color: var(--text-main); border-radius: 4px; font-weight: 600; font-size: 0.85rem; cursor: pointer; min-width: 90px; max-width: 220px; }
   .header-episode-selector:hover { background: rgba(43,110,246,0.08); }
+  #header-season-selector { min-width: 70px; }
   .seq-input-group { display: flex; gap: 5px; flex-grow: 1; align-items: center; }
   #inpPre { width: 100px; text-transform: uppercase; font-weight: bold; text-align: center; }
   #inpLoc { flex-grow: 1; text-transform: uppercase; font-weight: bold; }
@@ -6396,7 +6397,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.8.9</p>
+      <p>v2.9.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -8513,8 +8514,10 @@ body.presentation-mode .presentation-bar {
         <input id="projectTitle" type="text" value="Mon Film">
         <span id="sync-indicator" data-tooltip="Synchronisation" data-tooltip-pos="bottom" style="margin-left:8px; font-size:1rem; opacity:0.4; transition: all 0.3s;">☁️</span>
         <span id="role-badge" style="margin-left:10px; font-size:0.8rem; padding:4px 8px; background:var(--highlight); border-radius:4px; color:var(--text-main); border:1px solid var(--border)">PROPRIÉTAIRE</span>
-        <!-- S4 : sélecteur global d'épisode (séries uniquement) -->
+        <!-- S4 + S7 : sélecteurs globaux de saison et d'épisode (séries uniquement) -->
         <span id="header-episode-wrapper" class="header-episode-wrapper" style="display:none;">
+            <span class="header-ep-label">📺</span>
+            <select id="header-season-selector" class="header-episode-selector" onchange="app.Episodes.switchSeason(this.value)"></select>
             <span class="header-ep-label">🎬</span>
             <select id="header-episode-selector" class="header-episode-selector" onchange="app.ScriptEditor.switchEpisode(this.value)"></select>
         </span>
@@ -24172,37 +24175,65 @@ const DrawingEditor = {
           }
       },
       
-      // S4 : gestion du sélecteur global d'épisode dans le header (séries uniquement)
+      // S4 + S7 : gestion des sélecteurs globaux de saison et d'épisode dans le header (séries uniquement)
       initEpisodeSelector: () => {
-          const sel = document.getElementById('header-episode-selector');
+          const selEp = document.getElementById('header-episode-selector');
+          const selSeason = document.getElementById('header-season-selector');
           const wrapper = document.getElementById('header-episode-wrapper');
           
           // Pour les films : masquer le wrapper, pas d'épisode actif
           if(state.currentProjectType !== 'series') {
               if(wrapper) wrapper.style.display = 'none';
               state.currentEpisodeId = null;
+              state.currentSeasonId = null;
               return;
           }
           
+          const seasons = state.data.seasons || [];
           const episodes = state.data.episodes || [];
-          if(episodes.length === 0) {
+          
+          if(seasons.length === 0 || episodes.length === 0) {
               if(wrapper) wrapper.style.display = 'none';
               return;
           }
           
-          // Peupler le dropdown avec les épisodes
-          if(sel) {
-              sel.innerHTML = episodes.map(ep => {
+          // Peupler le dropdown des saisons
+          if(selSeason) {
+              selSeason.innerHTML = seasons.map(s => {
+                  const num = String(s.number).padStart(2,'0');
+                  const title = s.title ? ' — ' + Utils.escape(s.title) : '';
+                  return `<option value="${s.id}">S${num}${title}</option>`;
+              }).join('');
+              
+              // Sélectionner la saison courante (active, ou déduite de l'épisode actif, ou première)
+              let seasonId = state.currentSeasonId;
+              if(!seasonId || !seasons.find(s => s.id === seasonId)) {
+                  // Essayer de déduire depuis l'épisode actif
+                  if(state.currentEpisodeId) {
+                      const currentEp = episodes.find(e => e.id === state.currentEpisodeId);
+                      seasonId = currentEp?.seasonId || seasons[0].id;
+                  } else {
+                      seasonId = seasons[0].id;
+                  }
+              }
+              state.currentSeasonId = seasonId;
+              selSeason.value = seasonId;
+          }
+          
+          // Peupler le dropdown des épisodes en filtrant par saison active
+          if(selEp) {
+              const episodesOfSeason = episodes.filter(ep => ep.seasonId === state.currentSeasonId);
+              selEp.innerHTML = episodesOfSeason.map(ep => {
                   const num = String(ep.number).padStart(2,'0');
                   const title = ep.title ? ' — ' + Utils.escape(ep.title) : '';
                   return `<option value="${ep.id}">E${num}${title}</option>`;
               }).join('');
               
-              // Sélectionner l'épisode courant (déjà actif ou premier)
-              if(!state.currentEpisodeId || !episodes.find(e => e.id === state.currentEpisodeId)) {
-                  state.currentEpisodeId = episodes[0].id;
+              // Sélectionner l'épisode courant (s'il est dans cette saison) ou le premier de la saison
+              if(!state.currentEpisodeId || !episodesOfSeason.find(e => e.id === state.currentEpisodeId)) {
+                  state.currentEpisodeId = episodesOfSeason[0]?.id || null;
               }
-              sel.value = state.currentEpisodeId;
+              if(state.currentEpisodeId) selEp.value = state.currentEpisodeId;
           }
           
           if(wrapper) wrapper.style.display = 'inline-flex';
@@ -53838,6 +53869,33 @@ const SceneVersions = {
 // Episodes — Gestion des épisodes d'une série (Phase S3)
 // ============================================================
 const Episodes = {
+    
+    // S7 : bascule de saison
+    // Change la saison active, met à jour les dropdowns et rafraîchit toutes les vues
+    switchSeason: (seasonId) => {
+        if(!seasonId) return;
+        state.currentSeasonId = seasonId;
+        
+        // Réinitialiser l'épisode actif sur le premier de la nouvelle saison
+        const episodesOfSeason = (state.data.episodes || []).filter(ep => ep.seasonId === seasonId);
+        state.currentEpisodeId = episodesOfSeason[0]?.id || null;
+        
+        // Re-rendre les dropdowns (saison + épisode)
+        ScriptEditor.initEpisodeSelector();
+        
+        // Rafraîchir les vues filtrées par épisode
+        if(ScriptEditor.viewMode === 'continuous') {
+            ScriptEditor.renderContinuous();
+        } else {
+            UI.renderScript();
+        }
+        if(typeof UI.renderBoard === 'function') UI.renderBoard();
+        if(typeof Storyboard !== 'undefined' && typeof Storyboard.renderScenesList === 'function') Storyboard.renderScenesList();
+        if(typeof BeatBoard !== 'undefined' && typeof BeatBoard.render === 'function') BeatBoard.render();
+        
+        // Si on est sur l'onglet Épisodes, le re-rendre pour afficher ceux de la saison
+        Episodes.render();
+    },
     
     // Rend la grille d'épisodes
     render: () => {
