@@ -6421,7 +6421,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.9.2</p>
+      <p>v2.9.3</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -54143,13 +54143,23 @@ const Episodes = {
         
         // Init : si state.data.episodes n'existe pas, le créer
         if(!state.data.episodes) state.data.episodes = [];
+        if(!state.data.seasons) state.data.seasons = [];
         
-        const episodes = state.data.episodes;
+        const allEpisodes = state.data.episodes;
+        const seasons = state.data.seasons;
         const canEdit = state.currentRole === 'owner' || state.currentRole === 'editor';
         
-        // Compteur
+        // S7.4 : filtrer les épisodes par saison active
+        const activeSeason = seasons.find(s => s.id === state.currentSeasonId) || seasons[0];
+        const episodes = activeSeason 
+            ? allEpisodes.filter(ep => ep.seasonId === activeSeason.id)
+            : allEpisodes;
+        
+        // Compteur (affiche aussi le nom de la saison)
         if(countLabel) {
-            countLabel.textContent = episodes.length === 0 ? '0 épisode' : (episodes.length === 1 ? '1 épisode' : episodes.length + ' épisodes');
+            const seasonLabel = activeSeason ? ` (S${String(activeSeason.number).padStart(2,'0')}${activeSeason.title ? ' — ' + Utils.escape(activeSeason.title) : ''})` : '';
+            const countText = episodes.length === 0 ? '0 épisode' : (episodes.length === 1 ? '1 épisode' : episodes.length + ' épisodes');
+            countLabel.innerHTML = countText + seasonLabel;
         }
         
         // Carte "Ajouter" à la fin (si canEdit)
@@ -54209,12 +54219,25 @@ const Episodes = {
         grid.innerHTML = cards + addCard;
     },
     
-    // Ajoute un nouvel épisode à la fin
+    // Ajoute un nouvel épisode à la fin (dans la saison active)
     add: () => {
         if(!state.data.episodes) state.data.episodes = [];
-        const nextNumber = state.data.episodes.length + 1;
+        if(!state.data.seasons) state.data.seasons = [];
+        
+        // S7.4 : rattacher à la saison active
+        const activeSeasonId = state.currentSeasonId || state.data.seasons[0]?.id;
+        if(!activeSeasonId) {
+            Utils.toast('Créez d\'abord une saison', 'warning');
+            return;
+        }
+        
+        // Numéro = nombre d'épisodes dans cette saison + 1
+        const episodesInSeason = state.data.episodes.filter(ep => ep.seasonId === activeSeasonId);
+        const nextNumber = episodesInSeason.length + 1;
+        
         state.data.episodes.push({
             id: crypto.randomUUID(),
+            seasonId: activeSeasonId,
             number: nextNumber,
             title: '',
             synopsis: '',
@@ -54223,6 +54246,8 @@ const Episodes = {
         });
         Store.save();
         Episodes.render();
+        // Rafraîchir aussi le sélecteur épisode du header
+        ScriptEditor.initEpisodeSelector();
         Utils.toast('Épisode ajouté', 'success');
     },
     
@@ -54245,14 +54270,25 @@ const Episodes = {
         // Supprimer les scènes liées
         state.data.scenes = (state.data.scenes || []).filter(s => s.episodeId !== episodeId);
         
+        // Mémoriser la saison de l'épisode supprimé pour renumérotation
+        const deletedSeasonId = ep.seasonId;
+        
         // Supprimer l'épisode
         state.data.episodes = state.data.episodes.filter(e => e.id !== episodeId);
         
-        // Re-numéroter les épisodes restants dans l'ordre du tableau
-        state.data.episodes.forEach((e, i) => { e.number = i + 1; });
+        // S7.4 : re-numéroter uniquement les épisodes de la même saison
+        if(deletedSeasonId) {
+            const sameSeasonEps = state.data.episodes.filter(e => e.seasonId === deletedSeasonId);
+            sameSeasonEps.forEach((e, i) => { e.number = i + 1; });
+        } else {
+            // Fallback : anciens épisodes sans seasonId
+            state.data.episodes.forEach((e, i) => { e.number = i + 1; });
+        }
         
         Store.save();
         Episodes.render();
+        // Rafraîchir le sélecteur épisode du header
+        ScriptEditor.initEpisodeSelector();
         Utils.toast('Épisode supprimé', 'success');
     },
     
@@ -54336,19 +54372,31 @@ const Episodes = {
         if(!sourceId || sourceId === targetId) return;
         
         const episodes = state.data.episodes;
+        const source = episodes.find(ep => ep.id === sourceId);
+        const target = episodes.find(ep => ep.id === targetId);
+        if(!source || !target) return;
+        
+        // S7.4 : drag & drop uniquement dans la même saison
+        if(source.seasonId !== target.seasonId) {
+            Utils.toast('Les épisodes ne peuvent être réordonnés qu\'au sein d\'une même saison', 'warning');
+            return;
+        }
+        
         const sourceIdx = episodes.findIndex(ep => ep.id === sourceId);
         const targetIdx = episodes.findIndex(ep => ep.id === targetId);
-        if(sourceIdx === -1 || targetIdx === -1) return;
         
-        // Déplacer
+        // Déplacer dans le tableau global
         const [moved] = episodes.splice(sourceIdx, 1);
-        episodes.splice(targetIdx, 0, moved);
+        const newTargetIdx = episodes.findIndex(ep => ep.id === targetId);
+        episodes.splice(newTargetIdx, 0, moved);
         
-        // Re-numéroter
-        episodes.forEach((ep, i) => { ep.number = i + 1; });
+        // Re-numéroter uniquement dans la saison concernée
+        const sameSeasonEps = episodes.filter(ep => ep.seasonId === source.seasonId);
+        sameSeasonEps.forEach((ep, i) => { ep.number = i + 1; });
         
         Store.save();
         Episodes.render();
+        ScriptEditor.initEpisodeSelector();
     },
     
     _onDragEnd: (e) => {
