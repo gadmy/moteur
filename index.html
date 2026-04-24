@@ -26,10 +26,49 @@ HTML actuel
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
-HISTORIQUE DES VERSIONS
-================================================================================
-HISTORIQUE DES VERSIONS
-================================================================================
+
+v2.7.8 — Projets Séries — Phases S1 à S3 (24 Avr. 2026)
+- Nouvelle architecture : un projet peut être un film OU une série
+  Les séries partagent nativement casting/décors/ressources/planning
+  entre leurs épisodes (pas de duplication de données)
+  Seules les parties "écriture" (scénario, séquencier, beatboard) ont
+  une dimension épisode — les phases S4-S7 restent à implémenter
+
+- S1 Fondation :
+  * SQL : colonne projects.project_type ('film' | 'series', défaut 'film')
+  * CHECK constraint et index sur project_type
+  * JS : data.episodes = [] ajouté à Store.getEmpty()
+  * Compatibilité : projets existants restent en 'film', comportement inchangé
+
+- S2 Création projet Film / Série :
+  * Nouvelle modale affichée au clic "Nouveau projet"
+  * Radio Film / Série avec descriptions
+  * Si Série : champ "Nombre d'épisodes" (1 par défaut, max 50)
+  * Enchaînement sur la modale profil propriétaire existante
+  * À la création : episodes[] initial selon le nombre choisi
+  * project_type stocké en DB au moment de l'INSERT
+
+- S3 Onglet Épisodes (manager complet) :
+  * Module Episodes exporté (render, add, remove, setTitle, setStatus,
+    uploadThumb, openEpisode, drag&drop)
+  * CSS dédié : cartes avec vignette, badges numéro/statut, drag states
+  * Ajout dans categoryTabs.ecriture (premier onglet écriture)
+  * 3 statuts : brouillon, en cours, terminé (avec badges colorés)
+  * Vignette : upload image base64 (max 2 Mo)
+  * Drag & drop pour réordonner (renumérote automatiquement)
+  * Suppression avec confirmation et comptage des scènes liées
+
+- S3.4 Affichage conditionnel :
+  * state.currentProjectType stocké au chargement du projet
+  * UI.switchCategory filtre 'episodes' si project_type !== 'series'
+  * Onglet invisible pour les films (comportement inchangé), visible séries
+
+- S3.5 Badge Série dans Mes Projets :
+  * getProjectsList renvoie project_type + episodeCount
+  * Badge gradient violet/rose "📺 N épisodes" sous le titre
+  * Placé sous le titre (pas inline) pour éviter chevauchement avec
+    le badge PROPRIÉTAIRE sur les petites cartes
+
 v2.7.2 — Finalisation modération badge noir + guide complet (23 Avr. 2026)
 - G5b (finalisation) : module Moderation était déjà présent mais son
   canCommunicate ne déclenchait pas les blocages car getBadge utilisait
@@ -3912,6 +3951,9 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .script-unified-inner { display: flex; align-items: center; max-width: 1200px; margin: 0 auto; }
   .script-unified-left { display: inline-flex; gap: 4px; background: var(--bg); padding: 4px; border-radius: 8px; }
   .script-unified-left .view-btn { padding: 8px 16px; border: none; background: transparent; color: var(--text-sec); cursor: pointer; border-radius: 6px; font-weight: 500; transition: all 0.2s; font-size: 0.85rem; }
+  .script-episode-selector { margin-left: 15px; padding: 8px 14px; border: 1px solid var(--primary); background: var(--panel-bg); color: var(--text-main); border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; min-width: 150px; }
+  .script-episode-selector:hover { background: rgba(43,110,246,0.08); }
+  .script-episode-selector:focus { outline: 2px solid var(--primary); outline-offset: 2px; }
   .script-unified-left .view-btn.active { background: var(--primary); color: white; }
   .script-unified-right { display: inline-flex; gap: 5px; margin-left: 175px; }
   .script-unified-right .fmt-btn { padding: 6px 12px; border: 1px solid var(--border); background: var(--bg); color: var(--text-main); cursor: pointer; border-radius: 4px; font-size: 0.8rem; }
@@ -6349,7 +6391,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.7.9</p>
+      <p>v2.8.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -9395,6 +9437,8 @@ body.presentation-mode .presentation-bar {
                   <div class="script-unified-left">
                       <button id="script-view-scenes" class="view-btn active" onclick="app.ScriptEditor.setViewMode('scenes')">📑 Vue Scènes</button>
                       <button id="script-view-continuous" class="view-btn" onclick="app.ScriptEditor.setViewMode('continuous')">📜 Vue Script</button>
+                      <!-- S4 : sélecteur d'épisode (visible uniquement pour les séries) -->
+                      <select id="script-episode-selector" class="script-episode-selector" onchange="app.ScriptEditor.switchEpisode(this.value)" style="display:none;"></select>
                   </div>
                   <div class="script-unified-right" id="continuous-toolbar">
                       <button class="fmt-btn active" data-type="sc-action" onclick="app.ScriptEditor.formatContinuous('sc-action', event)" onmousedown="event.preventDefault()">Action</button>
@@ -17419,7 +17463,7 @@ const tabToSection = {
               });
           }
           
-          const scene = { id: Utils.generateUniqueId(), title: `${p}. ${l} - ${s}`, perso: els.inpPerso.value.trim(), time: els.inpTime.value.trim(), resume: els.inpResume.value, scriptContent: "<div class='sc-action'><br></div>", breakdown: initialBreakdown, tag_id: 't1', lastModified: Date.now(), lastModifiedBy: state.currentUser.email }; 
+          const scene = { id: Utils.generateUniqueId(), title: `${p}. ${l} - ${s}`, perso: els.inpPerso.value.trim(), time: els.inpTime.value.trim(), resume: els.inpResume.value, scriptContent: "<div class='sc-action'><br></div>", breakdown: initialBreakdown, tag_id: 't1', lastModified: Date.now(), lastModifiedBy: state.currentUser.email, episodeId: (state.currentProjectType === 'series' ? (state.currentEpisodeId || null) : null) }; 
           
           const isEdit = !!state.currentEditingId;
           
