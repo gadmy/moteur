@@ -4092,6 +4092,10 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
 
   .group-section { margin-bottom: 30px; }
   .group-header { font-size: 1.1rem; font-weight: bold; margin-bottom: 15px; padding-bottom: 5px; border-bottom: 2px solid var(--border); color: var(--primary); display: flex; justify-content: space-between; align-items: center; }
+  /* S7 : tags "apparaît dans" sur les fiches personnage/acteur/décor */
+  .appearances-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 0.85rem; }
+  .appearances-label { color: var(--text-sec); font-weight: 600; margin-bottom: 6px; display: block; }
+  .appearance-tag { display: inline-block; padding: 3px 8px; margin: 2px 4px 2px 0; background: rgba(139,92,246,0.12); border: 1px solid rgba(139,92,246,0.3); border-radius: 4px; font-size: 0.75rem; color: var(--text-main); font-family: 'Courier New', monospace; font-weight: 600; }
   .data-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; }
   .data-card { background: var(--panel-bg); padding: 15px; border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; gap: 8px; }
   .data-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
@@ -6421,7 +6425,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.9.3</p>
+      <p>v2.9.4</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -16184,6 +16188,79 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           return `S${seasonNum}E${epNum}-SC${sceneNum}`;
       },
       
+      // S7 : retourne la liste des scènes où un personnage / acteur / décor apparaît
+      // Format : "S01E01-SC03, S01E02-SC05, S02E01-SC01" pour les séries, "SC03, SC05" pour les films
+      // type: 'characters' | 'actors' | 'locations'
+      getAppearances: (item, type) => {
+          if(!item || !item.name) return { count: 0, html: '' };
+          const itemName = item.name.toLowerCase();
+          const scenes = state.data.scenes || [];
+          if(scenes.length === 0) return { count: 0, html: '' };
+          
+          // Collecter les scènes où l'item apparaît
+          const matches = [];
+          
+          scenes.forEach(scene => {
+              let found = false;
+              
+              if(type === 'characters') {
+                  // Personnage : recherche dans scene.perso (champ texte libre)
+                  const persoStr = (scene.perso || '').toLowerCase();
+                  // Match exact ou en liste séparée par virgule
+                  if(persoStr.includes(itemName)) found = true;
+                  // Aussi dans breakdown.COMEDIENS via le lien actor_id (si perso lié)
+                  if(!found && item.actor_id) {
+                      const linkedActor = (state.data.actors || []).find(a => a.id === item.actor_id);
+                      if(linkedActor && (scene.breakdown?.COMEDIENS || []).some(n => n.toLowerCase() === linkedActor.name.toLowerCase())) {
+                          found = true;
+                      }
+                  }
+              } else if(type === 'actors') {
+                  // Acteur : recherche dans breakdown.COMEDIENS
+                  if((scene.breakdown?.COMEDIENS || []).some(n => n.toLowerCase() === itemName)) {
+                      found = true;
+                  }
+              } else if(type === 'locations') {
+                  // Décor : extraire le lieu du titre "INT. LIEU - JOUR"
+                  const parts = (scene.title || '').match(/^[^.]+\.\s*(.+?)\s*-/);
+                  if(parts && parts[1].trim().toLowerCase() === itemName) {
+                      found = true;
+                  }
+              }
+              
+              if(found) matches.push(scene);
+          });
+          
+          if(matches.length === 0) return { count: 0, html: '' };
+          
+          // Formater chaque apparition selon série/film
+          const isSeries = state.currentProjectType === 'series';
+          const episodes = state.data.episodes || [];
+          const seasons = state.data.seasons || [];
+          
+          // Organiser les scènes avec leur index dans leur épisode (pour formatSceneNumber)
+          const formatted = matches.map(scene => {
+              if(!isSeries) {
+                  const idx = scenes.indexOf(scene);
+                  return UI.formatSceneNumber(scene, idx);
+              }
+              // Série : calculer l'index dans l'épisode
+              const ep = episodes.find(e => e.id === scene.episodeId);
+              if(!ep) return null; // scène orpheline
+              const scenesInEp = scenes.filter(s => s.episodeId === ep.id);
+              const idxInEp = scenesInEp.indexOf(scene);
+              return UI.formatSceneNumber(scene, idxInEp);
+          }).filter(x => x);
+          
+          // Dédoublonner et trier
+          const unique = [...new Set(formatted)].sort();
+          
+          return {
+              count: matches.length,
+              html: unique.map(tag => `<span class="appearance-tag">${tag}</span>`).join(' ')
+          };
+      },
+      
       renderScript: () => { 
           // Si vue continue active, mettre à jour aussi cette vue
           if(ScriptEditor.viewMode === 'continuous') {
@@ -16600,6 +16677,34 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                       </div>`;
                   }
                   
+                  // S7 : Section "Apparaît dans" (via breakdown.COMEDIENS)
+                  const actorScenes = (state.data.scenes || []).filter(s => 
+                      (s.breakdown?.COMEDIENS || []).some(n => n.toLowerCase() === item.name.toLowerCase())
+                  );
+                  if(actorScenes.length > 0) {
+                      const isSeries = state.currentProjectType === 'series';
+                      const allScenes = state.data.scenes;
+                      const sceneNumbers = actorScenes.map(s => {
+                          let label;
+                          if(isSeries) {
+                              const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
+                              if(ep) {
+                                  const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
+                                  label = UI.formatSceneNumber(s, scenesInEp.indexOf(s));
+                              } else {
+                                  label = '#' + (allScenes.indexOf(s) + 1);
+                              }
+                          } else {
+                              label = '#' + (allScenes.indexOf(s) + 1);
+                          }
+                          return `<span class="appearance-tag">${label}</span>`;
+                      }).join(' ');
+                      contentHtml += `<div class="appearances-section">
+                          <span class="appearances-label">🎬 Joue dans (${actorScenes.length}) :</span>
+                          ${sceneNumbers}
+                      </div>`;
+                  }
+                  
                   contentHtml += groupSelect;
               } else if(type === 'locations') {
                   // === DÉCORS : Fiche enrichie ===
@@ -16647,16 +16752,31 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                   });
                   
                   if(locationScenes.length > 0) {
+                      // S7 : utiliser formatSceneNumber pour avoir la notation série S01E01-SC01
+                      const isSeries = state.currentProjectType === 'series';
+                      const allScenes = state.data.scenes;
                       const sceneNumbers = locationScenes.map(s => {
-                          const scIdx = state.data.scenes.indexOf(s) + 1;
-                          return `<span onclick="app.UI.switchTab('script')" style="cursor:pointer; color:var(--primary); text-decoration:underline;">#${scIdx}</span>`;
-                      }).join(', ');
-                      contentHtml += `<div style="margin-top:8px; padding:8px; background:var(--bg); border-radius:4px; font-size:0.85rem;">
-                          <strong>🎬 Scènes dans ce décor :</strong> ${sceneNumbers} <span class="text-sec">(${locationScenes.length} scène${locationScenes.length > 1 ? 's' : ''})</span>
+                          let label;
+                          if(isSeries) {
+                              const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
+                              if(ep) {
+                                  const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
+                                  label = UI.formatSceneNumber(s, scenesInEp.indexOf(s));
+                              } else {
+                                  label = '#' + (allScenes.indexOf(s) + 1);
+                              }
+                          } else {
+                              label = '#' + (allScenes.indexOf(s) + 1);
+                          }
+                          return `<span class="appearance-tag" onclick="app.UI.switchTab('script')" style="cursor:pointer;">${label}</span>`;
+                      }).join(' ');
+                      contentHtml += `<div class="appearances-section">
+                          <span class="appearances-label">🎬 Scènes dans ce décor (${locationScenes.length}) :</span>
+                          ${sceneNumbers}
                       </div>`;
                   } else {
-                      contentHtml += `<div style="margin-top:8px; padding:8px; background:var(--bg); border-radius:4px; font-size:0.85rem; color:var(--text-sec);">
-                          <em>Aucune scène dans ce décor</em>
+                      contentHtml += `<div class="appearances-section">
+                          <span class="appearances-label" style="font-style:italic;">Aucune scène dans ce décor</span>
                       </div>`;
                   }
                   
@@ -16682,16 +16802,31 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                   });
                   
                   if(characterScenes.length > 0) {
+                      // S7 : utiliser formatSceneNumber pour avoir la notation série S01E01-SC01
+                      const isSeries = state.currentProjectType === 'series';
+                      const allScenes = state.data.scenes;
                       const sceneNumbers = characterScenes.map(s => {
-                          const idx = state.data.scenes.indexOf(s) + 1;
-                          return `#${idx}`;
-                      }).join(', ');
-                      contentHtml += `<div style="margin-top:8px; padding:8px; background:var(--bg); border-radius:4px; font-size:0.85rem;">
-                          <strong>📍 Apparaît dans :</strong> ${sceneNumbers} <span class="text-sec">(${characterScenes.length} scène${characterScenes.length > 1 ? 's' : ''})</span>
+                          let label;
+                          if(isSeries) {
+                              const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
+                              if(ep) {
+                                  const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
+                                  label = UI.formatSceneNumber(s, scenesInEp.indexOf(s));
+                              } else {
+                                  label = '#' + (allScenes.indexOf(s) + 1);
+                              }
+                          } else {
+                              label = '#' + (allScenes.indexOf(s) + 1);
+                          }
+                          return `<span class="appearance-tag">${label}</span>`;
+                      }).join(' ');
+                      contentHtml += `<div class="appearances-section">
+                          <span class="appearances-label">📍 Apparaît dans (${characterScenes.length}) :</span>
+                          ${sceneNumbers}
                       </div>`;
                   } else {
-                      contentHtml += `<div style="margin-top:8px; padding:8px; background:var(--bg); border-radius:4px; font-size:0.85rem; color:var(--text-sec);">
-                          <em>N'apparaît dans aucune scène</em>
+                      contentHtml += `<div class="appearances-section">
+                          <span class="appearances-label" style="font-style:italic;">N'apparaît dans aucune scène</span>
                       </div>`;
                   }
                   
