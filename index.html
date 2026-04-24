@@ -6391,7 +6391,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.8.1</p>
+      <p>v2.8.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -15370,7 +15370,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           if(els.boardSynopsis) els.boardSynopsis.innerText = state.data.synopsis || "(Vide)";
           if(els.boardShort) els.boardShort.innerText = state.data.synopsisShort || "(Vide)";
           if(els.boardLong) els.boardLong.innerText = state.data.synopsisLong || "(Vide)";
-          UI.renderBoard(); UI.renderScript(); ScriptEditor.initViewMode(); UI.renderDataTab('characters', els.charContainer); UI.renderDataTab('actors', els.actorContainer); UI.renderDataTab('locations', els.locContainer); 
+          ScriptEditor.initEpisodeSelector(); UI.renderBoard(); UI.renderScript(); ScriptEditor.initViewMode(); UI.renderDataTab('characters', els.charContainer); UI.renderDataTab('actors', els.actorContainer); UI.renderDataTab('locations', els.locContainer); 
       },
       
       // V62: Affichage de la liste des snapshots dans la modale
@@ -15896,7 +15896,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           } else {
               els.quickNav.style.display = 'none';
           }
-          if(tabName === 'script') UI.renderScript(); 
+          if(tabName === 'script') { ScriptEditor.initEpisodeSelector(); UI.renderScript(); } 
           if(tabName === 'board') UI.renderBoard(); 
           if(tabName === 'chars') { Actions.syncCharacters(); Store.save(); UI.renderDataTab('characters', els.charContainer); } 
           if(tabName === 'actors') { Actions.syncActorsFromPublicProfiles().then(() => UI.renderDataTab('actors', els.actorContainer)); } 
@@ -16044,6 +16044,16 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           Comments.updateAllBadges();
       },
       
+      // S4 : retourne les scènes à afficher selon l'épisode actif (ou toutes si projet film)
+      getScenesForCurrentView: () => {
+          const allScenes = state.data.scenes || [];
+          // Pour les films : toutes les scènes
+          if(state.currentProjectType !== 'series') return allScenes;
+          // Pour les séries : scènes de l'épisode actif uniquement (+ legacy sans episodeId = visibles partout ? non, invisibles)
+          if(!state.currentEpisodeId) return allScenes; // Sécurité
+          return allScenes.filter(s => s.episodeId === state.currentEpisodeId);
+      },
+      
       renderScript: () => { 
           // Si vue continue active, mettre à jour aussi cette vue
           if(ScriptEditor.viewMode === 'continuous') {
@@ -16052,9 +16062,19 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           
           const focusedId = document.activeElement && document.activeElement.closest('.script-row') ? document.activeElement.closest('.script-row').dataset.id : null; 
           els.scriptContainer.innerHTML = ''; 
-          if(state.data.scenes.length === 0) { els.scriptContainer.innerHTML = '<div style="text-align:center;margin-top:50px;color:var(--text-sec)">Ajoutez des scènes pour commencer.</div>'; return; } 
+          
+          // S4 : filtrer les scènes selon l'épisode actif (séries uniquement)
+          const scenesToRender = UI.getScenesForCurrentView();
+          
+          if(scenesToRender.length === 0) { 
+              const msg = (state.currentProjectType === 'series' && state.currentEpisodeId)
+                  ? 'Aucune scène dans cet épisode. Créez-en une avec le formulaire du séquencier.'
+                  : 'Ajoutez des scènes pour commencer.';
+              els.scriptContainer.innerHTML = `<div style="text-align:center;margin-top:50px;color:var(--text-sec)">${msg}</div>`; 
+              return; 
+          } 
           const isView = state.currentRole === 'viewer' || !Permissions.canEdit('scenario'); 
-          state.data.scenes.forEach((scene, idx) => { 
+          scenesToRender.forEach((scene, idx) => { 
               const row = document.createElement('div'); 
               const sceneIsFinal = scene.isFinal === true;
               row.className = 'script-row ' + (sceneIsFinal ? 'is-final' : 'is-draft'); 
@@ -24098,6 +24118,52 @@ const DrawingEditor = {
           
           if(mode === 'continuous') {
               ScriptEditor.renderContinuous();
+          }
+      },
+      
+      // S4 : gestion du sélecteur d'épisode (séries uniquement)
+      initEpisodeSelector: () => {
+          const sel = document.getElementById('script-episode-selector');
+          if(!sel) return;
+          
+          // Pour les films : masquer le sélecteur, pas d'épisode actif
+          if(state.currentProjectType !== 'series') {
+              sel.style.display = 'none';
+              state.currentEpisodeId = null;
+              return;
+          }
+          
+          const episodes = state.data.episodes || [];
+          if(episodes.length === 0) {
+              sel.style.display = 'none';
+              return;
+          }
+          
+          // Peupler le dropdown avec les épisodes
+          sel.innerHTML = episodes.map(ep => {
+              const num = String(ep.number).padStart(2,'0');
+              const title = ep.title ? ' — ' + Utils.escape(ep.title) : '';
+              return `<option value="${ep.id}">E${num}${title}</option>`;
+          }).join('');
+          
+          // Sélectionner l'épisode courant (déjà actif ou premier)
+          if(!state.currentEpisodeId || !episodes.find(e => e.id === state.currentEpisodeId)) {
+              state.currentEpisodeId = episodes[0].id;
+          }
+          sel.value = state.currentEpisodeId;
+          sel.style.display = 'inline-block';
+      },
+      
+      // Bascule sur un autre épisode : change l'épisode actif et re-rend les vues
+      switchEpisode: (episodeId) => {
+          if(!episodeId) return;
+          state.currentEpisodeId = episodeId;
+          
+          // Re-render de la vue courante (scènes ou continu)
+          if(ScriptEditor.viewMode === 'continuous') {
+              ScriptEditor.renderContinuous();
+          } else {
+              UI.renderScript();
           }
       },
       
