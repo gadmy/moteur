@@ -2507,6 +2507,7 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
   .p-title { font-weight: bold; font-size: 1.2rem; margin-bottom: 10px; color: var(--text-main); }
   .p-meta { font-size: 0.85rem; color: var(--text-sec); margin-bottom: 5px; }
   .p-role-badge { position: absolute; top: 10px; right: 10px; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); text-transform: uppercase; }
+  .p-series-badge { display: inline-block; font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: linear-gradient(135deg, #8b5cf6, #ec4899); color: white; font-weight: 600; margin-left: 8px; vertical-align: middle; }
   .p-actions { margin-top: 15px; display: flex; justify-content: flex-end; gap: 10px; }
   .p-btn-del { background: none; border: none; color: var(--text-sec); cursor: pointer; font-size: 1.2rem; }
   .p-btn-del:hover { color: var(--danger); }.p-btn-del:hover { color: var(--danger); }
@@ -6347,7 +6348,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.7.7</p>
+      <p>v2.7.8</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -12958,7 +12959,7 @@ showDashboard: async () => {
               // Fallback : projets dont je suis owner mais pas encore dans project_members
               const { data: ownedProjects } = await supabase
                   .from('projects')
-                  .select('id, title, created_at, owner_email, owner_profile_id')
+                  .select('id, title, created_at, owner_email, owner_profile_id, project_type, data')
                   .eq('owner_email', myEmail);
               
               if (!ownedProjects) return [];
@@ -12972,14 +12973,16 @@ showDashboard: async () => {
                   title: p.title, 
                   date: new Date(p.created_at).toLocaleDateString(), 
                   owner: p.owner_email, 
-                  role: 'owner' 
+                  role: 'owner',
+                  project_type: p.project_type || 'film',
+                  episodeCount: Array.isArray(p.data?.episodes) ? p.data.episodes.length : 0
               }));
           }
           
           const projectIds = filteredMemberships.map(m => m.project_id);
           const { data: projects, error: projError } = await supabase
               .from('projects')
-              .select('id, title, created_at, owner_email, owner_profile_id')
+              .select('id, title, created_at, owner_email, owner_profile_id, project_type, data')
               .in('id', projectIds);
           
           if (projError || !projects) return [];
@@ -12991,7 +12994,9 @@ showDashboard: async () => {
                   title: p.title, 
                   date: new Date(p.created_at).toLocaleDateString(), 
                   owner: p.owner_email, 
-                  role: membership?.role || 'member' 
+                  role: membership?.role || 'member',
+                  project_type: p.project_type || 'film',
+                  episodeCount: Array.isArray(p.data?.episodes) ? p.data.episodes.length : 0
               };
           });
       },
@@ -15195,7 +15200,12 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                   let badgeText = p.role==='owner'?'PROPRIÉTAIRE':(p.role==='editor'?'ÉDITEUR':'LECTEUR');
                   const priorityClass = p.priority ? p.priority.replace(/\s+/g, '-').toLowerCase() : '';
                   const priorityBadge = p.priority ? `<span class="priority-badge ${priorityClass}">${p.priority}</span>` : '';
-                  card.innerHTML = `<span class="p-role-badge" style="color:${badgeColor}; border-color:${badgeColor}">${badgeText}</span><div><div class="p-title">${Utils.escape(p.title)}</div><div class="p-meta">Modifié : ${p.date} ${priorityBadge}</div></div><div class="p-actions"><button class="p-btn-priority" onclick="app.UI.showPriorityMenu(event, '${p.id}')" title="Priorité">🏷️</button><button class="p-btn-del" onclick="app.Store.deleteProject('${p.id}', '${p.role}', event)">🗑️</button></div>`; 
+                  // S3.5 : badge Série si project_type === 'series'
+                  const seriesBadge = (p.project_type === 'series') 
+                      ? `<span class="p-series-badge" title="Projet série">📺 ${p.episodeCount} épisode${p.episodeCount>1?'s':''}</span>`
+                      : '';
+                  
+                  card.innerHTML = `<span class="p-role-badge" style="color:${badgeColor}; border-color:${badgeColor}">${badgeText}</span><div><div class="p-title">${Utils.escape(p.title)} ${seriesBadge}</div><div class="p-meta">Modifié : ${p.date} ${priorityBadge}</div></div><div class="p-actions"><button class="p-btn-priority" onclick="app.UI.showPriorityMenu(event, '${p.id}')" title="Priorité">🏷️</button><button class="p-btn-del" onclick="app.Store.deleteProject('${p.id}', '${p.role}', event)">🗑️</button></div>`; 
                   card.onclick = (e) => { if(!e.target.closest('.p-actions')) Store.loadProject(p.id); };
                   
                   // Drag & drop events
