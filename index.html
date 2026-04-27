@@ -6665,7 +6665,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v3.0.9</p>
+      <p>v3.1.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10820,6 +10820,15 @@ body.presentation-mode .presentation-bar {
                     <div class="tool-label">Calques</div>
                     <button onclick="app.DrawingEditor.addLayer()" style="width: 100%; padding: 6px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 10px; font-size: 0.85rem;">+ Nouveau</button>
                     <div id="layersList"></div>
+                </div>
+                <!-- Phase 3B Storyboard : palette d'objets pré-remplis (visible uniquement pour les zones sémantiques) -->
+                <div class="tool-group" id="objectsPaletteGroup" style="display: none;">
+                    <div class="tool-label">🎯 Objets</div>
+                    <div id="objectsPaletteHint" style="font-size: 0.75rem; color: var(--text-sec); margin-bottom: 8px; line-height: 1.3;">
+                        Cliquez sur un objet, puis sur le canvas pour le placer.
+                    </div>
+                    <div id="objectsPalette" style="display: flex; flex-wrap: wrap; gap: 4px;"></div>
+                    <div id="objectsPlacedList" style="margin-top: 12px;"></div>
                 </div>
             </div>
             <div class="drawing-canvas-area">
@@ -24405,6 +24414,20 @@ const DrawingEditor = {
         DrawingEditor.setupCanvas();
         DrawingEditor.renderColorPalette();
         DrawingEditor.renderLayers();
+        
+        // Phase 3B Storyboard : afficher la palette d'objets pour les zones sémantiques
+        const paletteGroup = document.getElementById('objectsPaletteGroup');
+        if(paletteGroup) {
+            const showPalette = ['lighting', 'camera', 'actors'].includes(kind);
+            paletteGroup.style.display = showPalette ? 'block' : 'none';
+            if(showPalette) {
+                DrawingEditor.renderObjectsPalette();
+            }
+        }
+        // Reset de l'état "objet sélectionné pour placement"
+        DrawingEditor.pendingObjectType = null;
+        if(DrawingEditor.canvas) DrawingEditor.canvas.style.cursor = '';
+        
         DrawingEditor.redraw();
         DrawingEditor.saveState();
     },
@@ -24546,6 +24569,17 @@ const DrawingEditor = {
         const x = Math.floor(e.clientX - rect.left);
         const y = Math.floor(e.clientY - rect.top);
         
+        // Phase 3B Storyboard : si un objet est en attente de placement, le placer ici (et bloquer le dessin)
+        if(DrawingEditor.pendingObjectType) {
+            // Conversion en coordonnées canvas internes (le canvas peut être affiché à une taille différente)
+            const scaleX = DrawingEditor.canvas.width / rect.width;
+            const scaleY = DrawingEditor.canvas.height / rect.height;
+            const canvasX = (e.clientX - rect.left) * scaleX;
+            const canvasY = (e.clientY - rect.top) * scaleY;
+            DrawingEditor.placeObjectAt(canvasX, canvasY);
+            return;  // Bloquer le dessin
+        }
+        
         DrawingEditor.isDrawing = true;
         DrawingEditor.lastX = x;
         DrawingEditor.lastY = y;
@@ -24655,6 +24689,143 @@ const DrawingEditor = {
                 DrawingEditor.ctx.drawImage(layer.canvas, 0, 0);
             }
         });
+        
+        // Phase 3 Storyboard : dessiner les objets vectoriels de la zone en cours d'édition
+        if(DrawingEditor.currentShotId && DrawingEditor.currentKind) {
+            const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
+            const zone = shot && shot.drawings && shot.drawings[DrawingEditor.currentKind];
+            if(zone && Array.isArray(zone.objects) && zone.objects.length > 0) {
+                Storyboard.renderObjectsOnCanvas(DrawingEditor.ctx, zone.objects);
+            }
+        }
+    },
+    
+    // Phase 3B Storyboard : remplit la palette d'objets selon le kind courant
+    // Affiche les objets de la catégorie correspondante + ceux de la catégorie 'machinery' (commune)
+    renderObjectsPalette: () => {
+        const palette = document.getElementById('objectsPalette');
+        const placedList = document.getElementById('objectsPlacedList');
+        if(!palette) return;
+        
+        const kind = DrawingEditor.currentKind;
+        const catalog = (CONFIG.annotationObjects || []);
+        // Filtrer : catégorie correspondante au kind + machinery (commune)
+        const items = catalog.filter(o => o.category === kind || o.category === 'machinery');
+        
+        // Rendre les boutons d'objets
+        palette.innerHTML = items.map(o => {
+            const isMachinery = o.category === 'machinery';
+            const borderColor = isMachinery ? 'var(--text-sec)' : 'var(--primary)';
+            return `<button type="button" 
+                onclick="app.DrawingEditor.selectObjectType('${o.type}')"
+                title="${Utils.escape(o.label)}${isMachinery ? ' (machinerie)' : ''}"
+                data-obj-type="${o.type}"
+                style="width: 38px; height: 38px; padding: 0; border: 1.5px solid ${borderColor}; background: var(--panel-bg); border-radius: 6px; cursor: pointer; font-size: 1.3rem; line-height: 1; display: flex; align-items: center; justify-content: center;">
+                ${o.emoji}
+            </button>`;
+        }).join('');
+        
+        // Rendre la liste des objets déjà placés sur cette zone
+        if(placedList) {
+            const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
+            const zone = shot && shot.drawings && shot.drawings[kind];
+            const objects = (zone && Array.isArray(zone.objects)) ? zone.objects : [];
+            
+            if(objects.length === 0) {
+                placedList.innerHTML = `<div style="font-size: 0.75rem; color: var(--text-sec); font-style: italic;">Aucun objet placé</div>`;
+            } else {
+                placedList.innerHTML = `
+                    <div style="font-size: 0.8rem; font-weight: 600; margin-bottom: 6px;">Placés (${objects.length})</div>
+                    ${objects.map((obj, idx) => {
+                        const def = catalog.find(d => d.type === obj.type);
+                        const emoji = def ? def.emoji : '❓';
+                        const label = def ? def.label : obj.type;
+                        return `<div style="display: flex; align-items: center; gap: 6px; padding: 4px 6px; background: var(--bg); border-radius: 4px; margin-bottom: 3px; font-size: 0.78rem;">
+                            <span style="font-size: 1rem;">${emoji}</span>
+                            <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${Utils.escape(label)}">${Utils.escape(label)}</span>
+                            <button onclick="app.DrawingEditor.removePlacedObject(${idx})" 
+                                title="Supprimer cet objet" 
+                                style="background: var(--danger); color: white; border: none; border-radius: 3px; padding: 2px 5px; cursor: pointer; font-size: 0.7rem;">🗑️</button>
+                        </div>`;
+                    }).join('')}
+                `;
+            }
+        }
+    },
+    
+    // Phase 3B Storyboard : sélectionne un type d'objet pour placement au prochain clic
+    selectObjectType: (type) => {
+        DrawingEditor.pendingObjectType = type;
+        // Mise à jour visuelle : surligner le bouton sélectionné
+        document.querySelectorAll('#objectsPalette button[data-obj-type]').forEach(btn => {
+            if(btn.dataset.objType === type) {
+                btn.style.background = 'var(--primary)';
+                btn.style.color = 'white';
+            } else {
+                btn.style.background = 'var(--panel-bg)';
+                btn.style.color = '';
+            }
+        });
+        // Curseur crosshair pour indiquer le mode placement
+        if(DrawingEditor.canvas) DrawingEditor.canvas.style.cursor = 'crosshair';
+        const def = (CONFIG.annotationObjects || []).find(o => o.type === type);
+        if(def) Utils.toast(`${def.emoji} ${def.label} sélectionné — cliquez sur le canvas pour placer`, 'info', 2500);
+    },
+    
+    // Phase 3B Storyboard : supprime un objet placé (par son index dans le tableau)
+    removePlacedObject: (idx) => {
+        const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
+        if(!shot) return;
+        const zone = shot.drawings && shot.drawings[DrawingEditor.currentKind];
+        if(!zone || !Array.isArray(zone.objects)) return;
+        if(idx < 0 || idx >= zone.objects.length) return;
+        zone.objects.splice(idx, 1);
+        DrawingEditor.renderObjectsPalette();
+        DrawingEditor.redraw();
+    },
+    
+    // Phase 3B Storyboard : place l'objet en attente aux coordonnées canvas (x, y)
+    placeObjectAt: (x, y) => {
+        const type = DrawingEditor.pendingObjectType;
+        if(!type) return;
+        
+        const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
+        if(!shot) { console.error('Shot introuvable pour placement'); return; }
+        
+        // S'assurer que la zone existe avec sa structure complète
+        if(!shot.drawings) {
+            shot.drawings = { original: null, lighting: null, camera: null, actors: null };
+        }
+        if(!shot.drawings[DrawingEditor.currentKind]) {
+            shot.drawings[DrawingEditor.currentKind] = {
+                imageType: 'drawing',
+                imageUrl: null,
+                drawingData: null,
+                objects: []
+            };
+        }
+        if(!Array.isArray(shot.drawings[DrawingEditor.currentKind].objects)) {
+            shot.drawings[DrawingEditor.currentKind].objects = [];
+        }
+        
+        // Ajouter l'objet
+        shot.drawings[DrawingEditor.currentKind].objects.push({
+            id: Utils.generateUniqueId(),
+            type: type,
+            x: Math.round(x),
+            y: Math.round(y),
+            scale: 1,
+            rotation: 0
+        });
+        
+        // Marquer le shot comme modifié (pour activer le bouton "Sauvegarder" de la modale d'édition)
+        if(Storyboard.markAsDirty) Storyboard.markAsDirty();
+        
+        // On garde le type sélectionné pour permettre des placements multiples (workflow chef op)
+        // Si l'utilisateur veut arrêter, il peut cliquer ailleurs hors palette ou recliquer sur le même bouton
+        
+        DrawingEditor.renderObjectsPalette();
+        DrawingEditor.redraw();
     },
     
     setTool: (tool) => {
