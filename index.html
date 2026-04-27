@@ -6665,7 +6665,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v3.0.8</p>
+      <p>v3.0.9</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -23172,7 +23172,12 @@ const Storyboard = {
         
         // Phase 1 Storyboard : déterminer quelles zones sémantiques sont visibles
         const vis = shot.drawingsVisibility || { original: true, lighting: false, camera: false, actors: false };
-        const hasZone = (k) => !!(shot.drawings && shot.drawings[k] && (shot.drawings[k].drawingData || shot.drawings[k].imageUrl));
+        const hasZone = (k) => {
+            const z = shot.drawings && shot.drawings[k];
+            if(!z) return false;
+            // Phase 3 : une zone est considérée "non vide" si elle a un dessin/image OU au moins 1 objet vectoriel
+            return !!(z.drawingData || z.imageUrl || (Array.isArray(z.objects) && z.objects.length > 0));
+        };
         const zoneHas = { lighting: hasZone('lighting'), camera: hasZone('camera'), actors: hasZone('actors') };
         const showAnyOverlay = (vis.lighting && zoneHas.lighting) || (vis.camera && zoneHas.camera) || (vis.actors && zoneHas.actors);
         
@@ -23329,7 +23334,12 @@ const Storyboard = {
         
         // Phase 1 Storyboard : déterminer quelles zones sémantiques ont du contenu
         const vis = shot.drawingsVisibility || { original: true, lighting: false, camera: false, actors: false };
-        const hasZone = (k) => !!(shot.drawings && shot.drawings[k] && (shot.drawings[k].drawingData || shot.drawings[k].imageUrl));
+        const hasZone = (k) => {
+            const z = shot.drawings && shot.drawings[k];
+            if(!z) return false;
+            // Phase 3 : une zone est considérée "non vide" si elle a un dessin/image OU au moins 1 objet vectoriel
+            return !!(z.drawingData || z.imageUrl || (Array.isArray(z.objects) && z.objects.length > 0));
+        };
         const zoneHas = { lighting: hasZone('lighting'), camera: hasZone('camera'), actors: hasZone('actors') };
         const showAnyOverlay = (vis.lighting && zoneHas.lighting) || (vis.camera && zoneHas.camera) || (vis.actors && zoneHas.actors);
         
@@ -23597,10 +23607,24 @@ const Storyboard = {
     
     // Phase 3 Storyboard : DEBUG TEMPORAIRE — ajoute un objet test sur un plan/zone
     // À supprimer après Phase 3B (UI de placement). Usage console :
-    //   app.Storyboard._debugAddObject(0, 'lighting', 'spot', 200, 300)
-    _debugAddObject: (shotIdx, kind, type, x, y, scale, rotation) => {
-        const shot = state.data.shots[shotIdx];
-        if(!shot) { console.error('Shot introuvable'); return; }
+    //   app.Storyboard._debugAddObject('1.2', 'lighting', 'spot', 200, 300)
+    //   app.Storyboard._debugAddObject(0, 'lighting', 'spot')        // index direct
+    _debugAddObject: (shotRef, kind, type, x, y, scale, rotation) => {
+        let shot = null;
+        // Si shotRef est de la forme "X.Y" (scène.plan), on cherche par position dans la scène
+        if(typeof shotRef === 'string' && shotRef.includes('.')) {
+            const [sceneIdxStr, shotIdxStr] = shotRef.split('.');
+            const sceneIdx = parseInt(sceneIdxStr, 10) - 1;
+            const shotIdxInScene = parseInt(shotIdxStr, 10) - 1;
+            const scene = state.data.scenes[sceneIdx];
+            if(!scene) { console.error('Scène', sceneIdx + 1, 'introuvable'); return; }
+            const sceneShots = state.data.shots.filter(s => s.sceneId === scene.id).sort((a, b) => a.order - b.order);
+            shot = sceneShots[shotIdxInScene];
+            if(!shot) { console.error('Plan', shotRef, 'introuvable'); return; }
+        } else {
+            shot = state.data.shots[shotRef];
+            if(!shot) { console.error('Shot index', shotRef, 'introuvable'); return; }
+        }
         if(!shot.drawings) shot.drawings = { original:null, lighting:null, camera:null, actors:null };
         if(!shot.drawings[kind]) {
             shot.drawings[kind] = { imageType: 'drawing', imageUrl: null, drawingData: null, objects: [] };
