@@ -29,6 +29,23 @@ HTML actuel
 
 HISTORIQUE DES VERSIONS
 ================================================================================
+v2.9.7 — Stats filtrables par saison/épisode + badges niveau projet (27 Avr. 2026)
+
+===== Filtrage de l'onglet Statistiques =====
+- Sélecteur de scope en haut de l'onglet (séries uniquement, films inchangés)
+  3 niveaux : Tout le projet / Saison X / Épisode X
+- state.statsFilter = { scope, seasonId, episodeId } init au chargement projet
+- Helper Stats.getFilteredScenes() centralise l'accès aux scènes filtrées
+- Branchement dans render() + renderLieuxStats + renderIntExt
+  + renderJourNuit + renderTimeTags
+- Sections non-filtrables (Équipe Technique, Budget, Scènes planifiées,
+  Jours de tournage) : badge "— niveau projet" affiché quand un filtre
+  saison/épisode est actif, via Stats.refreshScopeBadges()
+- Marquage HTML : data-stats-scope="project" sur les éléments concernés
+- Nouvelle section "📺 Stats par saison" (table comparative) visible
+  uniquement en mode "Tout le projet", masquée quand un filtre est actif
+- Exports PDF de Stats inchangés (toujours niveau projet entier)
+
 v2.9.4 — Séries multi-saisons : filtrage, saisons, numérotation (24 Avr. 2026)
 
 ===== S4 — Scénario par épisode =====
@@ -6494,7 +6511,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v2.9.7</p>
+      <p>v2.9.8</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -13854,6 +13871,40 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                           }
                       });
                   }
+              }
+              
+              // Phase 1 Storyboard : migration des shots vers la structure `drawings` (4 zones)
+              // Les shots existants ont `imageType`/`imageUrl`/`drawingData` au niveau racine.
+              // On clone ces données dans `drawings.original` sans toucher à l'existant.
+              if(Array.isArray(safeData.shots)) {
+                  safeData.shots.forEach(shot => {
+                      if(!shot.drawings) {
+                          shot.drawings = {
+                              original: null,
+                              lighting: null,
+                              camera: null,
+                              actors: null
+                          };
+                          // Si le plan a déjà un dessin/image, on le clone dans drawings.original
+                          if(shot.imageType && (shot.drawingData || shot.imageUrl)) {
+                              shot.drawings.original = {
+                                  imageType: shot.imageType,
+                                  imageUrl: shot.imageUrl || null,
+                                  drawingData: shot.drawingData || null
+                              };
+                          }
+                          needsMigrationSave = true;
+                      }
+                      if(!shot.drawingsVisibility) {
+                          shot.drawingsVisibility = {
+                              original: true,
+                              lighting: false,
+                              camera: false,
+                              actors: false
+                          };
+                          needsMigrationSave = true;
+                      }
+                  });
               }
               
               state.data = safeData; state.currentProjectId = id;
@@ -22893,10 +22944,30 @@ const Storyboard = {
         const techInfo = techParts.length > 0 ? `<div class="shot-compact-tech">${techParts.join(' • ')}</div>` : '';
         const nameInfo = shot.name ? `<div class="shot-compact-name">${Utils.escape(shot.name)}</div>` : '';
         
+        // Phase 1 Storyboard : déterminer quelles zones sémantiques sont visibles
+        const vis = shot.drawingsVisibility || { original: true, lighting: false, camera: false, actors: false };
+        const hasZone = (k) => !!(shot.drawings && shot.drawings[k] && (shot.drawings[k].drawingData || shot.drawings[k].imageUrl));
+        const zoneHas = { lighting: hasZone('lighting'), camera: hasZone('camera'), actors: hasZone('actors') };
+        const showAnyOverlay = (vis.lighting && zoneHas.lighting) || (vis.camera && zoneHas.camera) || (vis.actors && zoneHas.actors);
+        
+        // Petit indicateur visuel des zones disponibles (icônes sur la vignette)
+        const indicators = [];
+        if(zoneHas.lighting) indicators.push(`<span title="Annotation Lumière disponible" style="opacity:${vis.lighting ? 1 : 0.4};">💡</span>`);
+        if(zoneHas.camera) indicators.push(`<span title="Annotation Caméra disponible" style="opacity:${vis.camera ? 1 : 0.4};">🎥</span>`);
+        if(zoneHas.actors) indicators.push(`<span title="Annotation Acteurs disponible" style="opacity:${vis.actors ? 1 : 0.4};">🎭</span>`);
+        const indicatorsHtml = indicators.length > 0 
+            ? `<div style="position: absolute; top: 4px; right: 4px; display: flex; gap: 3px; background: rgba(0,0,0,0.55); padding: 3px 6px; border-radius: 6px; font-size: 0.85em; z-index: 2;">${indicators.join('')}</div>` 
+            : '';
+        
+        const overlayHtml = `<canvas id="compact-overlay-${shot.id}" width="800" height="600" 
+            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; object-fit: contain; ${showAnyOverlay ? '' : 'display: none;'}"></canvas>`;
+        
         card.innerHTML = `
             ${dirtyIndicator}
-            <div class="shot-compact-image" onclick="app.Storyboard.openEditModal('${shot.id}')">
+            <div class="shot-compact-image" style="position: relative;" onclick="app.Storyboard.openEditModal('${shot.id}')">
                 ${imageHTML}
+                ${overlayHtml}
+                ${indicatorsHtml}
             </div>
             <div class="shot-compact-footer">
                 <span>Plan ${sceneIndex}.${idx + 1}</span>
@@ -22906,7 +22977,7 @@ const Storyboard = {
             ${techInfo}
         `;
         
-        // Render drawing preview
+        // Render drawing preview + overlay
         setTimeout(() => {
             if(shot.imageType === 'drawing' && shot.drawingData) {
                 const canvas = document.getElementById(`compact-preview-${shot.id}`);
@@ -22914,6 +22985,25 @@ const Storyboard = {
                     const ctx = canvas.getContext('2d');
                     DrawingEditor.renderDrawingData(ctx, shot.drawingData);
                 }
+            }
+            
+            // Phase 1 Storyboard : rendu de l'overlay compact (zones sémantiques visibles)
+            const overlayCanvas = document.getElementById(`compact-overlay-${shot.id}`);
+            if(overlayCanvas) {
+                const octx = overlayCanvas.getContext('2d');
+                octx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+                ['lighting', 'camera', 'actors'].forEach(k => {
+                    if(!vis[k] || !zoneHas[k]) return;
+                    const zone = shot.drawings && shot.drawings[k];
+                    if(!zone) return;
+                    if(zone.imageType === 'upload' && zone.imageUrl) {
+                        const im = new Image();
+                        im.onload = () => { octx.drawImage(im, 0, 0, overlayCanvas.width, overlayCanvas.height); };
+                        im.src = zone.imageUrl;
+                    } else if(zone.drawingData) {
+                        DrawingEditor.renderDrawingData(octx, zone.drawingData);
+                    }
+                });
             }
         }, 100);
         
@@ -22999,14 +23089,49 @@ const Storyboard = {
         
         const isView = state.currentRole === 'viewer';
         
+        // Phase 1 Storyboard : déterminer quelles zones sémantiques ont du contenu
+        const vis = shot.drawingsVisibility || { original: true, lighting: false, camera: false, actors: false };
+        const hasZone = (k) => !!(shot.drawings && shot.drawings[k] && (shot.drawings[k].drawingData || shot.drawings[k].imageUrl));
+        const zoneHas = { lighting: hasZone('lighting'), camera: hasZone('camera'), actors: hasZone('actors') };
+        const showAnyOverlay = (vis.lighting && zoneHas.lighting) || (vis.camera && zoneHas.camera) || (vis.actors && zoneHas.actors);
+        
+        // Bouton toggle générique
+        const toggleBtn = (kind, label, emoji, color) => {
+            const has = zoneHas[kind];
+            const isOn = vis[kind] && has;
+            const opacity = has ? 1 : 0.35;
+            const bg = isOn ? color : 'transparent';
+            const txtColor = isOn ? 'white' : 'var(--text-main)';
+            const title = has ? (isOn ? `Masquer ${label}` : `Afficher ${label}`) : `${label} (vide)`;
+            return `<button onclick="event.stopPropagation(); app.Storyboard.toggleDrawingVisibility('${shot.id}', '${kind}')" 
+                title="${title}"
+                style="padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: ${bg}; color: ${txtColor}; cursor: pointer; font-size: 0.85em; opacity: ${opacity};">
+                ${emoji} ${label}
+            </button>`;
+        };
+        const togglesHtml = `
+            <div class="shot-overlay-toggles" style="display: flex; gap: 6px; padding: 6px 10px; flex-wrap: wrap; background: var(--bg); border-bottom: 1px solid var(--border);">
+                ${toggleBtn('lighting', 'Lumière', '💡', 'linear-gradient(135deg, #ffd54f, #ffb300)')}
+                ${toggleBtn('camera', 'Caméra', '🎥', 'linear-gradient(135deg, #64b5f6, #1976d2)')}
+                ${toggleBtn('actors', 'Acteurs', '🎭', 'linear-gradient(135deg, #ce93d8, #8e24aa)')}
+            </div>
+        `;
+        
+        // Overlay canvas (par-dessus l'image originale)
+        const overlayHtml = `<canvas id="overlay-${shot.id}" width="800" height="600" 
+            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; ${showAnyOverlay ? '' : 'display: none;'}"></canvas>`;
+        
         card.innerHTML = `
             <div class="shot-header">
                 <h3 class="m-0">Plan ${idx + 1}</h3>
                 ${!isView ? `<button onclick="app.Storyboard.deleteShot('${shot.id}')" style="background: var(--danger); color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">🗑️ Supprimer</button>` : ''}
             </div>
             
-            <div class="shot-preview" onclick="${!isView ? `app.Storyboard.openImageMenu('${shot.id}')` : ''}">
+            ${togglesHtml}
+            
+            <div class="shot-preview" style="position: relative;" onclick="${!isView ? `app.Storyboard.openImageMenu('${shot.id}')` : ''}">
                 ${imagePreview}
+                ${overlayHtml}
             </div>
             
             <div class="shot-meta-grid">
@@ -23058,6 +23183,26 @@ const Storyboard = {
                     DrawingEditor.renderDrawingData(ctx, shot.drawingData);
                 }
             }
+            
+            // Phase 1 Storyboard : rendu de l'overlay (zones sémantiques visibles)
+            const overlayCanvas = document.getElementById(`overlay-${shot.id}`);
+            if(overlayCanvas) {
+                const octx = overlayCanvas.getContext('2d');
+                octx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+                const overlayKinds = ['lighting', 'camera', 'actors'];
+                overlayKinds.forEach(k => {
+                    if(!vis[k] || !zoneHas[k]) return;
+                    const zone = shot.drawings && shot.drawings[k];
+                    if(!zone) return;
+                    if(zone.imageType === 'upload' && zone.imageUrl) {
+                        const im = new Image();
+                        im.onload = () => { octx.drawImage(im, 0, 0, overlayCanvas.width, overlayCanvas.height); };
+                        im.src = zone.imageUrl;
+                    } else if(zone.drawingData) {
+                        DrawingEditor.renderDrawingData(octx, zone.drawingData);
+                    }
+                });
+            }
         }, 100);
         
         return card;
@@ -23082,6 +23227,21 @@ const Storyboard = {
             imageType: null,
             imageUrl: null,
             drawingData: null,
+            // Nouvelles zones d'annotation indépendantes (Phase 1)
+            // Chaque zone : null OU { imageType: 'drawing'|'upload', imageUrl: ..., drawingData: {...} }
+            drawings: {
+                original: null,  // dessin du réa (clone de drawingData/imageUrl à la migration)
+                lighting: null,  // 💡 chef op
+                camera: null,    // 🎥 cadreur
+                actors: null     // 🎭 réa/chorégraphe
+            },
+            // Visibilité par défaut des calques (vue lecture)
+            drawingsVisibility: {
+                original: true,
+                lighting: false,
+                camera: false,
+                actors: false
+            },
             shotType: '',
             cameraMove: '',
             cameraMode: '',
@@ -23136,8 +23296,10 @@ const Storyboard = {
         menu.onclick = (e) => { if(e.target === menu) menu.remove(); };
         
         menu.innerHTML = `
-            <div style="background: var(--panel-bg); border-radius: 12px; padding: 25px; text-align: center; min-width: 300px;">
-                <h3 style="margin: 0 0 20px; color: var(--text-main);">🖼️ Ajouter une image</h3>
+            <div style="background: var(--panel-bg); border-radius: 12px; padding: 25px; text-align: center; min-width: 320px; max-width: 400px;">
+                <h3 style="margin: 0 0 20px; color: var(--text-main);">🖼️ Plan — Dessins & annotations</h3>
+                
+                <div style="text-align: left; opacity: 0.7; font-size: 0.85em; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Dessin original</div>
                 <div class="flex-col-gap10">
                     <button onclick="app.Storyboard.chooseDrawing('${shotId}')" style="padding: 15px 20px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 600;">
                         🎨 Dessiner
@@ -23145,14 +23307,61 @@ const Storyboard = {
                     <button onclick="app.Storyboard.chooseImport('${shotId}')" style="padding: 15px 20px; background: var(--success); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 600;">
                         📷 Importer une image
                     </button>
-                    <button onclick="document.getElementById('image-menu-modal').remove()" style="padding: 12px 20px; background: var(--bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 0.95rem;">
-                        ✖ Annuler
+                </div>
+                
+                <div style="height: 1px; background: var(--border); margin: 18px 0;"></div>
+                
+                <div style="text-align: left; opacity: 0.7; font-size: 0.85em; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Annotations techniques</div>
+                <div class="flex-col-gap10">
+                    <button onclick="app.Storyboard.chooseAnnotation('${shotId}', 'lighting')" style="padding: 13px 20px; background: linear-gradient(135deg, #ffd54f, #ffb300); color: #3e2723; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; font-weight: 600;">
+                        💡 Lumière
+                    </button>
+                    <button onclick="app.Storyboard.chooseAnnotation('${shotId}', 'camera')" style="padding: 13px 20px; background: linear-gradient(135deg, #64b5f6, #1976d2); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; font-weight: 600;">
+                        🎥 Caméra
+                    </button>
+                    <button onclick="app.Storyboard.chooseAnnotation('${shotId}', 'actors')" style="padding: 13px 20px; background: linear-gradient(135deg, #ce93d8, #8e24aa); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; font-weight: 600;">
+                        🎭 Acteurs
                     </button>
                 </div>
+                
+                <div style="height: 1px; background: var(--border); margin: 18px 0 12px;"></div>
+                
+                <button onclick="document.getElementById('image-menu-modal').remove()" style="padding: 12px 20px; background: var(--bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 0.95rem; width: 100%;">
+                    ✖ Annuler
+                </button>
             </div>
         `;
         
         document.body.appendChild(menu);
+    },
+    
+    // Phase 1 Storyboard : inverse l'état de visibilité d'une zone sémantique sur un plan
+    toggleDrawingVisibility: (shotId, kind) => {
+        const validKinds = ['lighting', 'camera', 'actors'];
+        if(!validKinds.includes(kind)) return;
+        
+        const shot = state.data.shots.find(s => s.id === shotId);
+        if(!shot) return;
+        
+        // Si la zone est vide, ne rien faire (le bouton est désactivé visuellement)
+        const has = !!(shot.drawings && shot.drawings[kind] && (shot.drawings[kind].drawingData || shot.drawings[kind].imageUrl));
+        if(!has) {
+            Utils.toast(`Aucune annotation ${kind} pour ce plan`, 'info');
+            return;
+        }
+        
+        if(!shot.drawingsVisibility) {
+            shot.drawingsVisibility = { original: true, lighting: false, camera: false, actors: false };
+        }
+        shot.drawingsVisibility[kind] = !shot.drawingsVisibility[kind];
+        
+        Store.save();
+        
+        // Rafraîchir l'affichage : on re-render la grille storyboard et la modale d'édition si ouverte
+        Storyboard.renderShots();
+        if(Storyboard.currentEditingShotId === shotId) {
+            Storyboard.refreshEditModal(shotId);
+        }
     },
     
     chooseDrawing: (shotId) => {
@@ -23162,7 +23371,31 @@ const Storyboard = {
             if(Storyboard.currentEditingShotId === shotId) {
                 Storyboard.refreshEditModal(shotId);
             }
-        });
+        }, 'original');
+    },
+    
+    // Phase 1 Storyboard : ouvre l'éditeur sur une zone sémantique (lumière/caméra/acteurs)
+    chooseAnnotation: (shotId, kind) => {
+        const menuEl = document.getElementById('image-menu-modal');
+        if(menuEl) menuEl.remove();
+        
+        const validKinds = ['lighting', 'camera', 'actors'];
+        if(!validKinds.includes(kind)) return;
+        
+        // Activer automatiquement la visibilité de cette zone après édition
+        const shot = state.data.shots.find(s => s.id === shotId);
+        if(shot) {
+            if(!shot.drawingsVisibility) {
+                shot.drawingsVisibility = { original: true, lighting: false, camera: false, actors: false };
+            }
+            shot.drawingsVisibility[kind] = true;
+        }
+        
+        DrawingEditor.open(shotId, () => {
+            if(Storyboard.currentEditingShotId === shotId) {
+                Storyboard.refreshEditModal(shotId);
+            }
+        }, kind);
     },
     
     chooseImport: (shotId) => {
@@ -23667,6 +23900,7 @@ const Storyboard = {
 
 const DrawingEditor = {
     currentShotId: null,
+    currentKind: 'original',  // Phase 1 Storyboard : zone éditée ('original'|'lighting'|'camera'|'actors')
     moodboardCallback: null,
     canvas: null,
     ctx: null,
@@ -23690,8 +23924,9 @@ const DrawingEditor = {
         DrawingEditor.redraw();
     },
     
-    open: (shotId, moodboardCallback = null) => {
+    open: (shotId, moodboardCallback = null, kind = 'original') => {
         DrawingEditor.currentShotId = shotId;
+        DrawingEditor.currentKind = kind;
         DrawingEditor.moodboardCallback = moodboardCallback;
         const modal = document.getElementById('drawing-modal');
         modal.style.display = 'flex';
@@ -23699,12 +23934,25 @@ const DrawingEditor = {
         DrawingEditor.canvas = document.getElementById('drawingCanvas');
         DrawingEditor.ctx = DrawingEditor.canvas.getContext('2d');
         
+        // Phase 1 Storyboard : récupère le drawingData de la zone demandée
+        // Compat backwards : si kind='original' et `drawings.original` absent, on retombe sur shot.drawingData
+        const _getZoneDrawingData = (shot) => {
+            if(!shot) return null;
+            if(shot.drawings && shot.drawings[kind]) {
+                return shot.drawings[kind].drawingData || null;
+            }
+            // Fallback compat : shot ancien sans `drawings`, on lit shot.drawingData uniquement pour 'original'
+            if(kind === 'original') return shot.drawingData || null;
+            return null;
+        };
+        
         // Load existing drawing or create new
         if(shotId) {
             const shot = state.data.shots.find(s => s.id === shotId);
-            if(shot && shot.drawingData) {
-                DrawingEditor.layers = JSON.parse(JSON.stringify(shot.drawingData.layers));
-                DrawingEditor.currentLayerIndex = shot.drawingData.currentLayer || 0;
+            const zoneDrawingData = _getZoneDrawingData(shot);
+            if(zoneDrawingData) {
+                DrawingEditor.layers = JSON.parse(JSON.stringify(zoneDrawingData.layers));
+                DrawingEditor.currentLayerIndex = zoneDrawingData.currentLayer || 0;
                 // Restaurer les calques depuis les données sauvegardées
                 DrawingEditor.layers.forEach(layer => {
                     if(layer.imageData) {
@@ -23733,6 +23981,77 @@ const DrawingEditor = {
             // Mode MoodBoard : nouveau dessin vierge
             DrawingEditor.layers = [DrawingEditor.createNewLayer()];
             DrawingEditor.currentLayerIndex = 0;
+        }
+        
+        // Phase 1 Storyboard : préparer l'arrière-plan "original" pour les zones sémantiques
+        DrawingEditor.originalBgImage = null;
+        if(shotId && kind !== 'original') {
+            const shot = state.data.shots.find(s => s.id === shotId);
+            if(shot) {
+                // 1) Image importée dans la zone original ?
+                let originalUrl = null;
+                if(shot.drawings && shot.drawings.original && shot.drawings.original.imageType === 'upload' && shot.drawings.original.imageUrl) {
+                    originalUrl = shot.drawings.original.imageUrl;
+                }
+                // 2) Compat backwards : image importée à la racine du shot
+                else if((!shot.drawings || !shot.drawings.original) && shot.imageType === 'upload' && shot.imageUrl) {
+                    originalUrl = shot.imageUrl;
+                }
+                
+                // 3) Sinon, dessin à composer depuis les calques de l'original
+                if(!originalUrl) {
+                    let originalDrawingData = null;
+                    if(shot.drawings && shot.drawings.original && shot.drawings.original.drawingData) {
+                        originalDrawingData = shot.drawings.original.drawingData;
+                    } else if(shot.drawingData) {
+                        originalDrawingData = shot.drawingData;
+                    }
+                    
+                    if(originalDrawingData && Array.isArray(originalDrawingData.layers) && originalDrawingData.layers.length > 0) {
+                        // Composer les calques visibles dans un canvas temporaire
+                        const tmpCanvas = document.createElement('canvas');
+                        tmpCanvas.width = DrawingEditor.canvas.width;
+                        tmpCanvas.height = DrawingEditor.canvas.height;
+                        const tmpCtx = tmpCanvas.getContext('2d');
+                        let pending = 0;
+                        let resolved = 0;
+                        const layersToCompose = originalDrawingData.layers.filter(l => l.visible !== false && l.imageData);
+                        if(layersToCompose.length === 0) {
+                            // Rien à composer, on laisse originalBgImage à null
+                        } else {
+                            const finalize = () => {
+                                const dataUrl = tmpCanvas.toDataURL();
+                                const img = new Image();
+                                img.onload = () => { DrawingEditor.redraw(); };
+                                img.src = dataUrl;
+                                DrawingEditor.originalBgImage = img;
+                            };
+                            layersToCompose.forEach(layer => {
+                                pending++;
+                                const im = new Image();
+                                im.onload = () => {
+                                    tmpCtx.drawImage(im, 0, 0);
+                                    resolved++;
+                                    if(resolved === pending) finalize();
+                                };
+                                im.onerror = () => {
+                                    resolved++;
+                                    if(resolved === pending) finalize();
+                                };
+                                im.src = layer.imageData;
+                            });
+                        }
+                    }
+                }
+                
+                // Si on a une URL directe (image importée), la charger
+                if(originalUrl) {
+                    const img = new Image();
+                    img.onload = () => { DrawingEditor.redraw(); };
+                    img.src = originalUrl;
+                    DrawingEditor.originalBgImage = img;
+                }
+            }
         }
         
         DrawingEditor.setupCanvas();
@@ -23973,6 +24292,15 @@ const DrawingEditor = {
         // Clear main canvas
         DrawingEditor.ctx.clearRect(0, 0, DrawingEditor.canvas.width, DrawingEditor.canvas.height);
         
+        // Phase 1 Storyboard : si on édite une zone sémantique, afficher l'original en arrière-plan (lecture seule)
+        if(DrawingEditor.currentKind && DrawingEditor.currentKind !== 'original' 
+           && DrawingEditor.originalBgImage && DrawingEditor.originalBgImage.complete && DrawingEditor.originalBgImage.naturalWidth > 0) {
+            DrawingEditor.ctx.save();
+            DrawingEditor.ctx.globalAlpha = 0.4; // arrière-plan estompé pour distinguer du calque actif
+            DrawingEditor.ctx.drawImage(DrawingEditor.originalBgImage, 0, 0, DrawingEditor.canvas.width, DrawingEditor.canvas.height);
+            DrawingEditor.ctx.restore();
+        }
+        
         // Draw all visible layers
         DrawingEditor.layers.forEach(layer => {
             if(layer.visible) {
@@ -24119,13 +24447,29 @@ const DrawingEditor = {
             currentLayer: DrawingEditor.currentLayerIndex
         };
         
-        shot.imageType = 'drawing';
-        shot.drawingData = drawingData;
+        // Phase 1 Storyboard : écrire dans la zone correspondante
+        const kind = DrawingEditor.currentKind || 'original';
+        if(!shot.drawings) {
+            shot.drawings = { original: null, lighting: null, camera: null, actors: null };
+        }
+        shot.drawings[kind] = {
+            imageType: 'drawing',
+            imageUrl: null,
+            drawingData: drawingData
+        };
+        
+        // Compat backwards : pour 'original' on continue d'alimenter les champs racine
+        // (utilisés par l'aperçu compact, l'export PDF, etc.)
+        if(kind === 'original') {
+            shot.imageType = 'drawing';
+            shot.drawingData = drawingData;
+        }
         shot.lastModified = Date.now();
         
         Store.save();
         Storyboard.renderShots();
-        Utils.toast('Dessin sauvegardé !', 'success');
+        const zoneLabel = { original: 'Dessin', lighting: 'Lumière', camera: 'Caméra', actors: 'Acteurs' }[kind] || 'Dessin';
+        Utils.toast(zoneLabel + ' sauvegardé !', 'success');
     },
     
     saveVersion: () => {
@@ -24147,13 +24491,29 @@ const DrawingEditor = {
         
         if(!shot.versions) shot.versions = [];
         
+        // Phase 1 Storyboard : versionner avec le kind, pour pouvoir restaurer dans la bonne zone
+        const kind = DrawingEditor.currentKind || 'original';
         shot.versions.push({
             timestamp: Date.now(),
+            kind: kind,
             data: drawingData
         });
         
-        shot.imageType = 'drawing';
-        shot.drawingData = drawingData;
+        // Phase 1 Storyboard : écrire dans la zone correspondante
+        if(!shot.drawings) {
+            shot.drawings = { original: null, lighting: null, camera: null, actors: null };
+        }
+        shot.drawings[kind] = {
+            imageType: 'drawing',
+            imageUrl: null,
+            drawingData: drawingData
+        };
+        
+        // Compat backwards pour 'original'
+        if(kind === 'original') {
+            shot.imageType = 'drawing';
+            shot.drawingData = drawingData;
+        }
         shot.lastModified = Date.now();
         
         Store.save();
