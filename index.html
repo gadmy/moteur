@@ -6665,7 +6665,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v3.1.4</p>
+      <p>v3.1.5</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -12658,11 +12658,23 @@ crewRoles: {
       
       broadcast: (type, data) => {
           if(SessionManager.channel) {
-              SessionManager.channel.postMessage({
-                  type: type,
-                  tabId: SessionManager.tabId,
-                  data: data
-              });
+              try {
+                  SessionManager.channel.postMessage({
+                      type: type,
+                      tabId: SessionManager.tabId,
+                      data: data
+                  });
+              } catch(err) {
+                  // BroadcastChannel peut devenir invalide si l'onglet a été inactif/fermé
+                  console.warn('[SessionManager] Channel invalidé, recréation:', err.message);
+                  SessionManager.channel = null;
+                  // Tentative de recréation pour les broadcasts suivants
+                  try {
+                      if(typeof BroadcastChannel !== 'undefined') {
+                          SessionManager.channel = new BroadcastChannel('moteur_session_' + state.currentProjectId);
+                      }
+                  } catch(_) { /* silent */ }
+              }
           }
       },
       
@@ -25046,7 +25058,13 @@ const DrawingEditor = {
     },
     
     // Phase 3B Storyboard : sélectionne un type d'objet pour placement au prochain clic
+    // Re-cliquer sur le même type → désélectionne (passe en mode édition)
     selectObjectType: (type) => {
+        // Toggle : si on re-clique sur le type déjà actif, on le désélectionne
+        if(DrawingEditor.pendingObjectType === type) {
+            DrawingEditor.exitPlacementMode();
+            return;
+        }
         DrawingEditor.pendingObjectType = type;
         // Mise à jour visuelle : surligner le bouton sélectionné
         document.querySelectorAll('#objectsPalette button[data-obj-type]').forEach(btn => {
@@ -25061,7 +25079,17 @@ const DrawingEditor = {
         // Curseur crosshair pour indiquer le mode placement
         if(DrawingEditor.canvas) DrawingEditor.canvas.style.cursor = 'crosshair';
         const def = (CONFIG.annotationObjects || []).find(o => o.type === type);
-        if(def) Utils.toast(`${def.emoji} ${def.label} sélectionné — cliquez sur le canvas pour placer`, 'info', 2500);
+        if(def) Utils.toast(`${def.emoji} ${def.label} sélectionné — cliquez sur le canvas pour placer (re-cliquez sur l'icône pour annuler)`, 'info', 3000);
+    },
+    
+    // Phase 3C Storyboard : sortir du mode placement (revenir en mode édition/sélection)
+    exitPlacementMode: () => {
+        DrawingEditor.pendingObjectType = null;
+        if(DrawingEditor.canvas) DrawingEditor.canvas.style.cursor = '';
+        document.querySelectorAll('#objectsPalette button[data-obj-type]').forEach(btn => {
+            btn.style.background = 'var(--panel-bg)';
+            btn.style.color = '';
+        });
     },
     
     // Phase 3B Storyboard : supprime un objet placé (par son index dans le tableau)
