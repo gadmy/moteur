@@ -6665,7 +6665,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v3.1.8</p>
+      <p>v3.1.9</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10800,6 +10800,24 @@ body.presentation-mode .presentation-bar {
                 <div class="tool-group">
                     <div class="tool-label">Couleurs</div>
                     <div class="color-palette" id="colorPalette"></div>
+                    
+                    <!-- Phase 4A : sélecteur de couleur libre + pipette -->
+                    <div style="display: flex; gap: 6px; margin-top: 8px; align-items: center;">
+                        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; flex: 1; font-size: 0.78rem;">
+                            <input type="color" id="customColorPicker" 
+                                onchange="app.DrawingEditor.pickCustomColor(this.value)"
+                                style="width: 28px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; background: none;">
+                            <span>Couleur libre</span>
+                        </label>
+                        <button type="button" id="eyedropperBtn" 
+                            onclick="app.DrawingEditor.toggleEyedropper()"
+                            title="Pipette : cliquez puis sur le canvas pour récupérer une couleur"
+                            style="width: 28px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-bg); cursor: pointer; font-size: 0.95rem;">💧</button>
+                    </div>
+                    
+                    <!-- Phase 4A : couleurs récemment utilisées (10 max, persistées) -->
+                    <div id="recentColorsLabel" style="font-size: 0.72rem; opacity: 0.7; margin-top: 10px; display: none;">Récentes</div>
+                    <div class="color-palette" id="recentColorsPalette" style="margin-top: 4px;"></div>
                 </div>
                 <div class="tool-group">
                     <div class="tool-label">Outils</div>
@@ -24288,6 +24306,10 @@ const DrawingEditor = {
     
     colors: ['#000000', '#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#800080'],
     
+    // Phase 4A : couleurs récemment utilisées (max 10, persistées dans localStorage)
+    recentColors: [],
+    eyedropperActive: false,
+    
     toggleTransparent: (checked) => {
         DrawingEditor.transparentBg = checked;
         DrawingEditor.redraw();
@@ -24427,6 +24449,37 @@ const DrawingEditor = {
         DrawingEditor.renderColorPalette();
         DrawingEditor.renderLayers();
         
+        // Phase 4A : charger les couleurs récentes depuis localStorage
+        try {
+            const stored = localStorage.getItem('moteur_drawing_recent_colors');
+            if(stored) {
+                const parsed = JSON.parse(stored);
+                if(Array.isArray(parsed)) {
+                    DrawingEditor.recentColors = parsed.filter(c => typeof c === 'string').slice(0, 10);
+                }
+            }
+        } catch(_) { /* localStorage indisponible ou JSON invalide, silent */ }
+        
+        // Phase 4A : reset du mode pipette à chaque ouverture
+        DrawingEditor.eyedropperActive = false;
+        
+        // Phase 4A : charger les couleurs récentes depuis localStorage
+        try {
+            const stored = localStorage.getItem('moteur_drawing_recent_colors');
+            if(stored) {
+                const parsed = JSON.parse(stored);
+                if(Array.isArray(parsed)) {
+                    DrawingEditor.recentColors = parsed.filter(c => typeof c === 'string').slice(0, 10);
+                }
+            }
+        } catch(_) { /* localStorage indisponible ou JSON invalide, silent */ }
+        
+        // Phase 4A : reset du mode pipette à chaque ouverture
+        DrawingEditor.eyedropperActive = false;
+        
+        // Phase 4A : re-render de la palette pour afficher les récentes chargées
+        DrawingEditor.renderColorPalette();
+        
         // Phase 3B Storyboard : afficher la palette d'objets pour les zones sémantiques
         const paletteGroup = document.getElementById('objectsPaletteGroup');
         if(paletteGroup) {
@@ -24546,18 +24599,129 @@ const DrawingEditor = {
     
     renderColorPalette: () => {
         const container = document.getElementById('colorPalette');
+        if(!container) return;
         container.innerHTML = '';
         
+        // Couleurs prédéfinies (toujours présentes)
         DrawingEditor.colors.forEach(color => {
             const swatch = document.createElement('div');
-            swatch.className = 'color-swatch' + (DrawingEditor.currentColor === color ? ' active' : '');
+            swatch.className = 'color-swatch' + (DrawingEditor.currentColor.toLowerCase() === color.toLowerCase() ? ' active' : '');
             swatch.style.background = color;
-            swatch.onclick = () => {
-                DrawingEditor.currentColor = color;
-                DrawingEditor.renderColorPalette();
-            };
+            swatch.title = color;
+            swatch.onclick = () => DrawingEditor.selectColor(color);
             container.appendChild(swatch);
         });
+        
+        // Phase 4A : couleurs récemment utilisées
+        const recentContainer = document.getElementById('recentColorsPalette');
+        const recentLabel = document.getElementById('recentColorsLabel');
+        if(recentContainer && recentLabel) {
+            const recents = DrawingEditor.recentColors || [];
+            if(recents.length > 0) {
+                recentLabel.style.display = 'block';
+                recentContainer.innerHTML = '';
+                recents.forEach(color => {
+                    const swatch = document.createElement('div');
+                    swatch.className = 'color-swatch' + (DrawingEditor.currentColor.toLowerCase() === color.toLowerCase() ? ' active' : '');
+                    swatch.style.background = color;
+                    swatch.title = color;
+                    swatch.onclick = () => DrawingEditor.selectColor(color);
+                    recentContainer.appendChild(swatch);
+                });
+            } else {
+                recentLabel.style.display = 'none';
+                recentContainer.innerHTML = '';
+            }
+        }
+        
+        // Synchroniser le picker natif sur la couleur actuelle
+        const picker = document.getElementById('customColorPicker');
+        if(picker && /^#[0-9a-f]{6}$/i.test(DrawingEditor.currentColor)) {
+            picker.value = DrawingEditor.currentColor;
+        }
+    },
+    
+    // Phase 4A : sélectionne une couleur et l'ajoute aux récentes (sauf si elle est dans les prédéfinies)
+    selectColor: (color) => {
+        if(!color) return;
+        DrawingEditor.currentColor = color;
+        
+        // Ne pas mémoriser dans "récentes" si la couleur est déjà dans les prédéfinies
+        const isPredefined = DrawingEditor.colors.some(c => c.toLowerCase() === color.toLowerCase());
+        if(!isPredefined) {
+            DrawingEditor.recentColors = DrawingEditor.recentColors || [];
+            // Retirer si elle existe déjà (pour la remonter en tête)
+            DrawingEditor.recentColors = DrawingEditor.recentColors.filter(c => c.toLowerCase() !== color.toLowerCase());
+            // Ajouter en tête
+            DrawingEditor.recentColors.unshift(color);
+            // Limiter à 10
+            if(DrawingEditor.recentColors.length > 10) {
+                DrawingEditor.recentColors = DrawingEditor.recentColors.slice(0, 10);
+            }
+            // Persister
+            try {
+                localStorage.setItem('moteur_drawing_recent_colors', JSON.stringify(DrawingEditor.recentColors));
+            } catch(_) { /* localStorage indisponible (mode privé), silent */ }
+        }
+        
+        DrawingEditor.renderColorPalette();
+    },
+    
+    // Phase 4A : appelée par l'input color natif
+    pickCustomColor: (color) => {
+        DrawingEditor.selectColor(color);
+    },
+    
+    // Phase 4A : active/désactive le mode pipette
+    toggleEyedropper: () => {
+        DrawingEditor.eyedropperActive = !DrawingEditor.eyedropperActive;
+        const btn = document.getElementById('eyedropperBtn');
+        if(btn) {
+            if(DrawingEditor.eyedropperActive) {
+                btn.style.background = 'var(--primary)';
+                btn.style.color = 'white';
+            } else {
+                btn.style.background = 'var(--panel-bg)';
+                btn.style.color = '';
+            }
+        }
+        if(DrawingEditor.canvas) {
+            DrawingEditor.canvas.style.cursor = DrawingEditor.eyedropperActive ? 'crosshair' : '';
+        }
+        if(DrawingEditor.eyedropperActive) {
+            Utils.toast('💧 Pipette active : cliquez sur le canvas pour récupérer une couleur', 'info', 2500);
+        }
+    },
+    
+    // Phase 4A : récupère la couleur du pixel cliqué et sort du mode pipette
+    pickColorFromCanvas: (canvasX, canvasY) => {
+        try {
+            const x = Math.max(0, Math.min(DrawingEditor.canvas.width - 1, Math.round(canvasX)));
+            const y = Math.max(0, Math.min(DrawingEditor.canvas.height - 1, Math.round(canvasY)));
+            const pixel = DrawingEditor.ctx.getImageData(x, y, 1, 1).data;
+            const r = pixel[0], g = pixel[1], b = pixel[2], a = pixel[3];
+            // Si pixel transparent (canvas vide à cet endroit), prendre la couleur de fond perçue (blanc)
+            if(a === 0) {
+                Utils.toast('Pixel transparent — couleur blanche prise par défaut', 'info', 2000);
+                DrawingEditor.selectColor('#FFFFFF');
+            } else {
+                // Convertir en hex
+                const toHex = (n) => n.toString(16).padStart(2, '0').toUpperCase();
+                const hex = '#' + toHex(r) + toHex(g) + toHex(b);
+                DrawingEditor.selectColor(hex);
+            }
+        } catch(err) {
+            console.error('Pipette : impossible de lire le pixel', err);
+            Utils.toast('Pipette : erreur de lecture', 'error');
+        }
+        // Sortir du mode pipette
+        DrawingEditor.eyedropperActive = false;
+        const btn = document.getElementById('eyedropperBtn');
+        if(btn) {
+            btn.style.background = 'var(--panel-bg)';
+            btn.style.color = '';
+        }
+        DrawingEditor.canvas.style.cursor = '';
     },
     
     renderLayers: () => {
@@ -24589,6 +24753,16 @@ const DrawingEditor = {
         const rect = DrawingEditor.canvas.getBoundingClientRect();
         const x = Math.floor(e.clientX - rect.left);
         const y = Math.floor(e.clientY - rect.top);
+        
+        // Phase 4A : mode pipette actif → récupérer la couleur du pixel et sortir du mode
+        if(DrawingEditor.eyedropperActive) {
+            const scaleX = DrawingEditor.canvas.width / rect.width;
+            const scaleY = DrawingEditor.canvas.height / rect.height;
+            const canvasX = (e.clientX - rect.left) * scaleX;
+            const canvasY = (e.clientY - rect.top) * scaleY;
+            DrawingEditor.pickColorFromCanvas(canvasX, canvasY);
+            return;  // Bloquer tout le reste (dessin, drag, etc.)
+        }
         
         // Phase 3C v2 Storyboard : si on clique gauche sur un objet existant en zone sémantique
         if(DrawingEditor.currentKind && DrawingEditor.currentKind !== 'original') {
