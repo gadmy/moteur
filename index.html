@@ -6665,7 +6665,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v3.1.6</p>
+      <p>v3.1.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -24582,17 +24582,41 @@ const DrawingEditor = {
     },
     
     startDrawing: (e) => {
+        // Phase 3C v3 Storyboard : ignorer le clic droit (géré par handleContextMenu pour les poignées)
+        if(e.button && e.button !== 0) return;
+        
         const rect = DrawingEditor.canvas.getBoundingClientRect();
         const x = Math.floor(e.clientX - rect.left);
         const y = Math.floor(e.clientY - rect.top);
         
-        // Phase 3C v2 Storyboard : si on clique gauche sur un objet existant en zone sémantique, drag pour déplacer
+        // Phase 3C v2 Storyboard : si on clique gauche sur un objet existant en zone sémantique
         if(DrawingEditor.currentKind && DrawingEditor.currentKind !== 'original') {
             const scaleX = DrawingEditor.canvas.width / rect.width;
             const scaleY = DrawingEditor.canvas.height / rect.height;
             const canvasX = (e.clientX - rect.left) * scaleX;
             const canvasY = (e.clientY - rect.top) * scaleY;
             
+            // Phase 3C v3 : si un objet est sélectionné, prioriser la détection des poignées
+            if(typeof DrawingEditor.selectedObjectIdx === 'number' && DrawingEditor.selectedObjectIdx >= 0) {
+                const handle = DrawingEditor.findHandleAt(canvasX, canvasY);
+                if(handle) {
+                    const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
+                    const obj = shot && shot.drawings[DrawingEditor.currentKind].objects[DrawingEditor.selectedObjectIdx];
+                    if(obj) {
+                        DrawingEditor.transformingHandle = handle;
+                        DrawingEditor.transformStartX = canvasX;
+                        DrawingEditor.transformStartY = canvasY;
+                        DrawingEditor.transformInitialScale = obj.scale || 1;
+                        DrawingEditor.transformInitialRotation = obj.rotation || 0;
+                        DrawingEditor.transformObjectCx = obj.x;
+                        DrawingEditor.transformObjectCy = obj.y;
+                        DrawingEditor.canvas.style.cursor = (handle === 'rotate') ? 'grab' : 'nwse-resize';
+                        return;  // Bloquer le dessin et le drag
+                    }
+                }
+            }
+            
+            // Sinon, drag d'objet pour déplacer
             const objIdx = DrawingEditor.findObjectAt(canvasX, canvasY);
             if(objIdx >= 0) {
                 DrawingEditor.draggingObjectIdx = objIdx;
@@ -24613,6 +24637,46 @@ const DrawingEditor = {
     },
     
     draw: (e) => {
+        // Phase 3C v3 Storyboard : drag d'une poignée (transform : resize ou rotate)
+        if(DrawingEditor.transformingHandle) {
+            const rect = DrawingEditor.canvas.getBoundingClientRect();
+            const scaleX = DrawingEditor.canvas.width / rect.width;
+            const scaleY = DrawingEditor.canvas.height / rect.height;
+            const canvasX = (e.clientX - rect.left) * scaleX;
+            const canvasY = (e.clientY - rect.top) * scaleY;
+            
+            const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
+            const zone = shot && shot.drawings && shot.drawings[DrawingEditor.currentKind];
+            const obj = zone && zone.objects && zone.objects[DrawingEditor.selectedObjectIdx];
+            if(obj) {
+                const cx = DrawingEditor.transformObjectCx;
+                const cy = DrawingEditor.transformObjectCy;
+                
+                if(DrawingEditor.transformingHandle === 'rotate') {
+                    // Angle entre le centre et la souris (en degrés, 0° = haut)
+                    const dx = canvasX - cx;
+                    const dy = canvasY - cy;
+                    const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI + 90;
+                    obj.rotation = Math.round(angleDeg);
+                } else {
+                    // Resize : ratio de distance entre la souris et le centre vs. distance initiale
+                    const initDx = DrawingEditor.transformStartX - cx;
+                    const initDy = DrawingEditor.transformStartY - cy;
+                    const initDist = Math.sqrt(initDx * initDx + initDy * initDy);
+                    const curDx = canvasX - cx;
+                    const curDy = canvasY - cy;
+                    const curDist = Math.sqrt(curDx * curDx + curDy * curDy);
+                    if(initDist > 1) {
+                        const ratio = curDist / initDist;
+                        const newScale = DrawingEditor.transformInitialScale * ratio;
+                        obj.scale = Math.max(0.25, Math.min(5, newScale));
+                    }
+                }
+                DrawingEditor.redraw();
+            }
+            return;  // Bloquer dessin et drag
+        }
+        
         // Phase 3C v2 Storyboard : drag d'un objet posé (déplacement)
         if(typeof DrawingEditor.draggingObjectIdx === 'number' && DrawingEditor.draggingObjectIdx >= 0) {
             const rect = DrawingEditor.canvas.getBoundingClientRect();
@@ -24714,6 +24778,21 @@ const DrawingEditor = {
     },
     
     stopDrawing: () => {
+        // Phase 3C v3 Storyboard : terminer une transformation (resize/rotate via poignée)
+        if(DrawingEditor.transformingHandle) {
+            DrawingEditor.transformingHandle = null;
+            DrawingEditor.transformStartX = 0;
+            DrawingEditor.transformStartY = 0;
+            DrawingEditor.transformInitialScale = 1;
+            DrawingEditor.transformInitialRotation = 0;
+            DrawingEditor.transformObjectCx = 0;
+            DrawingEditor.transformObjectCy = 0;
+            DrawingEditor.canvas.style.cursor = '';
+            if(Storyboard.markAsDirty) Storyboard.markAsDirty();
+            DrawingEditor.redraw();
+            return;
+        }
+        
         // Phase 3C v2 Storyboard : terminer un drag d'objet posé
         if(typeof DrawingEditor.draggingObjectIdx === 'number' && DrawingEditor.draggingObjectIdx >= 0) {
             DrawingEditor.draggingObjectIdx = -1;
@@ -24762,6 +24841,9 @@ const DrawingEditor = {
                 Storyboard.renderObjectsOnCanvas(DrawingEditor.ctx, zone.objects);
             }
         }
+        
+        // Phase 3C v3 Storyboard : poignées de sélection (mode transform via clic droit)
+        DrawingEditor.drawSelectionHandles();
     },
     
     // Phase 3B Storyboard : remplit la palette d'objets selon le kind courant
@@ -25072,9 +25154,12 @@ const DrawingEditor = {
         DrawingEditor.redraw();
     },
     
-    // Phase 3C Storyboard : clic droit sur un objet = menu contextuel custom
+    // Phase 3C v3 Storyboard : clic droit sur un objet = activer le mode transform (poignées)
+    // Clic droit dans le vide = désélectionner
     handleContextMenu: (e) => {
+        e.preventDefault();  // Toujours bloquer le menu natif du navigateur sur le canvas
         if(!DrawingEditor.currentKind || DrawingEditor.currentKind === 'original') return;
+        
         const rect = DrawingEditor.canvas.getBoundingClientRect();
         const scaleX = DrawingEditor.canvas.width / rect.width;
         const scaleY = DrawingEditor.canvas.height / rect.height;
@@ -25082,49 +25167,18 @@ const DrawingEditor = {
         const canvasY = (e.clientY - rect.top) * scaleY;
         
         const idx = DrawingEditor.findObjectAt(canvasX, canvasY);
-        if(idx < 0) return;  // Pas sur un objet → laisser le menu natif (utile pour Inspecter, etc.)
+        if(idx < 0) {
+            // Clic droit dans le vide : désélectionner si une sélection existe
+            if(typeof DrawingEditor.selectedObjectIdx === 'number' && DrawingEditor.selectedObjectIdx >= 0) {
+                DrawingEditor.selectedObjectIdx = -1;
+                DrawingEditor.redraw();
+            }
+            return;
+        }
         
-        e.preventDefault();  // Bloquer le menu natif
-        DrawingEditor.closeContextMenu();  // Au cas où un menu serait déjà ouvert
-        
-        const menu = document.createElement('div');
-        menu.id = 'drawing-object-context-menu';
-        menu.style.cssText = `position: fixed; top: ${e.clientY}px; left: ${e.clientX}px; z-index: 999999; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.25); padding: 4px; min-width: 180px;`;
-        
-        const action = (icon, label, fn) => {
-            const btn = document.createElement('button');
-            btn.style.cssText = 'display: block; width: 100%; padding: 8px 12px; background: transparent; border: none; text-align: left; cursor: pointer; font-size: 0.85rem; color: var(--text-main); border-radius: 4px;';
-            btn.innerHTML = `<span style="display: inline-block; width: 22px;">${icon}</span> ${label}`;
-            btn.onmouseenter = () => { btn.style.background = 'var(--bg)'; };
-            btn.onmouseleave = () => { btn.style.background = 'transparent'; };
-            btn.onclick = (ev) => {
-                ev.stopPropagation();
-                fn();
-                DrawingEditor.closeContextMenu();
-            };
-            return btn;
-        };
-        
-        menu.appendChild(action('↶', 'Tourner -90°', () => DrawingEditor.rotateObject(idx, -90)));
-        menu.appendChild(action('↷', 'Tourner +90°', () => DrawingEditor.rotateObject(idx, 90)));
-        const sep1 = document.createElement('div');
-        sep1.style.cssText = 'height: 1px; background: var(--border); margin: 4px 6px;';
-        menu.appendChild(sep1);
-        menu.appendChild(action('➖', 'Réduire (×0.8)', () => DrawingEditor.scaleObject(idx, 0.8)));
-        menu.appendChild(action('➕', 'Agrandir (×1.25)', () => DrawingEditor.scaleObject(idx, 1.25)));
-        const sep2 = document.createElement('div');
-        sep2.style.cssText = 'height: 1px; background: var(--border); margin: 4px 6px;';
-        menu.appendChild(sep2);
-        menu.appendChild(action('📋', 'Dupliquer', () => DrawingEditor.duplicateObject(idx)));
-        menu.appendChild(action('🗑️', 'Supprimer', () => DrawingEditor.removePlacedObject(idx)));
-        
-        document.body.appendChild(menu);
-        
-        // Fermer au clic ailleurs
-        setTimeout(() => {
-            document.addEventListener('click', DrawingEditor.closeContextMenu, { once: true });
-            document.addEventListener('contextmenu', DrawingEditor.closeContextMenu, { once: true });
-        }, 0);
+        // Activer le mode transform sur cet objet (les poignées apparaissent via drawSelectionHandles)
+        DrawingEditor.selectedObjectIdx = idx;
+        DrawingEditor.redraw();
     },
     
     closeContextMenu: () => {
