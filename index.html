@@ -24436,8 +24436,9 @@ const DrawingEditor = {
                 DrawingEditor.renderObjectsPalette();
             }
         }
-        // Reset de l'état "objet sélectionné pour placement"
-        DrawingEditor.pendingObjectType = null;
+        // Phase 3C v3 : reset de l'état "objet sélectionné" (mode transform)
+        DrawingEditor.selectedObjectIdx = -1;
+        DrawingEditor.transformingHandle = null;
         if(DrawingEditor.canvas) DrawingEditor.canvas.style.cursor = '';
         
         DrawingEditor.redraw();
@@ -25026,41 +25027,6 @@ const DrawingEditor = {
         ctx.restore();
     },
     
-    // Phase 3B Storyboard : sélectionne un type d'objet pour placement au prochain clic
-    // Re-cliquer sur le même type → désélectionne (passe en mode édition)
-    selectObjectType: (type) => {
-        // Toggle : si on re-clique sur le type déjà actif, on le désélectionne
-        if(DrawingEditor.pendingObjectType === type) {
-            DrawingEditor.exitPlacementMode();
-            return;
-        }
-        DrawingEditor.pendingObjectType = type;
-        // Mise à jour visuelle : surligner le bouton sélectionné
-        document.querySelectorAll('#objectsPalette button[data-obj-type]').forEach(btn => {
-            if(btn.dataset.objType === type) {
-                btn.style.background = 'var(--primary)';
-                btn.style.color = 'white';
-            } else {
-                btn.style.background = 'var(--panel-bg)';
-                btn.style.color = '';
-            }
-        });
-        // Curseur crosshair pour indiquer le mode placement
-        if(DrawingEditor.canvas) DrawingEditor.canvas.style.cursor = 'crosshair';
-        const def = (CONFIG.annotationObjects || []).find(o => o.type === type);
-        if(def) Utils.toast(`${def.emoji} ${def.label} sélectionné — cliquez sur le canvas pour placer (re-cliquez sur l'icône pour annuler)`, 'info', 3000);
-    },
-    
-    // Phase 3C Storyboard : sortir du mode placement (revenir en mode édition/sélection)
-    exitPlacementMode: () => {
-        DrawingEditor.pendingObjectType = null;
-        if(DrawingEditor.canvas) DrawingEditor.canvas.style.cursor = '';
-        document.querySelectorAll('#objectsPalette button[data-obj-type]').forEach(btn => {
-            btn.style.background = 'var(--panel-bg)';
-            btn.style.color = '';
-        });
-    },
-    
     // Phase 3B Storyboard : supprime un objet placé (par son index dans le tableau)
     removePlacedObject: (idx) => {
         const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
@@ -25131,29 +25097,6 @@ const DrawingEditor = {
         DrawingEditor.redraw();
     },
     
-    // Phase 3C Storyboard : double-clic = suppression rapide d'un objet
-    handleDoubleClick: (e) => {
-        if(!DrawingEditor.currentKind || DrawingEditor.currentKind === 'original') return;
-        const rect = DrawingEditor.canvas.getBoundingClientRect();
-        const scaleX = DrawingEditor.canvas.width / rect.width;
-        const scaleY = DrawingEditor.canvas.height / rect.height;
-        const canvasX = (e.clientX - rect.left) * scaleX;
-        const canvasY = (e.clientY - rect.top) * scaleY;
-        
-        const idx = DrawingEditor.findObjectAt(canvasX, canvasY);
-        if(idx < 0) return;
-        
-        const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
-        if(!shot) return;
-        const zone = shot.drawings && shot.drawings[DrawingEditor.currentKind];
-        if(!zone || !Array.isArray(zone.objects)) return;
-        
-        zone.objects.splice(idx, 1);
-        if(Storyboard.markAsDirty) Storyboard.markAsDirty();
-        DrawingEditor.renderObjectsPalette();
-        DrawingEditor.redraw();
-    },
-    
     // Phase 3C v3 Storyboard : clic droit sur un objet = activer le mode transform (poignées)
     // Clic droit dans le vide = désélectionner
     handleContextMenu: (e) => {
@@ -25181,58 +25124,6 @@ const DrawingEditor = {
         DrawingEditor.redraw();
     },
     
-    closeContextMenu: () => {
-        const menu = document.getElementById('drawing-object-context-menu');
-        if(menu) menu.remove();
-    },
-    
-    // Phase 3C Storyboard : actions du menu contextuel
-    rotateObject: (idx, deltaDegrees) => {
-        const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
-        if(!shot) return;
-        const zone = shot.drawings && shot.drawings[DrawingEditor.currentKind];
-        if(!zone || !Array.isArray(zone.objects)) return;
-        const obj = zone.objects[idx];
-        if(!obj) return;
-        obj.rotation = ((obj.rotation || 0) + deltaDegrees) % 360;
-        if(Storyboard.markAsDirty) Storyboard.markAsDirty();
-        DrawingEditor.redraw();
-    },
-    
-    scaleObject: (idx, factor) => {
-        const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
-        if(!shot) return;
-        const zone = shot.drawings && shot.drawings[DrawingEditor.currentKind];
-        if(!zone || !Array.isArray(zone.objects)) return;
-        const obj = zone.objects[idx];
-        if(!obj) return;
-        const newScale = (obj.scale || 1) * factor;
-        // Limites raisonnables
-        obj.scale = Math.max(0.25, Math.min(5, newScale));
-        if(Storyboard.markAsDirty) Storyboard.markAsDirty();
-        DrawingEditor.redraw();
-    },
-    
-    duplicateObject: (idx) => {
-        const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
-        if(!shot) return;
-        const zone = shot.drawings && shot.drawings[DrawingEditor.currentKind];
-        if(!zone || !Array.isArray(zone.objects)) return;
-        const obj = zone.objects[idx];
-        if(!obj) return;
-        zone.objects.push({
-            id: Utils.generateUniqueId(),
-            type: obj.type,
-            x: (obj.x || 0) + 30,  // Décalage visible pour ne pas se superposer
-            y: (obj.y || 0) + 30,
-            scale: obj.scale || 1,
-            rotation: obj.rotation || 0
-        });
-        if(Storyboard.markAsDirty) Storyboard.markAsDirty();
-        DrawingEditor.renderObjectsPalette();
-        DrawingEditor.redraw();
-    },
-    
     // Phase 3C Storyboard : retourne l'index de l'objet (ou -1) sous le point (canvasX, canvasY) dans la zone courante
     // Parcourt à l'envers pour que les objets dessinés en dernier soient prioritaires (au-dessus)
     findObjectAt: (canvasX, canvasY) => {
@@ -25256,50 +25147,6 @@ const DrawingEditor = {
             }
         }
         return -1;
-    },
-    
-    // Phase 3B Storyboard : place l'objet en attente aux coordonnées canvas (x, y)
-    placeObjectAt: (x, y) => {
-        const type = DrawingEditor.pendingObjectType;
-        if(!type) return;
-        
-        const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
-        if(!shot) { console.error('Shot introuvable pour placement'); return; }
-        
-        // S'assurer que la zone existe avec sa structure complète
-        if(!shot.drawings) {
-            shot.drawings = { original: null, lighting: null, camera: null, actors: null };
-        }
-        if(!shot.drawings[DrawingEditor.currentKind]) {
-            shot.drawings[DrawingEditor.currentKind] = {
-                imageType: 'drawing',
-                imageUrl: null,
-                drawingData: null,
-                objects: []
-            };
-        }
-        if(!Array.isArray(shot.drawings[DrawingEditor.currentKind].objects)) {
-            shot.drawings[DrawingEditor.currentKind].objects = [];
-        }
-        
-        // Ajouter l'objet
-        shot.drawings[DrawingEditor.currentKind].objects.push({
-            id: Utils.generateUniqueId(),
-            type: type,
-            x: Math.round(x),
-            y: Math.round(y),
-            scale: 1,
-            rotation: 0
-        });
-        
-        // Marquer le shot comme modifié (pour activer le bouton "Sauvegarder" de la modale d'édition)
-        if(Storyboard.markAsDirty) Storyboard.markAsDirty();
-        
-        // On garde le type sélectionné pour permettre des placements multiples (workflow chef op)
-        // Si l'utilisateur veut arrêter, il peut cliquer ailleurs hors palette ou recliquer sur le même bouton
-        
-        DrawingEditor.renderObjectsPalette();
-        DrawingEditor.redraw();
     },
     
     setTool: (tool) => {
