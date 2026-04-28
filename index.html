@@ -6665,7 +6665,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>v3.1.5</p>
+      <p>v3.1.6</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -24497,10 +24497,11 @@ const DrawingEditor = {
         DrawingEditor.canvas.addEventListener('mousemove', DrawingEditor.draw);
         DrawingEditor.canvas.addEventListener('mouseup', DrawingEditor.stopDrawing);
         DrawingEditor.canvas.addEventListener('mouseout', DrawingEditor.stopDrawing);
-        // Phase 3C Storyboard : double-clic pour supprimer un objet
-        DrawingEditor.canvas.addEventListener('dblclick', DrawingEditor.handleDoubleClick);
         // Phase 3C Storyboard : clic droit sur un objet = menu contextuel custom
         DrawingEditor.canvas.addEventListener('contextmenu', DrawingEditor.handleContextMenu);
+        // Phase 3C v2 Storyboard : drag-and-drop depuis la palette vers le canvas
+        DrawingEditor.canvas.addEventListener('dragover', DrawingEditor.handleCanvasDragOver);
+        DrawingEditor.canvas.addEventListener('drop', DrawingEditor.handleCanvasDrop);
         
         // Touch support
         DrawingEditor.canvas.addEventListener('touchstart', (e) => {
@@ -24585,61 +24586,24 @@ const DrawingEditor = {
         const x = Math.floor(e.clientX - rect.left);
         const y = Math.floor(e.clientY - rect.top);
         
-        // Coordonnées canvas internes (réutilisées pour placement et drag)
-        const scaleX = DrawingEditor.canvas.width / rect.width;
-        const scaleY = DrawingEditor.canvas.height / rect.height;
-        const canvasX = (e.clientX - rect.left) * scaleX;
-        const canvasY = (e.clientY - rect.top) * scaleY;
-        
-        // Phase 3B Storyboard : si un objet est en attente de placement, le placer ici (et bloquer le dessin)
-        if(DrawingEditor.pendingObjectType) {
-            DrawingEditor.placeObjectAt(canvasX, canvasY);
-            return;  // Bloquer le dessin
-        }
-        
-        // Phase 3C Storyboard : si un objet est sélectionné, prioriser la détection des poignées
-        if(DrawingEditor.currentKind && DrawingEditor.currentKind !== 'original'
-           && typeof DrawingEditor.selectedObjectIdx === 'number' && DrawingEditor.selectedObjectIdx >= 0) {
-            const handle = DrawingEditor.findHandleAt(canvasX, canvasY);
-            if(handle) {
-                const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
-                const obj = shot && shot.drawings[DrawingEditor.currentKind].objects[DrawingEditor.selectedObjectIdx];
-                if(obj) {
-                    DrawingEditor.transformingHandle = handle;
-                    DrawingEditor.transformStartX = canvasX;
-                    DrawingEditor.transformStartY = canvasY;
-                    DrawingEditor.transformInitialScale = obj.scale || 1;
-                    DrawingEditor.transformInitialRotation = obj.rotation || 0;
-                    DrawingEditor.transformObjectCx = obj.x;
-                    DrawingEditor.transformObjectCy = obj.y;
-                    DrawingEditor.canvas.style.cursor = (handle === 'rotate') ? 'grab' : 'nwse-resize';
-                    return;  // Bloquer le dessin et le drag d'objet
-                }
-            }
-        }
-        
-        // Phase 3C Storyboard : si on clique sur un objet existant en zone sémantique, entrer en mode drag
-        // (on enregistre aussi la possibilité que ce soit un clic court → sélection)
+        // Phase 3C v2 Storyboard : si on clique gauche sur un objet existant en zone sémantique, drag pour déplacer
         if(DrawingEditor.currentKind && DrawingEditor.currentKind !== 'original') {
+            const scaleX = DrawingEditor.canvas.width / rect.width;
+            const scaleY = DrawingEditor.canvas.height / rect.height;
+            const canvasX = (e.clientX - rect.left) * scaleX;
+            const canvasY = (e.clientY - rect.top) * scaleY;
+            
             const objIdx = DrawingEditor.findObjectAt(canvasX, canvasY);
             if(objIdx >= 0) {
                 DrawingEditor.draggingObjectIdx = objIdx;
                 DrawingEditor.draggingStartX = canvasX;
                 DrawingEditor.draggingStartY = canvasY;
-                DrawingEditor.draggingMoved = false;  // Pour distinguer clic court vs drag réel
                 const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
                 const obj = shot.drawings[DrawingEditor.currentKind].objects[objIdx];
                 DrawingEditor.draggingObjectInitialX = obj.x;
                 DrawingEditor.draggingObjectInitialY = obj.y;
                 DrawingEditor.canvas.style.cursor = 'grabbing';
                 return;  // Bloquer le dessin
-            }
-            
-            // Clic dans le vide en zone sémantique : désélectionner s'il y avait une sélection
-            if(typeof DrawingEditor.selectedObjectIdx === 'number' && DrawingEditor.selectedObjectIdx >= 0) {
-                DrawingEditor.selectedObjectIdx = -1;
-                DrawingEditor.redraw();
-                return;  // Bloquer le dessin pour éviter de tracer un trait par accident
             }
         }
         
@@ -24649,48 +24613,7 @@ const DrawingEditor = {
     },
     
     draw: (e) => {
-        // Phase 3C Storyboard : gestion du drag d'une poignée (transform : resize ou rotate)
-        if(DrawingEditor.transformingHandle) {
-            const rect = DrawingEditor.canvas.getBoundingClientRect();
-            const scaleX = DrawingEditor.canvas.width / rect.width;
-            const scaleY = DrawingEditor.canvas.height / rect.height;
-            const canvasX = (e.clientX - rect.left) * scaleX;
-            const canvasY = (e.clientY - rect.top) * scaleY;
-            
-            const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
-            const zone = shot && shot.drawings && shot.drawings[DrawingEditor.currentKind];
-            const obj = zone && zone.objects && zone.objects[DrawingEditor.selectedObjectIdx];
-            if(obj) {
-                const cx = DrawingEditor.transformObjectCx;
-                const cy = DrawingEditor.transformObjectCy;
-                
-                if(DrawingEditor.transformingHandle === 'rotate') {
-                    // Angle entre le centre et la souris (en degrés, 0° = haut)
-                    const dx = canvasX - cx;
-                    const dy = canvasY - cy;
-                    // atan2 retourne par rapport à l'axe X+ (droite). On veut 0° = haut, donc on ajoute 90°.
-                    const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI + 90;
-                    obj.rotation = Math.round(angleDeg);
-                } else {
-                    // Resize : ratio de distance entre la souris et le centre, vs. distance initiale du clic
-                    const initDx = DrawingEditor.transformStartX - cx;
-                    const initDy = DrawingEditor.transformStartY - cy;
-                    const initDist = Math.sqrt(initDx * initDx + initDy * initDy);
-                    const curDx = canvasX - cx;
-                    const curDy = canvasY - cy;
-                    const curDist = Math.sqrt(curDx * curDx + curDy * curDy);
-                    if(initDist > 1) {  // Éviter la division par zéro
-                        const ratio = curDist / initDist;
-                        const newScale = DrawingEditor.transformInitialScale * ratio;
-                        obj.scale = Math.max(0.25, Math.min(5, newScale));
-                    }
-                }
-                DrawingEditor.redraw();
-            }
-            return;  // Bloquer le dessin et le drag d'objet
-        }
-        
-        // Phase 3C Storyboard : gestion du drag d'un objet (prioritaire sur le dessin)
+        // Phase 3C v2 Storyboard : drag d'un objet posé (déplacement)
         if(typeof DrawingEditor.draggingObjectIdx === 'number' && DrawingEditor.draggingObjectIdx >= 0) {
             const rect = DrawingEditor.canvas.getBoundingClientRect();
             const scaleX = DrawingEditor.canvas.width / rect.width;
@@ -24699,11 +24622,6 @@ const DrawingEditor = {
             const canvasY = (e.clientY - rect.top) * scaleY;
             const dx = canvasX - DrawingEditor.draggingStartX;
             const dy = canvasY - DrawingEditor.draggingStartY;
-            
-            // Si le mouvement total dépasse 4px, on considère que c'est un drag réel (pas un clic court)
-            if(Math.abs(dx) > 4 || Math.abs(dy) > 4) {
-                DrawingEditor.draggingMoved = true;
-            }
             
             const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
             const zone = shot && shot.drawings && shot.drawings[DrawingEditor.currentKind];
@@ -24796,49 +24714,16 @@ const DrawingEditor = {
     },
     
     stopDrawing: () => {
-        // Phase 3C Storyboard : terminer une transformation (resize/rotate via poignée)
-        if(DrawingEditor.transformingHandle) {
-            DrawingEditor.transformingHandle = null;
-            DrawingEditor.transformStartX = 0;
-            DrawingEditor.transformStartY = 0;
-            DrawingEditor.transformInitialScale = 1;
-            DrawingEditor.transformInitialRotation = 0;
-            DrawingEditor.transformObjectCx = 0;
-            DrawingEditor.transformObjectCy = 0;
-            DrawingEditor.canvas.style.cursor = '';
-            if(Storyboard.markAsDirty) Storyboard.markAsDirty();
-            DrawingEditor.redraw();
-            return;
-        }
-        
-        // Phase 3C Storyboard : terminer un drag d'objet
+        // Phase 3C v2 Storyboard : terminer un drag d'objet posé
         if(typeof DrawingEditor.draggingObjectIdx === 'number' && DrawingEditor.draggingObjectIdx >= 0) {
-            const wasClick = !DrawingEditor.draggingMoved;
-            const idx = DrawingEditor.draggingObjectIdx;
-            
-            // Si c'était un clic court (pas de drag réel), annuler le mini-déplacement et sélectionner
-            if(wasClick) {
-                const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
-                const zone = shot && shot.drawings && shot.drawings[DrawingEditor.currentKind];
-                if(zone && Array.isArray(zone.objects) && zone.objects[idx]) {
-                    zone.objects[idx].x = DrawingEditor.draggingObjectInitialX;
-                    zone.objects[idx].y = DrawingEditor.draggingObjectInitialY;
-                }
-                DrawingEditor.selectedObjectIdx = idx;
-            }
-            
             DrawingEditor.draggingObjectIdx = -1;
             DrawingEditor.draggingStartX = 0;
             DrawingEditor.draggingStartY = 0;
             DrawingEditor.draggingObjectInitialX = 0;
             DrawingEditor.draggingObjectInitialY = 0;
-            DrawingEditor.draggingMoved = false;
-            // Restaurer le curseur (crosshair si un type est en attente, normal sinon)
-            DrawingEditor.canvas.style.cursor = DrawingEditor.pendingObjectType ? 'crosshair' : '';
-            // Rafraîchir la liste "Placés"
+            DrawingEditor.canvas.style.cursor = '';
+            if(Storyboard.markAsDirty) Storyboard.markAsDirty();
             DrawingEditor.renderObjectsPalette();
-            // Marquer le shot comme modifié seulement si c'était un vrai drag
-            if(!wasClick && Storyboard.markAsDirty) Storyboard.markAsDirty();
             DrawingEditor.redraw();
             return;
         }
@@ -24877,9 +24762,6 @@ const DrawingEditor = {
                 Storyboard.renderObjectsOnCanvas(DrawingEditor.ctx, zone.objects);
             }
         }
-        
-        // Phase 3C Storyboard : poignées de sélection (par-dessus tout) si un objet est sélectionné
-        DrawingEditor.drawSelectionHandles();
     },
     
     // Phase 3B Storyboard : remplit la palette d'objets selon le kind courant
@@ -24894,18 +24776,23 @@ const DrawingEditor = {
         // Filtrer : catégorie correspondante au kind + machinery (commune)
         const items = catalog.filter(o => o.category === kind || o.category === 'machinery');
         
-        // Rendre les boutons d'objets
+        // Rendre les boutons d'objets (drag-and-drop HTML5 natif)
         palette.innerHTML = items.map(o => {
             const isMachinery = o.category === 'machinery';
             const borderColor = isMachinery ? 'var(--text-sec)' : 'var(--primary)';
-            return `<button type="button" 
-                onclick="app.DrawingEditor.selectObjectType('${o.type}')"
-                title="${Utils.escape(o.label)}${isMachinery ? ' (machinerie)' : ''}"
+            return `<div 
+                draggable="true"
+                ondragstart="app.DrawingEditor.handlePaletteDragStart(event, '${o.type}')"
+                title="Glissez sur le canvas — ${Utils.escape(o.label)}${isMachinery ? ' (machinerie)' : ''}"
                 data-obj-type="${o.type}"
-                style="width: 38px; height: 38px; padding: 0; border: 1.5px solid ${borderColor}; background: var(--panel-bg); border-radius: 6px; cursor: pointer; font-size: 1.3rem; line-height: 1; display: flex; align-items: center; justify-content: center;">
+                style="width: 38px; height: 38px; padding: 0; border: 1.5px solid ${borderColor}; background: var(--panel-bg); border-radius: 6px; cursor: grab; font-size: 1.3rem; line-height: 1; display: flex; align-items: center; justify-content: center; user-select: none;">
                 ${o.emoji}
-            </button>`;
+            </div>`;
         }).join('');
+        
+        // Mettre à jour le hint affiché au-dessus de la palette
+        const hint = document.getElementById('objectsPaletteHint');
+        if(hint) hint.textContent = 'Glissez un objet sur le canvas pour le placer.';
         
         // Rendre la liste des objets déjà placés sur cette zone
         if(placedList) {
@@ -25100,6 +24987,64 @@ const DrawingEditor = {
         if(!zone || !Array.isArray(zone.objects)) return;
         if(idx < 0 || idx >= zone.objects.length) return;
         zone.objects.splice(idx, 1);
+        DrawingEditor.renderObjectsPalette();
+        DrawingEditor.redraw();
+    },
+    
+    // Phase 3C v2 Storyboard : drag-and-drop natif depuis la palette vers le canvas
+    handlePaletteDragStart: (e, type) => {
+        e.dataTransfer.setData('text/plain', type);
+        e.dataTransfer.effectAllowed = 'copy';
+    },
+    
+    handleCanvasDragOver: (e) => {
+        // Empêche le navigateur de bloquer le drop (comportement par défaut)
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+    },
+    
+    handleCanvasDrop: (e) => {
+        e.preventDefault();
+        const type = e.dataTransfer.getData('text/plain');
+        if(!type) return;
+        // Vérifier qu'on est bien dans une zone sémantique
+        if(!DrawingEditor.currentKind || DrawingEditor.currentKind === 'original') return;
+        // Vérifier que le type existe dans le catalogue
+        const def = (CONFIG.annotationObjects || []).find(o => o.type === type);
+        if(!def) return;
+        
+        // Calculer les coordonnées canvas (avec scaling pour gérer un canvas affiché à taille différente)
+        const rect = DrawingEditor.canvas.getBoundingClientRect();
+        const scaleX = DrawingEditor.canvas.width / rect.width;
+        const scaleY = DrawingEditor.canvas.height / rect.height;
+        const canvasX = (e.clientX - rect.left) * scaleX;
+        const canvasY = (e.clientY - rect.top) * scaleY;
+        
+        // Créer l'objet
+        const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
+        if(!shot) return;
+        if(!shot.drawings) shot.drawings = { original:null, lighting:null, camera:null, actors:null };
+        if(!shot.drawings[DrawingEditor.currentKind]) {
+            shot.drawings[DrawingEditor.currentKind] = {
+                imageType: 'drawing',
+                imageUrl: null,
+                drawingData: null,
+                objects: []
+            };
+        }
+        if(!Array.isArray(shot.drawings[DrawingEditor.currentKind].objects)) {
+            shot.drawings[DrawingEditor.currentKind].objects = [];
+        }
+        shot.drawings[DrawingEditor.currentKind].objects.push({
+            id: Utils.generateUniqueId(),
+            type: type,
+            x: Math.round(canvasX),
+            y: Math.round(canvasY),
+            scale: 1,
+            rotation: 0
+        });
+        
+        if(Storyboard.markAsDirty) Storyboard.markAsDirty();
         DrawingEditor.renderObjectsPalette();
         DrawingEditor.redraw();
     },
