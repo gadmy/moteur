@@ -29,7 +29,66 @@ HTML actuel
 
 HISTORIQUE DES VERSIONS
 ================================================================================
-v3.2.0 — Storyboard : annotations objets (drag&drop + transform) + palette couleurs avancée - Phase 3 + 4A (28 Avr. 2026)
+v3.2.1 — Storyboard : icônes SVG plan technique (45 objets dessinés à la main) - Phase 4B (29 Avr. 2026)
+
+===== Phase 4B — Refonte visuelle des objets storyboard =====
+
+Remplacement complet des emojis Unicode par des icônes SVG dessinées à la main
+dans un style "plan technique de production" (vue de dessus, lignes fines 1.5px,
+stroke="currentColor" pour s'adapter au thème clair/sombre, viewBox 48×48).
+
+--- Restructuration des catégories ---
+Avant : 4 catégories (lighting, camera, actors, machinery), machinery commune.
+Après : 5 catégories avec règles de visibilité par palette :
+  * lighting (10 objets) : palette Lumière uniquement
+  * camera (8 objets) : palette Caméra uniquement
+  * actors (9 objets) : palette Acteurs uniquement
+  * tools (10 objets) : NOUVELLE catégorie, visible dans toutes les palettes
+    (outils électriques + grip : pied, pont, multiprise, sandbag, apple_box,
+     cstand, gaffer, boîte à outils + praticable et échelle migrés depuis machinery)
+  * machinery (7 objets) : visible UNIQUEMENT dans palette Caméra
+    (mouvements caméra : dolly, rail droit, rail 45°, grue, steadicam, gimbal, drone)
+
+Total : 44 objets dans le catalogue (vs 35 avant), tous avec SVG.
+
+--- Architecture du rendu SVG ---
+- CONFIG.annotationObjects étendu : chaque entrée a maintenant un champ `svg`
+  contenant le SVG complet en string. L'`emoji` est conservé comme fallback.
+- Storyboard._svgImageCache : cache key=type+couleur, valeur={img, ready}
+  pour éviter de reconvertir le SVG à chaque frame de drag.
+- Storyboard.getOrCreateSvgImage(type, color) : retourne l'Image() chargée
+  depuis le SVG (lazy-loaded). Convertit le SVG via Blob + createObjectURL.
+  Déclenche un redraw automatique quand l'image est prête.
+- Storyboard.renderObjectsOnCanvas modifié : tente le SVG en priorité, fallback
+  emoji pendant le chargement initial OU si def.svg manquant. Compat ascendante
+  totale pour les anciens objets sans champ SVG.
+
+--- Catalogue détaillé ---
+Lumière : spot (faisceau étroit), projecteur (lentille+volets+faisceau large),
+  kino flo (3 tubes parallèles), PAR (cercles concentriques), Fresnel (lentille
+  striée caractéristique), néon/LED (bande + diffusion), drapeau noir (panneau
+  rempli + tige + base), réflecteur (disque + flèches rebond), gélatine (feuille
+  + hachures diagonales), lumière d'ambiance (boîte diffuse + halos rayonnants).
+
+Caméra : caméra principale (boîtier + chiffre 1 + champ large), caméra secondaire
+  (chiffre 2 + champ étroit), axe de vue (œil + flèche directionnelle), zoom
+  (optique extensible + flèches in/out), pano horizontal (arc rotation gauche-
+  droite), tilt vertical (arc rotation haut-bas), trépied (Y vue de dessus),
+  caméra épaule (silhouette + caméra + champ).
+
+Acteurs : homme (épaules carrées), femme (épaules en cloche + cheveux longs),
+  assis (chaise visible), couché (silhouette horizontale), marque au sol (croix X),
+  déplacement (trajectoire courbe pointillée), entrée (cadre + flèche entrante),
+  sortie (silhouette + flèche sortante + cadre), regard (cône de vision 120°).
+
+Outils : pied (Y simple), pont/truss (structure triangulaire répétée), multiprise
+  (3 prises + câble), sandbag (sac + poignée + grains), apple box (caisse iso 3/4
+  + trou de prise), c-stand (tripode + bras + knuckles), gaffer (rouleau + bande),
+  boîte à outils (corps + couvercle + poignée + serrure), praticable (caisse
+  perspective), échelle (2 montants + 4 barreaux).
+
+Machinerie : dolly (plateau 4 roues vue dessus), rail droit (2 rails + traverses
+  + chariot), rail 45° courbe (arc + traverses + chariot incliné), grue (m
 
 ===== Phase 3 — Objets vectoriels sur les calques sémantiques =====
 
@@ -6738,7 +6797,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>version3.2.1</p>
+      <p>vv3.2.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -23848,6 +23907,12 @@ const Storyboard = {
         } else {
             // Par défaut, on utilise une couleur visible (noir ou blanc selon le contexte)
             svgString = svgString.replace(/currentColor/g, '#222');
+        }
+        
+        // Phase 4B fix : certains navigateurs exigent xmlns sur la balise <svg> pour rendre
+        // un blob SVG en image. On l'injecte si absent (compatibilité Firefox stricte).
+        if(!svgString.includes('xmlns=')) {
+            svgString = svgString.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
         }
         
         // Créer l'image et déclencher le chargement
