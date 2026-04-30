@@ -6877,7 +6877,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.2.8</p>
+      <p>vv3.2.9</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -11002,11 +11002,19 @@ body.presentation-mode .presentation-bar {
             </div>
         <div class="drawing-workspace">
             <div class="drawing-sidebar">
-                <!-- Phase 4B v2 : bouton Insérer une image (visible uniquement pour la zone Original) -->
+                <!-- Phase 4B v2 : deux boutons d'insertion d'image (visibles uniquement pour la zone Original) -->
+                <!-- 📐 Fond = nouveau calque pixel sous les dessins existants (pour dessiner par-dessus) -->
+                <!-- 📌 Objet = image déplaçable/transformable dans objects[] (sticker) -->
                 <div class="tool-group" id="leftSidebarInsertImage" style="display: none;">
+                    <button type="button" onclick="app.DrawingEditor.insertImageAsBackgroundLayer()" 
+                        title="Crée un nouveau calque sous les dessins, idéal comme base de planche"
+                        style="width: 100%; padding: 8px; margin-bottom: 6px; background: var(--success); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.82rem; font-weight: 600;">
+                        📐 Insérer image fond
+                    </button>
                     <button type="button" onclick="app.DrawingEditor.insertImageFromFile()" 
-                        style="width: 100%; padding: 8px; background: var(--success); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.82rem; font-weight: 600;">
-                        📥 Insérer une image
+                        title="Insère l'image comme objet déplaçable et redimensionnable"
+                        style="width: 100%; padding: 8px; background: var(--primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.82rem; font-weight: 600;">
+                        📌 Insérer image objet
                     </button>
                 </div>
                 <div class="tool-group">
@@ -25222,6 +25230,114 @@ const DrawingEditor = {
             console.log(k + ':', count, 'objets', z?.objects ? '→' : '', z?.objects);
         });
         return shot;
+    },
+    
+    // Phase 4B v2 : insérer une image comme nouveau calque pixel de fond
+    // (uniquement appelé depuis la zone Original ; idéal comme base de planche pour dessiner par-dessus)
+    // - Crée un nouveau calque (taille canvas) en bas de la pile (unshift)
+    // - Y dessine l'image compressée centrée + ratio préservé (letterbox transparent autour)
+    // - Le calque actif courant n'est PAS changé (on continue à dessiner dans son calque)
+    insertImageAsBackgroundLayer: () => {
+        if(!DrawingEditor.currentShotId || !DrawingEditor.currentKind) {
+            Utils.toast('Aucune zone active', 'error');
+            return;
+        }
+        // Garde-fou : cette fonction n'a de sens que pour Original
+        if(DrawingEditor.currentKind !== 'original') {
+            Utils.toast('Image fond disponible uniquement dans Dessiner', 'error');
+            return;
+        }
+        
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.style.display = 'none';
+        
+        input.onchange = (e) => {
+            const file = e.target.files && e.target.files[0];
+            if(!file) return;
+            
+            // Limite source 5 Mo (cohérent avec insertImageFromFile)
+            if(file.size > 5 * 1024 * 1024) {
+                Utils.toast('Image trop volumineuse (max 5 Mo)', 'error');
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const dataUrl = ev.target.result;
+                const img = new Image();
+                img.onload = () => {
+                    // Compression identique à insertImageFromFile : 1280×720 max, JPEG 0.8
+                    const compressed = DrawingEditor._compressImage(img, 1280, 720, 0.8);
+                    const before = Math.round(dataUrl.length / 1024);
+                    const after = Math.round(compressed.dataUrl.length / 1024);
+                    console.log(`[insertBgLayer] ${img.width}×${img.height} → ${compressed.width}×${compressed.height} | ${before} Ko → ${after} Ko (${Math.round(100 * after / before)}%)`);
+                    
+                    // Charger l'image compressée pour la dessiner dans le calque
+                    const compImg = new Image();
+                    compImg.onload = () => {
+                        // Créer le nouveau calque (taille du canvas de l'éditeur)
+                        const layerCanvas = document.createElement('canvas');
+                        layerCanvas.width = DrawingEditor.canvas.width;
+                        layerCanvas.height = DrawingEditor.canvas.height;
+                        const lctx = layerCanvas.getContext('2d');
+                        lctx.imageSmoothingEnabled = true;
+                        lctx.imageSmoothingQuality = 'high';
+                        
+                        // Calcul d'un fit "contain" centré (ratio préservé, marges transparentes)
+                        const cw = layerCanvas.width;
+                        const ch = layerCanvas.height;
+                        const iw = compImg.naturalWidth;
+                        const ih = compImg.naturalHeight;
+                        const ratio = Math.min(cw / iw, ch / ih);
+                        const drawW = Math.round(iw * ratio);
+                        const drawH = Math.round(ih * ratio);
+                        const dx = Math.round((cw - drawW) / 2);
+                        const dy = Math.round((ch - drawH) / 2);
+                        lctx.drawImage(compImg, dx, dy, drawW, drawH);
+                        
+                        // Construction du calque (même schéma que createNewLayer mais avec le canvas pré-rempli)
+                        const newLayer = {
+                            id: Utils.generateUniqueId(),
+                            canvas: layerCanvas,
+                            visible: true,
+                            name: '🖼️ Image de fond'
+                        };
+                        
+                        // Insertion en BAS de la pile (sous tous les dessins existants)
+                        DrawingEditor.layers.unshift(newLayer);
+                        
+                        // currentLayerIndex pointe sur le calque actif AVANT insertion :
+                        // comme on a ajouté un calque en position 0, tous les indices supérieurs
+                        // ont décalé de +1. On incrémente pour pointer sur le même calque qu'avant.
+                        DrawingEditor.currentLayerIndex = (DrawingEditor.currentLayerIndex || 0) + 1;
+                        
+                        // Rafraîchir UI + canvas + état dirty
+                        DrawingEditor.renderLayers();
+                        DrawingEditor.redraw();
+                        if(Storyboard.markAsDirty) Storyboard.markAsDirty();
+                        Utils.toast('Image de fond insérée — dessinez par-dessus', 'success', 2500);
+                    };
+                    compImg.onerror = () => {
+                        Utils.toast('Erreur de chargement de l\'image compressée', 'error');
+                    };
+                    compImg.src = compressed.dataUrl;
+                };
+                img.onerror = () => {
+                    Utils.toast('Erreur de chargement de l\'image', 'error');
+                };
+                img.src = dataUrl;
+            };
+            reader.onerror = () => {
+                Utils.toast('Erreur de lecture du fichier', 'error');
+            };
+            reader.readAsDataURL(file);
+        };
+        
+        document.body.appendChild(input);
+        input.click();
+        setTimeout(() => { input.remove(); }, 1000);
     },
     
     // Phase 4B v2 : ouvrir un sélecteur de fichier et insérer l'image comme objet déplaçable
