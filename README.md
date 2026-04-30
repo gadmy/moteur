@@ -1,6 +1,6 @@
 # 🎬 Moteur
 
-**L'application gratuite tout-en-un pour gérer vos projets de films.**
+**L'application tout-en-un pour gérer vos projets de films.**
 
 ![Moteur - Audiovisual Production Management](og-image.png)
 
