@@ -6799,7 +6799,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.2.6</p>
+      <p>vv3.2.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -24086,8 +24086,11 @@ const Storyboard = {
         if(!shot) return;
         
         // Si la zone est vide, ne rien faire (le bouton est désactivé visuellement)
-        const has = !!(shot.drawings && shot.drawings[kind] && (shot.drawings[kind].drawingData || shot.drawings[kind].imageUrl));
-        if(!has) {
+        // Phase 4B v2 : aussi considérer la présence d'objets/images insérées comme une annotation
+        const zone = shot.drawings && shot.drawings[kind];
+        const hasPixels = !!(zone && (zone.drawingData || zone.imageUrl));
+        const hasObjects = !!(zone && Array.isArray(zone.objects) && zone.objects.length > 0);
+        if(!hasPixels && !hasObjects) {
             Utils.toast(`Aucune annotation ${kind} pour ce plan`, 'info');
             return;
         }
@@ -25139,7 +25142,14 @@ const DrawingEditor = {
                 // Charger l'image pour récupérer ses dimensions natives
                 const img = new Image();
                 img.onload = () => {
-                    DrawingEditor._addImageObject(dataUrl, img.width, img.height);
+                    // Phase 4B v2 : compresser l'image avant stockage pour éviter les timeouts Supabase
+                    // Cible : max 1280×720, JPEG qualité 80 → ~150-300 Ko en base64
+                    const compressed = DrawingEditor._compressImage(img, 1280, 720, 0.8);
+                    // Logging utile pour diagnostiquer la compression
+                    const before = Math.round(dataUrl.length / 1024);
+                    const after = Math.round(compressed.dataUrl.length / 1024);
+                    console.log(`[insertImage] ${img.width}×${img.height} → ${compressed.width}×${compressed.height} | ${before} Ko → ${after} Ko (${Math.round(100 * after / before)}%)`);
+                    DrawingEditor._addImageObject(compressed.dataUrl, compressed.width, compressed.height);
                 };
                 img.onerror = () => {
                     Utils.toast('Erreur de chargement de l\'image', 'error');
@@ -25209,6 +25219,39 @@ const DrawingEditor = {
         }
         DrawingEditor.redraw();
         Utils.toast('Image insérée — clic droit pour la transformer', 'success', 2500);
+    },
+    
+    // Phase 4B v2 : compresse une image via canvas pour limiter la taille en base64
+    // - imgElement : HTMLImageElement déjà chargé (img.onload résolu)
+    // - maxWidth/maxHeight : dimensions cibles maximales (le ratio est conservé)
+    // - quality : qualité JPEG entre 0 et 1 (ex. 0.8)
+    // Retourne { dataUrl, width, height }
+    _compressImage: (imgElement, maxWidth, maxHeight, quality) => {
+        const srcW = imgElement.naturalWidth || imgElement.width;
+        const srcH = imgElement.naturalHeight || imgElement.height;
+        
+        // Calcul du ratio de redimensionnement (on ne fait que réduire, jamais agrandir)
+        let ratio = 1;
+        if(srcW > maxWidth) ratio = Math.min(ratio, maxWidth / srcW);
+        if(srcH > maxHeight) ratio = Math.min(ratio, maxHeight / srcH);
+        
+        const targetW = Math.round(srcW * ratio);
+        const targetH = Math.round(srcH * ratio);
+        
+        // Canvas hors-écran pour le redimensionnement
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        // Lissage de qualité pour le downscale
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(imgElement, 0, 0, targetW, targetH);
+        
+        // Export JPEG (pas de canal alpha, mais bien plus compact que PNG pour des photos)
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        
+        return { dataUrl: dataUrl, width: targetW, height: targetH };
     },
     
     // Phase 4B v3 : déplacer un calque de fromIdx vers toIdx (réordonnancement par drag-and-drop)
