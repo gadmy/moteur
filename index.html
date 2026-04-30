@@ -29,6 +29,84 @@ HTML actuel
 
 HISTORIQUE DES VERSIONS
 ================================================================================
+v3.2.7 — DrawingEditor : drag layers, suppr objets, insertion image compressée - Phase 4B v2 (30 Avr. 2026)
+
+===== Phase 4B v2 — DrawingEditor : ergonomie + insertion d'images =====
+
+Ajout de quatre fonctionnalités majeures sur l'éditeur de dessin du storyboard,
+avec correction d'un bug de détection d'annotation et d'un timeout Supabase
+sur la sauvegarde quand des images étaient insérées.
+
+--- Champs numériques Taille / Opacité avec snap à 5 ---
+Les sliders Taille du trait et Opacité disposent maintenant d'un champ numérique
+synchronisé. Saisie clavier directe, et snap automatique au multiple de 5 le
+plus proche au blur (ex. 23 → 25, 47 → 45). Synchronisation bidirectionnelle :
+slider ↔ input. Permet la précision quand le slider seul n'est pas pratique.
+
+--- Drag-and-drop des calques ---
+Réordonnancement à la souris des calques pixel ET des objets placés directement
+depuis la sidebar gauche. Indicateur visuel de drop pendant le drag, animation
+fluide. Helper privé DrawingEditor._reorderLayers(fromIdx, toIdx) qui gère le
+déplacement dans le tableau et redéclenche un redraw + markAsDirty.
+
+--- Touche Suppr / Backspace pour effacer un objet sélectionné ---
+Listener clavier global au niveau du DrawingEditor : quand un objet est
+sélectionné (selectedObjectId non null) et que l'éditeur est ouvert, Suppr ou
+Backspace retire l'objet du tableau objects[] de la zone courante. Ne déclenche
+rien si on est en train de taper dans un input/textarea (filtre sur e.target).
+
+--- Insertion d'images comme objets déplaçables ---
+Bouton "Insérer une image" dans la sidebar gauche du DrawingEditor (zone Original
++ zones sémantiques). Ouvre un sélecteur de fichier, charge l'image, la compresse
+(voir ci-dessous), puis l'ajoute comme objet de type 'image' dans objects[]. 
+L'objet image se comporte comme tous les autres : drag, clic droit pour
+transformer (scale/rotation), suppression au clavier, mini-aperçu dans la liste
+"Placés". Position par défaut : centre du canvas. Scale par défaut : max 50% de
+la largeur/hauteur du canvas.
+
+Architecture stockage : l'image compressée est stockée en base64 (JPEG) dans le
+champ imageData de l'objet, avec width/height natifs après compression. Les
+dimensions natives servent au rendu canvas et au calcul de la bounding box pour
+la sélection / le clic droit / le transform.
+
+--- Compression d'image avant stockage (fix timeout Supabase 57014) ---
+Problème : insérer une image non compressée (~5 Mo) ajoutait ~6.7 Mo de base64
+au JSON du storyboard, ce qui faisait timeout Supabase à la sauvegarde
+(code 57014 — canceling statement due to statement timeout) car le payload
+dépassait les limites raisonnables d'un UPDATE sur la table.
+
+Solution pragmatique (sans refactor Supabase Storage pour l'instant) :
+compression locale avant stockage via DrawingEditor._compressImage(img, 1280, 720, 0.8).
+- Redimensionnement canvas avec conservation du ratio (jamais d'upscale)
+- imageSmoothingQuality = 'high' pour un downscale propre
+- Export JPEG qualité 0.8 (pas PNG : pas de canal alpha mais ~10x plus compact)
+- Cible : ~150-300 Ko en base64 pour une photo 4000×3000 d'origine
+
+Logging dans la console au moment de l'insertion :
+[insertImage] 4000×3000 → 1280×960 | 6700 Ko → 230 Ko (3%)
+
+Limite de taille en amont : 5 Mo max sur le fichier source pour éviter les
+abus / les fichiers absurdes.
+
+--- Bug 1 corrigé : toggleDrawingVisibility ratait les images-objets ---
+Avant : la fonction qui détecte "y a-t-il une annotation à cacher/afficher ?"
+ne regardait que drawingData (les traits pixel). Si la zone ne contenait QUE
+des objets placés (incluant des images insérées), le toast "aucune annotation"
+s'affichait à tort. Correction : ajout de la condition objects.length > 0 dans
+la détection. Marqué dans le code par "Phase 4B v2 : aussi considérer la
+présence d'objets/images insérées comme une annotation".
+
+--- Détails techniques ---
+- Nouvelles fonctions DrawingEditor : _compressImage, _addImageObject,
+  _reorderLayers, insertImageFromFile.
+- Cache d'images étendu : Storyboard._svgImageCache gère maintenant aussi les
+  objets de type 'image' (lazy-load via getOrCreateUserImage).
+- Compatibilité ascendante : les anciens storyboards sans tableau objects[] sur
+  certaines zones reçoivent une initialisation à [] à la première interaction.
+  Les structures drawings.{kind} manquantes sont créées avec la forme complète
+  { imageType, imageUrl, drawingData, objects: [] }.
+
+================================================================================
 v3.2.1 — Storyboard : icônes SVG plan technique (45 objets dessinés à la main) - Phase 4B (29 Avr. 2026)
 
 ===== Phase 4B — Refonte visuelle des objets storyboard =====
@@ -6799,7 +6877,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.2.7</p>
+      <p>vv3.2.8</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -23497,6 +23575,19 @@ const Storyboard = {
                 }
             }
             
+            // Phase 4B v2 : rendre les objets de la zone Original (images insérées + autres)
+            // Délai léger pour laisser le temps aux Image.onload des SVG/images de s'amorcer
+            setTimeout(() => {
+                const previewCanvas = document.getElementById(`compact-preview-${shot.id}`);
+                if(previewCanvas) {
+                    const pctx = previewCanvas.getContext('2d');
+                    const originalZone = shot.drawings && shot.drawings.original;
+                    if(originalZone && Array.isArray(originalZone.objects) && originalZone.objects.length > 0) {
+                        Storyboard.renderObjectsOnCanvas(pctx, originalZone.objects);
+                    }
+                }
+            }, 150);
+            
             // Phase 1 Storyboard : rendu de l'overlay compact (zones sémantiques visibles)
             const overlayCanvas = document.getElementById(`compact-overlay-${shot.id}`);
             if(overlayCanvas) {
@@ -23710,6 +23801,19 @@ const Storyboard = {
                     DrawingEditor.renderDrawingData(ctx, shot.drawingData);
                 }
             }
+            
+            // Phase 4B v2 : rendre les objets de la zone Original (images insérées + autres)
+            // Délai léger pour laisser le temps aux Image.onload des SVG/images de s'amorcer
+            setTimeout(() => {
+                const previewCanvas = document.getElementById(`preview-${shot.id}`);
+                if(previewCanvas) {
+                    const pctx = previewCanvas.getContext('2d');
+                    const originalZone = shot.drawings && shot.drawings.original;
+                    if(originalZone && Array.isArray(originalZone.objects) && originalZone.objects.length > 0) {
+                        Storyboard.renderObjectsOnCanvas(pctx, originalZone.objects);
+                    }
+                }
+            }, 150);
             
             // Phase 1 Storyboard : rendu de l'overlay (zones sémantiques visibles)
             const overlayCanvas = document.getElementById(`overlay-${shot.id}`);
@@ -24426,6 +24530,13 @@ const Storyboard = {
             canvas.height = 600;
             const ctx = canvas.getContext('2d');
             DrawingEditor.renderDrawingData(ctx, shot.drawingData);
+            // Phase 4B v2 : rendre les objets de la zone Original (images insérées + autres) par-dessus
+            const originalZone = shot.drawings && shot.drawings.original;
+            if(originalZone && Array.isArray(originalZone.objects) && originalZone.objects.length > 0) {
+                setTimeout(() => {
+                    Storyboard.renderObjectsOnCanvas(ctx, originalZone.objects);
+                }, 200);
+            }
             imageDiv.appendChild(canvas);
         } else {
             imageDiv.innerHTML = '<div style="color: #999;">Pas d\'image</div>';
