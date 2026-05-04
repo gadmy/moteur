@@ -6900,7 +6900,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.3.9</p>
+      <p>vv3.4.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -24464,14 +24464,26 @@ const Storyboard = {
         document.getElementById('sbFullscreenModal').classList.remove('active');
     },
     
-    printDirect: () => {
+    printDirect: async () => {
         // 1. Force le rendu à jour dans le conteneur plein écran
         Storyboard.renderPrintPreview('sbFullscreenContent');
         const layout = (Storyboard.printConfig && Storyboard.printConfig.layout) || 'standard';
         const isLandscape = (layout === 'large' || layout === 'compact');
         const orientation = isLandscape ? 'landscape' : 'portrait';
-        // 2. Cloner le contenu et convertir TOUS les canvas en images data URL
+        // 2. Attendre que les setTimeout(200) des objets vectoriels finissent
+        await new Promise(r => setTimeout(r, 350));
+        // 3. Attendre que toutes les images upload soient chargées
         const sourceContent = document.getElementById('sbFullscreenContent');
+        const sourceImgs = sourceContent.querySelectorAll('img');
+        await Promise.all(Array.from(sourceImgs).map(img => {
+            if(img.complete && img.naturalWidth > 0) return Promise.resolve();
+            return new Promise(resolve => {
+                img.addEventListener('load', resolve, { once: true });
+                img.addEventListener('error', resolve, { once: true });
+                setTimeout(resolve, 3000); // safety timeout
+            });
+        }));
+        // 4. Cloner le contenu et convertir TOUS les canvas en images data URL
         const clone = sourceContent.cloneNode(true);
         const sourceCanvases = sourceContent.querySelectorAll('canvas');
         const cloneCanvases = clone.querySelectorAll('canvas');
@@ -24518,8 +24530,24 @@ const Storyboard = {
             .sb-print-page--compact .sb-print-shot-header { font-size: 0.75rem; margin-bottom: 2px; }
         </style></head><body>${content}</body></html>`);
         printWindow.document.close();
-        // Petit délai pour laisser le DOM se construire et les images charger
-        setTimeout(() => { printWindow.print(); printWindow.close(); }, 500);
+        // Attendre que toutes les images de la fenêtre d'impression soient prêtes
+        printWindow.addEventListener('load', async () => {
+            const winImgs = printWindow.document.querySelectorAll('img');
+            await Promise.all(Array.from(winImgs).map(img => {
+                if(img.complete && img.naturalWidth > 0) return Promise.resolve();
+                return new Promise(resolve => {
+                    img.addEventListener('load', resolve, { once: true });
+                    img.addEventListener('error', resolve, { once: true });
+                    setTimeout(resolve, 3000);
+                });
+            }));
+            // Petit délai supplémentaire pour le décodage final
+            setTimeout(() => {
+                printWindow.print();
+                // Ne pas fermer immédiatement - laisser l'utilisateur valider/annuler le print
+                printWindow.addEventListener('afterprint', () => printWindow.close());
+            }, 200);
+        }, { once: true });
     },
     
     renderPrintPreview: (containerId) => {
