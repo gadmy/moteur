@@ -26,6 +26,86 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 HISTORIQUE DES VERSIONS
 ================================================================================
+v3.4.2 — Storyboard : refonte complète impression PDF + 3 modes de mise en page (04 Mai 2026)
+
+===== Refonte complète de l'export PDF storyboard =====
+
+Le print du storyboard utilisait window.print() sur le document principal, ce qui
+faisait hériter de toute la chaîne de styles d'impression du scénario (marges
+35mm, fonte Courier monospace, numéro de page en haut à droite, page de garde
+qui se dupliquait). Résultat : PDF mal cadré, texte tassé, pages en double.
+
+Approche : ouverture d'une fenêtre d'impression dédiée via Blob URL, complètement
+isolée du document principal. Plus aucun héritage CSS parasite, contrôle total
+sur la mise en page, le format et l'orientation.
+
+--- 3 modes de mise en page configurables ---
+Remplacement des 8 cases à cocher (numéro/type/mvt/mode/desc/acteurs/tech/scène)
+par un sélecteur radio à 3 modes mutuellement exclusifs :
+
+  * Standard (portrait, 4-6 plans/page) : layout dessin à gauche / texte à
+    droite, toutes les infos affichées. Card pleine largeur, le texte s'étale
+    sur des lignes plus longues, plus dense que l'ancienne grille 2 colonnes.
+  
+  * Image en grand (paysage, 1 plan/page) : un seul plan par page A4 paysage,
+    image qui prend ~70% de la hauteur, texte complet en dessous. Si la
+    description est très longue, l'image rétrécit (plancher 80mm) sans jamais
+    tronquer le texte.
+  
+  * Compact (paysage, 16 plans/page) : grille 4×4 dense en A4 paysage, infos
+    minimales (numéro de plan, type, mvt caméra, mode caméra, titre de scène).
+    Pas de description ni de directions. Pour vue d'ensemble rapide.
+
+--- Pipeline d'export Blob URL ---
+Storyboard.printDirect() :
+  1. Force un re-render via renderPrintPreview('sbFullscreenContent')
+  2. Attend 350ms pour que les setTimeout(200) des objets vectoriels finissent
+     leur rendu sur les canvas
+  3. Attend que toutes les <img> upload soient chargées (Promise.all sur load)
+  4. Clone le DOM, remplace chaque <canvas> par une <img> data URL
+     (canvas.toDataURL('image/png')) — sinon les dessins seraient blancs car
+     cloneNode ne copie pas le bitmap du canvas
+  5. Génère un document HTML autonome avec @page A4 portrait/landscape selon
+     le mode et CSS dédié
+  6. Crée un Blob text/html, URL.createObjectURL, window.open(blobUrl)
+  7. Le HTML injecté contient un <script> auto-print qui se déclenche après
+     l'événement load + 300ms (le temps que les data URL soient décodées)
+  8. La fenêtre se ferme via afterprint ; URL.revokeObjectURL en sécurité 60s
+
+--- Pourquoi Blob URL et pas document.write ---
+Firefox ignore @page { size: A4 landscape } dans une fenêtre ouverte par
+window.open('') + document.write — l'orientation reste portrait. Le passage
+par un Blob URL force le navigateur à charger le document comme un vrai
+document HTML autonome, avec parsing complet et donc respect du @page.
+Bonus : marche identiquement sur Chrome et Firefox.
+
+--- Titre du PDF dynamique ---
+document.title = `StoryBoard <nom du film> - Sc X à Y` calculé depuis la
+plage de scènes effectivement présentes (Storyboard._printSceneRange). Le
+PDF généré porte ce titre comme nom de fichier par défaut.
+
+--- Pièges techniques résolus ---
+- <script>...</script> à l'intérieur d'un template literal dans un <script>
+  parent : le parser HTML voyait le </script> interne et fermait le bloc
+  principal. Fix : <scr` + `ipt> et <\/scr` + `ipt> en concaténation pour
+  cacher la balise au parser HTML tout en générant la bonne chaîne au runtime.
+- window.open après await retournait null (Firefox bloquait : appel hors
+  contexte de clic synchrone). Résolu par l'ouverture via Blob URL qui se
+  fait en une seule passe synchrone après les await sur les images.
+- @page globale du scénario (margin 25mm/35mm, counter-increment, top-right
+  numéro de page) qui empoisonnait toutes les autres impressions. Plus de
+  conflit puisque la fenêtre d'impression est isolée.
+
+--- Cleanup ---
+Suppression des règles CSS @page storyboard / @page storyboardLarge dans le
+@media print global du document principal, devenues inutiles puisque le
+storyboard ne passe plus par window.print() du document principal.
+Le bouton "Imprimer" dans la modale d'aperçu plein écran (sbFullscreenModal)
+appelle maintenant Storyboard.printDirect() au lieu de window.print().
+Ajout d'un bouton "📄 Imprimer / PDF" dans la barre principale du storyboard
+pour imprimer sans passer par l'aperçu plein écran.
+
+================================================================================
 v3.2.7 — DrawingEditor : drag layers, suppr objets, insertion image compressée - Phase 4B v2 (30 Avr. 2026)
 
 ===== Phase 4B v2 — DrawingEditor : ergonomie + insertion d'images =====
@@ -6900,7 +6980,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.4.2</p>
+      <p>vv3.4.3</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -9814,6 +9894,7 @@ body.presentation-mode .presentation-bar {
                     <p id="boardLongDisplay" class="pre-wrap"></p>
                 </div>
                 <hr>
+                <button onclick="app.UI.printBoard()" style="width:100%;padding:10px;background:var(--primary);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:10px;">📄 Imprimer / PDF</button>
                 <div style="font-size:0.8rem; color:var(--text-sec); margin-top:20px">Astuce: Clic-droit sur une carte pour gérer les Tags/Couleurs.</div>
                 </div><!-- fin sequencer-options -->
                 <div id="beatboard-options" class="d-none">
@@ -17048,6 +17129,110 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           UI.updateQuickNav();
           UI.loadBoardMode();
           Comments.updateAllBadges();
+      },
+      
+      // ===== IMPRESSION SÉQUENCIER =====
+      printBoard: (episodeIds) => {
+          const isSeries = state.currentProjectType === 'series';
+          if(isSeries && !episodeIds) { UI.openBoardPrintEpisodeChooser(); return; }
+          const visibleIds = Array.from(document.querySelectorAll('#boardList .card')).map(c => c.dataset.id);
+          let scenes = (state.data.scenes || []).filter(s => visibleIds.includes(s.id));
+          if(isSeries && episodeIds && episodeIds.length > 0) {
+              scenes = scenes.filter(s => episodeIds.includes(s.episodeId));
+          }
+          if(scenes.length === 0) { Utils.toast('Aucune scène à imprimer', 'warning'); return; }
+          UI._launchBoardPrint(scenes);
+      },
+      
+      _launchBoardPrint: (scenes) => {
+          const title = `Séquencier ${state.data.title || ''}`.trim();
+          const tags = state.data.tags || [];
+          const cardsHTML = scenes.map((s, idx) => {
+              const tag = tags.find(t => t.id === s.tag_id);
+              const tagColor = (tag && tag.color !== 'transparent') ? tag.color : '#ddd';
+              const tagName = tag ? tag.name : '';
+              const tagLine = tagName ? `<div class="seq-tag"><strong>${Utils.escape(tagName)}</strong></div>` : '';
+              const isFinal = s.isFinal === true;
+              const statusLabel = isFinal ? '✅ FINALE' : '📝 BROUILLON';
+              const num = UI.formatSceneNumber(s, idx);
+              const meta = `${Utils.escape(s.perso || '')} • ${Utils.escape(String(s.time || 0))} min`;
+              const resume = s.resume ? `<div class="seq-resume">${Utils.escape(s.resume)}</div>` : '';
+              return `<div class="seq-card" style="border-left:6px solid ${tagColor};">
+                  <div class="seq-head"><span class="seq-num">${num}</span> <span class="seq-status">${statusLabel}</span></div>
+                  <h3 class="seq-title">${Utils.escape(s.title || '')}</h3>
+                  ${tagLine}
+                  <div class="seq-meta">${meta}</div>
+                  ${resume}
+              </div>`;
+          }).join('');
+          const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title><style>
+              @page { size: A4 portrait; margin: 12mm; }
+              body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; background: white; color: #222; }
+              h1.doc-title { font-size: 1.4rem; margin: 0 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid #333; }
+              .seq-grid { column-count: 2; column-gap: 10mm; }
+              .seq-card { break-inside: avoid; page-break-inside: avoid; border: 1px solid #999; border-radius: 6px; padding: 10px 12px; margin: 0 0 10px 0; background: white; }
+              .seq-head { display: flex; justify-content: space-between; font-size: 0.75rem; color: #555; margin-bottom: 4px; }
+              .seq-num { font-weight: bold; color: #333; }
+              .seq-status { font-size: 0.7rem; padding: 2px 6px; border: 1px solid #999; border-radius: 3px; }
+              .seq-title { font-size: 0.95rem; margin: 4px 0 6px 0; line-height: 1.25; }
+              .seq-tag { font-size: 0.75rem; margin: 4px 0; color: #333; }
+              .seq-meta { font-size: 0.78rem; color: #555; font-style: italic; margin-bottom: 6px; }
+              .seq-resume { font-size: 0.8rem; line-height: 1.4; color: #333; margin-top: 4px; padding-top: 6px; border-top: 1px dashed #ccc; white-space: pre-wrap; }
+          </style></head><body>
+              <h1 class="doc-title">${title}</h1>
+              <div class="seq-grid">${cardsHTML}</div>
+              <scr` + `ipt>window.addEventListener('load',function(){setTimeout(function(){window.print();},300);});<\/scr` + `ipt>
+          </body></html>`;
+          const blob = new Blob([html], { type: 'text/html' });
+          const blobUrl = URL.createObjectURL(blob);
+          const printWindow = window.open(blobUrl, '_blank');
+          if(printWindow) {
+              printWindow.addEventListener('afterprint', () => { URL.revokeObjectURL(blobUrl); printWindow.close(); }, { once: true });
+              setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+          }
+      },
+      
+      openBoardPrintEpisodeChooser: () => {
+          const episodes = state.data.episodes || [];
+          if(episodes.length === 0) { UI._launchBoardPrint([]); return; }
+          const seasons = state.data.seasons || [];
+          const current = state.currentEpisodeId;
+          const items = episodes.map(ep => {
+              const season = seasons.find(s => s.id === ep.seasonId);
+              const sNum = season ? String(season.number).padStart(2, '0') : '00';
+              const eNum = String(ep.number).padStart(2, '0');
+              const checked = ep.id === current ? 'checked' : '';
+              return `<label class="epchk-item"><input type="checkbox" class="epchk" value="${ep.id}" ${checked}> S${sNum}E${eNum} — ${Utils.escape(ep.title || '')}</label>`;
+          }).join('');
+          const overlay = document.createElement('div');
+          overlay.className = 'confirm-modal-overlay';
+          overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:480px;">
+              <div class="confirm-modal-icon">📋</div>
+              <div class="confirm-modal-title">Imprimer le séquencier</div>
+              <div class="confirm-modal-message" style="text-align:left;">
+                  <p style="margin:0 0 10px 0;">Sélectionnez les épisodes à inclure :</p>
+                  <div style="max-height:300px;overflow-y:auto;">${items}</div>
+                  <div style="margin-top:10px;display:flex;gap:6px;">
+                      <button type="button" id="ep-all" style="padding:6px 10px;font-size:0.8rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout cocher</button>
+                      <button type="button" id="ep-none" style="padding:6px 10px;font-size:0.8rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout décocher</button>
+                  </div>
+              </div>
+              <div class="confirm-modal-buttons">
+                  <button class="confirm-modal-btn cancel" id="ep-cancel">Annuler</button>
+                  <button class="confirm-modal-btn confirm" id="ep-ok">Imprimer</button>
+              </div>
+          </div>`;
+          document.body.appendChild(overlay);
+          overlay.querySelector('#ep-all').onclick = () => overlay.querySelectorAll('.epchk').forEach(cb => cb.checked = true);
+          overlay.querySelector('#ep-none').onclick = () => overlay.querySelectorAll('.epchk').forEach(cb => cb.checked = false);
+          overlay.querySelector('#ep-cancel').onclick = () => overlay.remove();
+          overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+          overlay.querySelector('#ep-ok').onclick = () => {
+              const ids = Array.from(overlay.querySelectorAll('.epchk:checked')).map(cb => cb.value);
+              if(ids.length === 0) { Utils.toast('Aucun épisode sélectionné', 'warning'); return; }
+              overlay.remove();
+              setTimeout(() => UI.printBoard(ids), 100);
+          };
       },
       
       // S4 : retourne les scènes à afficher selon l'épisode actif (ou toutes si projet film)
@@ -39513,7 +39698,7 @@ const Stats = {
         document.getElementById('pc-contact').innerHTML = contactHtml;
         
         if(opts.synop) document.body.classList.add('print-synopsis'); 
-        if(opts.board) document.body.classList.add('print-board'); 
+        if(opts.board) { setTimeout(() => UI.printBoard(), 100); return; } 
         if(opts.script) document.body.classList.add('print-script'); 
         if(opts.chars) document.body.classList.add('print-chars'); 
         if(opts.actors) document.body.classList.add('print-actors');
