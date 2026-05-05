@@ -6980,7 +6980,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.4.8</p>
+      <p>vv3.4.9</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10225,7 +10225,10 @@ body.presentation-mode .presentation-bar {
 	  
       <div id="tab-chars" class="tab-content">
           <h1 class="print-only-title">PERSONNAGES</h1>
-          <button onclick="app.Actions.addGroup('perso')" class="n8-badge-4">➕ Nouveau Groupe</button>
+          <div style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap;">
+              <button onclick="app.Actions.addGroup('perso')" class="n8-badge-4">➕ Nouveau Groupe</button>
+              <button onclick="app.UI.printChars()" style="padding:8px 15px;background:var(--primary);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">📄 Imprimer / PDF</button>
+          </div>
           <div id="charContainer"></div>
       </div>
       
@@ -17302,6 +17305,211 @@ openBoardPrintEpisodeChooser: () => {
               overlay.remove();
               setTimeout(() => UI.printBoard(epIds), 100);
           };
+      },
+      
+      // ===== IMPRESSION PERSONNAGES =====
+      printChars: (episodeIds, mode) => {
+          const isSeries = state.currentProjectType === 'series';
+          // Étape 1 : si série et pas de saisons choisies, ouvrir le chooser
+          if(isSeries && !episodeIds) { UI._openCharsSeasonChooser(); return; }
+          // Étape 2 : si pas encore de mode choisi, ouvrir le chooser
+          if(!mode) { UI._openCharsModeChooser(episodeIds); return; }
+          // Étape 3 : déterminer les scènes à utiliser pour le filtrage des personnages
+          let scenesScope;
+          if(isSeries && episodeIds && episodeIds.length > 0) {
+              scenesScope = (state.data.scenes || []).filter(s => episodeIds.includes(s.episodeId));
+          } else {
+              scenesScope = state.data.scenes || [];
+          }
+          UI._launchCharsPrint(scenesScope, mode);
+      },
+      
+      _openCharsSeasonChooser: () => {
+          const seasons = (state.data.seasons || []).slice().sort((a,b) => (a.number||0) - (b.number||0));
+          const episodes = state.data.episodes || [];
+          if(seasons.length === 0) { UI.printChars([], null); return; }
+          const currentEp = episodes.find(e => e.id === state.currentEpisodeId);
+          const currentSeasonId = currentEp ? currentEp.seasonId : null;
+          const items = seasons.map(s => {
+              const sNum = String(s.number).padStart(2, '0');
+              const epCount = episodes.filter(e => e.seasonId === s.id).length;
+              const checked = s.id === currentSeasonId ? 'checked' : '';
+              const sTitle = s.title ? ' — ' + Utils.escape(s.title) : '';
+              return `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()"><td style="width:24px;padding:4px 8px;vertical-align:middle;"><input type="checkbox" class="cseachk" value="${s.id}" ${checked} style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td><td style="padding:4px 8px;font-size:0.88rem;line-height:1.3;vertical-align:middle;"><strong>Saison ${sNum}</strong>${sTitle} <span style="color:var(--text-sec);font-size:0.78rem;">(${epCount} ép.)</span></td></tr>`;
+          }).join('');
+          const overlay = document.createElement('div');
+          overlay.className = 'confirm-modal-overlay';
+          overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:420px;padding:20px;">
+              <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">👥 Imprimer les personnages</div>
+              <div style="text-align:left;font-size:0.85rem;color:var(--text-sec);margin-bottom:8px;">Saisons à inclure :</div>
+              <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;"><table style="width:100%;border-collapse:collapse;">${items}</table></div>
+              <div style="display:flex;gap:6px;margin-bottom:14px;">
+                  <button type="button" id="csea-all" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout cocher</button>
+                  <button type="button" id="csea-none" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout décocher</button>
+              </div>
+              <div style="display:flex;gap:8px;justify-content:flex-end;">
+                  <button class="confirm-modal-btn cancel" id="csea-cancel" style="margin:0;">Annuler</button>
+                  <button class="confirm-modal-btn confirm" id="csea-ok" style="margin:0;">Suivant</button>
+              </div>
+          </div>`;
+          document.body.appendChild(overlay);
+          overlay.querySelector('#csea-all').onclick = () => overlay.querySelectorAll('.cseachk').forEach(cb => cb.checked = true);
+          overlay.querySelector('#csea-none').onclick = () => overlay.querySelectorAll('.cseachk').forEach(cb => cb.checked = false);
+          overlay.querySelector('#csea-cancel').onclick = () => overlay.remove();
+          overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+          overlay.querySelector('#csea-ok').onclick = () => {
+              const seasonIds = Array.from(overlay.querySelectorAll('.cseachk:checked')).map(cb => cb.value);
+              if(seasonIds.length === 0) { Utils.toast('Aucune saison sélectionnée', 'warning'); return; }
+              const epIds = episodes.filter(e => seasonIds.includes(e.seasonId)).map(e => e.id);
+              overlay.remove();
+              setTimeout(() => UI.printChars(epIds), 100);
+          };
+      },
+      
+      _openCharsModeChooser: (episodeIds) => {
+          const overlay = document.createElement('div');
+          overlay.className = 'confirm-modal-overlay';
+          overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:420px;padding:20px;">
+              <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">👥 Mode d'impression</div>
+              <div style="text-align:left;margin-bottom:14px;">
+                  <label style="display:block;padding:10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px;cursor:pointer;"><input type="radio" name="cmode" value="detailed" checked style="margin-right:8px;"><strong>Détaillé</strong><br><span style="font-size:0.8rem;color:var(--text-sec);">1 personnage par ligne, photo + bio + sexe + comédien lié + liste des scènes</span></label>
+                  <label style="display:block;padding:10px;border:1px solid var(--border);border-radius:6px;cursor:pointer;"><input type="radio" name="cmode" value="list" style="margin-right:8px;"><strong>Liste</strong><br><span style="font-size:0.8rem;color:var(--text-sec);">2 colonnes compactes, juste nom + nombre de scènes</span></label>
+              </div>
+              <div style="display:flex;gap:8px;justify-content:flex-end;">
+                  <button class="confirm-modal-btn cancel" id="cmode-cancel" style="margin:0;">Annuler</button>
+                  <button class="confirm-modal-btn confirm" id="cmode-ok" style="margin:0;">Imprimer</button>
+              </div>
+          </div>`;
+          document.body.appendChild(overlay);
+          overlay.querySelector('#cmode-cancel').onclick = () => overlay.remove();
+          overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+          overlay.querySelector('#cmode-ok').onclick = () => {
+              const mode = overlay.querySelector('input[name="cmode"]:checked').value;
+              overlay.remove();
+              setTimeout(() => UI.printChars(episodeIds, mode), 100);
+          };
+      },
+      
+      _launchCharsPrint: (scenesScope, mode) => {
+          const filmTitle = state.data.title || '';
+          const docTitle = `Personnages — ${filmTitle}`.trim();
+          const allChars = state.data.characters || [];
+          const groups = (state.data.groups || []).filter(g => g.type === 'perso');
+          const actors = state.data.actors || [];
+          const isSeries = state.currentProjectType === 'series';
+          // Filtrer personnages : garder ceux qui apparaissent dans au moins une scène du scope OU sans filtrage si film
+          const charsInScope = isSeries ? allChars.filter(ch => {
+              return scenesScope.some(s => {
+                  if(!s.perso) return false;
+                  const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
+                  return names.includes(ch.name.toUpperCase());
+              });
+          }) : allChars;
+          if(charsInScope.length === 0) { Utils.toast('Aucun personnage à imprimer', 'warning'); return; }
+          // Calcul des scènes par personnage (dans le scope)
+          const allScenes = state.data.scenes || [];
+          const sceneLabel = (s) => {
+              if(isSeries) {
+                  const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
+                  if(ep) {
+                      const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
+                      return UI.formatSceneNumber(s, scenesInEp.indexOf(s));
+                  }
+              }
+              return '#' + (allScenes.indexOf(s) + 1);
+          };
+          const charScenes = (ch) => scenesScope.filter(s => {
+              if(!s.perso) return false;
+              const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
+              return names.includes(ch.name.toUpperCase());
+          });
+          // Grouper par groupe
+          const grouped = {};
+          charsInScope.forEach(ch => {
+              const gid = ch.group_id || 'orphan';
+              if(!grouped[gid]) grouped[gid] = [];
+              grouped[gid].push(ch);
+          });
+          const groupOrder = Object.keys(grouped).sort((a, b) => {
+              if(a === 'orphan') return 1;
+              if(b === 'orphan') return -1;
+              return 0;
+          });
+          // Helpers HTML
+          const renderDetailed = (ch) => {
+              const actor = ch.actor_id ? actors.find(a => a.id === ch.actor_id) : null;
+              const photoSrc = (actor && actor.photo) ? actor.photo : '';
+              const photoBlock = photoSrc 
+                  ? `<img src="${photoSrc}" style="width:80px;height:100px;object-fit:cover;border:1px solid #999;border-radius:4px;flex-shrink:0;">`
+                  : `<div style="width:80px;height:100px;border:1px dashed #bbb;border-radius:4px;display:flex;align-items:center;justify-content:center;color:#999;font-size:0.7rem;flex-shrink:0;">Pas de photo</div>`;
+              const genderLabel = { homme: 'Homme', femme: 'Femme', 'non-binaire': 'Non-binaire' }[ch.gender] || ch.gender || '';
+              const genderLine = genderLabel ? `<div class="ch-meta"><strong>Sexe :</strong> ${Utils.escape(genderLabel)}</div>` : '';
+              const actorLine = actor ? `<div class="ch-meta"><strong>🎭 Joué par :</strong> ${Utils.escape(actor.name)}</div>` : `<div class="ch-meta" style="color:#999;font-style:italic;">Aucun comédien lié</div>`;
+              const bioLine = ch.bio ? `<div class="ch-bio">${Utils.escape(ch.bio)}</div>` : '';
+              const cs = charScenes(ch);
+              const scenesLine = cs.length > 0
+                  ? `<div class="ch-scenes"><strong>📍 Apparaît dans (${cs.length}) :</strong> ${cs.map(s => `<span class="ch-tag">${sceneLabel(s)}</span>`).join(' ')}</div>`
+                  : `<div class="ch-scenes" style="color:#999;font-style:italic;">N'apparaît dans aucune scène</div>`;
+              return `<div class="ch-card-detailed">
+                  ${photoBlock}
+                  <div class="ch-info">
+                      <h3 class="ch-name">${Utils.escape(ch.name)}</h3>
+                      ${genderLine}
+                      ${actorLine}
+                      ${bioLine}
+                      ${scenesLine}
+                  </div>
+              </div>`;
+          };
+          const renderList = (ch) => {
+              const cs = charScenes(ch);
+              return `<div class="ch-card-list"><span class="ch-list-name">${Utils.escape(ch.name)}</span><span class="ch-list-count">${cs.length} sc.</span></div>`;
+          };
+          // Construction body
+          let bodyHTML = '';
+          groupOrder.forEach(gid => {
+              const group = groups.find(g => g.id === gid);
+              const groupName = group ? group.name : 'Non classé';
+              bodyHTML += `<div class="ch-group">${Utils.escape(groupName)}</div>`;
+              if(mode === 'detailed') {
+                  grouped[gid].forEach(ch => { bodyHTML += renderDetailed(ch); });
+              } else {
+                  bodyHTML += '<div class="ch-list-grid">';
+                  grouped[gid].forEach(ch => { bodyHTML += renderList(ch); });
+                  bodyHTML += '</div>';
+              }
+          });
+          const css = `
+              @page { size: A4 portrait; margin: 12mm; }
+              body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; background: white; color: #222; }
+              h1.doc-title { font-size: 1.4rem; margin: 0 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid #333; }
+              .ch-group { background: #333; color: white; padding: 8px 14px; font-size: 1rem; font-weight: bold; letter-spacing: 0.5px; margin: 6mm 0 3mm 0; border-radius: 4px; page-break-after: avoid; break-after: avoid; }
+              .ch-group:first-child { margin-top: 0; }
+              .ch-card-detailed { display: flex; gap: 12px; border: 1px solid #999; border-radius: 6px; padding: 12px; margin-bottom: 8px; page-break-inside: avoid; break-inside: avoid; background: white; }
+              .ch-info { flex: 1; min-width: 0; }
+              .ch-name { font-size: 1.05rem; margin: 0 0 6px 0; }
+              .ch-meta { font-size: 0.82rem; color: #444; margin-bottom: 3px; }
+              .ch-bio { font-size: 0.82rem; color: #333; margin: 6px 0; padding-top: 6px; border-top: 1px dashed #ccc; line-height: 1.4; white-space: pre-wrap; }
+              .ch-scenes { font-size: 0.78rem; color: #444; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #ccc; line-height: 1.6; }
+              .ch-tag { display: inline-block; background: #e8e8e8; padding: 1px 6px; border-radius: 3px; font-size: 0.72rem; margin: 1px 2px; color: #333; }
+              .ch-list-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 4mm; }
+              .ch-card-list { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 8px; border-bottom: 1px dotted #ccc; font-size: 0.85rem; page-break-inside: avoid; break-inside: avoid; }
+              .ch-list-name { font-weight: 500; }
+              .ch-list-count { font-size: 0.75rem; color: #777; flex-shrink: 0; margin-left: 8px; }
+          `;
+          // Charger les images photo et les convertir en data URL avant d'imprimer
+          const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docTitle}</title><style>${css}</style></head><body>
+              <h1 class="doc-title">${docTitle}</h1>
+              ${bodyHTML}
+              <scr` + `ipt>window.addEventListener('load',function(){setTimeout(function(){window.print();},500);});<\/scr` + `ipt>
+          </body></html>`;
+          const blob = new Blob([html], { type: 'text/html' });
+          const blobUrl = URL.createObjectURL(blob);
+          const printWindow = window.open(blobUrl, '_blank');
+          if(printWindow) {
+              printWindow.addEventListener('afterprint', () => { URL.revokeObjectURL(blobUrl); printWindow.close(); }, { once: true });
+              setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+          }
       },
       
       // S4 : retourne les scènes à afficher selon l'épisode actif (ou toutes si projet film)
@@ -39769,7 +39977,7 @@ const Stats = {
         if(opts.synop) document.body.classList.add('print-synopsis'); 
         if(opts.board) { setTimeout(() => UI.printBoard(), 100); return; } 
         if(opts.script) document.body.classList.add('print-script'); 
-        if(opts.chars) document.body.classList.add('print-chars'); 
+        if(opts.chars) { setTimeout(() => UI.printChars(), 100); return; } 
         if(opts.actors) document.body.classList.add('print-actors');
         if(opts.locs) document.body.classList.add('print-locs'); 
         const _origTitle = document.title;
