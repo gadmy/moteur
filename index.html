@@ -6980,7 +6980,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.4.7</p>
+      <p>vv3.4.8</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -17165,7 +17165,11 @@ CONFIG.crewGroups.forEach(defaultGrp => {
       _launchBoardPrint: (scenes) => {
           const title = `Séquencier ${state.data.title || ''}`.trim();
           const tags = state.data.tags || [];
-          const cardsHTML = scenes.map((s, idx) => {
+          const isSeries = state.currentProjectType === 'series';
+          const seasons = state.data.seasons || [];
+          const episodes = state.data.episodes || [];
+          // Helper rendu d'une card
+          const renderCard = (s, idx) => {
               const tag = tags.find(t => t.id === s.tag_id);
               const tagColor = (tag && tag.color !== 'transparent') ? tag.color : '#ddd';
               const tagName = tag ? tag.name : '';
@@ -17182,13 +17186,61 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                   <div class="seq-meta">${meta}</div>
                   ${resume}
               </div>`;
-          }).join('');
+          };
+          // Construction du HTML : grouper par saison/épisode si série
+          let bodyHTML = '';
+          if(isSeries && episodes.length > 0) {
+              // Grouper scènes par saisonId, puis par episodeId
+              const sceneIdxMap = new Map();
+              scenes.forEach((s, idx) => sceneIdxMap.set(s.id, idx));
+              const grouped = {};
+              scenes.forEach(s => {
+                  const ep = episodes.find(e => e.id === s.episodeId);
+                  const seaId = ep ? ep.seasonId : 'orphan';
+                  const epId = ep ? ep.id : 'orphan';
+                  if(!grouped[seaId]) grouped[seaId] = {};
+                  if(!grouped[seaId][epId]) grouped[seaId][epId] = [];
+                  grouped[seaId][epId].push(s);
+              });
+              // Tri saisons par numéro
+              const seaOrder = Object.keys(grouped).sort((a, b) => {
+                  const sa = seasons.find(x => x.id === a);
+                  const sb = seasons.find(x => x.id === b);
+                  return ((sa && sa.number) || 999) - ((sb && sb.number) || 999);
+              });
+              seaOrder.forEach(seaId => {
+                  const sea = seasons.find(x => x.id === seaId);
+                  const seaNum = sea ? String(sea.number).padStart(2, '0') : '??';
+                  const seaTitle = sea && sea.title ? ' — ' + Utils.escape(sea.title) : '';
+                  bodyHTML += `<div class="seq-season">SAISON ${seaNum}${seaTitle}</div>`;
+                  const epOrder = Object.keys(grouped[seaId]).sort((a, b) => {
+                      const ea = episodes.find(x => x.id === a);
+                      const eb = episodes.find(x => x.id === b);
+                      return ((ea && ea.number) || 999) - ((eb && eb.number) || 999);
+                  });
+                  epOrder.forEach(epId => {
+                      const ep = episodes.find(x => x.id === epId);
+                      const epNum = ep ? String(ep.number).padStart(2, '0') : '??';
+                      const epTitle = ep && ep.title ? ' — ' + Utils.escape(ep.title) : '';
+                      bodyHTML += `<div class="seq-episode">Épisode ${epNum}${epTitle}</div>`;
+                      grouped[seaId][epId].forEach(s => {
+                          bodyHTML += renderCard(s, sceneIdxMap.get(s.id));
+                      });
+                  });
+              });
+          } else {
+              // Films : juste les cards
+              bodyHTML = scenes.map((s, idx) => renderCard(s, idx)).join('');
+          }
           const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title><style>
               @page { size: A4 portrait; margin: 12mm; }
               body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; background: white; color: #222; }
               h1.doc-title { font-size: 1.4rem; margin: 0 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid #333; }
-              .seq-grid { column-count: 2; column-gap: 10mm; }
-              .seq-card { break-inside: avoid; page-break-inside: avoid; border: 1px solid #999; border-radius: 6px; padding: 10px 12px; margin: 0 0 10px 0; background: white; }
+              .seq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm 8mm; align-items: start; }
+              .seq-season { grid-column: 1 / -1; background: #333; color: white; padding: 8px 14px; font-size: 1rem; font-weight: bold; letter-spacing: 0.5px; margin: 6mm 0 2mm 0; border-radius: 4px; page-break-after: avoid; break-after: avoid; }
+              .seq-season:first-child { margin-top: 0; }
+              .seq-episode { grid-column: 1 / -1; font-size: 0.85rem; font-weight: bold; color: #555; padding: 4px 0 2px 0; margin-top: 2mm; border-bottom: 1px solid #ccc; page-break-after: avoid; break-after: avoid; }
+              .seq-card { break-inside: avoid; page-break-inside: avoid; border: 1px solid #999; border-radius: 6px; padding: 10px 12px; background: white; }
               .seq-head { display: flex; justify-content: space-between; font-size: 0.75rem; color: #555; margin-bottom: 4px; }
               .seq-num { font-weight: bold; color: #333; }
               .seq-status { font-size: 0.7rem; padding: 2px 6px; border: 1px solid #999; border-radius: 3px; }
@@ -17198,7 +17250,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               .seq-resume { font-size: 0.8rem; line-height: 1.4; color: #333; margin-top: 4px; padding-top: 6px; border-top: 1px dashed #ccc; white-space: pre-wrap; }
           </style></head><body>
               <h1 class="doc-title">${title}</h1>
-              <div class="seq-grid">${cardsHTML}</div>
+              <div class="seq-grid">${bodyHTML}</div>
               <scr` + `ipt>window.addEventListener('load',function(){setTimeout(function(){window.print();},300);});<\/scr` + `ipt>
           </body></html>`;
           const blob = new Blob([html], { type: 'text/html' });
