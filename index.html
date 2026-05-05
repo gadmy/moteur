@@ -6980,7 +6980,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.5.2</p>
+      <p>vv3.5.3</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10309,7 +10309,10 @@ body.presentation-mode .presentation-bar {
 
       <div id="tab-locs" class="tab-content">
           <h1 class="print-only-title">DÉCORS</h1>
-          <button onclick="app.Actions.addGroup('lieu')" class="n8-badge-4">➕ Nouveau Groupe</button>
+          <div style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap;">
+              <button onclick="app.Actions.addGroup('lieu')" class="n8-badge-4">➕ Nouveau Groupe</button>
+              <button onclick="app.UI.printLocations()" style="padding:8px 15px;background:var(--primary);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">📄 Imprimer / PDF</button>
+          </div>
           <div id="locContainer"></div>
       </div>
       
@@ -17807,6 +17810,305 @@ openBoardPrintEpisodeChooser: () => {
               .ac-fiche-col { min-width: 0; }
               .ac-fiche-subtitle { font-weight: bold; font-size: 0.85rem; color: #555; margin-top: 6px; margin-bottom: 3px; }
               .ac-fiche-bio-text { font-size: 0.82rem; white-space: pre-wrap; line-height: 1.4; }
+          `;
+          const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docTitle}</title><style>${css}</style></head><body>
+              ${mode === 'card' ? '' : `<h1 class="doc-title">${docTitle}</h1>`}
+              ${bodyHTML}
+              <scr` + `ipt>window.addEventListener('load',function(){setTimeout(function(){window.print();},500);});<\/scr` + `ipt>
+          </body></html>`;
+          const blob = new Blob([html], { type: 'text/html' });
+          const blobUrl = URL.createObjectURL(blob);
+          const printWindow = window.open(blobUrl, '_blank');
+          if(printWindow) {
+              printWindow.addEventListener('afterprint', () => { URL.revokeObjectURL(blobUrl); printWindow.close(); }, { once: true });
+              setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+          }
+      },
+      
+      // ===== IMPRESSION LIEUX =====
+      printLocations: (episodeIds, mode) => {
+          const isSeries = state.currentProjectType === 'series';
+          if(isSeries && !episodeIds) { UI._openLocsSeasonChooser(); return; }
+          if(!mode) { UI._openLocsModeChooser(episodeIds); return; }
+          let scenesScope;
+          if(isSeries && episodeIds && episodeIds.length > 0) {
+              scenesScope = (state.data.scenes || []).filter(s => episodeIds.includes(s.episodeId));
+          } else {
+              scenesScope = state.data.scenes || [];
+          }
+          UI._launchLocsPrint(scenesScope, mode, isSeries && episodeIds && episodeIds.length > 0);
+      },
+      
+      _openLocsSeasonChooser: () => {
+          const seasons = (state.data.seasons || []).slice().sort((a,b) => (a.number||0) - (b.number||0));
+          const episodes = state.data.episodes || [];
+          if(seasons.length === 0) { UI.printLocations([], null); return; }
+          const currentEp = episodes.find(e => e.id === state.currentEpisodeId);
+          const currentSeasonId = currentEp ? currentEp.seasonId : null;
+          const items = seasons.map(s => {
+              const sNum = String(s.number).padStart(2, '0');
+              const epCount = episodes.filter(e => e.seasonId === s.id).length;
+              const checked = s.id === currentSeasonId ? 'checked' : '';
+              const sTitle = s.title ? ' — ' + Utils.escape(s.title) : '';
+              return `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()"><td style="width:24px;padding:4px 8px;vertical-align:middle;"><input type="checkbox" class="lseachk" value="${s.id}" ${checked} style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td><td style="padding:4px 8px;font-size:0.88rem;line-height:1.3;vertical-align:middle;"><strong>Saison ${sNum}</strong>${sTitle} <span style="color:var(--text-sec);font-size:0.78rem;">(${epCount} ép.)</span></td></tr>`;
+          }).join('');
+          const overlay = document.createElement('div');
+          overlay.className = 'confirm-modal-overlay';
+          overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:420px;padding:20px;">
+              <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">🏠 Imprimer les décors</div>
+              <div style="text-align:left;font-size:0.85rem;color:var(--text-sec);margin-bottom:8px;">Saisons à inclure :</div>
+              <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;"><table style="width:100%;border-collapse:collapse;">${items}</table></div>
+              <div style="display:flex;gap:6px;margin-bottom:14px;">
+                  <button type="button" id="lsea-all" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout cocher</button>
+                  <button type="button" id="lsea-none" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout décocher</button>
+              </div>
+              <div style="display:flex;gap:8px;justify-content:flex-end;">
+                  <button class="confirm-modal-btn cancel" id="lsea-cancel" style="margin:0;">Annuler</button>
+                  <button class="confirm-modal-btn confirm" id="lsea-ok" style="margin:0;">Suivant</button>
+              </div>
+          </div>`;
+          document.body.appendChild(overlay);
+          overlay.querySelector('#lsea-all').onclick = () => overlay.querySelectorAll('.lseachk').forEach(cb => cb.checked = true);
+          overlay.querySelector('#lsea-none').onclick = () => overlay.querySelectorAll('.lseachk').forEach(cb => cb.checked = false);
+          overlay.querySelector('#lsea-cancel').onclick = () => overlay.remove();
+          overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+          overlay.querySelector('#lsea-ok').onclick = () => {
+              const seasonIds = Array.from(overlay.querySelectorAll('.lseachk:checked')).map(cb => cb.value);
+              if(seasonIds.length === 0) { Utils.toast('Aucune saison sélectionnée', 'warning'); return; }
+              const epIds = episodes.filter(e => seasonIds.includes(e.seasonId)).map(e => e.id);
+              overlay.remove();
+              setTimeout(() => UI.printLocations(epIds), 100);
+          };
+      },
+      
+      _openLocsModeChooser: (episodeIds) => {
+          const overlay = document.createElement('div');
+          overlay.className = 'confirm-modal-overlay';
+          overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:460px;padding:20px;">
+              <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">🏠 Mode d'impression</div>
+              <div style="text-align:left;margin-bottom:14px;">
+                  <label style="display:block;padding:10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px;cursor:pointer;"><input type="radio" name="lmode" value="detailed" checked style="margin-right:8px;"><strong>Détaillé</strong><br><span style="font-size:0.8rem;color:var(--text-sec);">1 par ligne, 1ère photo + adresse + contact + accès + scènes</span></label>
+                  <label style="display:block;padding:10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px;cursor:pointer;"><input type="radio" name="lmode" value="list" style="margin-right:8px;"><strong>Liste</strong><br><span style="font-size:0.8rem;color:var(--text-sec);">1 colonne dense : nom + nb scènes + adresse</span></label>
+                  <label style="display:block;padding:10px;border:1px solid var(--border);border-radius:6px;cursor:pointer;"><input type="radio" name="lmode" value="card" style="margin-right:8px;"><strong>Fiche</strong><br><span style="font-size:0.8rem;color:var(--text-sec);">1 page A4 paysage par lieu (+ pages photos), pour les équipes de tournage</span></label>
+              </div>
+              <div style="display:flex;gap:8px;justify-content:flex-end;">
+                  <button class="confirm-modal-btn cancel" id="lmode-cancel" style="margin:0;">Annuler</button>
+                  <button class="confirm-modal-btn confirm" id="lmode-ok" style="margin:0;">Imprimer</button>
+              </div>
+          </div>`;
+          document.body.appendChild(overlay);
+          overlay.querySelector('#lmode-cancel').onclick = () => overlay.remove();
+          overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+          overlay.querySelector('#lmode-ok').onclick = () => {
+              const mode = overlay.querySelector('input[name="lmode"]:checked').value;
+              overlay.remove();
+              setTimeout(() => UI.printLocations(episodeIds, mode), 100);
+          };
+      },
+      
+      _launchLocsPrint: (scenesScope, mode, hasSeasonFilter) => {
+          const filmTitle = state.data.title || '';
+          const docTitle = `Décors — ${filmTitle}`.trim();
+          const allLocations = state.data.locations || [];
+          const groups = (state.data.groups || []).filter(g => g.type === 'lieu');
+          const isSeries = state.currentProjectType === 'series';
+          const allScenes = state.data.scenes || [];
+          // Helper : scènes tournées dans un lieu (matche le titre du lieu avec le préfixe INT/EXT du titre de scène)
+          const locationScenes = (loc, scenePool) => scenePool.filter(s => {
+              if(!s.title) return false;
+              const m = s.title.match(/^(?:INT\.|EXT\.|I\/E)\s*([^\-]+)/i);
+              if(m && m[1]) return m[1].trim().toUpperCase() === loc.name.toUpperCase();
+              return false;
+          });
+          // Filtrer lieux : si série filtrée, ne garder que ceux qui ont au moins 1 scène dans le scope
+          const usedLocations = [];
+          const unusedLocations = [];
+          allLocations.forEach(loc => {
+              const scenesInScope = locationScenes(loc, scenesScope);
+              if(scenesInScope.length > 0) usedLocations.push(loc);
+              else unusedLocations.push(loc);
+          });
+          if(usedLocations.length === 0 && unusedLocations.length === 0) { Utils.toast('Aucun décor à imprimer', 'warning'); return; }
+          // Helpers labels scène
+          const sceneLabel = (s) => {
+              if(isSeries) {
+                  const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
+                  if(ep) {
+                      const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
+                      return UI.formatSceneNumber(s, scenesInEp.indexOf(s));
+                  }
+              }
+              return '#' + (allScenes.indexOf(s) + 1);
+          };
+          // Grouper par groupe
+          const grouped = {};
+          usedLocations.forEach(loc => {
+              const gid = loc.group_id || 'orphan';
+              if(!grouped[gid]) grouped[gid] = [];
+              grouped[gid].push(loc);
+          });
+          const groupOrder = Object.keys(grouped).sort((a, b) => {
+              if(a === 'orphan') return 1;
+              if(b === 'orphan') return -1;
+              return 0;
+          });
+          // Helpers HTML
+          const photoOrPlaceholder = (url, w, h, fontSize) => {
+              if(url) return `<img src="${url}" style="width:${w};height:${h};object-fit:cover;border:1px solid #999;border-radius:4px;flex-shrink:0;">`;
+              return `<div style="width:${w};height:${h};border:1px dashed #bbb;border-radius:4px;display:flex;align-items:center;justify-content:center;color:#999;font-size:${fontSize};flex-shrink:0;text-align:center;">Pas de photo</div>`;
+          };
+          const renderDetailed = (loc) => {
+              const photos = loc.galleryPhotos || [];
+              const firstPhoto = photos[0] || '';
+              const sList = locationScenes(loc, scenesScope);
+              const sceneTags = sList.length > 0
+                  ? sList.map(s => `<span class="lc-tag">${sceneLabel(s)}</span>`).join(' ')
+                  : '<span style="color:#999;font-style:italic;">Aucune scène dans ce décor</span>';
+              const realName = loc.realName ? `<div class="lc-meta"><strong>📍 Lieu réel :</strong> ${Utils.escape(loc.realName)}</div>` : '';
+              const desc = loc.desc ? `<div class="lc-desc">${Utils.escape(loc.desc)}</div>` : '';
+              const address = loc.address ? `<div class="lc-meta"><strong>Adresse :</strong> ${Utils.escape(loc.address)}</div>` : '';
+              const contact = (loc.contactName || loc.contactPhone) ? `<div class="lc-meta"><strong>Contact :</strong> ${Utils.escape(loc.contactName || '')}${loc.contactPhone ? ' — ' + Utils.escape(loc.contactPhone) : ''}</div>` : '';
+              const access = loc.accessNotes ? `<div class="lc-meta"><strong>Accès :</strong> ${Utils.escape(loc.accessNotes)}</div>` : '';
+              const photoCount = photos.length > 1 ? `<div class="lc-meta" style="color:#666;font-size:0.78rem;">📸 ${photos.length} photos disponibles</div>` : '';
+              return `<div class="lc-card-detailed">
+                  ${photoOrPlaceholder(firstPhoto, '100px', '120px', '0.7rem')}
+                  <div class="lc-info">
+                      <h3 class="lc-name">🏠 ${Utils.escape(loc.name)}</h3>
+                      ${realName}
+                      ${desc}
+                      ${address}
+                      ${contact}
+                      ${access}
+                      ${photoCount}
+                      <div class="lc-scenes"><strong>🎬 Scènes (${sList.length}) :</strong> ${sceneTags}</div>
+                  </div>
+              </div>`;
+          };
+          const renderList = (loc) => {
+              const sList = locationScenes(loc, scenesScope);
+              const addr = loc.address ? Utils.escape(loc.address) : '<span style="color:#999;font-style:italic;">pas d\'adresse</span>';
+              return `<div class="lc-card-list"><span class="lc-list-name">🏠 ${Utils.escape(loc.name)}</span> <span class="lc-list-sep">·</span> <span class="lc-list-count">${sList.length} sc.</span> <span class="lc-list-sep">·</span> <span class="lc-list-addr">${addr}</span></div>`;
+          };
+          const renderCard = (loc) => {
+              const photos = loc.galleryPhotos || [];
+              const firstPhoto = photos[0] || '';
+              const sList = locationScenes(loc, scenesScope);
+              const sceneTags = sList.length > 0
+                  ? sList.map(s => `<span class="lc-tag">${sceneLabel(s)}</span>`).join(' ')
+                  : '<span style="color:#999;font-style:italic;">Aucune scène</span>';
+              // Page principale (1ère page de la fiche)
+              let html = `<div class="lc-fiche">
+                  <div class="lc-fiche-top">
+                      <div class="lc-fiche-photo">${photoOrPlaceholder(firstPhoto, '100%', '100%', '0.9rem')}</div>
+                      <div class="lc-fiche-title">
+                          <h2>🏠 ${Utils.escape(loc.name)}</h2>
+                          ${loc.realName ? `<div class="lc-fiche-sub">${Utils.escape(loc.realName)}</div>` : ''}
+                          <div class="lc-fiche-meta"><strong>🎬 ${sList.length}</strong> scène${sList.length > 1 ? 's' : ''} tournée${sList.length > 1 ? 's' : ''}</div>
+                          ${photos.length > 1 ? `<div class="lc-fiche-meta" style="color:#666;font-size:0.85rem;">📸 ${photos.length} photos de repérage</div>` : ''}
+                      </div>
+                  </div>
+                  <div class="lc-fiche-bottom">
+                      <div class="lc-fiche-grid">
+                          <div class="lc-fiche-col">
+                              <div class="lc-fiche-zone-title">📍 Adresse & Contact</div>
+                              ${loc.address ? `<div style="margin-bottom:6px;">${Utils.escape(loc.address)}</div>` : '<div style="color:#999;font-style:italic;">Pas d\'adresse renseignée</div>'}
+                              ${loc.contactName ? `<div><strong>👤 ${Utils.escape(loc.contactName)}</strong></div>` : ''}
+                              ${loc.contactPhone ? `<div>📞 ${Utils.escape(loc.contactPhone)}</div>` : ''}
+                              ${loc.accessNotes ? `<div class="lc-fiche-bio"><strong>🔑 Accès :</strong><br>${Utils.escape(loc.accessNotes)}</div>` : ''}
+                          </div>
+                          <div class="lc-fiche-col">
+                              <div class="lc-fiche-zone-title">📋 Description</div>
+                              ${loc.desc ? `<div class="lc-fiche-desc">${Utils.escape(loc.desc)}</div>` : '<div style="color:#999;font-style:italic;">Pas de description</div>'}
+                              <div class="lc-fiche-zone-title" style="margin-top:8px;">🎬 Scènes</div>
+                              <div style="font-size:0.78rem;line-height:1.6;">${sceneTags}</div>
+                          </div>
+                      </div>
+                  </div>
+              </div>`;
+              // Pages supplémentaires : 4 photos par page (uniquement si plus d'1 photo)
+              if(photos.length > 1) {
+                  const extraPhotos = photos.slice(1); // sauter la 1ère déjà affichée
+                  for(let i = 0; i < extraPhotos.length; i += 4) {
+                      const chunk = extraPhotos.slice(i, i + 4);
+                      html += `<div class="lc-fiche-photos">
+                          <h2>🏠 ${Utils.escape(loc.name)} <span style="font-weight:normal;font-size:1rem;color:#666;">— Photos de repérage</span></h2>
+                          <div class="lc-photo-grid">
+                              ${chunk.map(p => `<div class="lc-photo-cell"><img src="${p}"></div>`).join('')}
+                          </div>
+                      </div>`;
+                  }
+              }
+              return html;
+          };
+          // Construction body
+          let bodyHTML = '';
+          let cssOrientation = 'portrait';
+          if(mode === 'card') {
+              cssOrientation = 'landscape';
+              usedLocations.forEach(loc => { bodyHTML += renderCard(loc); });
+              if(unusedLocations.length > 0 && !hasSeasonFilter) {
+                  unusedLocations.forEach(loc => { bodyHTML += renderCard(loc); });
+              }
+          } else {
+              groupOrder.forEach(gid => {
+                  const group = groups.find(g => g.id === gid);
+                  const groupName = group ? group.name : 'Non classé';
+                  bodyHTML += `<div class="lc-group">${Utils.escape(groupName)}</div>`;
+                  if(mode === 'detailed') {
+                      grouped[gid].forEach(loc => { bodyHTML += renderDetailed(loc); });
+                  } else {
+                      grouped[gid].forEach(loc => { bodyHTML += renderList(loc); });
+                  }
+              });
+              if(unusedLocations.length > 0 && !hasSeasonFilter) {
+                  bodyHTML += `<div class="lc-group" style="background:#666;">Lieux non utilisés (${unusedLocations.length})</div>`;
+                  if(mode === 'detailed') {
+                      unusedLocations.forEach(loc => { bodyHTML += renderDetailed(loc); });
+                  } else {
+                      unusedLocations.forEach(loc => { bodyHTML += renderList(loc); });
+                  }
+              }
+          }
+          const css = `
+              @page { size: A4 ${cssOrientation}; margin: 12mm; }
+              body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; background: white; color: #222; }
+              h1.doc-title { font-size: 1.4rem; margin: 0 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid #333; }
+              .lc-group { background: #333; color: white; padding: 8px 14px; font-size: 1rem; font-weight: bold; letter-spacing: 0.5px; margin: 6mm 0 3mm 0; border-radius: 4px; page-break-after: avoid; break-after: avoid; }
+              .lc-group:first-child { margin-top: 0; }
+              .lc-card-detailed { display: flex; gap: 12px; border: 1px solid #999; border-radius: 6px; padding: 12px; margin-bottom: 8px; page-break-inside: avoid; break-inside: avoid; background: white; }
+              .lc-info { flex: 1; min-width: 0; }
+              .lc-name { font-size: 1.05rem; margin: 0 0 6px 0; }
+              .lc-meta { font-size: 0.82rem; color: #444; margin-bottom: 3px; line-height: 1.4; }
+              .lc-desc { font-size: 0.82rem; color: #333; margin: 4px 0 6px 0; line-height: 1.4; white-space: pre-wrap; }
+              .lc-scenes { font-size: 0.78rem; color: #444; margin-top: 6px; padding-top: 6px; border-top: 1px dashed #ccc; line-height: 1.6; }
+              .lc-tag { display: inline-block; background: #e8e8e8; padding: 1px 6px; border-radius: 3px; font-size: 0.72rem; margin: 1px 2px; color: #333; }
+              .lc-card-list { padding: 5px 8px; border-bottom: 1px dotted #ccc; font-size: 0.84rem; page-break-inside: avoid; break-inside: avoid; line-height: 1.5; }
+              .lc-list-name { font-weight: bold; }
+              .lc-list-sep { color: #999; margin: 0 3px; }
+              .lc-list-count { color: #555; font-size: 0.78rem; }
+              .lc-list-addr { color: #666; font-size: 0.8rem; }
+              /* Mode Fiche : 1 page A4 paysage par lieu */
+              .lc-fiche { page-break-after: always; break-after: page; height: 186mm; display: flex; flex-direction: column; gap: 6mm; box-sizing: border-box; overflow: hidden; }
+              .lc-fiche-top { display: flex; gap: 8mm; height: 90mm; flex-shrink: 0; }
+              .lc-fiche-photo { width: 130mm; height: 90mm; flex-shrink: 0; border: 1px solid #999; border-radius: 6px; overflow: hidden; }
+              .lc-fiche-photo img, .lc-fiche-photo > div { width: 100% !important; height: 100% !important; border: none !important; border-radius: 0 !important; }
+              .lc-fiche-title { flex: 1; min-width: 0; border: 1px solid #ccc; border-radius: 6px; padding: 6mm; font-size: 0.85rem; line-height: 1.5; overflow: hidden; }
+              .lc-fiche-title h2 { font-size: 1.5rem; margin: 0 0 6px 0; }
+              .lc-fiche-sub { font-size: 1rem; color: #666; margin-bottom: 8px; font-style: italic; }
+              .lc-fiche-meta { font-size: 0.9rem; margin-bottom: 4px; }
+              .lc-fiche-bottom { flex: 1; min-height: 0; border: 1px solid #ccc; border-radius: 6px; padding: 6mm; font-size: 0.85rem; line-height: 1.5; overflow: hidden; }
+              .lc-fiche-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; height: 100%; }
+              .lc-fiche-col { min-width: 0; overflow: hidden; }
+              .lc-fiche-zone-title { font-weight: bold; font-size: 0.95rem; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #ddd; }
+              .lc-fiche-bio { margin-top: 8px; padding-top: 6px; border-top: 1px dashed #ccc; font-size: 0.82rem; white-space: pre-wrap; }
+              .lc-fiche-desc { font-size: 0.82rem; line-height: 1.4; white-space: pre-wrap; }
+              /* Pages supplémentaires de photos */
+              .lc-fiche-photos { page-break-after: always; break-after: page; height: 186mm; display: flex; flex-direction: column; box-sizing: border-box; }
+              .lc-fiche-photos:last-child { page-break-after: auto; }
+              .lc-fiche-photos h2 { font-size: 1.2rem; margin: 0 0 8mm 0; padding-bottom: 4px; border-bottom: 2px solid #333; flex-shrink: 0; }
+              .lc-photo-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 6mm; min-height: 0; }
+              .lc-photo-cell { border: 1px solid #999; border-radius: 6px; overflow: hidden; min-height: 0; }
+              .lc-photo-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
           `;
           const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docTitle}</title><style>${css}</style></head><body>
               ${mode === 'card' ? '' : `<h1 class="doc-title">${docTitle}</h1>`}
@@ -40289,7 +40591,7 @@ const Stats = {
         if(opts.script) document.body.classList.add('print-script'); 
         if(opts.chars) { setTimeout(() => UI.printChars(), 100); return; } 
         if(opts.actors) { setTimeout(() => UI.printActors(), 100); return; }
-        if(opts.locs) document.body.classList.add('print-locs'); 
+        if(opts.locs) { setTimeout(() => UI.printLocations(), 100); return; } 
         const _origTitle = document.title;
         if(opts.storyboard) {
             document.body.classList.add('print-storyboard');
