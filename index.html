@@ -6980,7 +6980,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.5.3</p>
+      <p>vv3.5.4</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -9940,7 +9940,7 @@ body.presentation-mode .presentation-bar {
                 <div id="edit-scene-form" class="controls-row" style="background:var(--panel-bg); padding:15px; border-radius:8px; border:1px solid var(--border); margin-bottom:15px; display:block">
                   <div class="seq-header-row">
                       <div class="seq-input-group">
-                          <input id="inpPre" placeholder="INT"><span>.</span><input id="inpLoc" placeholder="LIEU"><span>-</span><input id="inpSuff" placeholder="JOUR">
+                          <input id="inpPre" placeholder="INT"><span>.</span><div class="autocomplete-wrapper" style="flex-grow:1;display:inline-block;position:relative;"><input id="inpLoc" placeholder="LIEU" style="width:100%;"><div id="autocomplete-list-loc" class="autocomplete-list"></div></div><span>-</span><input id="inpSuff" placeholder="JOUR">
                       </div>
                       <input id="inpTime" placeholder="Durée (min)">
                   </div>
@@ -11992,7 +11992,7 @@ crewRoles: {
     scriptContainer: document.getElementById('scriptContainer'), charContainer: document.getElementById('charContainer'), actorContainer: document.getElementById('actorContainer'), locContainer: document.getElementById('locContainer'),
     bdScriptContent: document.getElementById('bdScriptContent'), bdRightContent: document.getElementById('bdRightContent'), bdCtxMenu: document.getElementById('breakdown-ctx-menu'), tagCtxMenu: document.getElementById('tag-ctx-menu'),
     btnSave: document.getElementById('btnSave'), fileInput: document.getElementById('fileInput'), importInput: document.getElementById('importInput'), 
-    inpPre: document.getElementById('inpPre'), inpLoc: document.getElementById('inpLoc'), inpSuff: document.getElementById('inpSuff'), inpPerso: document.getElementById('inpPerso'), inpTime: document.getElementById('inpTime'), inpResume: document.getElementById('inpResume'),
+    inpPre: document.getElementById('inpPre'), inpLoc: document.getElementById('inpLoc'), inpSuff: document.getElementById('inpSuff'), inpPerso: document.getElementById('inpPerso'), inpTime: document.getElementById('inpTime'), inpResume: document.getElementById('inpResume'), acListLoc: document.getElementById('autocomplete-list-loc'),
     acList: document.getElementById('autocomplete-list'), scriptACList: document.getElementById('script-ac-list'),
     exportModal: document.getElementById('export-modal'), shareModal: document.getElementById('share-modal'), tagModal: document.getElementById('tag-modal'),
     
@@ -12296,31 +12296,44 @@ crewRoles: {
       getInitials: (email) => email.substring(0,2).toUpperCase(),
       getColor: (str) => { const colors = ['#f44336', '#E91E63', '#9C27B0', '#3F51B5', '#2196F3', '#009688', '#FF9800', '#795548']; let hash = 0; for(let i=0; i<str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash); return colors[Math.abs(hash) % colors.length]; },
       
-      setupAutocomplete: (inp) => { 
+      setupAutocomplete: (inp, opts) => { 
+          // opts = { source: () => array d'items, listEl: DOM element, multi: bool, transform: fn(item)=>string }
+          // Defaults : source = personnages, listEl = els.acList, multi = true (séparé par ;)
+          opts = opts || {};
+          const source = opts.source || (() => state.data.characters || []);
+          const listEl = opts.listEl || els.acList;
+          const multi = opts.multi !== false;
+          const transform = opts.transform || (item => item.name);
           let currentFocus = -1; 
           inp.addEventListener("input", function(e) { 
               const val = this.value; Utils.closeAllLists(); 
               if (!val) return false; 
-              const terms = val.split(';'); 
+              const terms = multi ? val.split(';') : [val];
               const currentTerm = terms[terms.length - 1].trim().toLowerCase(); 
               if(currentTerm.length < 1) return; 
-              currentFocus = -1; els.acList.innerHTML = ''; 
-              const matches = state.data.characters.filter(c => c.name.toLowerCase().startsWith(currentTerm)); 
+              currentFocus = -1; listEl.innerHTML = ''; 
+              const matches = source().filter(item => transform(item).toLowerCase().startsWith(currentTerm)); 
               if(matches.length === 0) return; 
               matches.forEach(match => { 
+                  const matchName = transform(match);
                   const div = document.createElement("div"); div.className = "autocomplete-item"; 
-                  div.innerHTML = "<strong>" + Utils.escape(match.name.substring(0, currentTerm.length)) + "</strong>" + Utils.escape(match.name.substring(currentTerm.length)); 
-                  div.innerHTML += "<input type='hidden' value='" + Utils.escape(match.name) + "'>"; 
+                  div.innerHTML = "<strong>" + Utils.escape(matchName.substring(0, currentTerm.length)) + "</strong>" + Utils.escape(matchName.substring(currentTerm.length)); 
+                  div.innerHTML += "<input type='hidden' value='" + Utils.escape(matchName) + "'>"; 
                   div.addEventListener("click", function(e) { 
-                      terms[terms.length - 1] = " " + this.getElementsByTagName("input")[0].value; 
-                      inp.value = terms.join(';').trim() + '; '; 
+                      const chosen = this.getElementsByTagName("input")[0].value;
+                      if(multi) {
+                          terms[terms.length - 1] = " " + chosen; 
+                          inp.value = terms.join(';').trim() + '; '; 
+                      } else {
+                          inp.value = chosen;
+                      }
                       Utils.closeAllLists(); inp.focus(); 
                   }); 
-                  els.acList.appendChild(div); 
+                  listEl.appendChild(div); 
               }); 
           }); 
           inp.addEventListener("keydown", function(e) { 
-              let x = els.acList.getElementsByTagName("div"); 
+              let x = listEl.getElementsByTagName("div"); 
               if (e.key === "ArrowDown") { currentFocus++; addActive(x); } 
               else if (e.key === "ArrowUp") { currentFocus--; addActive(x); } 
               else if (e.key === "Enter") { 
@@ -12336,10 +12349,13 @@ crewRoles: {
           } 
           function removeActive(x) { for (let i = 0; i < x.length; i++) x[i].classList.remove("autocomplete-active"); } 
       },
-      closeAllLists: () => { while (els.acList.firstChild) els.acList.removeChild(els.acList.firstChild); },
+      closeAllLists: () => { 
+          while (els.acList && els.acList.firstChild) els.acList.removeChild(els.acList.firstChild); 
+          if(els.acListLoc) while (els.acListLoc.firstChild) els.acListLoc.removeChild(els.acListLoc.firstChild);
+      },
       setupEnterNav: () => { 
           els.inpPre.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); els.inpLoc.focus(); } }); 
-          els.inpLoc.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); els.inpSuff.focus(); } }); 
+          els.inpLoc.addEventListener('keydown', e => { if(e.key==='Enter' && (!els.acListLoc || els.acListLoc.children.length === 0)){ e.preventDefault(); els.inpSuff.focus(); } }); 
           els.inpSuff.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); els.inpTime.focus(); } }); 
           els.inpTime.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); els.inpPerso.focus(); } }); 
           els.inpPerso.addEventListener('keydown', e => { if(e.key==='Enter' && els.acList.children.length === 0){ e.preventDefault(); els.inpResume.focus(); } }); 
@@ -16435,7 +16451,9 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               document.getElementById('btnLoad').addEventListener('click', () => els.fileInput.click()); 
               els.fileInput.addEventListener('change', Store.importJSON); 
               document.getElementById('btnClear').addEventListener('click', Store.clearCurrent); 
-              Utils.setupEnterNav(); Utils.setupAutocomplete(els.inpPerso); 
+              Utils.setupEnterNav(); 
+              Utils.setupAutocomplete(els.inpPerso); 
+              Utils.setupAutocomplete(els.inpLoc, { source: () => state.data.locations || [], listEl: els.acListLoc, multi: false }); 
               els.boardList.addEventListener('dragover', e => UI.handleDragOver(e, els.boardList, '.card')); 
               els.scriptContainer.addEventListener('dragover', e => UI.handleDragOver(e, els.scriptContainer, '.script-row')); 
               document.addEventListener('click', (e) => { 
@@ -20512,6 +20530,33 @@ const tabToSection = {
               return;
           }
           const name = await ConfirmModal.prompt("Entrez le nom du comédien ou de la comédienne.", "Nouveau comédien", "Nom..."); if(name) { const newActor = { id: 'act_'+Date.now(), name: name, gender: "", bio: "", email: "", phone: "", address: "", city: "", website: "", photo: "", group_id: "", hasVehicle: false, vehicleType: "", vehiclePlate: "", vehicleSeats: "", vehicleTrunk: false, vehicleNotes: "", dailyRate: "", rateCurrency: "€", rateType: "Jour", availabilityText: "", availabilityDates: [], color: "", height: "", weight: "", age: "", eyeColor: "", hairColor: "", hairLength: "", ethnicity: "", corpulence: "", sports: "", languages: "", demoreel: "", galleryPhotos: [] }; state.data.actors.push(newActor); History.log('ADD', `Ajout comédien : ${name}`); Store.save(); UI.renderDataTab('actors', els.actorContainer); } },
+      addDataItem: async (type) => {
+          if(type === 'actors') { Actions.addActor(); return; }
+          const labels = { characters: { perm: 'personnages', singular: 'personnage', title: 'Nouveau personnage', placeholder: 'Nom du personnage…' }, locations: { perm: 'decors', singular: 'décor', title: 'Nouveau décor', placeholder: 'Nom du décor (ex: GRENIER MAISON PATERNELLE)…' } };
+          const cfg = labels[type];
+          if(!cfg) { Utils.toast('Type inconnu', 'error'); return; }
+          if(state.currentRole !== 'owner' && !Permissions.canEdit(cfg.perm)) { Utils.toast(`Vous n'avez pas la permission d'ajouter des ${cfg.perm}.`, 'error'); return; }
+          const name = await ConfirmModal.prompt(`Entrez le nom du ${cfg.singular}.`, cfg.title, cfg.placeholder);
+          if(!name) return;
+          const trimmed = name.trim();
+          if(!trimmed) return;
+          if(type === 'characters') {
+              const exists = state.data.characters.find(c => c.name.toLowerCase() === trimmed.toLowerCase());
+              if(exists) { Utils.toast('Ce personnage existe déjà', 'warning'); return; }
+              state.data.characters.push({ name: trimmed, bio: '', group_id: '', gender: '' });
+              History.log('ADD', `Ajout personnage : ${trimmed}`);
+              Store.save();
+              UI.renderDataTab('characters', els.charContainer);
+          } else if(type === 'locations') {
+              const upperName = trimmed.toUpperCase();
+              const exists = state.data.locations.find(l => l.name.toUpperCase() === upperName);
+              if(exists) { Utils.toast('Ce décor existe déjà', 'warning'); return; }
+              state.data.locations.push({ name: upperName, desc: '', group_id: '', realName: '', address: '', contactName: '', contactPhone: '', accessNotes: '', galleryPhotos: [] });
+              History.log('ADD', `Ajout décor : ${upperName}`);
+              Store.save();
+              UI.renderDataTab('locations', els.locContainer);
+          }
+      },
       updateActorMeta: (idx, field, val) => { 
           if(state.data.actors[idx]) { 
               const oldVal = state.data.actors[idx][field];
