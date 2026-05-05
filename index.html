@@ -26,84 +26,36 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 HISTORIQUE DES VERSIONS
 ================================================================================
+v3.5.5 — Refonte exports PDF (toutes sections), bugs latents, autocomplétion scénario, esthétique boutons (05 Mai 2026)
+- Suite de la refonte storyboard : généralisation "1 fenêtre Blob URL par section" aux 4 autres sections
+- Séquencier : 2 colonnes A4 portrait, multi-saisons via popup pour séries, bandeaux saison + sous-titres épisode
+- Personnages : 2 modes (Détaillé 1 col / Liste 2 col), regroupé par groupe, photo comédien lié
+- Comédiens : 3 modes (Détaillé / Liste / Fiche casting paysage 1 page A4 par comédien)
+- Lieux : 3 modes (Détaillé / Liste / Fiche multi-pages avec galerie photos 4/page)
+- Chaque section : popup multi-saisons pour séries, filtrage WYSIWYG ou par scope selon contexte
+- Bug latent fixé : Actions.addDataItem (référencé mais inexistant) — boutons "+ Ajouter X" plantaient
+- Bug latent fixé : UI.showModal (référencé mais inexistant) — bouton "+ Nouvelle Ressource" plantait
+- Boutons permanents "+ Nouveau Personnage" et "+ Nouveau Décor" en haut des onglets
+- Esthétique : classes .btn-tool (minimaliste) et .btn-tool-print (bleu primary) appliquées partout
+- Autocomplétion scénario étendue : multi-catégories (perso/décor/ressource) en colonnes côte à côte
+- Détection contextuelle : .sc-perso = persos seuls / .sc-action et .sc-dial = 3 catégories sur dernier mot, seuil 3 chars
+- Navigation : ↑↓ dans colonne, ←→ entre colonnes, Enter/Tab pour insérer
+- Toggle ON/OFF persisté en localStorage, bouton 🟢/⚪ dans sidebar du scénario
+- Autocomplétion lieu dans la barre du séquencier (champ inpLoc) — Utils.setupAutocomplete généralisé avec opts {source, listEl, multi, transform}
+
+================================================================================
 v3.4.2 — Storyboard : refonte complète impression PDF + 3 modes de mise en page (04 Mai 2026)
-
-===== Refonte complète de l'export PDF storyboard =====
-
-Le print du storyboard utilisait window.print() sur le document principal, ce qui
-faisait hériter de toute la chaîne de styles d'impression du scénario (marges
-35mm, fonte Courier monospace, numéro de page en haut à droite, page de garde
-qui se dupliquait). Résultat : PDF mal cadré, texte tassé, pages en double.
-
-Approche : ouverture d'une fenêtre d'impression dédiée via Blob URL, complètement
-isolée du document principal. Plus aucun héritage CSS parasite, contrôle total
-sur la mise en page, le format et l'orientation.
-
---- 3 modes de mise en page configurables ---
-Remplacement des 8 cases à cocher (numéro/type/mvt/mode/desc/acteurs/tech/scène)
-par un sélecteur radio à 3 modes mutuellement exclusifs :
-
-  * Standard (portrait, 4-6 plans/page) : layout dessin à gauche / texte à
-    droite, toutes les infos affichées. Card pleine largeur, le texte s'étale
-    sur des lignes plus longues, plus dense que l'ancienne grille 2 colonnes.
-  
-  * Image en grand (paysage, 1 plan/page) : un seul plan par page A4 paysage,
-    image qui prend ~70% de la hauteur, texte complet en dessous. Si la
-    description est très longue, l'image rétrécit (plancher 80mm) sans jamais
-    tronquer le texte.
-  
-  * Compact (paysage, 16 plans/page) : grille 4×4 dense en A4 paysage, infos
-    minimales (numéro de plan, type, mvt caméra, mode caméra, titre de scène).
-    Pas de description ni de directions. Pour vue d'ensemble rapide.
-
---- Pipeline d'export Blob URL ---
-Storyboard.printDirect() :
-  1. Force un re-render via renderPrintPreview('sbFullscreenContent')
-  2. Attend 350ms pour que les setTimeout(200) des objets vectoriels finissent
-     leur rendu sur les canvas
-  3. Attend que toutes les <img> upload soient chargées (Promise.all sur load)
-  4. Clone le DOM, remplace chaque <canvas> par une <img> data URL
-     (canvas.toDataURL('image/png')) — sinon les dessins seraient blancs car
-     cloneNode ne copie pas le bitmap du canvas
-  5. Génère un document HTML autonome avec @page A4 portrait/landscape selon
-     le mode et CSS dédié
-  6. Crée un Blob text/html, URL.createObjectURL, window.open(blobUrl)
-  7. Le HTML injecté contient un <script> auto-print qui se déclenche après
-     l'événement load + 300ms (le temps que les data URL soient décodées)
-  8. La fenêtre se ferme via afterprint ; URL.revokeObjectURL en sécurité 60s
-
---- Pourquoi Blob URL et pas document.write ---
-Firefox ignore @page { size: A4 landscape } dans une fenêtre ouverte par
-window.open('') + document.write — l'orientation reste portrait. Le passage
-par un Blob URL force le navigateur à charger le document comme un vrai
-document HTML autonome, avec parsing complet et donc respect du @page.
-Bonus : marche identiquement sur Chrome et Firefox.
-
---- Titre du PDF dynamique ---
-document.title = `StoryBoard <nom du film> - Sc X à Y` calculé depuis la
-plage de scènes effectivement présentes (Storyboard._printSceneRange). Le
-PDF généré porte ce titre comme nom de fichier par défaut.
-
---- Pièges techniques résolus ---
-- <script>...</script> à l'intérieur d'un template literal dans un <script>
-  parent : le parser HTML voyait le </script> interne et fermait le bloc
-  principal. Fix : <scr` + `ipt> et <\/scr` + `ipt> en concaténation pour
-  cacher la balise au parser HTML tout en générant la bonne chaîne au runtime.
-- window.open après await retournait null (Firefox bloquait : appel hors
-  contexte de clic synchrone). Résolu par l'ouverture via Blob URL qui se
-  fait en une seule passe synchrone après les await sur les images.
-- @page globale du scénario (margin 25mm/35mm, counter-increment, top-right
-  numéro de page) qui empoisonnait toutes les autres impressions. Plus de
-  conflit puisque la fenêtre d'impression est isolée.
-
---- Cleanup ---
-Suppression des règles CSS @page storyboard / @page storyboardLarge dans le
-@media print global du document principal, devenues inutiles puisque le
-storyboard ne passe plus par window.print() du document principal.
-Le bouton "Imprimer" dans la modale d'aperçu plein écran (sbFullscreenModal)
-appelle maintenant Storyboard.printDirect() au lieu de window.print().
-Ajout d'un bouton "📄 Imprimer / PDF" dans la barre principale du storyboard
-pour imprimer sans passer par l'aperçu plein écran.
+- Print storyboard ne passe plus par window.print() du document principal (héritage CSS du scénario qui parasitait : marges 35mm, Courier monospace, page de garde dupliquée)
+- Nouveau pipeline : window.open(Blob URL) avec @page A4 dédié, complètement isolé
+- 3 modes radio mutuellement exclusifs (remplace les 8 cases à cocher) :
+  * Standard (portrait, 4-6 plans/page) : layout dessin gauche / texte droite
+  * Image en grand (paysage, 1 plan/page) : image ~70% hauteur, texte dessous, plancher 80mm
+  * Compact (paysage, 16 plans/page) : grille 4×4 dense, infos minimales
+- Storyboard.printDirect() : re-render → attente 350ms (objets vectoriels) → wait images load → clone DOM avec canvas convertis en data URL → Blob HTML autonome → window.open
+- Auto-print via <script> injecté dans la fenêtre Blob, déclenché à load+300ms
+- Pourquoi Blob URL et pas document.write : Firefox ignore @page landscape sinon
+- Cleanup : suppression des @page storyboard du @media print global, devenues inutiles
+- Bouton "📄 Imprimer / PDF" ajouté dans la barre principale + bouton dans la modale plein écran appelle aussi printDirect()
 
 ================================================================================
 v3.2.7 — DrawingEditor : drag layers, suppr objets, insertion image compressée - Phase 4B v2 (30 Avr. 2026)
@@ -6984,7 +6936,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.5.5</p>
+      <p>vv3.5.6</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -11970,7 +11922,8 @@ crewRoles: {
       currentRole: 'viewer', 
       currentEditingId: null, 
       activeBdSceneId: null, 
-      scriptAC: { active: false, index: -1, items: [] }, 
+      scriptAC: { active: false, index: -1, colIndex: 0, columns: [], items: [], enabled: (localStorage.getItem('moteur_scriptAC_enabled') !== 'false') }, 
+      scriptBdEnabled: (localStorage.getItem('moteur_scriptBd_enabled') !== 'false'), 
       dbListener: null, 
       presenceRef: null, 
       locksListener: null, 
@@ -18327,6 +18280,9 @@ openBoardPrintEpisodeChooser: () => {
                       <button onclick="event.stopPropagation(); app.SceneVersions.save('${scene.id}')">📸 Sauvegarder version</button>
                       <button onclick="event.stopPropagation(); app.SceneVersions.openModal('${scene.id}')">📜 Historique${versionCount > 0 ? ' (' + versionCount + ')' : ''}</button>
                       <hr class="hr-subtle">
+                      <button onclick="event.stopPropagation(); app.ScriptEditor.toggleAC()" title="Active ou désactive les suggestions automatiques pendant l'écriture (personnages, décors, ressources)">${state.scriptAC.enabled ? '🟢' : '⚪'} Autocomplétion</button>
+                      <button onclick="event.stopPropagation(); app.ScriptEditor.toggleScriptBd()" title="Active le clic droit pour dépouiller du texte sélectionné dans le scénario. Si désactivé, le clic droit reste celui du navigateur (copier/coller).">${state.scriptBdEnabled ? '🟢' : '⚪'} Dépouillement</button>
+                      <hr class="hr-subtle">
                       <div style="text-align:center; margin-bottom:5px;">${finalBadge}</div>
                       ${finalizeBtn}
                       <hr class="hr-subtle">
@@ -18334,7 +18290,7 @@ openBoardPrintEpisodeChooser: () => {
                       <button onclick="event.stopPropagation(); app.ScriptImport.openModal()">📄 Importer PDF/FDX</button>
                   </div>
               `;
-              row.innerHTML = `<div class="lock-overlay">🔒</div><div class="script-info-col" style="${infoStyle}"><h3 style="cursor:context-menu; display:flex; align-items:center; flex-wrap:wrap;">${badge}${Utils.escape(scene.title)}${statusBadge}</h3><div style="margin-bottom:10px;font-size:0.8em">${UI.formatSceneNumber(scene, idx)} • ${Utils.escape(scene.time)} min</div><div style="margin-bottom:10px; font-size:0.85rem; color:var(--text-main); font-weight:normal;">${Utils.escape(scene.perso)}</div><strong>Résumé:</strong><p>${Utils.escape(scene.resume)||'-'}</p>${sidebarBtns}</div><div class="script-write-col"><div class="scene-heading-print">${Utils.escape(scene.title)}</div><div class="format-bar scene-format-bar d-none" id="toolbar-${scene.id}"><button class="fmt-btn nav-btn" onclick="app.ScriptEditor.goToScene(${idx - 1})" ${idx === 0 ? 'disabled style="opacity:0.4"' : ''} title="Scène précédente">⬅️</button><button class="fmt-btn active" data-type="sc-action" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-action', event)" title="Action">Action</button><button class="fmt-btn" data-type="sc-perso" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-perso', event)" title="Personnage">Perso</button><button class="fmt-btn" data-type="sc-dial" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-dial', event)" title="Dialogue">Dial</button><button class="fmt-btn" data-type="sc-paren" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-paren', event)" title="Didascalie">Didas</button><button class="fmt-btn" data-type="sc-trans" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-trans', event)" title="Transition">Trans</button><button class="fmt-btn" data-type="sc-centered" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-centered', event)" title="Centré">Centré</button><button class="fmt-btn" data-type="sc-note" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-note', event)" title="Note">Note</button><span class="scene-nav-indicator">${idx + 1}/${state.data.scenes.length}</span><button class="fmt-btn" onclick="app.ScriptEditor.insertSceneAfter(${idx})" title="Insérer nouvelle scène après">➕</button><button class="fmt-btn nav-btn" onclick="app.ScriptEditor.goToScene(${idx + 1})" ${idx === state.data.scenes.length - 1 ? 'disabled style="opacity:0.4"' : ''} title="Scène suivante">➡️</button></div><div class="script-editor-box" contenteditable="${!isView}" spellcheck="true" lang="fr" id="editor-${scene.id}">${contentHtml}</div></div>`;
+              row.innerHTML = `<div class="lock-overlay">🔒</div><div class="script-info-col" style="${infoStyle}"><h3 style="cursor:context-menu; display:flex; align-items:center; flex-wrap:wrap;">${badge}${Utils.escape(scene.title)}${statusBadge}</h3><div style="margin-bottom:10px;font-size:0.8em">${UI.formatSceneNumber(scene, idx)} • ${Utils.escape(scene.time)} min</div><div style="margin-bottom:10px; font-size:0.85rem; color:var(--text-main); font-weight:normal;">${Utils.escape(scene.perso)}</div><strong>Résumé:</strong><p>${Utils.escape(scene.resume)||'-'}</p>${sidebarBtns}</div><div class="script-write-col"><div class="scene-heading-print">${Utils.escape(scene.title)}</div><div class="format-bar scene-format-bar d-none" id="toolbar-${scene.id}"><button class="fmt-btn nav-btn" onclick="app.ScriptEditor.goToScene(${idx - 1})" ${idx === 0 ? 'disabled style="opacity:0.4"' : ''} title="Scène précédente">⬅️</button><button class="fmt-btn active" data-type="sc-action" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-action', event)" title="Action">Action</button><button class="fmt-btn" data-type="sc-perso" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-perso', event)" title="Personnage">Perso</button><button class="fmt-btn" data-type="sc-dial" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-dial', event)" title="Dialogue">Dial</button><button class="fmt-btn" data-type="sc-paren" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-paren', event)" title="Didascalie">Didas</button><button class="fmt-btn" data-type="sc-trans" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-trans', event)" title="Transition">Trans</button><button class="fmt-btn" data-type="sc-centered" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-centered', event)" title="Centré">Centré</button><button class="fmt-btn" data-type="sc-note" onmousedown="app.ScriptEditor.format(${scene.id}, 'sc-note', event)" title="Note">Note</button><span class="scene-nav-indicator">${idx + 1}/${state.data.scenes.length}</span><button class="fmt-btn" onclick="app.ScriptEditor.insertSceneAfter(${idx})" title="Insérer nouvelle scène après">➕</button><button class="fmt-btn nav-btn" onclick="app.ScriptEditor.goToScene(${idx + 1})" ${idx === state.data.scenes.length - 1 ? 'disabled style="opacity:0.4"' : ''} title="Scène suivante">➡️</button></div><div class="script-editor-box" contenteditable="${!isView}" spellcheck="true" lang="fr" id="editor-${scene.id}" oncontextmenu="app.Breakdown.handleRightClickFromScript(event, '${scene.id}')">${contentHtml}</div></div>`;
               els.scriptContainer.appendChild(row); 
               if(!isView) { 
                   const handle = row.querySelector('.script-info-col'); 
@@ -21119,6 +21075,124 @@ const tabToSection = {
           els.bdCtxMenu.style.top = top2 + 'px'; 
           els.bdCtxMenu.style.left = left2 + 'px'; 
       },
+      
+      // Variante de handleRightClick pour usage depuis l'onglet Scénario.
+      // Différences vs handleRightClick :
+      // - sceneId passé en paramètre (pas state.activeBdSceneId)
+      // - pas de check finalisation (l'utilisateur peut dépouiller pendant qu'il écrit)
+      // - si scriptBdEnabled === false : return sans preventDefault → clic droit standard du navigateur
+      // - pas de Breakdown.init() à la fin (l'onglet Dépouillement n'est pas affiché)
+      handleRightClickFromScript: (e, sceneId) => {
+          if(!state.scriptBdEnabled) return; // toggle OFF : laisser le clic droit standard
+          if(state.currentRole === 'viewer' || !Permissions.canEdit('depouillement')) return;
+          if(!sceneId) return;
+          const sel = window.getSelection();
+          const text = sel.toString().trim();
+          e.preventDefault();
+          // Si rien sélectionné : menu techniciens (comme dans Dépouillement)
+          if(text.length < 1) {
+              els.bdCtxMenu.innerHTML = `<div class="ctx-title">Ajouter technicien(s) :</div>`;
+              const addAllDiv = document.createElement('div');
+              addAllDiv.innerText = '⚡ Ajouter TOUS les techniciens';
+              addAllDiv.style.fontWeight = 'bold';
+              addAllDiv.style.borderBottom = '2px solid var(--border)';
+              addAllDiv.onclick = () => {
+                  if(state.data.crew && state.data.crew.length > 0) {
+                      state.data.crew.forEach(member => Breakdown.addItemSilent(sceneId, 'TECHNICIENS', member.name));
+                      Store.save();
+                      Utils.toast(`${state.data.crew.length} technicien(s) ajouté(s)`, 'success');
+                  }
+                  els.bdCtxMenu.style.display = 'none';
+              };
+              els.bdCtxMenu.appendChild(addAllDiv);
+              if(state.data.crew && state.data.crew.length > 0) {
+                  state.data.crew.forEach(member => {
+                      const div = document.createElement('div');
+                      div.innerText = `${member.name} (${member.role || 'Technicien'})`;
+                      div.onclick = () => {
+                          Breakdown.addItemFromScript(sceneId, 'TECHNICIENS', member.name);
+                          els.bdCtxMenu.style.display = 'none';
+                      };
+                      els.bdCtxMenu.appendChild(div);
+                  });
+              } else {
+                  const emptyDiv = document.createElement('div');
+                  emptyDiv.innerText = '(Aucun technicien)';
+                  emptyDiv.style.color = 'var(--text-sec)';
+                  els.bdCtxMenu.appendChild(emptyDiv);
+              }
+              els.bdCtxMenu.style.display = 'block';
+              let top1 = e.clientY; let left1 = e.clientX;
+              if(left1 + 200 > window.innerWidth) left1 = window.innerWidth - 210;
+              if(top1 + 300 > window.innerHeight) top1 = window.innerHeight - 310;
+              if(left1 < 10) left1 = 10; if(top1 < 10) top1 = 10;
+              els.bdCtxMenu.style.top = top1 + 'px';
+              els.bdCtxMenu.style.left = left1 + 'px';
+              return;
+          }
+          // Texte sélectionné : menu catégories
+          els.bdCtxMenu.innerHTML = `<div class="ctx-title">Ajouter à :</div>`;
+          CONFIG.bdCategories.forEach(cat => {
+              const div = document.createElement('div');
+              div.innerText = cat;
+              if(cat === 'TECHNICIENS' || cat === 'COMEDIENS') {
+                  div.innerHTML = `${cat} ▶`;
+                  div.style.cursor = 'pointer';
+                  div.style.fontWeight = 'bold';
+                  const isCrew = cat === 'TECHNICIENS';
+                  const dataList = isCrew ? state.data.crew : state.data.actors;
+                  const itemLabel = isCrew ? 'technicien' : 'comédien';
+                  div.onclick = (ev) => {
+                      ev.stopPropagation();
+                      // showPersonMenu utilise state.activeBdSceneId en interne ; on le set temporairement
+                      const prevId = state.activeBdSceneId;
+                      state.activeBdSceneId = sceneId;
+                      Breakdown.showPersonMenu(cat, text, sel, dataList, itemLabel);
+                      // Le set est valable pour la durée de l'interaction de showPersonMenu, on le restaure pas
+                      // car les addItem internes utiliseront state.activeBdSceneId. On le restaure quand le menu se ferme.
+                      // En pratique, addItem fonctionnera correctement tant que activeBdSceneId pointe sur sceneId.
+                  };
+              } else {
+                  div.onclick = () => {
+                      Breakdown.addItemFromScript(sceneId, cat, text);
+                      els.bdCtxMenu.style.display = 'none';
+                      sel.removeAllRanges();
+                  };
+              }
+              els.bdCtxMenu.appendChild(div);
+          });
+          els.bdCtxMenu.style.display = 'block';
+          let top2 = e.clientY; let left2 = e.clientX;
+          if(left2 + 200 > window.innerWidth) left2 = window.innerWidth - 210;
+          if(top2 + 350 > window.innerHeight) top2 = window.innerHeight - 360;
+          if(left2 < 10) left2 = 10; if(top2 < 10) top2 = 10;
+          els.bdCtxMenu.style.top = top2 + 'px';
+          els.bdCtxMenu.style.left = left2 + 'px';
+      },
+      
+      // Variante de addItem qui ne réinitialise PAS l'onglet Dépouillement (pas affiché depuis le scénario)
+      addItemFromScript: (sceneId, cat, text) => {
+          if(state.currentRole === 'viewer' || !Permissions.canEdit('depouillement')) return;
+          const scene = state.data.scenes.find(s => s.id === sceneId);
+          if(!scene) return;
+          if(!scene.breakdown) scene.breakdown = {};
+          if(!scene.breakdown[cat]) scene.breakdown[cat] = [];
+          if(scene.breakdown[cat].includes(text)) {
+              Utils.toast(`"${text}" déjà dans ${cat}`, 'info');
+              return;
+          }
+          scene.breakdown[cat].push(text);
+          if(cat === 'PERSONNAGES') ScriptEditor.syncCharMeta(text, sceneId);
+          if(cat !== 'TECHNICIENS' && cat !== 'PERSONNAGES' && cat !== 'DECORS-LIEUX') {
+              Breakdown.autoAddResponsibleCrew(sceneId, cat);
+          }
+          if(cat === 'ACCESSOIRES' || cat === 'COSTUMES' || cat === 'VEHICULES') {
+              Breakdown.autoCreateResource(text, cat);
+          }
+          Store.save();
+          Utils.toast(`✓ "${text}" ajouté à ${cat}`, 'success');
+      },
+      
       addItem: (sceneId, cat, text) => { 
           if(state.currentRole === 'viewer' || !Permissions.canEdit('depouillement')) return; 
           const scene = state.data.scenes.find(s => s.id === sceneId); 
@@ -27904,7 +27978,7 @@ const DrawingEditor = {
 
   const ScriptEditor = {
       format: (sceneId, className, e) => { if(e) e.preventDefault(); const editor = document.getElementById(`editor-${sceneId}`); const sel = window.getSelection(); if (!editor.contains(sel.anchorNode)) return; const block = ScriptEditor.getBlockNode(sel.anchorNode); if(block) { if(block.classList.contains('sc-note')) block.innerText = block.innerText.replace(/^\{\s*/, '').replace(/\s*\}$/, ''); if(block.classList.contains('sc-paren')) block.innerText = block.innerText.replace(/^\(\s*/, '').replace(/\s*\)$/, ''); block.className = className; if(className === 'sc-note') ScriptEditor.wrapNote(block); if(className === 'sc-paren') ScriptEditor.wrapParen(block); const s = state.data.scenes.find(x => x.id === sceneId); if(s) s.scriptContent = editor.innerHTML; Store.updateScene(sceneId, editor.innerHTML); ScriptEditor.updateToolbar(editor, document.getElementById(`toolbar-${sceneId}`)); } },
-      handleKey: (e, editor, toolbar, sceneId) => { if(state.scriptAC.active) { if(e.key === 'ArrowDown') { e.preventDefault(); state.scriptAC.index++; ScriptEditor.highlightAC(); return; } if(e.key === 'ArrowUp') { e.preventDefault(); state.scriptAC.index--; ScriptEditor.highlightAC(); return; } if(e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); ScriptEditor.selectAC(editor); return; } if(e.key === 'Escape') { ScriptEditor.hideAC(); return; } } const sceneIndex = state.data.scenes.findIndex(s => s.id === sceneId); if(e.ctrlKey || e.metaKey) { const codeToType = { 'Digit1': 'sc-action', 'Digit2': 'sc-perso', 'Digit3': 'sc-dial', 'Digit4': 'sc-paren', 'Digit5': 'sc-trans', 'Digit6': 'sc-centered', 'Digit7': 'sc-note', 'Digit8': 'sc-note', 'Numpad1': 'sc-action', 'Numpad2': 'sc-perso', 'Numpad3': 'sc-dial', 'Numpad4': 'sc-paren', 'Numpad5': 'sc-trans', 'Numpad6': 'sc-centered', 'Numpad7': 'sc-note' }; if(codeToType[e.code]) { e.preventDefault(); e.stopPropagation(); ScriptEditor.setFormatDirect(editor, toolbar, codeToType[e.code]); return; } if(e.key === 'ArrowLeft') { e.preventDefault(); ScriptEditor.goToScene(sceneIndex - 1); return; } if(e.key === 'ArrowRight') { e.preventDefault(); ScriptEditor.goToScene(sceneIndex + 1); return; } if(e.key === 'Enter') { e.preventDefault(); ScriptEditor.insertSceneAfter(sceneIndex); return; } } if(e.key === 'Tab' && e.shiftKey) { e.preventDefault(); ScriptEditor.cycleFormatReverse(editor, toolbar); return; } if(e.key === 'Tab') { e.preventDefault(); ScriptEditor.cycleFormatSmart(editor, toolbar); return; } if(e.key === 'Enter') { e.preventDefault(); const sel = window.getSelection(); const currentBlock = ScriptEditor.getBlockNode(sel.anchorNode); if(currentBlock && (currentBlock.classList.contains('sc-note') || currentBlock.classList.contains('sc-paren'))) { let txt = currentBlock.innerText.trim(); if(currentBlock.classList.contains('sc-note')) { txt = txt.replace(/^\{\s*/, '').replace(/\s*\}$/, '').trim(); currentBlock.innerText = '{ ' + txt + ' }'; } else { txt = txt.replace(/^\(\s*/, '').replace(/\s*\)$/, '').trim(); currentBlock.innerText = '( ' + txt + ' )'; } const newBlock = document.createElement('div'); newBlock.className = currentBlock.classList.contains('sc-paren') ? 'sc-dial' : 'sc-action'; newBlock.innerHTML = '<br>'; currentBlock.after(newBlock); const range = document.createRange(); range.setStart(newBlock, 0); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); ScriptEditor.updateToolbar(editor, toolbar); return; } if(currentBlock && currentBlock.classList.contains('sc-perso')) { const name = currentBlock.innerText.trim().replace(/\(.*\)/, '').trim(); if(name.length > 1) ScriptEditor.syncCharMeta(name, sceneId); } document.execCommand('insertParagraph', false); const newSelection = window.getSelection(); const newBlock = ScriptEditor.getBlockNode(newSelection.anchorNode); const prevBlock = newBlock.previousElementSibling; if(prevBlock && newBlock) { let nextClass = 'sc-action'; if(prevBlock.classList.contains('sc-action')) nextClass = 'sc-perso'; else if(prevBlock.classList.contains('sc-perso')) nextClass = 'sc-dial'; else if(prevBlock.classList.contains('sc-dial')) nextClass = 'sc-perso'; else if(prevBlock.classList.contains('sc-paren')) nextClass = 'sc-dial'; else if(prevBlock.classList.contains('sc-trans')) nextClass = 'sc-action'; newBlock.className = nextClass; } ScriptEditor.updateToolbar(editor, toolbar); } },
+      handleKey: (e, editor, toolbar, sceneId) => { if(state.scriptAC.active) { if(e.key === 'ArrowDown') { e.preventDefault(); state.scriptAC.index++; ScriptEditor.highlightAC(); return; } if(e.key === 'ArrowUp') { e.preventDefault(); state.scriptAC.index--; ScriptEditor.highlightAC(); return; } if(e.key === 'ArrowRight' && (state.scriptAC.columns||[]).length > 1) { e.preventDefault(); ScriptEditor.switchACColumn(1); return; } if(e.key === 'ArrowLeft' && (state.scriptAC.columns||[]).length > 1) { e.preventDefault(); ScriptEditor.switchACColumn(-1); return; } if(e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); ScriptEditor.selectAC(editor); return; } if(e.key === 'Escape') { ScriptEditor.hideAC(); return; } } const sceneIndex = state.data.scenes.findIndex(s => s.id === sceneId); if(e.ctrlKey || e.metaKey) { const codeToType = { 'Digit1': 'sc-action', 'Digit2': 'sc-perso', 'Digit3': 'sc-dial', 'Digit4': 'sc-paren', 'Digit5': 'sc-trans', 'Digit6': 'sc-centered', 'Digit7': 'sc-note', 'Digit8': 'sc-note', 'Numpad1': 'sc-action', 'Numpad2': 'sc-perso', 'Numpad3': 'sc-dial', 'Numpad4': 'sc-paren', 'Numpad5': 'sc-trans', 'Numpad6': 'sc-centered', 'Numpad7': 'sc-note' }; if(codeToType[e.code]) { e.preventDefault(); e.stopPropagation(); ScriptEditor.setFormatDirect(editor, toolbar, codeToType[e.code]); return; } if(e.key === 'ArrowLeft') { e.preventDefault(); ScriptEditor.goToScene(sceneIndex - 1); return; } if(e.key === 'ArrowRight') { e.preventDefault(); ScriptEditor.goToScene(sceneIndex + 1); return; } if(e.key === 'Enter') { e.preventDefault(); ScriptEditor.insertSceneAfter(sceneIndex); return; } } if(e.key === 'Tab' && e.shiftKey) { e.preventDefault(); ScriptEditor.cycleFormatReverse(editor, toolbar); return; } if(e.key === 'Tab') { e.preventDefault(); ScriptEditor.cycleFormatSmart(editor, toolbar); return; } if(e.key === 'Enter') { e.preventDefault(); const sel = window.getSelection(); const currentBlock = ScriptEditor.getBlockNode(sel.anchorNode); if(currentBlock && (currentBlock.classList.contains('sc-note') || currentBlock.classList.contains('sc-paren'))) { let txt = currentBlock.innerText.trim(); if(currentBlock.classList.contains('sc-note')) { txt = txt.replace(/^\{\s*/, '').replace(/\s*\}$/, '').trim(); currentBlock.innerText = '{ ' + txt + ' }'; } else { txt = txt.replace(/^\(\s*/, '').replace(/\s*\)$/, '').trim(); currentBlock.innerText = '( ' + txt + ' )'; } const newBlock = document.createElement('div'); newBlock.className = currentBlock.classList.contains('sc-paren') ? 'sc-dial' : 'sc-action'; newBlock.innerHTML = '<br>'; currentBlock.after(newBlock); const range = document.createRange(); range.setStart(newBlock, 0); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); ScriptEditor.updateToolbar(editor, toolbar); return; } if(currentBlock && currentBlock.classList.contains('sc-perso')) { const name = currentBlock.innerText.trim().replace(/\(.*\)/, '').trim(); if(name.length > 1) ScriptEditor.syncCharMeta(name, sceneId); } document.execCommand('insertParagraph', false); const newSelection = window.getSelection(); const newBlock = ScriptEditor.getBlockNode(newSelection.anchorNode); const prevBlock = newBlock.previousElementSibling; if(prevBlock && newBlock) { let nextClass = 'sc-action'; if(prevBlock.classList.contains('sc-action')) nextClass = 'sc-perso'; else if(prevBlock.classList.contains('sc-perso')) nextClass = 'sc-dial'; else if(prevBlock.classList.contains('sc-dial')) nextClass = 'sc-perso'; else if(prevBlock.classList.contains('sc-paren')) nextClass = 'sc-dial'; else if(prevBlock.classList.contains('sc-trans')) nextClass = 'sc-action'; newBlock.className = nextClass; } ScriptEditor.updateToolbar(editor, toolbar); } },
       setFormatDirect: (editor, toolbar, className) => { const sel = window.getSelection(); let block = ScriptEditor.getBlockNode(sel.anchorNode); if(!block && editor.children.length > 0) block = editor.firstElementChild; if(!block) return; if(block.classList.contains('sc-note')) block.innerText = block.innerText.replace(/^\{\s*/, '').replace(/\s*\}$/, ''); if(block.classList.contains('sc-paren')) block.innerText = block.innerText.replace(/^\(\s*/, '').replace(/\s*\)$/, ''); block.className = className; if(className === 'sc-note') ScriptEditor.wrapNote(block); if(className === 'sc-paren') ScriptEditor.wrapParen(block); ScriptEditor.updateToolbar(editor, toolbar); const sceneId = editor.id.replace('editor-', ''); const s = state.data.scenes.find(x => x.id == sceneId); if(s) { s.scriptContent = editor.innerHTML; Store.save(); } },
       cycleFormatSmart: (editor, toolbar) => { const sel = window.getSelection(); let block = ScriptEditor.getBlockNode(sel.anchorNode); if(!block && editor.children.length > 0) block = editor.firstElementChild; if(!block) return; if(block.classList.contains('sc-note')) block.innerText = block.innerText.replace(/^\{\s*/, '').replace(/\s*\}$/, ''); if(block.classList.contains('sc-paren')) block.innerText = block.innerText.replace(/^\(\s*/, '').replace(/\s*\)$/, ''); const smartNext = { 'sc-action': 'sc-perso', 'sc-perso': 'sc-action', 'sc-dial': 'sc-paren', 'sc-paren': 'sc-dial', 'sc-trans': 'sc-action', 'sc-centered': 'sc-action', 'sc-note': 'sc-action', 'sc-general': 'sc-action' }; const currentType = block.className || 'sc-action'; block.className = smartNext[currentType] || 'sc-action'; if(block.className === 'sc-note') ScriptEditor.wrapNote(block); if(block.className === 'sc-paren') ScriptEditor.wrapParen(block); ScriptEditor.updateToolbar(editor, toolbar); },
       cycleFormatReverse: (editor, toolbar) => { const sel = window.getSelection(); let block = ScriptEditor.getBlockNode(sel.anchorNode); if(!block && editor.children.length > 0) block = editor.firstElementChild; if(!block) return; if(block.classList.contains('sc-note')) block.innerText = block.innerText.replace(/^\{\s*/, '').replace(/\s*\}$/, ''); if(block.classList.contains('sc-paren')) block.innerText = block.innerText.replace(/^\(\s*/, '').replace(/\s*\)$/, ''); const types = ['sc-action', 'sc-perso', 'sc-dial', 'sc-paren', 'sc-trans', 'sc-centered', 'sc-note']; let currentIdx = types.indexOf(block.className); if(currentIdx === -1) currentIdx = 0; let prevIdx = (currentIdx - 1 + types.length) % types.length; block.className = types[prevIdx]; if(block.className === 'sc-note') ScriptEditor.wrapNote(block); if(block.className === 'sc-paren') ScriptEditor.wrapParen(block); ScriptEditor.updateToolbar(editor, toolbar); },
@@ -27914,11 +27988,181 @@ const DrawingEditor = {
       placeCursorInside: (block, openChar, closeChar) => { const text = block.innerText; const startPos = text.indexOf(openChar) + 2; const endPos = text.lastIndexOf(closeChar) - 1; if(block.firstChild) { const range = document.createRange(); const sel = window.getSelection(); try { const textNode = block.firstChild; const safeStart = Math.min(startPos, textNode.length); range.setStart(textNode, safeStart); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); } catch(e) { console.log('Cursor placement error', e); } } },
       getBlockNode: (node) => { if(!node) return null; if (node.nodeType === 1 && node.classList.contains('script-editor-box')) return node.firstElementChild || null; while (node && node.nodeName !== 'DIV' && !node.classList?.contains('script-editor-box')) node = node.parentNode; return (node && node.classList && !node.classList.contains('script-editor-box')) ? node : null; },
       updateToolbar: (editor, toolbar) => { const sel = window.getSelection(); if(!sel.rangeCount) return; let block = ScriptEditor.getBlockNode(sel.anchorNode); if(!block && editor.children.length > 0) block = editor.firstElementChild; toolbar.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active')); if(!block) return; const type = block.className || 'sc-action'; const btn = toolbar.querySelector(`[data-type="${type}"]`); if(btn) btn.classList.add('active'); },
-      checkAC: (editor) => { const sel = window.getSelection(); const block = ScriptEditor.getBlockNode(sel.anchorNode); if(!block || !block.classList.contains('sc-perso')) { ScriptEditor.hideAC(); return; } const text = block.innerText.trim().toUpperCase(); if(text.length < 1) { ScriptEditor.hideAC(); return; } const matches = state.data.characters.filter(c => c.name.toUpperCase().startsWith(text) && c.name.toUpperCase() !== text); if(matches.length === 0) { ScriptEditor.hideAC(); return; } state.scriptAC.items = matches; state.scriptAC.active = true; state.scriptAC.index = 0; const range = sel.getRangeAt(0); const rect = range.getBoundingClientRect(); els.scriptACList.style.display = 'block'; els.scriptACList.style.top = (rect.bottom + 5) + 'px'; els.scriptACList.style.left = rect.left + 'px'; ScriptEditor.renderScriptACList(editor); },
-      renderScriptACList: (editor) => { els.scriptACList.innerHTML = ''; state.scriptAC.items.forEach((m, i) => { const div = document.createElement('div'); if(i === state.scriptAC.index) div.className = 'active'; div.innerText = m.name; div.onmousedown = (e) => { e.preventDefault(); state.scriptAC.index = i; ScriptEditor.selectAC(editor); }; els.scriptACList.appendChild(div); }); },
-      highlightAC: () => { if(state.scriptAC.index >= state.scriptAC.items.length) state.scriptAC.index = 0; if(state.scriptAC.index < 0) state.scriptAC.index = state.scriptAC.items.length - 1; const divs = els.scriptACList.querySelectorAll('div'); divs.forEach(d => d.classList.remove('active')); if(divs[state.scriptAC.index]) divs[state.scriptAC.index].classList.add('active'); },
-      selectAC: (editor) => { if(state.scriptAC.index > -1 && state.scriptAC.items[state.scriptAC.index]) { const name = state.scriptAC.items[state.scriptAC.index].name.toUpperCase(); const sel = window.getSelection(); const block = ScriptEditor.getBlockNode(sel.anchorNode); if(block) { block.innerText = name; const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); sel.removeAllRanges(); sel.addRange(range); } } ScriptEditor.hideAC(); },
+      checkAC: (editor) => { 
+          if(!state.scriptAC.enabled) { ScriptEditor.hideAC(); return; }
+          const sel = window.getSelection(); 
+          const block = ScriptEditor.getBlockNode(sel.anchorNode); 
+          if(!block) { ScriptEditor.hideAC(); return; }
+          const blockType = block.className || '';
+          // Déterminer le contexte de recherche selon le bloc
+          const columns = [];
+          if(blockType.includes('sc-perso')) {
+              // Bloc perso : recherche sur le texte entier du bloc, juste personnages
+              const text = block.innerText.trim().toUpperCase();
+              if(text.length < 1) { ScriptEditor.hideAC(); return; }
+              const matches = (state.data.characters || []).filter(c => c.name.toUpperCase().startsWith(text) && c.name.toUpperCase() !== text);
+              if(matches.length > 0) columns.push({ type: 'perso', icon: '🎭', label: 'Personnages', items: matches.map(m => ({ name: m.name })) });
+          } else if(blockType.includes('sc-action') || blockType.includes('sc-dial')) {
+              // Bloc action ou dialogue : recherche sur le dernier mot, multi-catégories, min 3 chars
+              const range = sel.getRangeAt(0);
+              const textBefore = block.innerText.substring(0, ScriptEditor._getCaretOffsetInBlock(block, range));
+              const lastWordMatch = textBefore.match(/[\wÀ-ÿ]+$/);
+              if(!lastWordMatch) { ScriptEditor.hideAC(); return; }
+              const lastWord = lastWordMatch[0];
+              if(lastWord.length < 3) { ScriptEditor.hideAC(); return; }
+              const lwLower = lastWord.toLowerCase();
+              // Personnages
+              const persoMatches = (state.data.characters || []).filter(c => c.name.toLowerCase().startsWith(lwLower) && c.name.toLowerCase() !== lwLower);
+              if(persoMatches.length > 0) columns.push({ type: 'perso', icon: '🎭', label: 'Personnages', items: persoMatches.map(m => ({ name: m.name })) });
+              // Décors
+              const lieuMatches = (state.data.locations || []).filter(l => l.name.toLowerCase().startsWith(lwLower) && l.name.toLowerCase() !== lwLower);
+              if(lieuMatches.length > 0) columns.push({ type: 'lieu', icon: '🏠', label: 'Décors', items: lieuMatches.map(m => ({ name: m.name })) });
+              // Ressources
+              const resMatches = (state.data.resources || []).filter(r => r.name && r.name.toLowerCase().startsWith(lwLower) && r.name.toLowerCase() !== lwLower);
+              if(resMatches.length > 0) columns.push({ type: 'res', icon: '📦', label: 'Ressources', items: resMatches.map(m => ({ name: m.name })) });
+          } else { ScriptEditor.hideAC(); return; }
+          if(columns.length === 0) { ScriptEditor.hideAC(); return; }
+          state.scriptAC.columns = columns;
+          state.scriptAC.colIndex = 0;
+          state.scriptAC.index = 0;
+          state.scriptAC.items = columns[0].items;
+          state.scriptAC.active = true;
+          const range = sel.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+          els.scriptACList.style.display = 'block';
+          els.scriptACList.style.top = (rect.bottom + 5) + 'px';
+          els.scriptACList.style.left = rect.left + 'px';
+          ScriptEditor.renderScriptACList(editor);
+      },
+      
+      // Helper : retourne l'offset (en caractères) du curseur dans le bloc texte
+      _getCaretOffsetInBlock: (block, range) => {
+          const preRange = document.createRange();
+          preRange.selectNodeContents(block);
+          preRange.setEnd(range.endContainer, range.endOffset);
+          return preRange.toString().length;
+      },
+      renderScriptACList: (editor) => {
+          els.scriptACList.innerHTML = '';
+          els.scriptACList.style.width = 'auto';
+          els.scriptACList.style.padding = '0';
+          els.scriptACList.style.display = 'flex';
+          els.scriptACList.style.alignItems = 'flex-start';
+          state.scriptAC.columns.forEach((col, ci) => {
+              const colDiv = document.createElement('div');
+              colDiv.style.cssText = 'display:flex;flex-direction:column;border-right:1px solid var(--border);min-width:180px;max-width:240px;';
+              if(ci === state.scriptAC.columns.length - 1) colDiv.style.borderRight = 'none';
+              const head = document.createElement('div');
+              head.style.cssText = 'padding:6px 12px;font-size:0.75rem;font-weight:bold;color:var(--text-sec);background:var(--bg);border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:0.5px;';
+              head.innerText = `${col.icon} ${col.label}`;
+              colDiv.appendChild(head);
+              col.items.forEach((m, i) => {
+                  const div = document.createElement('div');
+                  div.style.cssText = 'padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:0.88rem;';
+                  if(ci === state.scriptAC.colIndex && i === state.scriptAC.index) {
+                      div.classList.add('active');
+                      div.style.background = 'var(--bg)';
+                      div.style.color = 'var(--primary)';
+                  }
+                  div.innerText = m.name;
+                  div.onmousedown = (e) => {
+                      e.preventDefault();
+                      state.scriptAC.colIndex = ci;
+                      state.scriptAC.index = i;
+                      state.scriptAC.items = col.items;
+                      ScriptEditor.selectAC(editor);
+                  };
+                  colDiv.appendChild(div);
+              });
+              els.scriptACList.appendChild(colDiv);
+          });
+      },
+      highlightAC: () => { 
+          const cols = state.scriptAC.columns || [];
+          if(cols.length === 0) return;
+          // Wrap vertical dans la colonne courante
+          const curCol = cols[state.scriptAC.colIndex];
+          if(!curCol) return;
+          if(state.scriptAC.index >= curCol.items.length) state.scriptAC.index = 0;
+          if(state.scriptAC.index < 0) state.scriptAC.index = curCol.items.length - 1;
+          state.scriptAC.items = curCol.items;
+          // Re-render pour mettre à jour la mise en surbrillance (plus simple que de manipuler les classes)
+          const editor = document.activeElement && document.activeElement.classList.contains('script-editor-box') ? document.activeElement : null;
+          ScriptEditor.renderScriptACList(editor);
+      },
+      switchACColumn: (delta) => {
+          const cols = state.scriptAC.columns || [];
+          if(cols.length === 0) return;
+          let newIdx = state.scriptAC.colIndex + delta;
+          if(newIdx >= cols.length) newIdx = 0;
+          if(newIdx < 0) newIdx = cols.length - 1;
+          state.scriptAC.colIndex = newIdx;
+          state.scriptAC.index = 0;
+          state.scriptAC.items = cols[newIdx].items;
+          const editor = document.activeElement && document.activeElement.classList.contains('script-editor-box') ? document.activeElement : null;
+          ScriptEditor.renderScriptACList(editor);
+      },
+      selectAC: (editor) => {
+          const cols = state.scriptAC.columns || [];
+          const curCol = cols[state.scriptAC.colIndex];
+          if(!curCol || state.scriptAC.index < 0 || !curCol.items[state.scriptAC.index]) { ScriptEditor.hideAC(); return; }
+          const chosen = curCol.items[state.scriptAC.index].name;
+          const sel = window.getSelection();
+          const block = ScriptEditor.getBlockNode(sel.anchorNode);
+          if(block) {
+              if(block.classList.contains('sc-perso')) {
+                  // Bloc perso : remplacer tout le contenu par le nom en majuscules
+                  block.innerText = chosen.toUpperCase();
+                  const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); sel.removeAllRanges(); sel.addRange(range);
+              } else {
+                  // Bloc action/dial : remplacer uniquement le dernier mot par le nom choisi
+                  const range = sel.getRangeAt(0);
+                  const offset = ScriptEditor._getCaretOffsetInBlock(block, range);
+                  const fullText = block.innerText;
+                  const before = fullText.substring(0, offset);
+                  const after = fullText.substring(offset);
+                  const lastWordMatch = before.match(/[\wÀ-ÿ]+$/);
+                  if(lastWordMatch) {
+                      const newBefore = before.substring(0, before.length - lastWordMatch[0].length) + chosen + ' ';
+                      block.innerText = newBefore + after;
+                      // Replacer le curseur après le mot inséré
+                      const newRange = document.createRange();
+                      const newOffset = newBefore.length;
+                      ScriptEditor._setCaretAtOffset(block, newOffset);
+                  }
+              }
+          }
+          ScriptEditor.hideAC();
+      },
+      _setCaretAtOffset: (block, offset) => {
+          const sel = window.getSelection();
+          const range = document.createRange();
+          let charCount = 0; let found = false;
+          const walk = (node) => {
+              if(found) return;
+              if(node.nodeType === 3) {
+                  const len = node.textContent.length;
+                  if(charCount + len >= offset) { range.setStart(node, offset - charCount); range.collapse(true); found = true; return; }
+                  charCount += len;
+              } else { for(const c of node.childNodes) walk(c); }
+          };
+          walk(block);
+          if(found) { sel.removeAllRanges(); sel.addRange(range); }
+      },
       hideAC: () => { state.scriptAC.active = false; els.scriptACList.style.display = 'none'; },
+      toggleAC: () => {
+          state.scriptAC.enabled = !state.scriptAC.enabled;
+          localStorage.setItem('moteur_scriptAC_enabled', state.scriptAC.enabled ? 'true' : 'false');
+          if(!state.scriptAC.enabled) ScriptEditor.hideAC();
+          Utils.toast(`Autocomplétion ${state.scriptAC.enabled ? 'activée' : 'désactivée'}`, 'success');
+          UI.renderScript();
+      },
+      toggleScriptBd: () => {
+          state.scriptBdEnabled = !state.scriptBdEnabled;
+          localStorage.setItem('moteur_scriptBd_enabled', state.scriptBdEnabled ? 'true' : 'false');
+          Utils.toast(`Dépouillement clic droit ${state.scriptBdEnabled ? 'activé' : 'désactivé'}`, 'success');
+          UI.renderScript();
+      },
       syncCharMeta: (name, sceneId) => { 
           const existsInDb = state.data.characters.find(c => c.name.toLowerCase() === name.toLowerCase()); 
           if (!existsInDb) return; 
