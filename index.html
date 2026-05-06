@@ -12280,6 +12280,63 @@ crewRoles: {
           const maxKb = opts.maxKb || 500;
           return new Promise((resolve) => {
               if(!file) { resolve(null); return; }
+              if(file.type === 'image/svg+xml' || file.type === 'image/gif') {
+                  const reader = new FileReader();
+                  reader.onload = (e) => resolve(e.target.result);
+                  reader.onerror = () => { Utils.toast('Erreur lecture image', 'error'); resolve(null); };
+                  reader.readAsDataURL(file);
+                  return;
+              }
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                  const img = new Image();
+                  img.onload = () => {
+                      let w = img.naturalWidth, h = img.naturalHeight;
+                      if(w > maxDimension || h > maxDimension) {
+                          const ratio = Math.min(maxDimension / w, maxDimension / h);
+                          w = Math.round(w * ratio);
+                          h = Math.round(h * ratio);
+                      }
+                      const canvas = document.createElement('canvas');
+                      canvas.width = w; canvas.height = h;
+                      const ctx = canvas.getContext('2d');
+                      ctx.fillStyle = '#fff';
+                      ctx.fillRect(0, 0, w, h);
+                      ctx.drawImage(img, 0, 0, w, h);
+                      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                      const sizeKb = Math.round(dataUrl.length * 0.75 / 1024);
+                      if(sizeKb > maxKb) {
+                          Utils.toast(`Image trop lourde même après compression (${sizeKb} Ko, max ${maxKb} Ko). Choisissez une image plus petite.`, 'error');
+                          resolve(null);
+                          return;
+                      }
+                      const origKb = Math.round(file.size / 1024);
+                      if(origKb > sizeKb * 1.5) {
+                          Utils.toast(`Image compressée : ${origKb} → ${sizeKb} Ko`, 'success');
+                      }
+                      resolve(dataUrl);
+                  };
+                  img.onerror = () => { Utils.toast('Image invalide ou corrompue', 'error'); resolve(null); };
+                  img.src = e.target.result;
+              };
+              reader.onerror = () => { Utils.toast('Erreur lecture fichier', 'error'); resolve(null); };
+              reader.readAsDataURL(file);
+          });
+      },
+      
+      // Compresse une image File/Blob en base64 JPEG.
+      // - Redimensionne si > maxDimension px (par défaut 1920)
+      // - Quality JPEG 0.85 par défaut
+      // - Refuse si le résultat est > maxKb (par défaut 500 Ko) avec un toast d'erreur
+      // - Préserve les SVG et GIF (renvoie tel quel sans compression)
+      // Retourne une Promise<dataURL> ou Promise<null> si échec/refus
+      compressImage: (file, opts) => {
+          opts = opts || {};
+          const maxDimension = opts.maxDimension || 1920;
+          const quality = opts.quality || 0.85;
+          const maxKb = opts.maxKb || 500;
+          return new Promise((resolve) => {
+              if(!file) { resolve(null); return; }
               // Préserver SVG et GIF (animations) tels quels
               if(file.type === 'image/svg+xml' || file.type === 'image/gif') {
                   const reader = new FileReader();
@@ -29990,17 +30047,16 @@ const DrawingEditor = {
           document.getElementById('res-owner-manual').style.display = type === 'manual' ? 'block' : 'none';
       },
       
-      previewPhoto: (input) => {
+      previewPhoto: async (input) => {
           const preview = document.getElementById('res-photo-preview');
           const hiddenInput = document.getElementById('res-photo');
           
           if(input.files && input.files[0]) {
-              const reader = new FileReader();
-              reader.onload = (e) => {
-                  preview.innerHTML = `<img src="${e.target.result}" style="max-width:100%; max-height:100%; object-fit:contain;">`;
-                  hiddenInput.value = e.target.result;
-              };
-              reader.readAsDataURL(input.files[0]);
+              // Compression automatique : redimensionnement à 1280px max + JPEG 0.85
+              const dataUrl = await Utils.compressImage(input.files[0], { maxDimension: 1280, maxKb: 400 });
+              if(!dataUrl) return; // erreur ou refus → toast déjà affiché par compressImage
+              preview.innerHTML = `<img src="${dataUrl}" style="max-width:100%; max-height:100%; object-fit:contain;">`;
+              hiddenInput.value = dataUrl;
           }
       },
       
