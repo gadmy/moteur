@@ -6951,7 +6951,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.5.7</p>
+      <p>vv3.5.8</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10322,6 +10322,10 @@ body.presentation-mode .presentation-bar {
 	  
 <div id="tab-stats" class="tab-content">
     <h1 class="print-only-title">STATISTIQUES</h1>
+    
+    <div style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap;">
+        <button onclick="app.UI.printStats()" class="btn-tool-print">📄 Imprimer / PDF</button>
+    </div>
     
     <!-- Sélecteur de scope (séries uniquement) -->
     <div id="stats-scope-selector" style="display: none; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 12px; padding: 15px 20px; margin-bottom: 20px;">
@@ -18104,6 +18108,235 @@ openBoardPrintEpisodeChooser: () => {
           `;
           const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docTitle}</title><style>${css}</style></head><body>
               ${mode === 'card' ? '' : `<h1 class="doc-title">${docTitle}</h1>`}
+              ${bodyHTML}
+              <scr` + `ipt>window.addEventListener('load',function(){setTimeout(function(){window.print();},500);});<\/scr` + `ipt>
+          </body></html>`;
+          const blob = new Blob([html], { type: 'text/html' });
+          const blobUrl = URL.createObjectURL(blob);
+          const printWindow = window.open(blobUrl, '_blank');
+          if(printWindow) {
+              printWindow.addEventListener('afterprint', () => { URL.revokeObjectURL(blobUrl); printWindow.close(); }, { once: true });
+              setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+          }
+      },
+      
+      // ===== IMPRESSION STATISTIQUES =====
+      printStats: () => {
+          // S'assurer que les stats sont rendues à l'écran avant capture
+          if(typeof Stats !== 'undefined' && Stats.render) Stats.render();
+          // Petit délai pour que Chart.js finisse de dessiner
+          setTimeout(() => UI._openStatsModeChooser(), 350);
+      },
+      
+      _openStatsModeChooser: () => {
+          const isSeries = state.currentProjectType === 'series';
+          const sections = [
+              { id: 'cards', label: '📊 Cartes résumé (totaux)', defaultOn: true, alwaysShow: true },
+              { id: 'seasons', label: '📺 Stats par saison', defaultOn: isSeries, alwaysShow: isSeries },
+              { id: 'progress', label: '📈 Avancement (planification, INT/EXT, JOUR/NUIT)', defaultOn: true, alwaysShow: true },
+              { id: 'budget', label: '💰 Budget', defaultOn: true, alwaysShow: true },
+              { id: 'time', label: '⏱️ Temps par Tag/Acte', defaultOn: true, alwaysShow: true },
+              { id: 'charsLocs', label: '👥 Personnages & Lieux', defaultOn: true, alwaysShow: true },
+              { id: 'crewSb', label: '🎬 Équipe & Storyboard', defaultOn: true, alwaysShow: true },
+              { id: 'castingDays', label: '🎭 Jours de tournage par comédien', defaultOn: true, alwaysShow: true }
+          ];
+          const sectionItems = sections.filter(s => s.alwaysShow).map(s => {
+              return `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()"><td style="width:24px;padding:4px 8px;vertical-align:middle;"><input type="checkbox" class="statsec" value="${s.id}" ${s.defaultOn ? 'checked' : ''} style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td><td style="padding:4px 8px;font-size:0.88rem;line-height:1.3;vertical-align:middle;">${s.label}</td></tr>`;
+          }).join('');
+          const overlay = document.createElement('div');
+          overlay.className = 'confirm-modal-overlay';
+          overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:520px;padding:20px;">
+              <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">📊 Imprimer les statistiques</div>
+              <div style="text-align:left;font-size:0.85rem;color:var(--text-sec);margin-bottom:8px;font-weight:bold;">Mode :</div>
+              <div style="text-align:left;margin-bottom:14px;">
+                  <label style="display:block;padding:10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px;cursor:pointer;"><input type="radio" name="stmode" value="portrait" checked style="margin-right:8px;"><strong>Portrait synthétique</strong><br><span style="font-size:0.8rem;color:var(--text-sec);">A4 portrait, 1 colonne, sections empilées</span></label>
+                  <label style="display:block;padding:10px;border:1px solid var(--border);border-radius:6px;cursor:pointer;"><input type="radio" name="stmode" value="landscape" style="margin-right:8px;"><strong>Paysage détaillé</strong><br><span style="font-size:0.8rem;color:var(--text-sec);">A4 paysage, 2 colonnes, look "tableau de bord"</span></label>
+              </div>
+              <div style="text-align:left;font-size:0.85rem;color:var(--text-sec);margin-bottom:8px;font-weight:bold;">Sections à inclure :</div>
+              <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;"><table style="width:100%;border-collapse:collapse;">${sectionItems}</table></div>
+              <div style="display:flex;gap:6px;margin-bottom:14px;">
+                  <button type="button" id="st-all" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout cocher</button>
+                  <button type="button" id="st-none" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout décocher</button>
+              </div>
+              <div style="display:flex;gap:8px;justify-content:flex-end;">
+                  <button class="confirm-modal-btn cancel" id="st-cancel" style="margin:0;">Annuler</button>
+                  <button class="confirm-modal-btn confirm" id="st-ok" style="margin:0;">Imprimer</button>
+              </div>
+          </div>`;
+          document.body.appendChild(overlay);
+          overlay.querySelector('#st-all').onclick = () => overlay.querySelectorAll('.statsec').forEach(cb => cb.checked = true);
+          overlay.querySelector('#st-none').onclick = () => overlay.querySelectorAll('.statsec').forEach(cb => cb.checked = false);
+          overlay.querySelector('#st-cancel').onclick = () => overlay.remove();
+          overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+          overlay.querySelector('#st-ok').onclick = () => {
+              const mode = overlay.querySelector('input[name="stmode"]:checked').value;
+              const selectedSections = Array.from(overlay.querySelectorAll('.statsec:checked')).map(cb => cb.value);
+              if(selectedSections.length === 0) { Utils.toast('Sélectionnez au moins une section', 'warning'); return; }
+              overlay.remove();
+              setTimeout(() => UI._launchStatsPrint(mode, selectedSections), 100);
+          };
+      },
+      
+      _launchStatsPrint: (mode, sections) => {
+          const filmTitle = state.data.title || '';
+          const docTitle = `Statistiques — ${filmTitle}`.trim();
+          const orientation = mode === 'landscape' ? 'landscape' : 'portrait';
+          // Construction du label de scope (pour la page de garde)
+          let scopeLabel = 'Tout le projet';
+          const f = state.statsFilter || { scope: 'all' };
+          if(f.scope === 'season' && f.seasonId) {
+              const sea = (state.data.seasons || []).find(s => s.id === f.seasonId);
+              if(sea) scopeLabel = `Saison ${String(sea.number).padStart(2, '0')}${sea.title ? ' — ' + sea.title : ''}`;
+          } else if(f.scope === 'episode' && f.episodeId) {
+              const ep = (state.data.episodes || []).find(e => e.id === f.episodeId);
+              if(ep) {
+                  const sea = (state.data.seasons || []).find(s => s.id === ep.seasonId);
+                  const sNum = sea ? String(sea.number).padStart(2, '0') : '??';
+                  const eNum = String(ep.number).padStart(2, '0');
+                  scopeLabel = `Saison ${sNum} — Épisode ${eNum}${ep.title ? ' — ' + ep.title : ''}`;
+              }
+          }
+          // Helper : capture un canvas Chart.js en data URL
+          const captureCanvas = (canvasId) => {
+              const c = document.getElementById(canvasId);
+              if(!c) return null;
+              try { return c.toDataURL('image/png'); } catch(e) { return null; }
+          };
+          // Helper : récupère le HTML d'une zone et nettoie les éléments interactifs
+          const captureZone = (selector) => {
+              const el = document.querySelector(selector);
+              if(!el) return '';
+              return el.outerHTML;
+          };
+          // Construction body HTML par section
+          let bodyHTML = '';
+          // Page de garde
+          const today = new Date().toLocaleDateString('fr-FR');
+          bodyHTML += `<div class="cover-page">
+              <div class="cover-content">
+                  <div class="cover-title">STATISTIQUES</div>
+                  <div class="cover-film">${Utils.escape(filmTitle)}</div>
+                  <div class="cover-scope">${Utils.escape(scopeLabel)}</div>
+                  <div class="cover-date">Imprimé le ${today}</div>
+              </div>
+          </div>`;
+          // Section Cartes résumé
+          if(sections.includes('cards')) {
+              const cards = [
+                  { label: 'Total Scènes', val: document.getElementById('stat-total-scenes')?.innerText || '0' },
+                  { label: 'Total Dialogues', val: document.getElementById('stat-total-dials')?.innerText || '0' },
+                  { label: 'Durée Estimée', val: document.getElementById('stat-total-time')?.innerText || '0 min' },
+                  { label: 'Total Plans', val: document.getElementById('stat-total-shots')?.innerText || '0' },
+                  { label: 'Équipe Technique', val: document.getElementById('stat-total-crew')?.innerText || '0' },
+                  { label: 'Budget Équipe', val: document.getElementById('stat-total-budget')?.innerText || '0 €' }
+              ];
+              bodyHTML += `<div class="st-section"><h2>📊 Vue d'ensemble</h2><div class="st-cards-grid">`;
+              cards.forEach(c => { bodyHTML += `<div class="st-card"><div class="st-card-label">${c.label}</div><div class="st-card-value">${Utils.escape(c.val)}</div></div>`; });
+              bodyHTML += `</div></div>`;
+          }
+          // Section Stats par saison
+          if(sections.includes('seasons')) {
+              const tableHTML = captureZone('#stats-seasons-section');
+              if(tableHTML) bodyHTML += `<div class="st-section">${tableHTML}</div>`;
+          }
+          // Section Avancement
+          if(sections.includes('progress')) {
+              const intExt = captureCanvas('chart-int-ext');
+              const jourNuit = captureCanvas('chart-jour-nuit');
+              const planned = document.getElementById('progress-scenes-planned');
+              const plannedPct = planned ? planned.style.width : '0%';
+              const plannedTxt = planned ? planned.innerText : '0%';
+              bodyHTML += `<div class="st-section"><h2>📈 Avancement du projet</h2><div class="st-charts-grid">
+                  <div class="st-chart-box"><div class="st-chart-title">Scènes planifiées</div><div class="st-progress-bar"><div class="st-progress-fill" style="width:${plannedPct};">${Utils.escape(plannedTxt)}</div></div></div>
+                  ${intExt ? `<div class="st-chart-box"><div class="st-chart-title">Répartition INT / EXT</div><img src="${intExt}" class="st-chart-img"></div>` : ''}
+                  ${jourNuit ? `<div class="st-chart-box"><div class="st-chart-title">Répartition JOUR / NUIT</div><img src="${jourNuit}" class="st-chart-img"></div>` : ''}
+              </div></div>`;
+          }
+          // Section Budget
+          if(sections.includes('budget')) {
+              const budgetCat = captureCanvas('chart-budget-cat');
+              const bPrev = document.getElementById('budget-prevu')?.innerText || '0 €';
+              const bDep = document.getElementById('budget-depense')?.innerText || '0 €';
+              const bRest = document.getElementById('budget-reste')?.innerText || '0 €';
+              const bProg = document.getElementById('progress-budget');
+              const bProgPct = bProg ? bProg.style.width : '0%';
+              const bProgTxt = bProg ? bProg.innerText : '0%';
+              bodyHTML += `<div class="st-section"><h2>💰 Budget</h2><div class="st-charts-grid">
+                  ${budgetCat ? `<div class="st-chart-box"><div class="st-chart-title">Dépenses par catégorie</div><img src="${budgetCat}" class="st-chart-img"></div>` : ''}
+                  <div class="st-chart-box"><div class="st-chart-title">Budget vs Dépenses</div><div class="st-budget-grid"><div><div class="st-budget-label">Budget prévu</div><div class="st-budget-val">${Utils.escape(bPrev)}</div></div><div><div class="st-budget-label">Dépensé</div><div class="st-budget-val">${Utils.escape(bDep)}</div></div><div><div class="st-budget-label">Reste</div><div class="st-budget-val">${Utils.escape(bRest)}</div></div></div><div class="st-progress-bar mt-10"><div class="st-progress-fill" style="width:${bProgPct};background:#2196F3;">${Utils.escape(bProgTxt)}</div></div></div>
+              </div></div>`;
+          }
+          // Section Temps par Tag
+          if(sections.includes('time')) {
+              const timeTags = captureCanvas('chart-time-tags');
+              if(timeTags) bodyHTML += `<div class="st-section"><h2>⏱️ Temps par Tag/Acte</h2><div class="st-chart-box st-chart-wide"><div class="st-chart-title">Durée estimée par Tag</div><img src="${timeTags}" class="st-chart-img"></div></div>`;
+          }
+          // Section Persos & Lieux
+          if(sections.includes('charsLocs')) {
+              const chars = document.getElementById('chart-chars')?.outerHTML || '';
+              const axes = document.getElementById('chart-axes')?.outerHTML || '';
+              const locs = document.getElementById('chart-locs')?.outerHTML || '';
+              if(chars || axes || locs) bodyHTML += `<div class="st-section"><h2>👥 Personnages & Lieux</h2><div class="st-charts-grid">
+                  ${chars ? `<div class="st-chart-box"><div class="st-chart-title">Personnages (mots)</div>${chars}</div>` : ''}
+                  ${axes ? `<div class="st-chart-box"><div class="st-chart-title">Répartition par Axe</div>${axes}</div>` : ''}
+                  ${locs ? `<div class="st-chart-box"><div class="st-chart-title">Lieux (scènes)</div>${locs}</div>` : ''}
+              </div></div>`;
+          }
+          // Section Équipe & Storyboard
+          if(sections.includes('crewSb')) {
+              const crew = document.getElementById('chart-crew')?.outerHTML || '';
+              const shots = document.getElementById('chart-shots')?.outerHTML || '';
+              if(crew || shots) bodyHTML += `<div class="st-section"><h2>🎬 Équipe & Storyboard</h2><div class="st-charts-grid">
+                  ${crew ? `<div class="st-chart-box"><div class="st-chart-title">Équipe par Département</div>${crew}</div>` : ''}
+                  ${shots ? `<div class="st-chart-box"><div class="st-chart-title">Plans par Type</div>${shots}</div>` : ''}
+              </div></div>`;
+          }
+          // Section Casting
+          if(sections.includes('castingDays')) {
+              const casting = document.getElementById('chart-casting-days')?.outerHTML || '';
+              if(casting) bodyHTML += `<div class="st-section"><h2>🎭 Jours de tournage par comédien</h2><div class="st-chart-box st-chart-wide">${casting}</div></div>`;
+          }
+          const cols = mode === 'landscape' ? '1fr 1fr' : '1fr';
+          const css = `
+              @page { size: A4 ${orientation}; margin: 12mm; }
+              body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; background: white; color: #222; }
+              h2 { font-size: 1.1rem; margin: 0 0 8px 0; padding-bottom: 4px; border-bottom: 2px solid #333; }
+              .cover-page { page-break-after: always; break-after: page; height: 250mm; display: flex; align-items: center; justify-content: center; }
+              .cover-content { text-align: center; }
+              .cover-title { font-size: 2.4rem; font-weight: bold; letter-spacing: 6px; margin-bottom: 30px; }
+              .cover-film { font-size: 1.6rem; margin-bottom: 16px; color: #333; }
+              .cover-scope { font-size: 1.1rem; color: #666; margin-bottom: 60px; font-style: italic; }
+              .cover-date { font-size: 0.9rem; color: #999; }
+              .st-section { margin-bottom: 12mm; page-break-inside: avoid; break-inside: avoid; }
+              .st-cards-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6mm; }
+              .st-card { border: 1px solid #ccc; border-radius: 6px; padding: 10px; text-align: center; background: #fafafa; }
+              .st-card-label { font-size: 0.78rem; color: #666; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+              .st-card-value { font-size: 1.5rem; font-weight: bold; color: #333; }
+              .st-charts-grid { display: grid; grid-template-columns: ${cols}; gap: 6mm; }
+              .st-chart-box { border: 1px solid #ddd; border-radius: 6px; padding: 10px; background: white; page-break-inside: avoid; break-inside: avoid; }
+              .st-chart-wide { grid-column: 1 / -1; }
+              .st-chart-title { font-size: 0.85rem; font-weight: bold; color: #555; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
+              .st-chart-img { width: 100%; height: auto; max-height: ${mode === 'landscape' ? '70mm' : '60mm'}; object-fit: contain; display: block; }
+              .st-progress-bar { width: 100%; height: 24px; background: #e0e0e0; border-radius: 12px; overflow: hidden; }
+              .st-progress-fill { height: 100%; background: linear-gradient(90deg, #4CAF50, #8BC34A); color: white; text-align: center; font-size: 0.8rem; line-height: 24px; font-weight: bold; }
+              .mt-10 { margin-top: 10px; }
+              .st-budget-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+              .st-budget-label { font-size: 0.72rem; color: #666; text-transform: uppercase; }
+              .st-budget-val { font-size: 1.1rem; font-weight: bold; color: #333; }
+              /* Tables et stats internes (capturés tels quels) */
+              table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+              table th, table td { padding: 4px 8px; border: 1px solid #ddd; text-align: left; }
+              table th { background: #f0f0f0; font-weight: bold; }
+              /* Forcer le rendu des barres horizontales (chart-chars, chart-locs, etc. qui sont des divs custom, pas des canvas) */
+              .stat-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; font-size: 0.78rem; }
+              .stat-row-label { min-width: 80px; }
+              .stat-row-bar { flex: 1; height: 14px; background: #eee; border-radius: 3px; overflow: hidden; }
+              .stat-row-fill { height: 100%; background: linear-gradient(90deg, #4CAF50, #8BC34A); }
+              .stat-row-val { min-width: 30px; text-align: right; font-weight: bold; }
+              /* Cacher les éléments d'UI interactive qui ne devraient pas apparaître */
+              button, .stats-scope-btn, #stats-scope-selector { display: none !important; }
+          `;
+          const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docTitle}</title><style>${css}</style></head><body>
               ${bodyHTML}
               <scr` + `ipt>window.addEventListener('load',function(){setTimeout(function(){window.print();},500);});<\/scr` + `ipt>
           </body></html>`;
@@ -40951,7 +41184,7 @@ const Stats = {
         }
         if(opts.crew) document.body.classList.add('print-crew');
         if(opts.breakdown) document.body.classList.add('print-breakdown'); 
-        if(opts.stats) document.body.classList.add('print-stats');
+        if(opts.stats) { setTimeout(() => UI.printStats(), 100); return; }
         
         window.print(); 
         document.title = _origTitle;
