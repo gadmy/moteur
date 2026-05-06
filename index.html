@@ -6946,7 +6946,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.6.1</p>
+      <p>vv3.6.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -60202,28 +60202,44 @@ const ScriptReport = {
         const reports = state.data.scriptReports || {};
         const reportKeys = Object.keys(reports).filter(k => reports[k] && reports[k].length > 0);
         if(reportKeys.length === 0) { Utils.toast('Aucune fiche à imprimer', 'warning'); return; }
-        // Grouper par sceneId
+        // Grouper par sceneId — ATTENTION : les IDs de scène et de plan contiennent des underscores
+        // (Utils.generateUniqueId = timestamp + '_' + hash), donc on ne peut PAS splitter simplement
+        // sur le premier '_'. On cherche quel sceneId existant matche le début de la clé.
+        const allScenes = state.data.scenes || [];
+        const allShots = state.data.shots || [];
         const bySceneId = {};
         reportKeys.forEach(key => {
-            const [sceneId, shotId] = ScriptReport.splitKey(key);
+            // Trouver la scène dont l'ID + '_' est préfixe de la clé
+            let matchedScene = allScenes.find(s => key.startsWith(s.id + '_'));
+            let sceneId, shotId;
+            if(matchedScene) {
+                sceneId = matchedScene.id;
+                shotId = key.substring(matchedScene.id.length + 1);
+            } else {
+                // Fallback : si on ne trouve pas la scène (orphan), on utilise la clé entière comme sceneId
+                sceneId = '__orphan__';
+                shotId = key;
+            }
             if(!bySceneId[sceneId]) bySceneId[sceneId] = [];
             bySceneId[sceneId].push({ key, shotId, reports: reports[key] });
         });
         // Trier les scènes selon l'ordre dans state.data.scenes
-        const allScenes = state.data.scenes || [];
-        const allShots = state.data.shots || [];
         const sortedSceneIds = Object.keys(bySceneId).sort((a, b) => {
+            if(a === '__orphan__') return 1;
+            if(b === '__orphan__') return -1;
             const ia = allScenes.findIndex(s => s.id === a);
             const ib = allScenes.findIndex(s => s.id === b);
             return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
         });
+        // Gérer les orphelins : pas de scène trouvée → label "Fiches orphelines"
         // Construire HTML colonnes
         const isSeries = state.currentProjectType === 'series';
         const colsHTML = sortedSceneIds.map(sceneId => {
-            const scene = allScenes.find(s => s.id === sceneId);
-            const sceneIdx = allScenes.indexOf(scene);
+            const isOrphan = sceneId === '__orphan__';
+            const scene = isOrphan ? null : allScenes.find(s => s.id === sceneId);
+            const sceneIdx = scene ? allScenes.indexOf(scene) : -1;
             const sceneNum = scene ? UI.formatSceneNumber(scene, sceneIdx) : '?';
-            const sceneTitle = scene ? (scene.title || '').substring(0, 30) : 'Scène inconnue';
+            const sceneTitle = isOrphan ? 'Fiches orphelines' : (scene ? (scene.title || '').substring(0, 30) : 'Scène inconnue');
             const items = bySceneId[sceneId].sort((a, b) => {
                 const ia = allShots.findIndex(s => s.id === a.shotId);
                 const ib = allShots.findIndex(s => s.id === b.shotId);
