@@ -12266,6 +12266,71 @@ crewRoles: {
       },
 	  getDragAfterElement: (container, y, selector) => { const els = [...container.querySelectorAll(selector + ':not(.dragging)')]; return els.reduce((closest, child)=>{ const box = child.getBoundingClientRect(); const offset=y-box.top-box.height/2; return (offset<0 && offset>closest.offset)?{offset:offset,element:child}:closest; }, {offset:Number.NEGATIVE_INFINITY}).element; },
       debounce: (func, wait) => { let timeout; return function(...args) { const later = () => { clearTimeout(timeout); func(...args); }; clearTimeout(timeout); timeout = setTimeout(later, wait); }; },
+      
+      // Compresse une image File/Blob en base64 JPEG.
+      // - Redimensionne si > maxDimension px (par défaut 1920)
+      // - Quality JPEG 0.85 par défaut
+      // - Refuse si le résultat est > maxKb (par défaut 500 Ko) avec un toast d'erreur
+      // - Préserve les SVG et GIF (renvoie tel quel sans compression)
+      // Retourne une Promise<dataURL> ou Promise<null> si échec/refus
+      compressImage: (file, opts) => {
+          opts = opts || {};
+          const maxDimension = opts.maxDimension || 1920;
+          const quality = opts.quality || 0.85;
+          const maxKb = opts.maxKb || 500;
+          return new Promise((resolve) => {
+              if(!file) { resolve(null); return; }
+              // Préserver SVG et GIF (animations) tels quels
+              if(file.type === 'image/svg+xml' || file.type === 'image/gif') {
+                  const reader = new FileReader();
+                  reader.onload = (e) => resolve(e.target.result);
+                  reader.onerror = () => { Utils.toast('Erreur lecture image', 'error'); resolve(null); };
+                  reader.readAsDataURL(file);
+                  return;
+              }
+              // Pour les autres formats : compresser via canvas
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                  const img = new Image();
+                  img.onload = () => {
+                      // Calculer dimensions cibles
+                      let w = img.naturalWidth, h = img.naturalHeight;
+                      if(w > maxDimension || h > maxDimension) {
+                          const ratio = Math.min(maxDimension / w, maxDimension / h);
+                          w = Math.round(w * ratio);
+                          h = Math.round(h * ratio);
+                      }
+                      // Dessiner sur canvas
+                      const canvas = document.createElement('canvas');
+                      canvas.width = w; canvas.height = h;
+                      const ctx = canvas.getContext('2d');
+                      ctx.fillStyle = '#fff'; // fond blanc pour les PNG transparents → JPEG
+                      ctx.fillRect(0, 0, w, h);
+                      ctx.drawImage(img, 0, 0, w, h);
+                      // Encoder en JPEG (sauf si fichier d'origine est PNG petit avec transparence importante)
+                      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                      // Vérifier la taille
+                      // Approximation : 4 octets base64 = 3 octets binaire, donc taille ≈ length * 0.75
+                      const sizeKb = Math.round(dataUrl.length * 0.75 / 1024);
+                      if(sizeKb > maxKb) {
+                          Utils.toast(`Image trop lourde même après compression (${sizeKb} Ko, max ${maxKb} Ko). Choisissez une image plus petite.`, 'error');
+                          resolve(null);
+                          return;
+                      }
+                      const origKb = Math.round(file.size / 1024);
+                      if(origKb > sizeKb * 1.5) {
+                          // Compression notable : afficher un petit toast d'info
+                          Utils.toast(`Image compressée : ${origKb} → ${sizeKb} Ko`, 'success');
+                      }
+                      resolve(dataUrl);
+                  };
+                  img.onerror = () => { Utils.toast('Image invalide ou corrompue', 'error'); resolve(null); };
+                  img.src = e.target.result;
+              };
+              reader.onerror = () => { Utils.toast('Erreur lecture fichier', 'error'); resolve(null); };
+              reader.readAsDataURL(file);
+          });
+      },
       getInitials: (email) => email.substring(0,2).toUpperCase(),
       getColor: (str) => { const colors = ['#f44336', '#E91E63', '#9C27B0', '#3F51B5', '#2196F3', '#009688', '#FF9800', '#795548']; let hash = 0; for(let i=0; i<str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash); return colors[Math.abs(hash) % colors.length]; },
       
