@@ -4482,6 +4482,8 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .script-unified-right .fmt-btn { padding: 6px 12px; border: 1px solid var(--border); background: var(--bg); color: var(--text-main); cursor: pointer; border-radius: 4px; font-size: 0.8rem; }
   .script-unified-right .fmt-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
   .script-unified-right .fmt-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+  .script-unified-right .fmt-btn-prefs { padding: 6px 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text-sec); cursor: pointer; border-radius: 4px; font-size: 0.9rem; margin-left: 8px; transition: all 0.15s; }
+  .script-unified-right .fmt-btn-prefs:hover { background: var(--panel-bg); border-color: var(--text-sec); color: var(--text-main); transform: rotate(45deg); }
   .scene-heading-print { display: none; }
   .script-write-col .scene-heading-print { display: block; font-weight: bold; text-transform: uppercase; margin-bottom: 10px; padding-left: 130px; font-family: 'Courier Prime', 'Courier New', Courier, monospace; font-size: 12pt; color: var(--text-sec); }
   .script-continuous-wrapper { display: flex; gap: 20px; max-width: 1200px; margin: 0 auto; }
@@ -6951,7 +6953,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.7.4</p>
+      <p>vv3.7.5</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10030,6 +10032,7 @@ body.presentation-mode .presentation-bar {
                       <button class="fmt-btn" data-type="sc-trans" onclick="app.ScriptEditor.formatContinuous('sc-trans', event)" onmousedown="event.preventDefault()">Trans</button>
                       <button class="fmt-btn" data-type="sc-centered" onclick="app.ScriptEditor.formatContinuous('sc-centered', event)" onmousedown="event.preventDefault()">Centré</button>
                       <button class="fmt-btn" data-type="sc-note" onclick="app.ScriptEditor.formatContinuous('sc-note', event)" onmousedown="event.preventDefault()">Note</button>
+                      <button class="fmt-btn-prefs" onclick="app.ScriptEditor.openPrefsModal()" onmousedown="event.preventDefault()" title="Paramètres éditeur scénario (Tab/Enter)">⚙️</button>
                   </div>
               </div>
           </div>
@@ -11943,6 +11946,21 @@ crewRoles: {
       activeBdSceneId: null, 
       scriptAC: { active: false, index: -1, colIndex: 0, columns: [], items: [], enabled: (localStorage.getItem('moteur_scriptAC_enabled') !== 'false') }, 
       scriptBdEnabled: (localStorage.getItem('moteur_scriptBd_enabled') !== 'false'), 
+      scriptPrefs: (() => {
+          // Préférences éditeur scénario : comportement Tab/Enter personnalisable
+          const defaults = {
+              enterAfterDialog: 'sc-perso',  // 'sc-perso' (défaut moteur) ou 'sc-action' (standard Final Draft)
+              enterAfterAction: 'sc-action', // 'sc-action' (défaut) ou 'sc-perso' (style ping-pong dialogue)
+              tabFromDialog: 'sc-perso',     // 'sc-perso' (défaut moteur) ou 'sc-action' (standard)
+              doubleTapTabToNote: true,      // Double Tab → Note
+              doubleEnterToTransition: true  // Double Enter sur Action → Transition
+          };
+          try {
+              const stored = localStorage.getItem('moteur_script_prefs');
+              if(stored) return Object.assign({}, defaults, JSON.parse(stored));
+          } catch(e) {}
+          return defaults;
+      })(), 
       dbListener: null, 
       presenceRef: null, 
       locksListener: null, 
@@ -12651,7 +12669,8 @@ crewRoles: {
           'fmp_theme_pref', 'fmp_design', 'fmp_nav_mode', 'fmp_tabs_mode',
           'fmp_tabs_position', 'fmp_board_mode', 'fmp_script_view_mode',
           'fmp_card_view_mode', 'moteur_icon_style', 'moteur_hub_cards',
-          'moteur_ob_dismissed'
+          'moteur_ob_dismissed', 'moteur_script_prefs', 'moteur_scriptAC_enabled',
+          'moteur_scriptBd_enabled'
       ],
       _pushTimer: null,
 
@@ -29394,8 +29413,8 @@ const DrawingEditor = {
               e.preventDefault();
               e.stopPropagation();
               
-              // Double Tab → Note
-              if(now - ScriptEditor.lastTabTime < ScriptEditor.doubleTapDelay) {
+              // Double Tab → Note (si activé dans les préférences)
+              if(state.scriptPrefs.doubleTapTabToNote && now - ScriptEditor.lastTabTime < ScriptEditor.doubleTapDelay) {
                   ScriptEditor.changeBlockType(currentBlock, 'sc-note');
                   ScriptEditor.lastTabTime = 0;
                   ScriptEditor.updateToolbarContinuous();
@@ -29407,7 +29426,7 @@ const DrawingEditor = {
               let nextType = 'sc-action';
               if(currentType === 'sc-action') nextType = 'sc-perso';
               else if(currentType === 'sc-perso') nextType = 'sc-paren';
-              else if(currentType === 'sc-dial') nextType = 'sc-perso';
+              else if(currentType === 'sc-dial') nextType = state.scriptPrefs.tabFromDialog || 'sc-perso';
               else if(currentType === 'sc-paren') nextType = 'sc-dial';
               else if(currentType === 'sc-trans') nextType = 'sc-action';
               else if(currentType === 'sc-note') nextType = 'sc-action';
@@ -29433,7 +29452,7 @@ const DrawingEditor = {
               const isDoubleEnter = (now - ScriptEditor.lastEnterTime < ScriptEditor.doubleTapDelay);
               ScriptEditor.lastEnterTime = now;
               
-              if(isDoubleEnter) {
+              if(isDoubleEnter && state.scriptPrefs.doubleEnterToTransition) {
                   // Double Enter : change le type du bloc actuel (pas de nouvelle ligne)
                   if(currentType === 'sc-action') {
                       ScriptEditor.changeBlockType(currentBlock, 'sc-trans');
@@ -29449,13 +29468,13 @@ const DrawingEditor = {
               // Enter simple - logique selon si la ligne est vide ou non
               
               if(currentType === 'sc-action') {
-                  // Action + Enter = si vide: reste Action, si rempli: nouveau paragraphe Action
+                  // Action + Enter = si vide: reste Action, si rempli: nouveau paragraphe selon préférence
                   if(isEmpty) {
                       // Ligne vide : on ne fait rien (reste sur Action)
                   } else {
                       document.execCommand('insertParagraph', false);
                       const newBlock = ScriptEditor.getBlockNode(window.getSelection().anchorNode);
-                      if(newBlock) newBlock.className = 'sc-action';
+                      if(newBlock) newBlock.className = state.scriptPrefs.enterAfterAction || 'sc-action';
                   }
               } else if(currentType === 'sc-perso') {
                   // Perso + Enter = si vide: change en Dialogue, si rempli: nouvelle ligne Dialogue
@@ -29467,13 +29486,13 @@ const DrawingEditor = {
                       if(newBlock) newBlock.className = 'sc-dial';
                   }
               } else if(currentType === 'sc-dial') {
-                  // Dialogue + Enter = si vide: change en Perso, si rempli: nouvelle ligne Perso
+                  // Dialogue + Enter = si vide: change en Perso, si rempli: nouvelle ligne selon préférence
                   if(isEmpty) {
                       ScriptEditor.changeBlockType(currentBlock, 'sc-perso');
                   } else {
                       document.execCommand('insertParagraph', false);
                       const newBlock = ScriptEditor.getBlockNode(window.getSelection().anchorNode);
-                      if(newBlock) newBlock.className = 'sc-perso';
+                      if(newBlock) newBlock.className = state.scriptPrefs.enterAfterDialog || 'sc-perso';
                   }
               } else if(currentType === 'sc-paren') {
                   // Didas + Enter = si vide: change en Dial, si rempli: nouvelle ligne Dial
@@ -29555,6 +29574,59 @@ const DrawingEditor = {
           if(className === 'sc-note') ScriptEditor.wrapNote(block);
           if(className === 'sc-paren') ScriptEditor.wrapParen(block);
           ScriptEditor.updateToolbarContinuous();
+      },
+      
+      // Ouvre la modale de paramètres éditeur scénario (Tab/Enter customisables)
+      openPrefsModal: () => {
+          const p = state.scriptPrefs;
+          UI.showModal({
+              title: '⚙️ Paramètres éditeur scénario',
+              html: `
+                  <div style="display:flex; flex-direction:column; gap:14px;">
+                      <div>
+                          <label class="form-label-block" style="font-weight:600; margin-bottom:6px;">Après <strong>Dialogue</strong> (ligne remplie) + Entrée :</label>
+                          <select id="pref-enterAfterDialog" class="actor-input">
+                              <option value="sc-perso" ${p.enterAfterDialog === 'sc-perso' ? 'selected' : ''}>Nouvelle ligne Personnage (défaut moteur)</option>
+                              <option value="sc-action" ${p.enterAfterDialog === 'sc-action' ? 'selected' : ''}>Nouvelle ligne Action (standard Final Draft)</option>
+                          </select>
+                      </div>
+                      <div>
+                          <label class="form-label-block" style="font-weight:600; margin-bottom:6px;">Après <strong>Action</strong> (ligne remplie) + Entrée :</label>
+                          <select id="pref-enterAfterAction" class="actor-input">
+                              <option value="sc-action" ${p.enterAfterAction === 'sc-action' ? 'selected' : ''}>Nouvelle ligne Action (défaut)</option>
+                              <option value="sc-perso" ${p.enterAfterAction === 'sc-perso' ? 'selected' : ''}>Nouvelle ligne Personnage (style ping-pong dialogue)</option>
+                          </select>
+                      </div>
+                      <div>
+                          <label class="form-label-block" style="font-weight:600; margin-bottom:6px;">Tab depuis un bloc <strong>Dialogue</strong> :</label>
+                          <select id="pref-tabFromDialog" class="actor-input">
+                              <option value="sc-perso" ${p.tabFromDialog === 'sc-perso' ? 'selected' : ''}>→ Personnage (défaut moteur)</option>
+                              <option value="sc-action" ${p.tabFromDialog === 'sc-action' ? 'selected' : ''}>→ Action (standard Final Draft)</option>
+                          </select>
+                      </div>
+                      <hr style="border:none; border-top:1px solid var(--border); margin:0;">
+                      <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+                          <input type="checkbox" id="pref-doubleTapTabToNote" ${p.doubleTapTabToNote ? 'checked' : ''} style="width:auto;">
+                          <span><strong>Double Tab rapide → Note</strong> <span style="color:var(--text-sec); font-size:0.85rem;">(raccourci moteur)</span></span>
+                      </label>
+                      <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+                          <input type="checkbox" id="pref-doubleEnterToTransition" ${p.doubleEnterToTransition ? 'checked' : ''} style="width:auto;">
+                          <span><strong>Double Entrée rapide depuis Action → Transition</strong> <span style="color:var(--text-sec); font-size:0.85rem;">(raccourci moteur)</span></span>
+                      </label>
+                  </div>
+              `,
+              confirmText: 'Enregistrer',
+              onConfirm: () => {
+                  state.scriptPrefs.enterAfterDialog = document.getElementById('pref-enterAfterDialog').value;
+                  state.scriptPrefs.enterAfterAction = document.getElementById('pref-enterAfterAction').value;
+                  state.scriptPrefs.tabFromDialog = document.getElementById('pref-tabFromDialog').value;
+                  state.scriptPrefs.doubleTapTabToNote = document.getElementById('pref-doubleTapTabToNote').checked;
+                  state.scriptPrefs.doubleEnterToTransition = document.getElementById('pref-doubleEnterToTransition').checked;
+                  PreferencesSync.save('moteur_script_prefs', JSON.stringify(state.scriptPrefs));
+                  Utils.toast('Paramètres enregistrés', 'success');
+                  return true;
+              }
+          });
       },
       
       // Les fonctions cycleFormat ne sont plus utilisées - la logique est dans handleKeyContinuous
