@@ -6957,7 +6957,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.8.1</p>
+      <p>vv3.8.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -12417,7 +12417,7 @@ crewRoles: {
           }
       },
       
-      // Supprime un fichier du bucket projects à partir de son URL publique
+// Supprime un fichier du bucket projects à partir de son URL publique
       // Ne supprime que si l'URL pointe bien vers notre bucket (laisse les anciennes base64 intactes)
       deleteProjectFile: async (publicUrl) => {
           if(!publicUrl || typeof publicUrl !== 'string') return;
@@ -12432,8 +12432,106 @@ crewRoles: {
           }
       },
       
-      getInitials: (email) => email.substring(0,2).toUpperCase(),
-      getColor: (str) => { const colors = ['#f44336', '#E91E63', '#9C27B0', '#3F51B5', '#2196F3', '#009688', '#FF9800', '#795548']; let hash = 0; for(let i=0; i<str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash); return colors[Math.abs(hash) % colors.length]; },
+      // === Script de migration ponctuelle : extrait les base64 hérités vers Storage ===
+      // À lancer manuellement depuis la console : await app.Utils.migrateProjectPhotos()
+      // Idempotent : peut être relancé sans risque (les URLs Storage sont skippées)
+      // Conservateur : si un upload échoue, le base64 est conservé pour ne pas perdre la photo
+      migrateProjectPhotos: async () => {
+          if(!state.currentProjectId) { console.error('Aucun projet ouvert'); return; }
+          if(!state.data) { console.error('state.data vide'); return; }
+          
+          console.log('🔄 Démarrage migration photos base64 → Storage...');
+          let totalProcessed = 0, totalSuccess = 0, totalFailed = 0, totalSkipped = 0;
+          
+          // Helper : convertir un dataUrl base64 en Blob
+          const dataUrlToBlob = async (dataUrl) => {
+              try {
+                  const res = await fetch(dataUrl);
+                  return await res.blob();
+              } catch(e) { return null; }
+          };
+          
+          // Helper : uploader un base64 vers Storage et retourner l'URL
+          const uploadBase64 = async (dataUrl, category, entityId, kind) => {
+              const blob = await dataUrlToBlob(dataUrl);
+              if(!blob) return null;
+              const ext = blob.type === 'image/png' ? 'png' : (blob.type === 'image/svg+xml' ? 'svg' : (blob.type === 'image/gif' ? 'gif' : 'jpg'));
+              const kindSuffix = kind === 'gallery' ? '_gallery' : '';
+              const filename = `${entityId || 'item'}${kindSuffix}_migrated_${Date.now()}_${Math.random().toString(36).slice(2,7)}.${ext}`;
+              const filePath = `${state.currentProjectId}/${category}/${filename}`;
+              try {
+                  const { error: upErr } = await supabase.storage.from('projects').upload(filePath, blob, { contentType: blob.type, upsert: false });
+                  if(upErr) { console.warn('Échec upload', filePath, upErr.message); return null; }
+                  const { data: urlData } = supabase.storage.from('projects').getPublicUrl(filePath);
+                  return urlData?.publicUrl || null;
+              } catch(e) {
+                  console.warn('Exception upload', filePath, e);
+                  return null;
+              }
+          };
+          
+          const isBase64 = (val) => typeof val === 'string' && val.startsWith('data:');
+          
+          // Helper générique pour migrer un champ photo unique d'une entité
+          const migratePhoto = async (entity, field, category, entityId) => {
+              if(!entity || !isBase64(entity[field])) return;
+              totalProcessed++;
+              const url = await uploadBase64(entity[field], category, entityId, 'photo');
+              if(url) { entity[field] = url; totalSuccess++; }
+              else { totalFailed++; }
+          };
+          
+          // Helper générique pour migrer un tableau galleryPhotos
+          const migrateGallery = async (entity, category, entityId) => {
+              if(!entity || !Array.isArray(entity.galleryPhotos)) return;
+              for(let i = 0; i < entity.galleryPhotos.length; i++) {
+                  const val = entity.galleryPhotos[i];
+                  if(!isBase64(val)) { totalSkipped++; continue; }
+                  totalProcessed++;
+                  const url = await uploadBase64(val, category, entityId, 'gallery');
+                  if(url) { entity.galleryPhotos[i] = url; totalSuccess++; }
+                  else { totalFailed++; }
+              }
+          };
+          
+          // 1. Comédiens
+          for(const actor of (state.data.actors || [])) {
+              await migratePhoto(actor, 'photo', 'actors', actor.id);
+              await migrateGallery(actor, 'actors', actor.id);
+          }
+          // 2. Décors
+          for(const loc of (state.data.locations || [])) {
+              await migrateGallery(loc, 'locations', loc.id);
+          }
+          // 3. Équipe
+          for(const member of (state.data.crew || [])) {
+              await migratePhoto(member, 'photo', 'crew', member.id);
+              await migrateGallery(member, 'crew', member.id);
+          }
+          // 4. Ressources
+          for(const res of (state.data.resources || [])) {
+              await migratePhoto(res, 'photo', 'resources', res.id);
+          }
+          
+          console.log(`✅ Migration terminée. Traité : ${totalProcessed}, Succès : ${totalSuccess}, Échecs : ${totalFailed}, Skippés (déjà URL) : ${totalSkipped}`);
+          
+          if(totalSuccess > 0) {
+              console.log('💾 Sauvegarde du projet allégé...');
+              await Store.save();
+              console.log('✅ Projet sauvegardé. Rechargez la page pour vérifier.');
+              Utils.toast(`Migration : ${totalSuccess} photo(s) migrées vers Storage`, 'success', 5000);
+          } else if(totalProcessed === 0) {
+              console.log('ℹ️ Rien à migrer (toutes les photos sont déjà en URL Storage).');
+              Utils.toast('Aucune photo base64 à migrer', 'info');
+          } else {
+              console.warn('⚠️ Aucune migration n\'a réussi. Vérifiez les permissions du bucket.');
+              Utils.toast('Migration échouée. Vérifiez la console.', 'error');
+          }
+          
+          return { totalProcessed, totalSuccess, totalFailed, totalSkipped };
+      },
+      
+      getInitials: (email) => email.substring(0,2).toUpperCase(),      getColor: (str) => { const colors = ['#f44336', '#E91E63', '#9C27B0', '#3F51B5', '#2196F3', '#009688', '#FF9800', '#795548']; let hash = 0; for(let i=0; i<str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash); return colors[Math.abs(hash) % colors.length]; },
       
       setupAutocomplete: (inp, opts) => { 
           // opts = { source: () => array d'items, listEl: DOM element, multi: bool, transform: fn(item)=>string }
@@ -30301,11 +30399,20 @@ const DrawingEditor = {
           const hiddenInput = document.getElementById('res-photo');
           
           if(input.files && input.files[0]) {
-              // Compression automatique : redimensionnement à 1280px max + JPEG 0.85
-              const dataUrl = await Utils.compressImage(input.files[0], { maxDimension: 1280, maxKb: 400 });
-              if(!dataUrl) return; // erreur ou refus → toast déjà affiché par compressImage
-              preview.innerHTML = `<img src="${dataUrl}" style="max-width:100%; max-height:100%; object-fit:contain;">`;
-              hiddenInput.value = dataUrl;
+              const file = input.files[0];
+              input.value = ''; // reset (avant async)
+              Utils.toast('Envoi de la photo...', 'info', 1500);
+              // Upload direct vers Storage (au lieu de base64 dans state.data)
+              const editingId = document.getElementById('res-edit-id')?.value || ('res_new_' + Date.now());
+              const url = await Utils.uploadProjectFile(file, {
+                  category: 'resources',
+                  entityId: editingId,
+                  kind: 'photo',
+                  maxDimension: 1280, quality: 0.85, maxKb: 400
+              });
+              if(!url) return;
+              preview.innerHTML = `<img src="${url}" style="max-width:100%; max-height:100%; object-fit:contain;">`;
+              hiddenInput.value = url;
           }
       },
       
@@ -30425,6 +30532,8 @@ const DrawingEditor = {
           }
           
           state.data.resources = state.data.resources.filter(r => r.id !== id);
+          // Nettoyer la photo Storage si présente
+          if(resource.photo) Utils.deleteProjectFile(resource.photo);
           const categoryLabels = { accessoire: 'accessoire', costume: 'costume', vehicule: 'véhicule' };
           const catLabel = categoryLabels[resource.category] || resource.category;
           History.log('DELETE', `Suppression ${catLabel} : ${resource.name}${deleteFromBreakdown ? ' (et du dépouillement)' : ''}`);
