@@ -6957,7 +6957,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.7.6</p>
+      <p>vv3.7.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -20564,7 +20564,12 @@ const tabToSection = {
                   }
               }
               
+              // Capturer le nom de l'item AVANT splice pour le journal
+              const deletedItemName = state.data[type][idx]?.name || 'Sans nom';
+              const typeLabel = type === 'characters' ? 'personnage' : (type === 'actors' ? 'comédien' : 'décor');
+              
               state.data[type].splice(idx, 1); 
+              History.log('DELETE', `Suppression ${typeLabel} : ${deletedItemName}`);
               Store.save(); 
               type === 'characters' ? UI.renderDataTab('characters', els.charContainer) : (type === 'actors' ? UI.renderDataTab('actors', els.actorContainer) : UI.renderDataTab('locations', els.locContainer)); 
           } 
@@ -21012,7 +21017,10 @@ const tabToSection = {
           const dataUrl = await Utils.compressImage(file, { maxDimension: 1920, quality: 0.92, maxKb: 1500 });
           input.value = ''; // reset pour permettre re-sélection du même fichier
           if(!dataUrl) return; // erreur ou refus → toast déjà affiché par compressImage
+          const hadPhoto = !!state.data.actors[idx].photo;
           state.data.actors[idx].photo = dataUrl;
+          const actorPhotoName = state.data.actors[idx].name || 'comédien';
+          History.log('EDIT', `${hadPhoto ? 'Modification' : 'Ajout'} photo principale de ${actorPhotoName}`, {}, 'minor');
           Store.save();
           UI.renderDataTab('actors', els.actorContainer);
       },
@@ -21033,12 +21041,16 @@ const tabToSection = {
           input.value = ''; // reset pour permettre re-sélection du même fichier
           if(!dataUrl) return; // erreur ou refus → toast déjà affiché par compressImage
           state.data.actors[idx].galleryPhotos.push(dataUrl);
+          const actorNameLog = state.data.actors[idx].name || 'comédien';
+          History.log('ADD', `Ajout photo galerie pour ${actorNameLog}`, {}, 'minor');
           Store.save();
           UI.renderDataTab('actors', els.actorContainer);
       },
       removeActorGalleryPhoto: (actorIdx, photoIdx) => {
           if(state.data.actors[actorIdx] && state.data.actors[actorIdx].galleryPhotos) {
+              const actorName = state.data.actors[actorIdx].name || 'comédien';
               state.data.actors[actorIdx].galleryPhotos.splice(photoIdx, 1);
+              History.log('DELETE', `Suppression photo galerie de ${actorName}`, {}, 'minor');
               Store.save();
               UI.renderDataTab('actors', els.actorContainer);
           }
@@ -21078,13 +21090,17 @@ const tabToSection = {
           if(!dataUrl) return; // erreur ou refus → toast déjà affiché par compressImage
           if(!state.data.locations[idx].galleryPhotos) state.data.locations[idx].galleryPhotos = [];
           state.data.locations[idx].galleryPhotos.push(dataUrl);
+          const locName = state.data.locations[idx].name || 'décor';
+          History.log('ADD', `Ajout photo galerie pour ${locName}`, {}, 'minor');
           Store.save();
           UI.renderDataTab('locations', els.locContainer);
           Utils.toast('Photo ajoutée', 'success');
       },
       removeLocationPhoto: (locIdx, photoIdx) => {
           if(state.data.locations[locIdx] && state.data.locations[locIdx].galleryPhotos) {
+              const locNameRm = state.data.locations[locIdx].name || 'décor';
               state.data.locations[locIdx].galleryPhotos.splice(photoIdx, 1);
+              History.log('DELETE', `Suppression photo galerie de ${locNameRm}`, {}, 'minor');
               Store.save();
               UI.renderDataTab('locations', els.locContainer);
           }
@@ -30192,12 +30208,15 @@ const DrawingEditor = {
           
           if(!state.data.resources) state.data.resources = [];
           
+          const categoryLabels = { accessoire: 'accessoire', costume: 'costume', vehicule: 'véhicule' };
+          const catLabel = categoryLabels[category] || category;
           if(editId) {
               const idx = state.data.resources.findIndex(r => r.id === editId);
               if(idx > -1) {
                   state.data.resources[idx] = { ...state.data.resources[idx], name, category, photo, description, note, owner };
               }
               Utils.toast('Ressource modifiée', 'success');
+              History.log('EDIT', `Modification ${catLabel} : ${name}`);
           } else {
               const newResource = {
                   id: 'res_' + Date.now(),
@@ -30211,6 +30230,7 @@ const DrawingEditor = {
               };
               state.data.resources.push(newResource);
               Utils.toast('Ressource créée', 'success');
+              History.log('ADD', `Ajout ${catLabel} : ${name}`);
           }
           
           Store.save();
@@ -30273,6 +30293,9 @@ const DrawingEditor = {
           }
           
           state.data.resources = state.data.resources.filter(r => r.id !== id);
+          const categoryLabels = { accessoire: 'accessoire', costume: 'costume', vehicule: 'véhicule' };
+          const catLabel = categoryLabels[resource.category] || resource.category;
+          History.log('DELETE', `Suppression ${catLabel} : ${resource.name}${deleteFromBreakdown ? ' (et du dépouillement)' : ''}`);
           Store.save();
           Resources.render();
           Utils.toast('Ressource supprimée', 'success');
@@ -30467,6 +30490,8 @@ const DrawingEditor = {
                   Store.save();
                   Resources.render();
                   const count = removeResources.length;
+                  const removedNamesForLog = removeResources.map(rr => rr.name).join(', ');
+                  History.log('MERGE', `Fusion de ${count + 1} fiches → "${keepResource.name}" (fusionnées : ${removedNamesForLog})`);
                   Utils.toast(`${count + 1} fiches fusionnées en "${keepResource.name}"`, 'success');
                   return true;
               }
@@ -30537,6 +30562,7 @@ const DrawingEditor = {
         };
         
         state.data.crew.push(newMember);
+        History.log('ADD', `Ajout technicien : ${name}`);
         Store.save();
         UI.renderCrewTab();
         
@@ -30606,8 +30632,9 @@ const DrawingEditor = {
         if(state.currentRole === 'viewer') return;
         // Confirmation déjà faite dans confirmDeleteMember si appelé depuis le bouton
         
-        // Récupérer l'ID du membre avant suppression
+        // Récupérer l'ID et nom du membre avant suppression
         const memberId = state.data.crew[idx]?.id;
+        const memberName = state.data.crew[idx]?.name || 'Sans nom';
         
         // Retirer des feuilles de service (callSheet) de tous les jours de tournage
         if(memberId && state.data.shootingDays) {
@@ -30628,6 +30655,7 @@ const DrawingEditor = {
         }
         
         state.data.crew.splice(idx, 1);
+        History.log('DELETE', `Suppression technicien : ${memberName}`);
         Store.save();
         UI.renderCrewTab();
     },
@@ -30638,6 +30666,13 @@ const DrawingEditor = {
         
         const oldVal = state.data.crew[idx][field];
         state.data.crew[idx][field] = value;
+        // Tracer en niveau minor (sera filtré en mode "essentiel")
+        const fieldLabels = { name: 'nom', email: 'email', phone: 'téléphone', role: 'rôle', city: 'ville', address: 'adresse', dailyRate: 'tarif', group_id: 'département', photo: 'photo' };
+        const fLabel = fieldLabels[field] || field;
+        const memberName = state.data.crew[idx].name || 'technicien';
+        if(oldVal !== value) {
+            History.log('EDIT', `Modification ${fLabel} de ${memberName}`, {}, 'minor');
+        }
         Store.save();
         
         // Re-render role dropdown if group changed
@@ -30694,7 +30729,10 @@ const DrawingEditor = {
         const dataUrl = await Utils.compressImage(file, { maxDimension: 1280, quality: 0.85, maxKb: 400 });
         input.value = ''; // reset pour permettre re-sélection du même fichier
         if(!dataUrl) return; // erreur ou refus → toast déjà affiché par compressImage
+        const hadCrewPhoto = !!state.data.crew[idx].photo;
         state.data.crew[idx].photo = dataUrl;
+        const crewPhotoName = state.data.crew[idx].name || 'technicien';
+        History.log('EDIT', `${hadCrewPhoto ? 'Modification' : 'Ajout'} photo principale de ${crewPhotoName}`, {}, 'minor');
         Store.save();
         UI.renderCrewTab();
     },
@@ -30711,6 +30749,8 @@ const DrawingEditor = {
         if(!dataUrl) return; // erreur ou refus → toast déjà affiché par compressImage
         if(!state.data.crew[idx].galleryPhotos) state.data.crew[idx].galleryPhotos = [];
         state.data.crew[idx].galleryPhotos.push(dataUrl);
+        const crewGalName = state.data.crew[idx].name || 'technicien';
+        History.log('ADD', `Ajout photo galerie pour ${crewGalName}`, {}, 'minor');
         Store.save();
         UI.renderCrewTab();
     },
@@ -30718,7 +30758,9 @@ const DrawingEditor = {
     removeGalleryPhoto: (crewIdx, photoIdx) => {
         if(state.currentRole === 'viewer') return;
         if(state.data.crew[crewIdx] && state.data.crew[crewIdx].galleryPhotos) {
+            const crewRmName = state.data.crew[crewIdx].name || 'technicien';
             state.data.crew[crewIdx].galleryPhotos.splice(photoIdx, 1);
+            History.log('DELETE', `Suppression photo galerie de ${crewRmName}`, {}, 'minor');
             Store.save();
             UI.renderCrewTab();
         }
@@ -34463,6 +34505,8 @@ const Permissions = {
         
         try {
             await Store.save();
+            const memberCount = Object.keys(permsByEmail).length;
+            History.log('PERMISSIONS', `Permissions modifiées pour ${memberCount} membre${memberCount > 1 ? 's' : ''}`);
             Utils.toast('Permissions sauvegardées !', 'success');
             Permissions.closeModal();
         } catch(e) {
@@ -45837,8 +45881,12 @@ const Expenses = {
     // Sauvegarde le budget
     saveBudget: () => {
         if(!state.data.budget) state.data.budget = {};
-        state.data.budget.total = parseFloat(document.getElementById('expenses-budget-total').value) || 0;
-        state.data.budget.currency = document.getElementById('expenses-currency').value;
+        const oldTotal = state.data.budget.total || 0;
+        const oldCurrency = state.data.budget.currency || '€';
+        const newTotal = parseFloat(document.getElementById('expenses-budget-total').value) || 0;
+        const newCurrency = document.getElementById('expenses-currency').value;
+        state.data.budget.total = newTotal;
+        state.data.budget.currency = newCurrency;
         
         // Synchroniser avec la présentation
         if(!state.data.presentation) state.data.presentation = {};
@@ -45847,6 +45895,13 @@ const Expenses = {
         // Mettre à jour le champ dans la présentation si visible
         const projectBudgetInput = document.getElementById('project-budget');
         if(projectBudgetInput) projectBudgetInput.value = state.data.budget.total || '';
+        
+        // Tracer le changement (en major si total changé, en minor si juste devise)
+        if(oldTotal !== newTotal) {
+            History.log('EDIT', `Budget total : ${oldTotal} ${oldCurrency} → ${newTotal} ${newCurrency}`);
+        } else if(oldCurrency !== newCurrency) {
+            History.log('EDIT', `Devise budget : ${oldCurrency} → ${newCurrency}`, {}, 'minor');
+        }
         
         Store.save();
         Expenses.updateSummary();
@@ -47373,12 +47428,15 @@ const Expenses = {
             updatedAt: new Date().toISOString()
         };
         
+        const currency = state.data.budget?.currency || '€';
+        const amountStr = `${amountTTC.toFixed(2)} ${currency}`;
         if(editId) {
             // Modification
             const idx = state.data.expenses.findIndex(e => e.id === editId);
             if(idx > -1) {
                 state.data.expenses[idx] = { ...state.data.expenses[idx], ...expenseData };
             }
+            History.log('EDIT', `Modification dépense : ${title} (${amountStr})`);
         } else {
             // Création
             expenseData.id = 'exp_' + Date.now();
@@ -47386,6 +47444,7 @@ const Expenses = {
             expenseData.createdBy = state.currentUser?.email;
             expenseData.createdByName = state.userProfile?.displayName || state.currentUser?.email?.split('@')[0];
             state.data.expenses.push(expenseData);
+            History.log('ADD', `Ajout dépense : ${title} (${amountStr})`);
             
             // Notifier le responsable concerné
             Expenses.notifyExpenseUpdate(expenseData, 'new');
@@ -47430,7 +47489,12 @@ const Expenses = {
     deleteExpense: async (id) => {
         if(!await ConfirmModal.confirmDelete("Cette dépense sera supprimée.")) return;
         
+        const expense = state.data.expenses?.find(e => e.id === id);
+        const expenseTitle = expense?.title || 'sans titre';
+        const currency = state.data.budget?.currency || '€';
+        const amountStr = expense ? `${(expense.amountTTC || expense.amount || 0).toFixed(2)} ${currency}` : '?';
         state.data.expenses = state.data.expenses.filter(e => e.id !== id);
+        History.log('DELETE', `Suppression dépense : ${expenseTitle} (${amountStr})`);
         Store.save();
         Expenses.render();
     },
@@ -54487,6 +54551,10 @@ const Invitations = {
                 });
             }
             
+            const roleForLog = role === 'editor' ? 'Éditeur' : 'Lecteur';
+            History.log('SHARE', userExists 
+                ? `${email} ajouté au projet (${roleForLog})` 
+                : `Invitation envoyée à ${email} (${roleForLog})`);
             Utils.toast(userExists 
                 ? `${email} a maintenant accès au projet !` 
                 : `Invitation envoyée à ${email} !`, 'success');
@@ -59089,6 +59157,7 @@ const Seasons = {
             title: '',
             description: ''
         });
+        History.log('ADD', `Ajout saison S${String(nextNumber).padStart(2,'0')}`);
         Store.save();
         Seasons.render();
         // Rafraîchir aussi le sélecteur du header
@@ -59141,6 +59210,12 @@ const Seasons = {
             state.currentEpisodeId = null; // sera réinitialisé par initEpisodeSelector
         }
         
+        const seasonLabel = `S${String(s.number).padStart(2,'0')}${s.title ? ' — ' + s.title : ''}`;
+        const sceneCountInfo = linkedScenes.length > 0 ? ` (avec ${linkedEpisodes.length} épisode${linkedEpisodes.length>1?'s':''} et ${linkedScenes.length} scène${linkedScenes.length>1?'s':''})` : (linkedEpisodes.length > 0 ? ` (avec ${linkedEpisodes.length} épisode${linkedEpisodes.length>1?'s':''})` : '');
+        History.log('DELETE', `Suppression saison ${seasonLabel}${sceneCountInfo}`);
+        const seasonLabel = `S${String(s.number).padStart(2,'0')}${s.title ? ' — ' + s.title : ''}`;
+        const sceneCountInfo = linkedScenes.length > 0 ? ` (avec ${linkedEpisodes.length} épisode${linkedEpisodes.length>1?'s':''} et ${linkedScenes.length} scène${linkedScenes.length>1?'s':''})` : (linkedEpisodes.length > 0 ? ` (avec ${linkedEpisodes.length} épisode${linkedEpisodes.length>1?'s':''})` : '');
+        History.log('DELETE', `Suppression saison ${seasonLabel}${sceneCountInfo}`);
         Store.save();
         Seasons.render();
         ScriptEditor.initEpisodeSelector();
@@ -59350,6 +59425,9 @@ const Episodes = {
             status: 'draft',
             thumb: ''
         });
+        const seasonForLog = state.data.seasons.find(s => s.id === activeSeasonId);
+        const seasonNumStr = seasonForLog ? `S${String(seasonForLog.number).padStart(2,'0')}` : '?';
+        History.log('ADD', `Ajout épisode ${seasonNumStr}E${String(nextNumber).padStart(2,'0')}`);
         Store.save();
         Episodes.render();
         // Rafraîchir aussi le sélecteur épisode du header
@@ -59391,6 +59469,11 @@ const Episodes = {
             state.data.episodes.forEach((e, i) => { e.number = i + 1; });
         }
         
+        const seasonForLog2 = state.data.seasons.find(s => s.id === deletedSeasonId);
+        const seasonNumStr2 = seasonForLog2 ? `S${String(seasonForLog2.number).padStart(2,'0')}` : '?';
+        const episodeLabel = `${seasonNumStr2}E${String(ep.number).padStart(2,'0')}${ep.title ? ' — ' + ep.title : ''}`;
+        const sceneInfo = linkedScenes.length > 0 ? ` (avec ${linkedScenes.length} scène${linkedScenes.length>1?'s':''})` : '';
+        History.log('DELETE', `Suppression épisode ${episodeLabel}${sceneInfo}`);
         Store.save();
         Episodes.render();
         // Rafraîchir le sélecteur épisode du header
