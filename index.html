@@ -6950,7 +6950,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.6.9</p>
+      <p>vv3.7.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -29878,9 +29878,9 @@ const DrawingEditor = {
                           ` : ''}
                       </div>
                       <div class="resource-card-actions">
-                          <button onclick="app.Resources.merge('${res.id}')" style="background:var(--locked);color:white;">🔀 Fusionner</button>
-                          <button onclick="app.Resources.edit('${res.id}')" style="background:var(--primary);color:white;">✏️ Modifier</button>
-                          <button onclick="app.Resources.delete('${res.id}')" style="background:var(--danger);color:white;">🗑️</button>
+                          <button onclick="app.Resources.merge('${res.id}')" class="btn-merge" title="Fusionner avec une autre fiche">🔀 Fusionner</button>
+                          <button onclick="app.Resources.edit('${res.id}')" class="btn-edit" title="Modifier la fiche">✏️ Modifier</button>
+                          <button onclick="app.Resources.delete('${res.id}')" class="btn-delete" title="Supprimer la fiche">🗑️</button>
                       </div>
                   </div>
               `;
@@ -30276,7 +30276,7 @@ const DrawingEditor = {
               `,
               confirmText: 'Fusionner',
               type: 'warning',
-              onConfirm: () => {
+              onConfirm: async () => {
                   const selectedCards = document.querySelectorAll('.merge-fiche.selected');
                   if(selectedCards.length === 0) {
                       Utils.toast('Sélectionnez au moins une fiche à fusionner', 'error');
@@ -30302,6 +30302,24 @@ const DrawingEditor = {
                   const allCandidates = [resource, ...targets];
                   const keepResource = allCandidates.reduce((best, cur) => scoreResource(cur) > scoreResource(best) ? cur : best, allCandidates[0]);
                   const removeResources = allCandidates.filter(r => r.id !== keepResource.id);
+                  
+                  // === DOUBLE CONFIRMATION (action destructive et irréversible) ===
+                  const removedNames = removeResources.map(rr => `• ${rr.name}`).join('\n');
+                  const totalScenesAffected = removeResources.reduce((sum, rr) => sum + Resources.getLinkedScenes(rr).length, 0);
+                  const confirmMsg = `⚠️ Action IRRÉVERSIBLE\n\n` +
+                      `Fiche maître conservée :\n✓ ${keepResource.name}\n\n` +
+                      `Fiche${removeResources.length > 1 ? 's' : ''} qui ${removeResources.length > 1 ? 'seront supprimées' : 'sera supprimée'} (${removeResources.length}) :\n${removedNames}\n\n` +
+                      (totalScenesAffected > 0 ? `📍 ${totalScenesAffected} occurrence${totalScenesAffected > 1 ? 's' : ''} dans le dépouillement ${totalScenesAffected > 1 ? 'seront renommées' : 'sera renommée'} en "${keepResource.name}"\n\n` : '') +
+                      `Confirmer la fusion ?`;
+                  const confirmed = await ConfirmModal.show({
+                      title: 'Confirmer la fusion',
+                      message: confirmMsg,
+                      icon: '🔀',
+                      dangerous: true,
+                      confirmText: `Fusionner ${removeResources.length + 1} → 1`
+                  });
+                  if(!confirmed) return false;
+                  // === FIN DOUBLE CONFIRMATION ===
                   
                   // Fusionner les aliases (noms alternatifs) de toutes les fiches à supprimer
                   const allAliases = new Set(keepResource.aliases || []);
