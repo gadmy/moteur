@@ -6957,7 +6957,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.7.9</p>
+      <p>vv3.8.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -12358,6 +12358,80 @@ crewRoles: {
               reader.readAsDataURL(file);
           });
       },
+      
+      // === ProjectStorage : upload/suppression de photos vers le bucket Supabase 'projects' ===
+      // Évite de stocker des base64 dans state.data (cause majeure de surcharge Supabase)
+      // Convention de chemin : {projectId}/{category}/{filename}
+      // category : 'actors', 'locations', 'crew'
+      uploadProjectFile: async (file, opts) => {
+          // opts = { category: 'actors'|'locations'|'crew', entityId: 'act_xxx', kind: 'photo'|'gallery', maxDimension, quality, maxKb }
+          if(!state.currentProjectId) { Utils.toast('Aucun projet ouvert', 'error'); return null; }
+          if(!file) return null;
+          opts = opts || {};
+          
+          // Compresser d'abord (réutilise la logique existante)
+          const dataUrl = await Utils.compressImage(file, {
+              maxDimension: opts.maxDimension || 1920,
+              quality: opts.quality || 0.85,
+              maxKb: opts.maxKb || 1500
+          });
+          if(!dataUrl) return null; // erreur de compression déjà signalée
+          
+          // Convertir le data URL en Blob pour upload
+          let blob;
+          try {
+              const res = await fetch(dataUrl);
+              blob = await res.blob();
+          } catch(e) {
+              Utils.toast('Erreur lors de la préparation du fichier', 'error');
+              return null;
+          }
+          
+          // Construire le chemin
+          const ext = blob.type === 'image/png' ? 'png' : (blob.type === 'image/svg+xml' ? 'svg' : (blob.type === 'image/gif' ? 'gif' : 'jpg'));
+          const kindSuffix = opts.kind === 'gallery' ? '_gallery' : '';
+          const filename = `${opts.entityId || 'item'}${kindSuffix}_${Date.now()}.${ext}`;
+          const filePath = `${state.currentProjectId}/${opts.category}/${filename}`;
+          
+          // Uploader vers Supabase Storage
+          try {
+              const { error: uploadErr } = await supabase.storage
+                  .from('projects')
+                  .upload(filePath, blob, {
+                      contentType: blob.type,
+                      upsert: false
+                  });
+              if(uploadErr) {
+                  console.error('Erreur upload Storage:', uploadErr);
+                  Utils.toast('Erreur lors de l\'enregistrement de la photo', 'error');
+                  return null;
+              }
+              
+              // Récupérer l'URL publique
+              const { data: urlData } = supabase.storage.from('projects').getPublicUrl(filePath);
+              return urlData?.publicUrl || null;
+          } catch(e) {
+              console.error('Exception upload Storage:', e);
+              Utils.toast('Erreur réseau lors de l\'upload', 'error');
+              return null;
+          }
+      },
+      
+      // Supprime un fichier du bucket projects à partir de son URL publique
+      // Ne supprime que si l'URL pointe bien vers notre bucket (laisse les anciennes base64 intactes)
+      deleteProjectFile: async (publicUrl) => {
+          if(!publicUrl || typeof publicUrl !== 'string') return;
+          if(!publicUrl.includes('/storage/v1/object/public/projects/')) return; // pas une URL Storage projects (probablement base64 hérité)
+          try {
+              const path = publicUrl.split('/storage/v1/object/public/projects/')[1];
+              if(!path) return;
+              const { error } = await supabase.storage.from('projects').remove([path]);
+              if(error) console.warn('Erreur suppression fichier Storage:', error.message);
+          } catch(e) {
+              console.warn('Exception suppression Storage:', e);
+          }
+      },
+      
       getInitials: (email) => email.substring(0,2).toUpperCase(),
       getColor: (str) => { const colors = ['#f44336', '#E91E63', '#9C27B0', '#3F51B5', '#2196F3', '#009688', '#FF9800', '#795548']; let hash = 0; for(let i=0; i<str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash); return colors[Math.abs(hash) % colors.length]; },
       
@@ -14519,6 +14593,10 @@ showDashboard: async () => {
       
       loadProject: async (id) => {
           if(!state.currentUser) return;
+          // Flush immédiat des modifs debouncées du projet courant (si on change de projet)
+          if(state.currentProjectId && state.currentProjectId !== id) {
+              await Store.saveFlush();
+          }
           LoadingScreen.show("Ouverture du projet...");
           try {
               const myEmail = state.currentUser.email.toLowerCase();
@@ -15051,6 +15129,13 @@ CONFIG.crewGroups.forEach(defaultGrp => {
       save: async () => { 
           if(!state.currentProjectId || !state.currentUser || state.currentRole === 'viewer') return;
           
+          // Verrou anti-concurrence : si un save est déjà en cours, on note la demande et on sortira
+          // Quand le save courant se termine, on relance automatiquement (cf. fin de la fonction)
+          if(state.savingInProgress) {
+              state.pendingSave = true;
+              return;
+          }
+          
           // Marquer qu'une sauvegarde est en cours
           state.savingInProgress = true; 
           
@@ -15127,6 +15212,11 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                   }, 4000);
               }
               state.savingInProgress = false;
+              // Si une nouvelle demande arrive après l'échec, on tentera quand même
+              if(state.pendingSave) {
+                  state.pendingSave = false;
+                  setTimeout(() => Store.save(), 5000); // retry après 5s
+              }
               return;
           }
           
@@ -15147,6 +15237,13 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           // Notifier les autres onglets de la modification
           if(typeof SessionManager !== 'undefined') {
               SessionManager.notifyDataUpdate();
+          }
+          
+          // Verrou anti-concurrence : si une demande de save a eu lieu pendant qu'on sauvegardait,
+          // on relance maintenant pour ne pas perdre la modif
+          if(state.pendingSave) {
+              state.pendingSave = false;
+              Store.save();
           }
       },
       deleteProject: async (id, role, e) => { 
@@ -20472,7 +20569,7 @@ const tabToSection = {
               Utils.toast(`${orphans.length} personnage(s) supprimé(s)`, 'success');
           }
       },
-      updateDataItem: (type, idx, val) => { if(state.data[type][idx]) { const key = (type === 'characters' || type === 'actors') ? 'bio' : 'desc'; state.data[type][idx][key] = val; Store.save(); } },
+      updateDataItem: (type, idx, val) => { if(state.data[type][idx]) { const key = (type === 'characters' || type === 'actors') ? 'bio' : 'desc'; state.data[type][idx][key] = val; Store.saveDebounced(); } },
       deleteDataItem: async (type, idx) => { 
           if(await ConfirmModal.confirmDelete("Cet élément sera supprimé.")) { 
               // Si on supprime un acteur, délier les personnages associés
@@ -20988,7 +21085,7 @@ const tabToSection = {
           if(state.data.actors[idx]) { 
               const oldVal = state.data.actors[idx][field];
               state.data.actors[idx][field] = val; 
-              Store.save(); 
+              Store.saveDebounced(); 
               if(field === 'photo') UI.renderDataTab('actors', els.actorContainer);
               
               // Si on ajoute un email valide, vérifier si un profil public existe
@@ -21007,19 +21104,29 @@ const tabToSection = {
               }
           } 
       },
-      updateCharacterMeta: (idx, field, val) => { if(state.data.characters[idx]) { state.data.characters[idx][field] = val; Store.save(); } },
+      updateCharacterMeta: (idx, field, val) => { if(state.data.characters[idx]) { state.data.characters[idx][field] = val; Store.saveDebounced(); } },
       toggleActorVehicle: (idx, hasVehicle) => { if(state.data.actors[idx]) { state.data.actors[idx].hasVehicle = hasVehicle; Store.save(); const vehicleDetails = document.getElementById(`actor-vehicle-${idx}`); if(vehicleDetails) { if(hasVehicle) { vehicleDetails.classList.add('visible'); } else { vehicleDetails.classList.remove('visible'); } } } },
       uploadActorPhoto: async (idx, input) => {
           if(!state.data.actors[idx]) return;
           if(!input.files || !input.files[0]) return;
           const file = input.files[0];
-          // Compression spéciale comédien : qualité préservée pour casting
-          const dataUrl = await Utils.compressImage(file, { maxDimension: 1920, quality: 0.92, maxKb: 1500 });
-          input.value = ''; // reset pour permettre re-sélection du même fichier
-          if(!dataUrl) return; // erreur ou refus → toast déjà affiché par compressImage
-          const hadPhoto = !!state.data.actors[idx].photo;
-          state.data.actors[idx].photo = dataUrl;
-          const actorPhotoName = state.data.actors[idx].name || 'comédien';
+          input.value = ''; // reset pour permettre re-sélection du même fichier (avant async pour éviter race)
+          // Toast loading pendant l'upload
+          Utils.toast('Envoi de la photo...', 'info', 1500);
+          // Upload vers Storage (compression + upload Supabase)
+          const actor = state.data.actors[idx];
+          const url = await Utils.uploadProjectFile(file, {
+              category: 'actors',
+              entityId: actor.id || `idx${idx}`,
+              kind: 'photo',
+              maxDimension: 1920, quality: 0.92, maxKb: 1500
+          });
+          if(!url) return; // erreur déjà signalée
+          // Supprimer l'ancienne photo Storage si elle existait
+          const hadPhoto = !!actor.photo;
+          if(actor.photo) await Utils.deleteProjectFile(actor.photo);
+          actor.photo = url;
+          const actorPhotoName = actor.name || 'comédien';
           History.log('EDIT', `${hadPhoto ? 'Modification' : 'Ajout'} photo principale de ${actorPhotoName}`, {}, 'minor');
           Store.save();
           UI.renderDataTab('actors', els.actorContainer);
@@ -21037,21 +21144,31 @@ const tabToSection = {
               return;
           }
           const file = input.files[0];
-          // Compression spéciale comédien : qualité préservée pour casting
-          const dataUrl = await Utils.compressImage(file, { maxDimension: 1920, quality: 0.92, maxKb: 1500 });
           input.value = ''; // reset pour permettre re-sélection du même fichier
-          if(!dataUrl) return; // erreur ou refus → toast déjà affiché par compressImage
-          state.data.actors[idx].galleryPhotos.push(dataUrl);
-          const actorNameLog = state.data.actors[idx].name || 'comédien';
+          // Toast loading
+          Utils.toast('Envoi de la photo...', 'info', 1500);
+          const actor = state.data.actors[idx];
+          const url = await Utils.uploadProjectFile(file, {
+              category: 'actors',
+              entityId: actor.id || `idx${idx}`,
+              kind: 'gallery',
+              maxDimension: 1920, quality: 0.92, maxKb: 1500
+          });
+          if(!url) return;
+          actor.galleryPhotos.push(url);
+          const actorNameLog = actor.name || 'comédien';
           History.log('ADD', `Ajout photo galerie pour ${actorNameLog}`, {}, 'minor');
           Store.save();
           UI.renderDataTab('actors', els.actorContainer);
           CardModal.refresh();
       },
-      removeActorGalleryPhoto: (actorIdx, photoIdx) => {
+      removeActorGalleryPhoto: async (actorIdx, photoIdx) => {
           if(state.data.actors[actorIdx] && state.data.actors[actorIdx].galleryPhotos) {
               const actorName = state.data.actors[actorIdx].name || 'comédien';
+              const removedUrl = state.data.actors[actorIdx].galleryPhotos[photoIdx];
               state.data.actors[actorIdx].galleryPhotos.splice(photoIdx, 1);
+              // Supprimer le fichier du Storage (si c'est une URL Storage, sinon ignoré)
+              if(removedUrl) Utils.deleteProjectFile(removedUrl);
               History.log('DELETE', `Suppression photo galerie de ${actorName}`, {}, 'minor');
               Store.save();
               UI.renderDataTab('actors', els.actorContainer);
@@ -21080,30 +21197,38 @@ const tabToSection = {
       updateLocationMeta: (idx, field, value) => {
           if(state.data.locations[idx]) {
               state.data.locations[idx][field] = value;
-              Store.save();
+              Store.saveDebounced();
           }
       },
       addLocationPhoto: async (idx, input) => {
           if(!state.data.locations[idx]) return;
           if(!input || !input.files || !input.files[0]) return;
           const file = input.files[0];
-          // Compression standard pour photos de repérage
-          const dataUrl = await Utils.compressImage(file, { maxDimension: 1280, quality: 0.85, maxKb: 400 });
-          input.value = ''; // reset pour permettre re-sélection du même fichier
-          if(!dataUrl) return; // erreur ou refus → toast déjà affiché par compressImage
-          if(!state.data.locations[idx].galleryPhotos) state.data.locations[idx].galleryPhotos = [];
-          state.data.locations[idx].galleryPhotos.push(dataUrl);
-          const locName = state.data.locations[idx].name || 'décor';
+          input.value = ''; // reset pour permettre re-sélection du même fichier (avant async)
+          Utils.toast('Envoi de la photo...', 'info', 1500);
+          const loc = state.data.locations[idx];
+          const url = await Utils.uploadProjectFile(file, {
+              category: 'locations',
+              entityId: loc.id || `idx${idx}`,
+              kind: 'gallery',
+              maxDimension: 1280, quality: 0.85, maxKb: 400
+          });
+          if(!url) return;
+          if(!loc.galleryPhotos) loc.galleryPhotos = [];
+          loc.galleryPhotos.push(url);
+          const locName = loc.name || 'décor';
           History.log('ADD', `Ajout photo galerie pour ${locName}`, {}, 'minor');
           Store.save();
           UI.renderDataTab('locations', els.locContainer);
           CardModal.refresh();
           Utils.toast('Photo ajoutée', 'success');
       },
-      removeLocationPhoto: (locIdx, photoIdx) => {
+      removeLocationPhoto: async (locIdx, photoIdx) => {
           if(state.data.locations[locIdx] && state.data.locations[locIdx].galleryPhotos) {
               const locNameRm = state.data.locations[locIdx].name || 'décor';
+              const removedUrl = state.data.locations[locIdx].galleryPhotos[photoIdx];
               state.data.locations[locIdx].galleryPhotos.splice(photoIdx, 1);
+              if(removedUrl) Utils.deleteProjectFile(removedUrl);
               History.log('DELETE', `Suppression photo galerie de ${locNameRm}`, {}, 'minor');
               Store.save();
               UI.renderDataTab('locations', els.locContainer);
@@ -30680,7 +30805,7 @@ const DrawingEditor = {
         if(oldVal !== value) {
             History.log('EDIT', `Modification ${fLabel} de ${memberName}`, {}, 'minor');
         }
-        Store.save();
+        Store.saveDebounced();
         
         // Re-render role dropdown if group changed
         if(field === 'group_id') {
@@ -30690,7 +30815,7 @@ const DrawingEditor = {
             const member = state.data.crew[idx];
             if(member) {
                 Crew.syncCrewMemberToScenes(member);
-                Store.save();
+                Store.saveDebounced();
             }
         }
         
@@ -30732,13 +30857,20 @@ const DrawingEditor = {
         if(!state.data.crew[idx]) return;
         if(!input.files || !input.files[0]) return;
         const file = input.files[0];
-        // Compression standard équipe
-        const dataUrl = await Utils.compressImage(file, { maxDimension: 1280, quality: 0.85, maxKb: 400 });
-        input.value = ''; // reset pour permettre re-sélection du même fichier
-        if(!dataUrl) return; // erreur ou refus → toast déjà affiché par compressImage
-        const hadCrewPhoto = !!state.data.crew[idx].photo;
-        state.data.crew[idx].photo = dataUrl;
-        const crewPhotoName = state.data.crew[idx].name || 'technicien';
+        input.value = ''; // reset pour permettre re-sélection du même fichier (avant async)
+        Utils.toast('Envoi de la photo...', 'info', 1500);
+        const member = state.data.crew[idx];
+        const url = await Utils.uploadProjectFile(file, {
+            category: 'crew',
+            entityId: member.id || `idx${idx}`,
+            kind: 'photo',
+            maxDimension: 1280, quality: 0.85, maxKb: 400
+        });
+        if(!url) return;
+        const hadCrewPhoto = !!member.photo;
+        if(member.photo) await Utils.deleteProjectFile(member.photo);
+        member.photo = url;
+        const crewPhotoName = member.name || 'technicien';
         History.log('EDIT', `${hadCrewPhoto ? 'Modification' : 'Ajout'} photo principale de ${crewPhotoName}`, {}, 'minor');
         Store.save();
         UI.renderCrewTab();
@@ -30751,24 +30883,32 @@ const DrawingEditor = {
         const input = document.getElementById(`crew-gallery-input-${idx}`);
         if(!input || !input.files || !input.files[0]) { Utils.toast('Veuillez sélectionner une photo.', 'warning'); return; }
         const file = input.files[0];
-        // Compression standard équipe
-        const dataUrl = await Utils.compressImage(file, { maxDimension: 1280, quality: 0.85, maxKb: 400 });
-        input.value = ''; // reset pour permettre re-sélection du même fichier
-        if(!dataUrl) return; // erreur ou refus → toast déjà affiché par compressImage
-        if(!state.data.crew[idx].galleryPhotos) state.data.crew[idx].galleryPhotos = [];
-        state.data.crew[idx].galleryPhotos.push(dataUrl);
-        const crewGalName = state.data.crew[idx].name || 'technicien';
+        input.value = ''; // reset (avant async)
+        Utils.toast('Envoi de la photo...', 'info', 1500);
+        const member = state.data.crew[idx];
+        const url = await Utils.uploadProjectFile(file, {
+            category: 'crew',
+            entityId: member.id || `idx${idx}`,
+            kind: 'gallery',
+            maxDimension: 1280, quality: 0.85, maxKb: 400
+        });
+        if(!url) return;
+        if(!member.galleryPhotos) member.galleryPhotos = [];
+        member.galleryPhotos.push(url);
+        const crewGalName = member.name || 'technicien';
         History.log('ADD', `Ajout photo galerie pour ${crewGalName}`, {}, 'minor');
         Store.save();
         UI.renderCrewTab();
         CardModal.refresh();
     },
     
-    removeGalleryPhoto: (crewIdx, photoIdx) => {
+    removeGalleryPhoto: async (crewIdx, photoIdx) => {
         if(state.currentRole === 'viewer') return;
         if(state.data.crew[crewIdx] && state.data.crew[crewIdx].galleryPhotos) {
             const crewRmName = state.data.crew[crewIdx].name || 'technicien';
+            const removedUrl = state.data.crew[crewIdx].galleryPhotos[photoIdx];
             state.data.crew[crewIdx].galleryPhotos.splice(photoIdx, 1);
+            if(removedUrl) Utils.deleteProjectFile(removedUrl);
             History.log('DELETE', `Suppression photo galerie de ${crewRmName}`, {}, 'minor');
             Store.save();
             UI.renderCrewTab();
@@ -58881,7 +59021,7 @@ const TitlePage = {
             if(projectTitleEl) projectTitleEl.value = newTitle;
             Store.updateTitle(newTitle);
         }
-        Store.save();
+        Store.saveDebounced();
     }
 };
 
@@ -59249,7 +59389,7 @@ const Seasons = {
         const s = state.data.seasons.find(x => x.id === seasonId);
         if(!s) return;
         s.title = (title || '').trim();
-        Store.save();
+        Store.saveDebounced();
         // Rafraîchir le sélecteur saison pour qu'il reflète le nouveau titre
         ScriptEditor.initEpisodeSelector();
     },
@@ -59508,7 +59648,7 @@ const Episodes = {
         const ep = state.data.episodes.find(e => e.id === episodeId);
         if(!ep) return;
         ep.title = (title || '').trim();
-        Store.save();
+        Store.saveDebounced();
         // Pas de re-render (on ne veut pas perdre le focus du champ)
     },
     
