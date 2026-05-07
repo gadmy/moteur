@@ -6372,6 +6372,10 @@ body.dark-mode .scene-status-badge.final { background: #1b3d1f; color: #81c784; 
 .history-icon.edit { background: rgba(33, 150, 243, 0.2); }
 .history-icon.delete { background: rgba(244, 67, 54, 0.2); }
 .history-icon.share { background: rgba(156, 39, 176, 0.2); }
+.history-icon.export { background: rgba(255, 152, 0, 0.2); }
+.history-icon.reorder { background: rgba(0, 188, 212, 0.2); }
+.history-icon.permissions { background: rgba(63, 81, 181, 0.2); }
+.history-icon.merge { background: rgba(121, 85, 72, 0.2); }
 .history-content {
     flex: 1;
 }
@@ -6953,7 +6957,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.7.5</p>
+      <p>vv3.7.6</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -43961,17 +43965,32 @@ const History = {
         ADD: { icon: '➕', label: 'Ajout', class: 'add' },
         EDIT: { icon: '✏️', label: 'Modification', class: 'edit' },
         DELETE: { icon: '🗑️', label: 'Suppression', class: 'delete' },
-        SHARE: { icon: '👥', label: 'Partage', class: 'share' }
+        SHARE: { icon: '👥', label: 'Partage', class: 'share' },
+        EXPORT: { icon: '📤', label: 'Export', class: 'export' },
+        REORDER: { icon: '🔀', label: 'Réorganisation', class: 'reorder' },
+        PERMISSIONS: { icon: '🔐', label: 'Permissions', class: 'permissions' },
+        MERGE: { icon: '🔗', label: 'Fusion', class: 'merge' }
     },
     
     // Enregistrer une action dans l'historique
-    log: async (type, description, details = {}) => {
+    // type : ADD | EDIT | DELETE | SHARE | EXPORT | REORDER | PERMISSIONS | MERGE
+    // level : 'major' (défaut, tracé en mode essentiel) | 'minor' (tracé seulement en mode complet)
+    log: async (type, description, details = {}, level = 'major') => {
         if(!state.currentProjectId || !state.currentUser) return;
+        
+        // Filtrer selon le mode du journal (par projet, défaut = essentiel)
+        const mode = state.data?.history_mode || 'essential';
+        if(mode === 'essential') {
+            // En mode essentiel, on ignore les types "bruyants" (REORDER, EXPORT) et les EDIT mineurs
+            if(type === 'REORDER' || type === 'EXPORT') return;
+            if(type === 'EDIT' && level === 'minor') return;
+        }
         
         const entry = {
             type: type,
             description: description,
             details: details,
+            level: level,
             user: {
                 email: state.currentUser.email,
                 name: state.currentUser.displayName || state.currentUser.email.split('@')[0]
@@ -44032,11 +44051,19 @@ const History = {
                         <option value="ADD">➕ Ajouts</option>
                         <option value="EDIT">✏️ Modifications</option>
                         <option value="DELETE">🗑️ Suppressions</option>
+                        <option value="MERGE">🔗 Fusions</option>
+                        <option value="REORDER">🔀 Réorganisations</option>
+                        <option value="PERMISSIONS">🔐 Permissions</option>
                         <option value="SHARE">👥 Partages</option>
+                        <option value="EXPORT">📤 Exports</option>
                     </select>
                     <select id="history-filter-user" onchange="app.History.applyFilters()">
                         <option value="">Tous les utilisateurs</option>
                         ${users.map(u => `<option value="${u}">${u}</option>`).join('')}
+                    </select>
+                    <select id="history-mode-toggle" onchange="app.History.setMode(this.value)" title="Niveau de détail du journal" style="margin-left:auto;">
+                        <option value="essential" ${(state.data?.history_mode || 'essential') === 'essential' ? 'selected' : ''}>📋 Essentiel</option>
+                        <option value="full" ${state.data?.history_mode === 'full' ? 'selected' : ''}>📚 Complet</option>
                     </select>
                 </div>
                 <div class="history-list" id="history-list">
@@ -44047,6 +44074,36 @@ const History = {
         
         document.body.appendChild(modal);
         state.historyEntries = entries;
+    },
+    
+    // Changer le niveau de détail du journal (par projet)
+    setMode: (mode) => {
+        if(!state.data) return;
+        if(mode !== 'essential' && mode !== 'full') return;
+        const oldMode = state.data.history_mode || 'essential';
+        if(oldMode === mode) return;
+        state.data.history_mode = mode;
+        Store.save();
+        const modeLabel = mode === 'essential' ? 'Essentiel' : 'Complet';
+        Utils.toast(`Mode journal : ${modeLabel}`, 'success');
+        // Tracer le changement de mode lui-même (toujours, indépendamment du nouveau mode)
+        // → on bypass le filtre en passant directement par state.data.history
+        if(state.currentProjectId && state.currentUser) {
+            if(!state.data.history) state.data.history = [];
+            state.data.history.unshift({
+                type: 'EDIT',
+                description: `Mode journal changé : ${oldMode === 'essential' ? 'Essentiel' : 'Complet'} → ${modeLabel}`,
+                details: {},
+                level: 'major',
+                user: {
+                    email: state.currentUser.email,
+                    name: state.currentUser.displayName || state.currentUser.email.split('@')[0]
+                },
+                timestamp: Date.now()
+            });
+            if(state.data.history.length > 100) state.data.history = state.data.history.slice(0, 100);
+            Store.save();
+        }
     },
     
     // Fermer la modale
