@@ -6957,7 +6957,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.9.2</p>
+      <p>vv3.9.3</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -20645,6 +20645,13 @@ const tabToSection = {
               UI.renderBoard();
               UI.renderScript();
               Breakdown.init();
+              // [Phase D - Bug 3] Refresh du storyboard si on est dessus et que la scène concernée est sélectionnée
+              if(typeof Storyboard !== 'undefined' && Storyboard.currentSceneId === id) {
+                  Storyboard.renderShots();
+              }
+              if(typeof Storyboard !== 'undefined' && Storyboard.renderScenesList) {
+                  Storyboard.renderScenesList();
+              }
               Utils.toast(`"${scene.title}" est maintenant finale`, 'success');
           }
       },
@@ -20672,6 +20679,14 @@ const tabToSection = {
           
           if(confirmed) {
               scene.isFinal = false;
+              
+              // [Phase D - Bug 3] Refresh storyboard si on est dessus
+              if(typeof Storyboard !== 'undefined' && Storyboard.currentSceneId === id) {
+                  Storyboard.renderShots();
+              }
+              if(typeof Storyboard !== 'undefined' && Storyboard.renderScenesList) {
+                  Storyboard.renderScenesList();
+              }
               
               // Supprimer le dépouillement si présent
               if(hasBreakdown) {
@@ -25668,14 +25683,18 @@ const Storyboard = {
         scenesToRender.forEach((scene, idx) => {
             const shotCount = state.data.shots.filter(s => s.sceneId === scene.id).length;
             const sceneStatus = scene.status || 'not-verified';
+            const isFinal = scene.isFinal === true;
             const div = document.createElement('div');
-            div.className = 'sb-scene-item' + (Storyboard.currentSceneId === scene.id ? ' active' : '');
+            div.className = 'sb-scene-item' + (Storyboard.currentSceneId === scene.id ? ' active' : '') + (isFinal ? '' : ' is-draft');
+            // [Phase D - Bug 3] Badge brouillon/final pour signaler les scènes non validées
+            const finalIcon = isFinal ? '✅' : '📝';
+            const finalTitle = isFinal ? 'Scène validée' : 'Scène en brouillon (à valider avant storyboard)';
             div.innerHTML = `
                 <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <div class="sb-scene-title">${UI.formatSceneNumber(scene, idx)} ${Utils.escape(scene.title)}</div>
+                    <div class="sb-scene-title"><span title="${finalTitle}" style="margin-right:4px;">${finalIcon}</span>${UI.formatSceneNumber(scene, idx)} ${Utils.escape(scene.title)}</div>
                     <div class="scene-status-container"><span class="scene-status-badge ${sceneStatus}" onclick="event.stopPropagation(); app.UI.toggleSceneStatus('${scene.id}', event)">${SCENE_STATUS_LABELS[sceneStatus]}</span></div>
                 </div>
-                <div class="sb-scene-meta">${shotCount} plan(s)</div>
+                <div class="sb-scene-meta">${shotCount} plan(s)${!isFinal ? ' • <span style="color:#ff9800;">brouillon</span>' : ''}</div>
             `;
             div.onclick = () => Storyboard.selectScene(scene.id);
             container.appendChild(div);
@@ -25695,6 +25714,33 @@ const Storyboard = {
         container.innerHTML = '';
         
         if(!state.data.shots) state.data.shots = [];
+        
+        // [Phase D - Bug 3] Si la scène n'est pas finalisée, afficher un appel à validation
+        const currentScene = state.data.scenes.find(s => s.id === Storyboard.currentSceneId);
+        if(currentScene && currentScene.isFinal !== true) {
+            const addBtn = document.querySelector('#sbShotsContainer > button');
+            if(addBtn) addBtn.style.display = 'none'; // masquer "Ajouter un Plan"
+            container.innerHTML = `
+                <div style="text-align:center; padding:50px 20px; max-width:500px; margin:30px auto; background:var(--panel-bg); border:2px dashed #ff9800; border-radius:12px;">
+                    <div style="font-size:3rem; margin-bottom:15px;">📝</div>
+                    <h3 style="color:#ff9800; margin:0 0 10px 0;">Scène non validée</h3>
+                    <p style="color:var(--text-sec); margin:0 0 20px 0; line-height:1.5;">
+                        Avant de créer un storyboard pour <strong>"${Utils.escape(currentScene.title)}"</strong>, 
+                        vous devez valider la scène. Cela garantit que le texte est définitif avant d'investir du temps en illustration.
+                    </p>
+                    <button onclick="app.Actions.finalizeScene('${currentScene.id}')" style="padding:12px 24px; background:var(--success); color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:1rem;">
+                        ✅ Valider cette scène
+                    </button>
+                    <div style="margin-top:15px; font-size:0.85rem; color:var(--text-sec);">
+                        💡 Vous pouvez aussi valider depuis le Séquencier ou le Scénario.
+                    </div>
+                </div>
+            `;
+            return;
+        }
+        // Scène finalisée : on s'assure que le bouton "Ajouter un Plan" est visible
+        const addBtn = document.querySelector('#sbShotsContainer > button');
+        if(addBtn) addBtn.style.display = '';
         
         const shots = state.data.shots
             .filter(s => s.sceneId === Storyboard.currentSceneId)
@@ -26079,6 +26125,13 @@ const Storyboard = {
             return;
         }
         if(!Storyboard.currentSceneId) return;
+        
+        // [Phase D - Bug 3] Sécurité : empêcher l'ajout de plans pour une scène non validée
+        const targetScene = state.data.scenes.find(s => s.id === Storyboard.currentSceneId);
+        if(targetScene && targetScene.isFinal !== true) {
+            Utils.toast('Validez la scène avant d\'ajouter des plans', 'warning');
+            return;
+        }
         
         const existingShots = state.data.shots.filter(s => s.sceneId === Storyboard.currentSceneId);
         const maxOrder = existingShots.length > 0 ? Math.max(...existingShots.map(s => s.order)) : -1;
@@ -44683,6 +44736,26 @@ const History = {
         MERGE: { icon: '🔗', label: 'Fusion', class: 'merge' }
     },
     
+    // === Helper : extrait tous les champs scalaires d'un item (auto-extensible) ===
+    // Exclut id et les champs passés dans excludeKeys (typiquement les médias gérés séparément)
+    // Capture aussi les arrays courts d'éléments simples (ex: availabilityDates) en JSON
+    _extractScalars: (item, excludeKeys = []) => {
+        if(!item || typeof item !== 'object') return {};
+        const result = {};
+        const skip = new Set(['id', ...(excludeKeys || [])]);
+        for(const [k, v] of Object.entries(item)) {
+            if(skip.has(k)) continue;
+            if(v === null || v === undefined || v === '') continue;
+            if(typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+                result[k] = v;
+            } else if(Array.isArray(v) && v.length > 0 && v.every(x => typeof x === 'string' || typeof x === 'number')) {
+                result[k] = v;
+            }
+            // Objets et tableaux complexes ignorés (évite de capturer breakdown, drawings, etc.)
+        }
+        return result;
+    },
+    
     // === Helper D1 : capturer le contenu récupérable AVANT suppression ===
     // Retourne un objet "recoverable" prêt à être inclus dans une entrée d'historique
     // kind : 'scene', 'actor', 'character', 'location', 'resource', 'crew', 'shot', 'expense', 'episode', 'season'
@@ -44735,9 +44808,11 @@ const History = {
                         if(url) recoverable.media.push({ kind: 'gallery', label: `Photo galerie ${i+1}`, url });
                     }
                 }
-                recoverable.metadata = { name: item.name, role: item.role, email: item.email, phone: item.phone, bio: item.bio };
+                // Capture exhaustive de tous les champs scalaires (auto-extensible)
+                recoverable.metadata = History._extractScalars(item, ['photo', 'galleryPhotos', 'availabilityDates']);
+                if(item.bio) recoverable.text = { label: 'Bio', preview: item.bio.substring(0, 200), content: item.bio };
             } else if(kind === 'character') {
-                recoverable.metadata = { name: item.name, description: item.description, bio: item.bio, role: item.role };
+                recoverable.metadata = History._extractScalars(item, []);
                 if(item.bio) recoverable.text = { label: 'Bio', preview: item.bio.substring(0, 200), content: item.bio };
             } else if(kind === 'location') {
                 if(Array.isArray(item.galleryPhotos)) {
@@ -44746,11 +44821,12 @@ const History = {
                         if(url) recoverable.media.push({ kind: 'gallery', label: `Photo ${i+1}`, url });
                     }
                 }
-                recoverable.metadata = { name: item.name, address: item.address, desc: item.desc };
+                recoverable.metadata = History._extractScalars(item, ['galleryPhotos']);
+                if(item.desc) recoverable.text = { label: 'Description', preview: item.desc.substring(0, 200), content: item.desc };
             } else if(kind === 'resource') {
                 const photoUrl = item.photo ? await uploadToHistory(item.photo, 'photo') : null;
                 if(photoUrl) recoverable.media.push({ kind: 'photo', label: 'Photo', url: photoUrl });
-                recoverable.metadata = { name: item.name, category: item.category, description: item.description, note: item.note };
+                recoverable.metadata = History._extractScalars(item, ['photo']);
                 if(item.description) recoverable.text = { label: 'Description', preview: item.description.substring(0, 200), content: item.description };
             } else if(kind === 'crew') {
                 const photoUrl = item.photo ? await uploadToHistory(item.photo, 'photo') : null;
@@ -44761,7 +44837,7 @@ const History = {
                         if(url) recoverable.media.push({ kind: 'gallery', label: `Photo galerie ${i+1}`, url });
                     }
                 }
-                recoverable.metadata = { name: item.name, role: item.role, email: item.email, phone: item.phone, dailyRate: item.dailyRate };
+                recoverable.metadata = History._extractScalars(item, ['photo', 'galleryPhotos', 'availabilityDates']);
             } else if(kind === 'shot') {
                 if(item.imageUrl) {
                     const url = await uploadToHistory(item.imageUrl, 'main');
@@ -45120,7 +45196,7 @@ const History = {
                             <div style="font-size:0.9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeLabel}</div>
                         </div>
                         <button onclick="app.History.viewImage('${safeUrl}', '${safeLabel.replace(/'/g, '&#39;')}')" style="padding:4px 10px; background:var(--bg); border:1px solid var(--border); border-radius:4px; cursor:pointer; font-size:0.8rem; flex-shrink:0;">👁️ Voir</button>
-                        <a href="${safeUrl}" download="${safeLabel}" style="padding:4px 10px; background:var(--primary); color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:0.8rem; text-decoration:none; flex-shrink:0;">⬇️ Télécharger</a>
+                        <button onclick="app.History.downloadImage('${safeUrl}', '${safeLabel.replace(/'/g, '&#39;')}')" style="padding:4px 10px; background:var(--primary); color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:0.8rem; flex-shrink:0;">⬇️ Télécharger</button>
                     </div>
                 `;
             }).filter(Boolean).join('');
@@ -45171,6 +45247,34 @@ const History = {
             </div>
         `;
         document.body.appendChild(overlay);
+    },
+    
+    // Téléchargement réel d'une image (fetch + blob pour bypass le bug cross-origin de <a download>)
+    downloadImage: async (url, label) => {
+        try {
+            Utils.toast('Téléchargement...', 'info', 1500);
+            const response = await fetch(url, { mode: 'cors' });
+            if(!response.ok) throw new Error('HTTP ' + response.status);
+            const blob = await response.blob();
+            // Déterminer l'extension
+            const ext = blob.type === 'image/png' ? 'png' : (blob.type === 'image/svg+xml' ? 'svg' : (blob.type === 'image/gif' ? 'gif' : 'jpg'));
+            // Construire un nom de fichier propre
+            const cleanLabel = (label || 'image').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 60);
+            const filename = `${cleanLabel}.${ext}`;
+            // Trigger download
+            const blobUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+            Utils.toast(`Téléchargé : ${filename}`, 'success');
+        } catch(e) {
+            console.error('Download error:', e);
+            Utils.toast('Erreur téléchargement. Essayez clic-droit sur "Voir" → Enregistrer', 'error', 4000);
+        }
     },
     
     // Naviguer vers la fiche/zone concernée par une action (ADD/EDIT)
