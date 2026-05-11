@@ -6957,7 +6957,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.8.8</p>
+      <p>vv3.8.9</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -20974,12 +20974,21 @@ const tabToSection = {
                   }
               }
               
-              // Capturer le nom de l'item AVANT splice pour le journal
-              const deletedItemName = state.data[type][idx]?.name || 'Sans nom';
+              // Capturer l'item entier AVANT splice pour le journal enrichi (Phase D)
+              const deletedItem = state.data[type][idx];
+              const deletedItemName = deletedItem?.name || 'Sans nom';
               const typeLabel = type === 'characters' ? 'personnage' : (type === 'actors' ? 'comédien' : 'décor');
+              const recoverableKind = type === 'characters' ? 'character' : (type === 'actors' ? 'actor' : 'location');
+              
+              // Générer un logId à l'avance pour permettre l'upload des médias dans history/<logId>_*
+              const logId = 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+              const recoverable = await History.captureRecoverable(deletedItem, recoverableKind, logId);
               
               state.data[type].splice(idx, 1); 
-              History.log('DELETE', `Suppression ${typeLabel} : ${deletedItemName}`);
+              History.log('DELETE', `Suppression ${typeLabel} : ${deletedItemName}`, {
+                  target: { kind: recoverableKind, id: deletedItem?.id, label: deletedItemName },
+                  recoverable: recoverable
+              });
               Store.save(); 
               type === 'characters' ? UI.renderDataTab('characters', els.charContainer) : (type === 'actors' ? UI.renderDataTab('actors', els.actorContainer) : UI.renderDataTab('locations', els.locContainer)); 
           } 
@@ -21477,12 +21486,21 @@ const tabToSection = {
       },
       removeActorGalleryPhoto: async (actorIdx, photoIdx) => {
           if(state.data.actors[actorIdx] && state.data.actors[actorIdx].galleryPhotos) {
-              const actorName = state.data.actors[actorIdx].name || 'comédien';
-              const removedUrl = state.data.actors[actorIdx].galleryPhotos[photoIdx];
-              state.data.actors[actorIdx].galleryPhotos.splice(photoIdx, 1);
-              // Supprimer le fichier du Storage (si c'est une URL Storage, sinon ignoré)
-              if(removedUrl) Utils.deleteProjectFile(removedUrl);
-              History.log('DELETE', `Suppression photo galerie de ${actorName}`, {}, 'minor');
+              const actor = state.data.actors[actorIdx];
+              const actorName = actor.name || 'comédien';
+              const removedUrl = actor.galleryPhotos[photoIdx];
+              actor.galleryPhotos.splice(photoIdx, 1);
+              // [Phase D] On ne supprime PAS le fichier Storage : on le garde référencé dans le journal
+              // Il sera supprimé automatiquement par cleanupExpiredEntry quand l'entrée sortira du cap
+              const recoverable = removedUrl ? {
+                  text: null,
+                  media: [{ kind: 'gallery', label: `Photo galerie de ${actorName}`, url: removedUrl }],
+                  metadata: { actorId: actor.id, actorName: actorName, photoIndex: photoIdx }
+              } : null;
+              History.log('DELETE', `Suppression photo galerie de ${actorName}`, {
+                  target: { kind: 'actor', id: actor.id, label: actorName },
+                  recoverable: recoverable
+              });
               Store.save();
               UI.renderDataTab('actors', els.actorContainer);
               CardModal.refresh();
@@ -21538,11 +21556,20 @@ const tabToSection = {
       },
       removeLocationPhoto: async (locIdx, photoIdx) => {
           if(state.data.locations[locIdx] && state.data.locations[locIdx].galleryPhotos) {
-              const locNameRm = state.data.locations[locIdx].name || 'décor';
-              const removedUrl = state.data.locations[locIdx].galleryPhotos[photoIdx];
-              state.data.locations[locIdx].galleryPhotos.splice(photoIdx, 1);
-              if(removedUrl) Utils.deleteProjectFile(removedUrl);
-              History.log('DELETE', `Suppression photo galerie de ${locNameRm}`, {}, 'minor');
+              const loc = state.data.locations[locIdx];
+              const locNameRm = loc.name || 'décor';
+              const removedUrl = loc.galleryPhotos[photoIdx];
+              loc.galleryPhotos.splice(photoIdx, 1);
+              // [Phase D] On ne supprime PAS le fichier Storage (gardé dans le journal)
+              const recoverable = removedUrl ? {
+                  text: null,
+                  media: [{ kind: 'gallery', label: `Photo de ${locNameRm}`, url: removedUrl }],
+                  metadata: { locationId: loc.id, locationName: locNameRm, photoIndex: photoIdx }
+              } : null;
+              History.log('DELETE', `Suppression photo galerie de ${locNameRm}`, {
+                  target: { kind: 'location', id: loc.id, label: locNameRm },
+                  recoverable: recoverable
+              });
               Store.save();
               UI.renderDataTab('locations', els.locContainer);
               CardModal.refresh();
@@ -31346,11 +31373,20 @@ const DrawingEditor = {
     removeGalleryPhoto: async (crewIdx, photoIdx) => {
         if(state.currentRole === 'viewer') return;
         if(state.data.crew[crewIdx] && state.data.crew[crewIdx].galleryPhotos) {
-            const crewRmName = state.data.crew[crewIdx].name || 'technicien';
-            const removedUrl = state.data.crew[crewIdx].galleryPhotos[photoIdx];
-            state.data.crew[crewIdx].galleryPhotos.splice(photoIdx, 1);
-            if(removedUrl) Utils.deleteProjectFile(removedUrl);
-            History.log('DELETE', `Suppression photo galerie de ${crewRmName}`, {}, 'minor');
+            const member = state.data.crew[crewIdx];
+            const crewRmName = member.name || 'technicien';
+            const removedUrl = member.galleryPhotos[photoIdx];
+            member.galleryPhotos.splice(photoIdx, 1);
+            // [Phase D] On ne supprime PAS le fichier Storage (gardé dans le journal)
+            const recoverable = removedUrl ? {
+                text: null,
+                media: [{ kind: 'gallery', label: `Photo galerie de ${crewRmName}`, url: removedUrl }],
+                metadata: { crewId: member.id, crewName: crewRmName, photoIndex: photoIdx }
+            } : null;
+            History.log('DELETE', `Suppression photo galerie de ${crewRmName}`, {
+                target: { kind: 'crew', id: member.id, label: crewRmName },
+                recoverable: recoverable
+            });
             Store.save();
             UI.renderCrewTab();
             CardModal.refresh();
