@@ -6957,7 +6957,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.8.3</p>
+      <p>vv3.8.5</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -12432,6 +12432,35 @@ crewRoles: {
           }
       },
       
+      // === Upload d'un dataUrl base64 directement (sans compression supplémentaire) ===
+      // Utile pour les calques de dessin canvas qui sont déjà au format PNG/JPEG optimal
+      // Si upsertPath est fourni, le fichier écrase celui à ce chemin (utile pour save de calques)
+      uploadDataUrl: async (dataUrl, filePath, upsert = true) => {
+          if(!state.currentProjectId) return null;
+          if(!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return null;
+          if(!filePath) return null;
+          
+          try {
+              const blob = await (await fetch(dataUrl)).blob();
+              const { error: uploadErr } = await supabase.storage
+                  .from('projects')
+                  .upload(filePath, blob, {
+                      contentType: blob.type,
+                      upsert: upsert
+                  });
+              if(uploadErr) {
+                  console.error('Erreur upload calque Storage:', uploadErr);
+                  return null;
+              }
+              const { data: urlData } = supabase.storage.from('projects').getPublicUrl(filePath);
+              // Ajout d'un cache-buster pour éviter que le navigateur affiche une vieille version après upsert
+              return urlData?.publicUrl ? `${urlData.publicUrl}?t=${Date.now()}` : null;
+          } catch(e) {
+              console.error('Exception upload calque Storage:', e);
+              return null;
+          }
+      },
+      
       // === Diagnostic : taille du projet par section + détection base64 ===
       // À lancer depuis la console : app.Utils.diagnoseProjectSize()
       diagnoseProjectSize: () => {
@@ -12653,6 +12682,163 @@ crewRoles: {
               console.log(`  [${i}] ${date.toString().padEnd(20)} | ${(size/1024/1024).toFixed(2)} Mo | ${label}`);
           });
           return snaps;
+      },
+      
+      // === Migration des données storyboard existantes (base64 → Storage) ===
+      // À lancer manuellement depuis la console : await app.Utils.migrateStoryboard()
+      // Idempotent : peut être relancé sans risque (les URLs Storage sont skippées)
+      // Conservateur : si un upload échoue, le base64 est conservé pour ne pas perdre les données
+      //
+      // Migre :
+      //  - shot.imageUrl (image principale uploadée) → Storage
+      //  - shot.drawings[kind].objects[].imageData (objets vectoriels images) → Storage
+      //  - shot.drawings[kind].drawingData.layers[].imageData (calques de dessin) → Storage (upsert)
+      //  - shot.versions[].data.layers[].imageData (versions historiques) → Storage (timestamp)
+      //  - shot.drawingData.layers[].imageData (compat backwards 'original') → Storage (upsert)
+      migrateStoryboard: async () => {
+          if(!state.currentProjectId) { console.error('Aucun projet ouvert'); return; }
+          if(!state.data) { console.error('state.data vide'); return; }
+          if(!Array.isArray(state.data.shots) || state.data.shots.length === 0) {
+              console.log('ℹ️ Aucun shot dans ce projet, rien à migrer');
+              return;
+          }
+          
+          console.log(`🔄 Démarrage migration storyboard de ${state.data.shots.length} shot(s)...`);
+          let totalProcessed = 0, totalSuccess = 0, totalFailed = 0, totalSkipped = 0;
+          const isBase64 = (val) => typeof val === 'string' && val.startsWith('data:');
+          
+          // Helper : convertir un dataUrl en blob
+          const dataUrlToBlob = async (dataUrl) => {
+              try {
+                  const res = await fetch(dataUrl);
+                  return await res.blob();
+              } catch(e) { return null; }
+          };
+          
+          // Helper : uploader un base64 vers Storage avec chemin déterministe
+          const uploadToStorage = async (dataUrl, filePath, upsert = true) => {
+              const blob = await dataUrlToBlob(dataUrl);
+              if(!blob) return null;
+              try {
+                  const { error: upErr } = await supabase.storage.from('projects').upload(filePath, blob, { contentType: blob.type, upsert: upsert });
+                  if(upErr) { console.warn('Échec upload', filePath, upErr.message); return null; }
+                  const { data: urlData } = supabase.storage.from('projects').getPublicUrl(filePath);
+                  return urlData?.publicUrl ? `${urlData.publicUrl}?t=${Date.now()}` : null;
+              } catch(e) {
+                  console.warn('Exception upload', filePath, e);
+                  return null;
+              }
+          };
+          
+          // Parcourir tous les shots
+          for(const shot of state.data.shots) {
+              const shotId = shot.id || 'unknown';
+              
+              // 1) shot.imageUrl (image principale uploadée)
+              if(isBase64(shot.imageUrl)) {
+                  totalProcessed++;
+                  const filePath = `${state.currentProjectId}/storyboard/${shotId}_main_migrated_${Date.now()}.jpg`;
+                  const url = await uploadToStorage(shot.imageUrl, filePath, false);
+                  if(url) { shot.imageUrl = url; totalSuccess++; }
+                  else { totalFailed++; }
+              } else if(shot.imageUrl) {
+                  totalSkipped++;
+              }
+              
+              // 2) shot.drawings[kind] : objects[] + drawingData.layers[]
+              if(shot.drawings) {
+                  for(const kind of ['original', 'lighting', 'camera', 'actors']) {
+                      const zone = shot.drawings[kind];
+                      if(!zone) continue;
+                      
+                      // 2a) Objets vectoriels (images insérées)
+                      if(Array.isArray(zone.objects)) {
+                          for(const obj of zone.objects) {
+                              if(obj.type !== 'image') continue;
+                              if(isBase64(obj.imageData)) {
+                                  totalProcessed++;
+                                  const filePath = `${state.currentProjectId}/storyboard/${shotId}_${kind}_obj_${obj.id || Date.now()}.jpg`;
+                                  const url = await uploadToStorage(obj.imageData, filePath, false);
+                                  if(url) { obj.imageData = url; totalSuccess++; }
+                                  else { totalFailed++; }
+                              } else if(obj.imageData) {
+                                  totalSkipped++;
+                              }
+                          }
+                      }
+                      
+                      // 2b) Calques de dessin (chemin déterministe = upsert si re-migration)
+                      if(zone.drawingData && Array.isArray(zone.drawingData.layers)) {
+                          for(const layer of zone.drawingData.layers) {
+                              if(isBase64(layer.imageData)) {
+                                  totalProcessed++;
+                                  const filePath = `${state.currentProjectId}/storyboard/${shotId}_${kind}_layer_${layer.id || 'unknown'}.png`;
+                                  const url = await uploadToStorage(layer.imageData, filePath, true);
+                                  if(url) { layer.imageData = url; totalSuccess++; }
+                                  else { totalFailed++; }
+                              } else if(layer.imageData) {
+                                  totalSkipped++;
+                              }
+                          }
+                      }
+                  }
+              }
+              
+              // 3) Versions historiques (shot.versions[].data.layers[])
+              if(Array.isArray(shot.versions)) {
+                  for(const version of shot.versions) {
+                      if(!version.data || !Array.isArray(version.data.layers)) continue;
+                      const versionKind = version.kind || 'original';
+                      const versionTs = version.timestamp || Date.now();
+                      for(const layer of version.data.layers) {
+                          if(isBase64(layer.imageData)) {
+                              totalProcessed++;
+                              const filePath = `${state.currentProjectId}/storyboard/${shotId}_${versionKind}_layer_${layer.id || 'unknown'}_v${versionTs}.png`;
+                              const url = await uploadToStorage(layer.imageData, filePath, false);
+                              if(url) { layer.imageData = url; totalSuccess++; }
+                              else { totalFailed++; }
+                          } else if(layer.imageData) {
+                              totalSkipped++;
+                          }
+                      }
+                  }
+              }
+              
+              // 4) Compat backwards : shot.drawingData.layers[] (alias de shot.drawings.original.drawingData.layers[])
+              // Note : si shot.drawings.original.drawingData.layers a déjà été migré, ce sont les MÊMES références
+              // mais en pratique JSON.parse a souvent cloné, donc on traite séparément
+              if(shot.drawingData && Array.isArray(shot.drawingData.layers)) {
+                  for(const layer of shot.drawingData.layers) {
+                      if(isBase64(layer.imageData)) {
+                          totalProcessed++;
+                          const filePath = `${state.currentProjectId}/storyboard/${shotId}_original_layer_${layer.id || 'unknown'}.png`;
+                          const url = await uploadToStorage(layer.imageData, filePath, true);
+                          if(url) { layer.imageData = url; totalSuccess++; }
+                          else { totalFailed++; }
+                      } else if(layer.imageData) {
+                          totalSkipped++;
+                      }
+                  }
+              }
+          }
+          
+          console.log(`✅ Migration storyboard terminée.`);
+          console.log(`   Traité : ${totalProcessed}, Succès : ${totalSuccess}, Échecs : ${totalFailed}, Skippés (déjà URL) : ${totalSkipped}`);
+          
+          if(totalSuccess > 0) {
+              console.log('💾 Sauvegarde du projet allégé...');
+              await Store.save();
+              console.log('✅ Projet sauvegardé. Rechargez la page (F5) pour vérifier.');
+              Utils.toast(`Migration storyboard : ${totalSuccess} image(s) migrées (${totalFailed} échecs)`, 'success', 6000);
+          } else if(totalProcessed === 0) {
+              console.log('ℹ️ Rien à migrer (tout est déjà en Storage ou aucun contenu base64).');
+              Utils.toast('Storyboard : aucune image base64 à migrer', 'info');
+          } else {
+              console.warn('⚠️ Aucune migration n\'a réussi. Vérifiez les permissions du bucket.');
+              Utils.toast('Migration échouée. Vérifiez la console.', 'error');
+          }
+          
+          return { totalProcessed, totalSuccess, totalFailed, totalSkipped };
       },
       
       // === Purge des snapshots : garde uniquement les N plus récents (par défaut 3) ===
@@ -20385,11 +20571,12 @@ const tabToSection = {
       },
       
       // Sauvegarde automatique (appelée par Store.save)
+      // Limite par défaut : 5 snapshots auto + tous les snapshots manuels (jamais purgés automatiquement)
       createAutoSnapshot: (trigger = 'Auto') => {
           // Clonage profond des données actuelles
           const snapshotData = JSON.parse(JSON.stringify(state.data));
           
-          // Ne pas stocker les snapshots dans un snapshot
+          // Ne pas stocker les snapshots dans un snapshot (évite récursion)
           delete snapshotData.snapshots;
           
           const snapshot = {
@@ -20406,13 +20593,26 @@ const tabToSection = {
           // Ajouter au début (plus récent en premier)
           state.data.snapshots.unshift(snapshot);
           
-          // Garder seulement les 20 dernières sauvegardes
-          if(state.data.snapshots.length > 20) {
-              state.data.snapshots = state.data.snapshots.slice(0, 20);
-          }
+          // === Nouvelle politique de rétention ===
+          // - Tous les snapshots manuels (trigger='Manuel') sont gardés
+          // - Maximum 5 snapshots auto (les + récents)
+          const manualSnaps = state.data.snapshots.filter(s => s.trigger === 'Manuel');
+          const autoSnaps = state.data.snapshots.filter(s => s.trigger !== 'Manuel').slice(0, 5);
+          // Reconstruire en gardant l'ordre antichronologique
+          const merged = [...manualSnaps, ...autoSnaps].sort((a, b) => new Date(b.date) - new Date(a.date));
+          state.data.snapshots = merged;
+          
+          // === Alerte : projet trop gros ? ===
+          try {
+              const sizeBytes = JSON.stringify(state.data).length;
+              const sizeMb = sizeBytes / 1024 / 1024;
+              if(sizeMb > 15) {
+                  console.warn(`⚠️ Projet volumineux : ${sizeMb.toFixed(1)} Mo. Risque de timeout lors des saves. Pensez à purger les snapshots ou migrer les médias vers Storage.`);
+              }
+          } catch(e) {}
       },
       
-      // Vérifier si on doit créer un snapshot auto (toutes les 5 min max)
+      // Vérifier si on doit créer un snapshot auto (toutes les 30 min max)
       shouldAutoSnapshot: () => {
           if(!state.data.snapshots || state.data.snapshots.length === 0) return true;
           
@@ -20423,7 +20623,7 @@ const tabToSection = {
           const now = new Date();
           const diffMinutes = (now - lastDate) / (1000 * 60);
           
-          return diffMinutes >= 5;
+          return diffMinutes >= 30;
       },
       
       restoreSnapshot: async (index) => {
@@ -26013,6 +26213,53 @@ const Storyboard = {
         
         const shot = state.data.shots.find(s => s.id === shotId);
         const scene = state.data.scenes.find(s => s.id === shot?.sceneId);
+        
+        // === Nettoyer tous les fichiers Storage associés à ce shot ===
+        if(shot) {
+            // 1. Image principale uploadée
+            if(shot.imageUrl) Utils.deleteProjectFile(shot.imageUrl);
+            // 2. Images insérées comme objets vectoriels + calques de dessin
+            if(shot.drawings) {
+                ['original', 'lighting', 'camera', 'actors'].forEach(kind => {
+                    const zone = shot.drawings[kind];
+                    if(zone) {
+                        // Objets vectoriels (images insérées)
+                        if(Array.isArray(zone.objects)) {
+                            zone.objects.forEach(obj => {
+                                if(obj.type === 'image' && obj.imageData) Utils.deleteProjectFile(obj.imageData);
+                            });
+                        }
+                        // Calques de dessin (Phase B2)
+                        if(zone.drawingData && Array.isArray(zone.drawingData.layers)) {
+                            zone.drawingData.layers.forEach(layer => {
+                                if(layer.imageData) Utils.deleteProjectFile(layer.imageData);
+                            });
+                        }
+                    }
+                });
+            }
+            // 3. Versions historiques (saveVersion - Phase B2)
+            if(Array.isArray(shot.versions)) {
+                shot.versions.forEach(v => {
+                    if(v.data && Array.isArray(v.data.layers)) {
+                        v.data.layers.forEach(layer => {
+                            if(layer.imageData) Utils.deleteProjectFile(layer.imageData);
+                        });
+                    }
+                });
+            }
+            // 4. Sécurité : suppression par préfixe des fichiers Storage non répertoriés pour ce shot
+            try {
+                const { data: files } = await supabase.storage.from('projects').list(`${state.currentProjectId}/storyboard`);
+                if(files) {
+                    const toDelete = files.filter(f => f.name.startsWith(`${shotId}_`)).map(f => `${state.currentProjectId}/storyboard/${f.name}`);
+                    if(toDelete.length > 0) {
+                        await supabase.storage.from('projects').remove(toDelete);
+                    }
+                }
+            } catch(e) { /* silent */ }
+        }
+        
         state.data.shots = state.data.shots.filter(s => s.id !== shotId);
         History.log('DELETE', `Suppression plan storyboard : ${scene?.title || 'Scène inconnue'}`);
         Store.save();
@@ -26204,6 +26451,10 @@ const Storyboard = {
         if(!imageData) return null;
         
         const img = new Image();
+        // Si l'image vient de Storage (URL https), activer CORS pour permettre le drawImage dans canvas (exports PDF)
+        if(typeof imageData === 'string' && imageData.startsWith('http')) {
+            img.crossOrigin = 'anonymous';
+        }
         Storyboard._svgImageCache[cacheKey] = { img: img, ready: false };
         
         img.onload = () => {
@@ -26367,26 +26618,36 @@ const Storyboard = {
         input.click();
     },
     
-    handleImageUpload: (shotId, event) => {
+    handleImageUpload: async (shotId, event) => {
         const file = event.target.files[0];
         if(!file) return;
+        event.target.value = ''; // reset (avant async)
         
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const shot = state.data.shots.find(s => s.id === shotId);
-            if(shot) {
-                shot.imageType = 'upload';
-                shot.imageUrl = e.target.result;
-                shot.lastModified = Date.now();
-                Store.save();
-                Storyboard.renderShots();
-                // Rafraîchir la modale si elle est ouverte
-                if(Storyboard.currentEditingShotId === shotId) {
-                    Storyboard.refreshEditModal(shotId);
-                }
+        Utils.toast('Envoi de l\'image...', 'info', 2000);
+        
+        // Upload vers Storage (avec compression : 1920px max, JPEG 0.9, max 1.5 Mo)
+        const url = await Utils.uploadProjectFile(file, {
+            category: 'storyboard',
+            entityId: shotId,
+            kind: 'photo',
+            maxDimension: 1920, quality: 0.9, maxKb: 1500
+        });
+        if(!url) return; // erreur déjà signalée
+        
+        const shot = state.data.shots.find(s => s.id === shotId);
+        if(shot) {
+            // Si l'ancienne image était déjà en Storage, on la supprime
+            if(shot.imageUrl) await Utils.deleteProjectFile(shot.imageUrl);
+            shot.imageType = 'upload';
+            shot.imageUrl = url;
+            shot.lastModified = Date.now();
+            Store.save();
+            Storyboard.renderShots();
+            // Rafraîchir la modale si elle est ouverte
+            if(Storyboard.currentEditingShotId === shotId) {
+                Storyboard.refreshEditModal(shotId);
             }
-        };
-        reader.readAsDataURL(file);
+        }
     },
     
 	currentEditingShotId: null,
@@ -27011,9 +27272,16 @@ const DrawingEditor = {
                         canvas.height = 600;
                         const ctx = canvas.getContext('2d');
                         const img = new Image();
+                        // Si l'imageData est une URL HTTP (Storage), activer CORS pour éviter le canvas tainted
+                        if(typeof layer.imageData === 'string' && layer.imageData.startsWith('http')) {
+                            img.crossOrigin = 'anonymous';
+                        }
                         img.onload = () => {
                             ctx.drawImage(img, 0, 0);
                             DrawingEditor.redraw();
+                        };
+                        img.onerror = () => {
+                            console.warn('[DrawingEditor] Erreur chargement calque depuis Storage:', layer.imageData?.substring(0, 80));
                         };
                         img.src = layer.imageData;
                         layer.canvas = canvas;
@@ -27526,7 +27794,7 @@ const DrawingEditor = {
         input.accept = 'image/*';
         input.style.display = 'none';
         
-        input.onchange = (e) => {
+        input.onchange = async (e) => {
             const file = e.target.files && e.target.files[0];
             if(!file) return;
             
@@ -27536,20 +27804,32 @@ const DrawingEditor = {
                 return;
             }
             
+            // Charger l'image pour récupérer ses dimensions natives
             const reader = new FileReader();
-            reader.onload = (ev) => {
+            reader.onload = async (ev) => {
                 const dataUrl = ev.target.result;
-                // Charger l'image pour récupérer ses dimensions natives
                 const img = new Image();
-                img.onload = () => {
-                    // Phase 4B v2 : compresser l'image avant stockage pour éviter les timeouts Supabase
-                    // Cible : max 1280×720, JPEG qualité 80 → ~150-300 Ko en base64
+                img.onload = async () => {
+                    // Compression locale pour avoir les bonnes dimensions canvas
                     const compressed = DrawingEditor._compressImage(img, 1280, 720, 0.8);
-                    // Logging utile pour diagnostiquer la compression
                     const before = Math.round(dataUrl.length / 1024);
                     const after = Math.round(compressed.dataUrl.length / 1024);
                     console.log(`[insertImage] ${img.width}×${img.height} → ${compressed.width}×${compressed.height} | ${before} Ko → ${after} Ko (${Math.round(100 * after / before)}%)`);
-                    DrawingEditor._addImageObject(compressed.dataUrl, compressed.width, compressed.height);
+                    
+                    // === Upload vers Storage (au lieu de garder le base64 en state.data) ===
+                    Utils.toast('Envoi de l\'image...', 'info', 2000);
+                    const blob = await (await fetch(compressed.dataUrl)).blob();
+                    const blobAsFile = new File([blob], 'storyboard_obj.jpg', { type: blob.type || 'image/jpeg' });
+                    const url = await Utils.uploadProjectFile(blobAsFile, {
+                        category: 'storyboard',
+                        entityId: DrawingEditor.currentShotId || 'shot',
+                        kind: 'gallery',  // multiple par shot
+                        maxDimension: 1280, quality: 0.8, maxKb: 500
+                    });
+                    if(!url) return; // erreur déjà signalée
+                    
+                    // _addImageObject va recevoir l'URL Storage à la place du base64
+                    DrawingEditor._addImageObject(url, compressed.width, compressed.height);
                 };
                 img.onerror = () => {
                     Utils.toast('Erreur de chargement de l\'image', 'error');
@@ -28659,7 +28939,7 @@ const DrawingEditor = {
         DrawingEditor.renderLayers();
     },
     
-    save: () => {
+    save: async () => {
         if(!DrawingEditor.currentShotId) return;
         
         const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
@@ -28676,13 +28956,22 @@ const DrawingEditor = {
         }
         
         // Convert layers to serializable format
-        const drawingData = {
-            layers: DrawingEditor.layers.map(layer => ({
+        // Upload de chaque calque vers Storage (upsert : écrasement du même chemin)
+        Utils.toast('Sauvegarde en cours...', 'info', 2000);
+        const shotId = DrawingEditor.currentShotId;
+        const layerUploads = await Promise.all(DrawingEditor.layers.map(async (layer) => {
+            const dataUrl = layer.canvas.toDataURL();
+            const filePath = `${state.currentProjectId}/storyboard/${shotId}_${kind}_layer_${layer.id}.png`;
+            const url = await Utils.uploadDataUrl(dataUrl, filePath, true);
+            return {
                 id: layer.id,
                 visible: layer.visible,
                 name: layer.name,
-                imageData: layer.canvas.toDataURL()
-            })),
+                imageData: url || dataUrl  // fallback base64 si upload échoue
+            };
+        }));
+        const drawingData = {
+            layers: layerUploads,
             currentLayer: DrawingEditor.currentLayerIndex
         };
         
@@ -28715,31 +29004,59 @@ const DrawingEditor = {
         Utils.toast(zoneLabel + ' sauvegardé !', 'success');
     },
     
-    saveVersion: () => {
+    saveVersion: async () => {
         if(!DrawingEditor.currentShotId) return;
         
         const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
         if(!shot) return;
         
-        // Save current state as a version
-        const drawingData = {
-            layers: DrawingEditor.layers.map(layer => ({
+        // Phase 1 Storyboard : versionner avec le kind, pour pouvoir restaurer dans la bonne zone
+        const kind = DrawingEditor.currentKind || 'original';
+        const shotId = DrawingEditor.currentShotId;
+        const versionTs = Date.now();
+        
+        // Upload de chaque calque vers Storage avec timestamp dans le nom (version historique)
+        Utils.toast('Sauvegarde de la version...', 'info', 2000);
+        const versionLayerUploads = await Promise.all(DrawingEditor.layers.map(async (layer) => {
+            const dataUrl = layer.canvas.toDataURL();
+            const versionPath = `${state.currentProjectId}/storyboard/${shotId}_${kind}_layer_${layer.id}_v${versionTs}.png`;
+            const url = await Utils.uploadDataUrl(dataUrl, versionPath, false);
+            return {
                 id: layer.id,
                 visible: layer.visible,
                 name: layer.name,
-                imageData: layer.canvas.toDataURL()
-            })),
+                imageData: url || dataUrl  // fallback base64 si upload échoue
+            };
+        }));
+        // Version sauvegardée (avec URLs Storage timestampées)
+        const versionDrawingData = {
+            layers: versionLayerUploads,
+            currentLayer: DrawingEditor.currentLayerIndex
+        };
+        
+        // Pour la version courante du shot, on upload aussi avec upsert (même chemin que save())
+        const currentLayerUploads = await Promise.all(DrawingEditor.layers.map(async (layer) => {
+            const dataUrl = layer.canvas.toDataURL();
+            const currentPath = `${state.currentProjectId}/storyboard/${shotId}_${kind}_layer_${layer.id}.png`;
+            const url = await Utils.uploadDataUrl(dataUrl, currentPath, true);
+            return {
+                id: layer.id,
+                visible: layer.visible,
+                name: layer.name,
+                imageData: url || dataUrl
+            };
+        }));
+        const drawingData = {
+            layers: currentLayerUploads,
             currentLayer: DrawingEditor.currentLayerIndex
         };
         
         if(!shot.versions) shot.versions = [];
         
-        // Phase 1 Storyboard : versionner avec le kind, pour pouvoir restaurer dans la bonne zone
-        const kind = DrawingEditor.currentKind || 'original';
         shot.versions.push({
-            timestamp: Date.now(),
+            timestamp: versionTs,
             kind: kind,
-            data: drawingData
+            data: versionDrawingData
         });
         
         // Phase 1 Storyboard : écrire dans la zone correspondante
