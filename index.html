@@ -12641,6 +12641,52 @@ crewRoles: {
           return { totalSize: fullSize, sections: sizes, base64Count, base64Size, longStrings: longStrings.slice(0, 10) };
       },
       
+      // === Diagnostic des snapshots du projet courant ===
+      // À lancer depuis la console : app.Utils.diagnoseSnapshots()
+      diagnoseSnapshots: () => {
+          const snaps = state.data?.snapshots || [];
+          console.log(`📸 ${snaps.length} snapshots dans le projet :`);
+          snaps.forEach((s, i) => {
+              const size = JSON.stringify(s).length;
+              const date = s.timestamp ? new Date(s.timestamp).toLocaleString('fr-FR') : (s.date || 'inconnu');
+              const label = s.label || s.name || s.reason || s.note || 'auto';
+              console.log(`  [${i}] ${date.toString().padEnd(20)} | ${(size/1024/1024).toFixed(2)} Mo | ${label}`);
+          });
+          return snaps;
+      },
+      
+      // === Purge des snapshots : garde uniquement les N plus récents (par défaut 3) ===
+      // À lancer depuis la console : await app.Utils.purgeSnapshots(3)
+      // Si labeled=true, on garde aussi tous les snapshots avec un label manuel
+      purgeSnapshots: async (keepCount = 3, keepLabeled = true) => {
+          if(!state.data) { console.log('No data'); return; }
+          if(!Array.isArray(state.data.snapshots)) { console.log('Aucun snapshot'); return; }
+          const before = state.data.snapshots.length;
+          const beforeSize = JSON.stringify(state.data.snapshots).length;
+          
+          // Tri par date décroissante (les plus récents d'abord)
+          state.data.snapshots.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          
+          // Définir lesquels garder
+          const kept = [];
+          state.data.snapshots.forEach((s, i) => {
+              const hasLabel = s.label || s.name;
+              if(i < keepCount) kept.push(s);
+              else if(keepLabeled && hasLabel) kept.push(s);
+          });
+          
+          state.data.snapshots = kept;
+          const afterSize = JSON.stringify(state.data.snapshots).length;
+          const freedMo = ((beforeSize - afterSize) / 1024 / 1024).toFixed(2);
+          
+          console.log(`✅ Purge : ${before} → ${kept.length} snapshots (${freedMo} Mo libérés)`);
+          console.log('💾 Sauvegarde du projet allégé...');
+          await Store.save();
+          console.log('✅ Projet sauvegardé. Rechargez la page.');
+          Utils.toast(`${before - kept.length} snapshots supprimés (${freedMo} Mo)`, 'success', 5000);
+          return { before, after: kept.length, freedMo };
+      },
+      
       getInitials: (email) => email.substring(0,2).toUpperCase(),
       getColor: (str) => { const colors = ['#f44336', '#E91E63', '#9C27B0', '#3F51B5', '#2196F3', '#009688', '#FF9800', '#795548']; let hash = 0; for(let i=0; i<str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash); return colors[Math.abs(hash) % colors.length]; },
       
