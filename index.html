@@ -6957,7 +6957,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.9.1</p>
+      <p>vv3.9.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -20704,6 +20704,11 @@ const tabToSection = {
           }
           
           if(await ConfirmModal.show({ title: 'Supprimer cette scène ?', message: confirmMessage, icon: '🗑️', dangerous: true, confirmText: 'Supprimer' })){ 
+              // [Phase D] Capturer les shots associés AVANT la cascade de suppression
+              const associatedShots = (state.data.shots || []).filter(shot => 
+                  shot.sceneId === id || String(shot.sceneId) === String(id)
+              );
+              
               // 1. Supprimer les plans storyboard associés
               if(state.data.shots) {
                   state.data.shots = state.data.shots.filter(shot => shot.sceneId !== id && String(shot.sceneId) !== String(id));
@@ -20738,8 +20743,37 @@ const tabToSection = {
                   if(els.inpTime) els.inpTime.value=''; 
                   if(els.inpResume) els.inpResume.value='';
               }
-              // Log historique
-              History.log('DELETE', `Suppression scène : ${sceneToDelete?.title || 'Sans titre'}`);
+              
+              // [Phase D] Capturer le recoverable enrichi : la scène + tous ses shots associés
+              const sceneLogId = 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+              const sceneRecoverable = await History.captureRecoverable(sceneToDelete, 'scene', sceneLogId);
+              // Enrichir avec les shots associés (chacun avec ses médias)
+              if(sceneRecoverable && associatedShots.length > 0) {
+                  sceneRecoverable.metadata = sceneRecoverable.metadata || {};
+                  sceneRecoverable.metadata.shotsCount = associatedShots.length;
+                  // Pour chaque shot associé, capturer son recoverable et fusionner les médias dans celui de la scène
+                  for(const sh of associatedShots) {
+                      const shotRecov = await History.captureRecoverable(sh, 'shot', sceneLogId);
+                      if(shotRecov && Array.isArray(shotRecov.media)) {
+                          sceneRecoverable.media = sceneRecoverable.media || [];
+                          // Préfixer chaque média avec l'ID du shot pour le retrouver
+                          shotRecov.media.forEach(m => {
+                              m.label = `[${sh.name || 'Plan ' + (sh.id || '?')}] ${m.label}`;
+                              sceneRecoverable.media.push(m);
+                          });
+                      }
+                  }
+              }
+              if(sceneRecoverable && affectedDays.length > 0) {
+                  sceneRecoverable.metadata = sceneRecoverable.metadata || {};
+                  sceneRecoverable.metadata.affectedShootingDays = affectedDays.length;
+              }
+              
+              // Log historique enrichi (Phase D)
+              History.log('DELETE', `Suppression scène : ${sceneToDelete?.title || 'Sans titre'}`, {
+                  target: { kind: 'scene', id: id, label: sceneToDelete?.title || 'Sans titre' },
+                  recoverable: sceneRecoverable
+              });sion scène : ${sceneToDelete?.title || 'Sans titre'}`);
               UI.renderBoard(); 
               UI.renderScript(); 
               Store.save();
@@ -30857,12 +30891,19 @@ const DrawingEditor = {
               });
           }
           
+          // [Phase D] Capturer le recoverable AVANT suppression
+          // On ne supprime PAS la photo Storage : elle reste référencée dans le journal
+          const resourceLogId = 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+          const resourceRecoverable = await History.captureRecoverable(resource, 'resource', resourceLogId);
+          
           state.data.resources = state.data.resources.filter(r => r.id !== id);
-          // Nettoyer la photo Storage si présente
-          if(resource.photo) Utils.deleteProjectFile(resource.photo);
           const categoryLabels = { accessoire: 'accessoire', costume: 'costume', vehicule: 'véhicule' };
           const catLabel = categoryLabels[resource.category] || resource.category;
-          History.log('DELETE', `Suppression ${catLabel} : ${resource.name}${deleteFromBreakdown ? ' (et du dépouillement)' : ''}`);
+          History.log('DELETE', `Suppression ${catLabel} : ${resource.name}${deleteFromBreakdown ? ' (et du dépouillement)' : ''}`, {
+              target: { kind: 'resource', id: resource.id, label: resource.name },
+              recoverable: resourceRecoverable,
+              details: { deleteFromBreakdown: !!deleteFromBreakdown }
+          });
           Store.save();
           Resources.render();
           Utils.toast('Ressource supprimée', 'success');
@@ -31221,8 +31262,16 @@ const DrawingEditor = {
             );
         }
         
+        // [Phase D] Capturer le recoverable AVANT le splice (on a déjà supprimé en cascade plus haut)
+        const memberToDelete = state.data.crew[idx];
+        const crewLogId = 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const crewRecoverable = memberToDelete ? await History.captureRecoverable(memberToDelete, 'crew', crewLogId) : null;
+        
         state.data.crew.splice(idx, 1);
-        History.log('DELETE', `Suppression technicien : ${memberName}`);
+        History.log('DELETE', `Suppression technicien : ${memberName}`, {
+            target: { kind: 'crew', id: memberId, label: memberName },
+            recoverable: crewRecoverable
+        });
         Store.save();
         UI.renderCrewTab();
     },
@@ -38518,8 +38567,15 @@ ${projectName}`;
         if(!await ConfirmModal.confirmDelete("Ce jour de tournage sera supprimé.")) return;
         
         const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
-        History.log('DELETE', `Suppression jour de tournage #${shootDay?.dayNumber || '?'} (${shootDay?.date || '?'})`);
+        // [Phase D] Capturer le recoverable AVANT suppression
+        const sdLogId = 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const sdRecoverable = shootDay ? await History.captureRecoverable(shootDay, 'shootingDay', sdLogId) : null;
+        
         state.data.shootingDays = state.data.shootingDays.filter(sd => sd.id !== dayId);
+        History.log('DELETE', `Suppression jour de tournage #${shootDay?.dayNumber || '?'} (${shootDay?.date || '?'})`, {
+            target: { kind: 'shootingDay', id: dayId, label: `Jour #${shootDay?.dayNumber || '?'}` },
+            recoverable: sdRecoverable
+        });
         
         // Synchroniser les calendriers des profils
         Planning.syncShootingDatesToProfiles();
@@ -38533,8 +38589,15 @@ ${projectName}`;
         const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
         if(!await ConfirmModal.confirmDelete(`Le tournage "${shootDay?.name || 'Tournage'}" (${shootDay?.startDate || shootDay?.date || '?'}) sera supprimé.`)) return;
         
-        History.log('DELETE', `Suppression tournage "${shootDay?.name || '?'}" (${shootDay?.startDate || shootDay?.date || '?'})`);
+        // [Phase D] Capturer le recoverable AVANT suppression
+        const sdLogId = 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const sdRecoverable = shootDay ? await History.captureRecoverable(shootDay, 'shootingDay', sdLogId) : null;
+        
         state.data.shootingDays = state.data.shootingDays.filter(sd => sd.id !== dayId);
+        History.log('DELETE', `Suppression tournage "${shootDay?.name || '?'}" (${shootDay?.startDate || shootDay?.date || '?'})`, {
+            target: { kind: 'shootingDay', id: dayId, label: shootDay?.name || 'Tournage' },
+            recoverable: sdRecoverable
+        });
         
         // Synchroniser les calendriers des profils
         Planning.syncShootingDatesToProfiles();
@@ -38606,8 +38669,15 @@ ${projectName}`;
         const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
         if(!await ConfirmModal.confirmDelete(`Le tournage "${shootDay?.name || 'Tournage'}" (${shootDay?.startDate || shootDay?.date || '?'}) sera supprimé.`)) return;
         
-        History.log('DELETE', `Suppression tournage "${shootDay?.name || '?'}" (${shootDay?.startDate || shootDay?.date || '?'})`);
+        // [Phase D] Capturer le recoverable AVANT suppression
+        const sdLogId = 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const sdRecoverable = shootDay ? await History.captureRecoverable(shootDay, 'shootingDay', sdLogId) : null;
+        
         state.data.shootingDays = state.data.shootingDays.filter(sd => sd.id !== dayId);
+        History.log('DELETE', `Suppression tournage "${shootDay?.name || '?'}" (${shootDay?.startDate || shootDay?.date || '?'})`, {
+            target: { kind: 'shootingDay', id: dayId, label: shootDay?.name || 'Tournage' },
+            recoverable: sdRecoverable
+        });
         
         Planning.syncShootingDatesToProfiles();
         Store.save();
@@ -44836,7 +44906,7 @@ const History = {
         }
     },
     
-    // Ouvrir la modale
+    // Ouvrir la modale [Phase D - refonte]
     openModal: async () => {
         if(!state.currentProjectId) {
             Utils.toast('Ouvrez un projet d\'abord', 'warning');
@@ -44851,14 +44921,27 @@ const History = {
         modal.id = 'history-modal';
         modal.onclick = (e) => { if(e.target === modal) History.closeModal(); };
         
+        // Par défaut : afficher "Mes actions" si l'utilisateur a au moins une action, sinon "Toutes"
+        const myEmail = state.currentUser?.email || '';
+        const hasMyActions = entries.some(e => e.user?.email === myEmail);
+        const defaultTab = hasMyActions ? 'mine' : 'all';
+        
         modal.innerHTML = `
             <div class="history-box">
                 <div class="history-header">
-                    <h3>📜 Historique des modifications</h3>
+                    <h3>📜 Journal des modifications</h3>
                     <button class="history-close-btn" onclick="app.History.closeModal()">✕</button>
                 </div>
-                <div class="history-filters">
-                    <select id="history-filter-type" onchange="app.History.applyFilters()">
+                <div class="history-tabs" style="display:flex; gap:8px; padding:0 16px; border-bottom:1px solid var(--border);">
+                    <button id="history-tab-mine" onclick="app.History.switchTab('mine')" class="history-tab ${defaultTab === 'mine' ? 'active' : ''}" style="padding:10px 18px; background:none; border:none; border-bottom:3px solid ${defaultTab === 'mine' ? 'var(--primary)' : 'transparent'}; cursor:pointer; color:var(--text-main); font-weight:${defaultTab === 'mine' ? '600' : '400'};">
+                        👤 Mes actions
+                    </button>
+                    <button id="history-tab-all" onclick="app.History.switchTab('all')" class="history-tab ${defaultTab === 'all' ? 'active' : ''}" style="padding:10px 18px; background:none; border:none; border-bottom:3px solid ${defaultTab === 'all' ? 'var(--primary)' : 'transparent'}; cursor:pointer; color:var(--text-main); font-weight:${defaultTab === 'all' ? '600' : '400'};">
+                        🌐 Tout le projet
+                    </button>
+                </div>
+                <div class="history-filters" style="padding:12px 16px; display:flex; gap:8px;">
+                    <select id="history-filter-type" onchange="app.History.applyFilters()" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--input-bg);">
                         <option value="">Tous les types</option>
                         <option value="ADD">➕ Ajouts</option>
                         <option value="EDIT">✏️ Modifications</option>
@@ -44869,19 +44952,43 @@ const History = {
                         <option value="SHARE">👥 Partages</option>
                         <option value="EXPORT">📤 Exports</option>
                     </select>
-                    <select id="history-filter-user" onchange="app.History.applyFilters()">
+                    <select id="history-filter-user" onchange="app.History.applyFilters()" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--input-bg);">
                         <option value="">Tous les utilisateurs</option>
-                        ${users.map(u => `<option value="${u}">${u}</option>`).join('')}
+                        ${users.map(u => `<option value="${Utils.escape(u)}">${Utils.escape(u)}</option>`).join('')}
                     </select>
                 </div>
                 <div class="history-list" id="history-list">
-                    ${History.renderEntries(entries)}
+                    ${History.renderEntries(History.filterByTab(entries, defaultTab))}
                 </div>
             </div>
         `;
         
         document.body.appendChild(modal);
         state.historyEntries = entries;
+        state.historyCurrentTab = defaultTab;
+    },
+    
+    // Basculer entre les onglets "Mes actions" / "Tout"
+    switchTab: (tab) => {
+        if(tab !== 'mine' && tab !== 'all') return;
+        state.historyCurrentTab = tab;
+        // Mettre à jour le style des onglets
+        ['mine', 'all'].forEach(t => {
+            const btn = document.getElementById('history-tab-' + t);
+            if(btn) {
+                const isActive = t === tab;
+                btn.style.borderBottomColor = isActive ? 'var(--primary)' : 'transparent';
+                btn.style.fontWeight = isActive ? '600' : '400';
+            }
+        });
+        History.applyFilters();
+    },
+    
+    // Filtrer selon l'onglet courant (mine = mes actions, all = toutes)
+    filterByTab: (entries, tab) => {
+        if(tab === 'all') return entries;
+        const myEmail = state.currentUser?.email || '';
+        return (entries || []).filter(e => e.user?.email === myEmail);
     },
     
     // Fermer la modale
@@ -44894,8 +45001,9 @@ const History = {
     applyFilters: () => {
         const typeFilter = document.getElementById('history-filter-type')?.value || '';
         const userFilter = document.getElementById('history-filter-user')?.value || '';
+        const currentTab = state.historyCurrentTab || 'all';
         
-        let filtered = state.historyEntries || [];
+        let filtered = History.filterByTab(state.historyEntries || [], currentTab);
         
         if(typeFilter) {
             filtered = filtered.filter(e => e.type === typeFilter);
@@ -44910,7 +45018,7 @@ const History = {
         }
     },
     
-    // Rendre les entrées HTML
+    // Rendre les entrées HTML [Phase D - enrichi]
     renderEntries: (entries) => {
         if(!entries || entries.length === 0) {
             return '<div class="history-empty">📭 Aucune modification enregistrée</div>';
@@ -44921,9 +45029,29 @@ const History = {
             const date = new Date(entry.timestamp);
             const dateStr = date.toLocaleDateString('fr-FR');
             const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+            const entryId = entry.id || ('legacy_' + entry.timestamp);
+            
+            // Boutons d'action selon le type
+            let actionButtons = '';
+            if(entry.type === 'DELETE' && entry.recoverable) {
+                const hasContent = (entry.recoverable.text?.content) 
+                                 || (Array.isArray(entry.recoverable.media) && entry.recoverable.media.length > 0)
+                                 || (entry.recoverable.metadata && Object.keys(entry.recoverable.metadata).length > 0);
+                if(hasContent) {
+                    actionButtons = `<button onclick="app.History.toggleDetails('${entryId}')" class="history-action-btn" style="margin-top:6px; padding:4px 10px; background:var(--bg); border:1px solid var(--border); border-radius:4px; cursor:pointer; font-size:0.85rem;">📋 Voir les conséquences</button>`;
+                }
+            } else if(entry.link && entry.link.tab) {
+                actionButtons = `<button onclick="app.History.goToLink('${entryId}')" class="history-action-btn" style="margin-top:6px; padding:4px 10px; background:var(--bg); border:1px solid var(--border); border-radius:4px; cursor:pointer; font-size:0.85rem;">🔗 Aller à la fiche</button>`;
+            }
+            
+            // Section détails (accordéon) cachée par défaut, contient le contenu recoverable
+            let detailsHtml = '';
+            if(entry.type === 'DELETE' && entry.recoverable) {
+                detailsHtml = `<div id="history-details-${entryId}" class="history-details" style="display:none; margin-top:10px; padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:6px;">${History.renderRecoverable(entry.recoverable, entryId)}</div>`;
+            }
             
             return `
-                <div class="history-item">
+                <div class="history-item" data-entry-id="${entryId}">
                     <div class="history-icon ${typeInfo.class}">${typeInfo.icon}</div>
                     <div class="history-content">
                         <div class="history-action">${Utils.escape(entry.description)}</div>
@@ -44931,10 +45059,156 @@ const History = {
                             <span>👤 ${Utils.escape(entry.user?.name || 'Inconnu')}</span>
                             <span>📅 ${dateStr} à ${timeStr}</span>
                         </div>
+                        ${actionButtons}
+                        ${detailsHtml}
                     </div>
                 </div>
             `;
         }).join('');
+    },
+    
+    // Rendre le contenu récupérable d'une entrée DELETE
+    renderRecoverable: (recoverable, entryId) => {
+        if(!recoverable) return '<em style="color:var(--text-sec);">Aucun contenu récupérable.</em>';
+        
+        let html = '';
+        
+        // Métadonnées (infos contextuelles)
+        if(recoverable.metadata && Object.keys(recoverable.metadata).length > 0) {
+            const metaItems = Object.entries(recoverable.metadata)
+                .filter(([k, v]) => v !== null && v !== undefined && v !== '')
+                .map(([k, v]) => {
+                    let displayVal = v;
+                    if(Array.isArray(v)) {
+                        if(v.length === 0) return null;
+                        displayVal = v.length > 5 ? v.slice(0, 5).join(', ') + ` ... (+${v.length-5})` : v.join(', ');
+                    } else if(typeof v === 'object') {
+                        displayVal = JSON.stringify(v);
+                    }
+                    return `<div style="margin:4px 0;"><strong style="color:var(--text-sec); font-size:0.85rem;">${Utils.escape(k)} :</strong> <span style="font-size:0.9rem;">${Utils.escape(String(displayVal))}</span></div>`;
+                })
+                .filter(Boolean);
+            if(metaItems.length > 0) {
+                html += `<div style="margin-bottom:12px;"><div style="font-weight:600; margin-bottom:6px; color:var(--text-main);">📋 Informations</div>${metaItems.join('')}</div>`;
+            }
+        }
+        
+        // Texte récupérable
+        if(recoverable.text && recoverable.text.content) {
+            const safeContent = Utils.escape(recoverable.text.content);
+            html += `
+                <div style="margin-bottom:12px;">
+                    <div style="font-weight:600; margin-bottom:6px; color:var(--text-main); display:flex; justify-content:space-between; align-items:center;">
+                        <span>📝 ${Utils.escape(recoverable.text.label || 'Texte')}</span>
+                        <button onclick="app.History.copyText('${entryId}_text')" style="padding:3px 8px; background:var(--primary); color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:0.8rem;">📋 Copier</button>
+                    </div>
+                    <textarea id="history-text-${entryId}_text" readonly style="width:100%; min-height:80px; max-height:200px; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--input-bg); color:var(--text-main); font-family:inherit; font-size:0.85rem; resize:vertical;">${safeContent}</textarea>
+                </div>
+            `;
+        }
+        
+        // Médias (images)
+        if(Array.isArray(recoverable.media) && recoverable.media.length > 0) {
+            const mediaItems = recoverable.media.map((m, i) => {
+                if(!m.url) return '';
+                const safeUrl = Utils.escape(m.url);
+                const safeLabel = Utils.escape(m.label || `Média ${i+1}`);
+                return `
+                    <div style="display:flex; align-items:center; gap:10px; padding:6px; background:var(--input-bg); border-radius:4px; margin-bottom:6px;">
+                        <img src="${safeUrl}" style="width:60px; height:60px; object-fit:cover; border-radius:4px; flex-shrink:0;" alt="${safeLabel}" onerror="this.style.display='none'">
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-size:0.9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeLabel}</div>
+                        </div>
+                        <button onclick="app.History.viewImage('${safeUrl}', '${safeLabel.replace(/'/g, '&#39;')}')" style="padding:4px 10px; background:var(--bg); border:1px solid var(--border); border-radius:4px; cursor:pointer; font-size:0.8rem; flex-shrink:0;">👁️ Voir</button>
+                        <a href="${safeUrl}" download="${safeLabel}" style="padding:4px 10px; background:var(--primary); color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:0.8rem; text-decoration:none; flex-shrink:0;">⬇️ Télécharger</a>
+                    </div>
+                `;
+            }).filter(Boolean).join('');
+            if(mediaItems) {
+                html += `<div style="margin-bottom:12px;"><div style="font-weight:600; margin-bottom:6px; color:var(--text-main);">🖼️ Images récupérables (${recoverable.media.length})</div>${mediaItems}</div>`;
+            }
+        }
+        
+        return html || '<em style="color:var(--text-sec);">Aucun contenu récupérable.</em>';
+    },
+    
+    // Basculer l'affichage de l'accordéon des détails
+    toggleDetails: (entryId) => {
+        const el = document.getElementById('history-details-' + entryId);
+        if(!el) return;
+        const isOpen = el.style.display !== 'none';
+        el.style.display = isOpen ? 'none' : 'block';
+    },
+    
+    // Copier le texte d'une entrée dans le presse-papier
+    copyText: (textKey) => {
+        const ta = document.getElementById('history-text-' + textKey);
+        if(!ta) return;
+        ta.select();
+        try {
+            navigator.clipboard.writeText(ta.value).then(() => {
+                Utils.toast('Texte copié dans le presse-papier', 'success', 2000);
+            }).catch(() => {
+                // Fallback : execCommand (deprecated mais marche encore)
+                document.execCommand('copy');
+                Utils.toast('Texte copié', 'success', 2000);
+            });
+        } catch(e) {
+            Utils.toast('Erreur copie', 'error');
+        }
+    },
+    
+    // Ouvrir une image en grand dans une lightbox
+    viewImage: (url, label) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); display:flex; justify-content:center; align-items:center; z-index:100000; cursor:pointer; padding:20px;';
+        overlay.onclick = () => overlay.remove();
+        overlay.innerHTML = `
+            <div style="max-width:90%; max-height:90%; display:flex; flex-direction:column; align-items:center;">
+                <img src="${url}" style="max-width:100%; max-height:80vh; object-fit:contain; border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.5);">
+                <div style="margin-top:12px; color:#fff; font-size:0.9rem; text-align:center;">${label}</div>
+                <div style="margin-top:10px; color:#aaa; font-size:0.8rem;">(cliquer pour fermer)</div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    },
+    
+    // Naviguer vers la fiche/zone concernée par une action (ADD/EDIT)
+    goToLink: (entryId) => {
+        const entry = (state.historyEntries || []).find(e => (e.id || ('legacy_' + e.timestamp)) === entryId);
+        if(!entry || !entry.link) {
+            Utils.toast('Lien non disponible pour cette entrée', 'warning');
+            return;
+        }
+        const tab = entry.link.tab;
+        const targetId = entry.link.id;
+        
+        // Fermer la modale du journal
+        History.closeModal();
+        
+        // Basculer vers l'onglet cible
+        if(tab && typeof UI !== 'undefined' && UI.switchTab) {
+            UI.switchTab(tab);
+        }
+        
+        // Tenter de scroller vers l'élément cible après un court délai (le temps que l'onglet charge)
+        if(targetId) {
+            setTimeout(() => {
+                const targetEl = document.querySelector(`[data-id="${targetId}"]`)
+                              || document.getElementById(targetId)
+                              || document.querySelector(`[data-scene-id="${targetId}"]`)
+                              || document.querySelector(`[data-shot-id="${targetId}"]`);
+                if(targetEl) {
+                    targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    // Highlight visuel temporaire
+                    targetEl.style.transition = 'box-shadow 0.3s';
+                    targetEl.style.boxShadow = '0 0 0 3px var(--primary)';
+                    setTimeout(() => { targetEl.style.boxShadow = ''; }, 2000);
+                } else {
+                    Utils.toast('Élément non trouvé dans l\'onglet', 'info');
+                }
+            }, 300);
+        }
     }
 };
 
@@ -48227,8 +48501,16 @@ const Expenses = {
         const expenseTitle = expense?.title || 'sans titre';
         const currency = state.data.budget?.currency || '€';
         const amountStr = expense ? `${(expense.amountTTC || expense.amount || 0).toFixed(2)} ${currency}` : '?';
+        
+        // [Phase D] Capturer le recoverable AVANT suppression
+        const expenseLogId = 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const expenseRecoverable = expense ? await History.captureRecoverable(expense, 'expense', expenseLogId) : null;
+        
         state.data.expenses = state.data.expenses.filter(e => e.id !== id);
-        History.log('DELETE', `Suppression dépense : ${expenseTitle} (${amountStr})`);
+        History.log('DELETE', `Suppression dépense : ${expenseTitle} (${amountStr})`, {
+            target: { kind: 'expense', id: id, label: expenseTitle },
+            recoverable: expenseRecoverable
+        });
         Store.save();
         Expenses.render();
     },
@@ -59940,6 +60222,20 @@ const Seasons = {
         const confirmed = await ConfirmModal.confirmDelete(msg);
         if(!confirmed) return;
         
+        // [Phase D] Capturer le recoverable AVANT la cascade
+        const seasonLogId = 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const seasonRecoverable = await History.captureRecoverable(s, 'season', seasonLogId);
+        // Enrichir avec les infos de cascade
+        if(seasonRecoverable) {
+            seasonRecoverable.metadata = seasonRecoverable.metadata || {};
+            seasonRecoverable.metadata.episodesCount = linkedEpisodes.length;
+            seasonRecoverable.metadata.scenesCount = linkedScenes.length;
+            seasonRecoverable.metadata.episodeTitles = linkedEpisodes.map(ep => 
+                `E${String(ep.number || '?').padStart(2,'0')}${ep.title ? ' — ' + ep.title : ''}`
+            );
+            seasonRecoverable.metadata.sceneTitles = linkedScenes.map(sc => sc.title || 'Sans titre');
+        }
+        
         // Supprimer les scènes liées
         const epIds = linkedEpisodes.map(e => e.id);
         state.data.scenes = (state.data.scenes || []).filter(sc => !epIds.includes(sc.episodeId));
@@ -59961,7 +60257,10 @@ const Seasons = {
         
         const seasonLabel = `S${String(s.number).padStart(2,'0')}${s.title ? ' — ' + s.title : ''}`;
         const sceneCountInfo = linkedScenes.length > 0 ? ` (avec ${linkedEpisodes.length} épisode${linkedEpisodes.length>1?'s':''} et ${linkedScenes.length} scène${linkedScenes.length>1?'s':''})` : (linkedEpisodes.length > 0 ? ` (avec ${linkedEpisodes.length} épisode${linkedEpisodes.length>1?'s':''})` : '');
-        History.log('DELETE', `Suppression saison ${seasonLabel}${sceneCountInfo}`);
+        History.log('DELETE', `Suppression saison ${seasonLabel}${sceneCountInfo}`, {
+            target: { kind: 'season', id: seasonId, label: seasonLabel },
+            recoverable: seasonRecoverable
+        });
         Store.save();
         Seasons.render();
         ScriptEditor.initEpisodeSelector();
@@ -60197,6 +60496,16 @@ const Episodes = {
         );
         if(!confirmed) return;
         
+        // [Phase D] Capturer le recoverable AVANT la cascade
+        const episodeLogId = 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const episodeRecoverable = await History.captureRecoverable(ep, 'episode', episodeLogId);
+        // Enrichir avec les infos de cascade
+        if(episodeRecoverable) {
+            episodeRecoverable.metadata = episodeRecoverable.metadata || {};
+            episodeRecoverable.metadata.scenesCount = linkedScenes.length;
+            episodeRecoverable.metadata.sceneTitles = linkedScenes.map(sc => sc.title || 'Sans titre');
+        }
+        
         // Supprimer les scènes liées
         state.data.scenes = (state.data.scenes || []).filter(s => s.episodeId !== episodeId);
         
@@ -60219,7 +60528,10 @@ const Episodes = {
         const seasonNumStr2 = seasonForLog2 ? `S${String(seasonForLog2.number).padStart(2,'0')}` : '?';
         const episodeLabel = `${seasonNumStr2}E${String(ep.number).padStart(2,'0')}${ep.title ? ' — ' + ep.title : ''}`;
         const sceneInfo = linkedScenes.length > 0 ? ` (avec ${linkedScenes.length} scène${linkedScenes.length>1?'s':''})` : '';
-        History.log('DELETE', `Suppression épisode ${episodeLabel}${sceneInfo}`);
+        History.log('DELETE', `Suppression épisode ${episodeLabel}${sceneInfo}`, {
+            target: { kind: 'episode', id: episodeId, label: episodeLabel },
+            recoverable: episodeRecoverable
+        });
         Store.save();
         Episodes.render();
         // Rafraîchir le sélecteur épisode du header
