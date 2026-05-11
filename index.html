@@ -6957,7 +6957,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.8.5</p>
+      <p>vv3.8.6</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -15580,10 +15580,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           // Marquer qu'une sauvegarde est en cours
           state.savingInProgress = true; 
           
-          // Créer un snapshot auto si plus de 5 min depuis le dernier
-          if(Actions.shouldAutoSnapshot()) {
-              Actions.createAutoSnapshot('Auto');
-          }
+          // [Phase D] Snapshots auto désactivés : remplacés par le journal d'actions enrichi
           
           const syncIndicator = document.getElementById('sync-indicator');
           
@@ -44737,6 +44734,9 @@ const Notifications = {
 };
 
 const History = {
+    // Cap global d'entrées dans le journal (partagé tous users)
+    MAX_ENTRIES: 50,
+    
     // Types d'actions
     TYPES: {
         ADD: { icon: '➕', label: 'Ajout', class: 'add' },
@@ -44749,39 +44749,210 @@ const History = {
         MERGE: { icon: '🔗', label: 'Fusion', class: 'merge' }
     },
     
-    // Enregistrer une action dans l'historique
-    // type : ADD | EDIT | DELETE | SHARE | EXPORT | REORDER | PERMISSIONS | MERGE
-    // level : 'major' (défaut, tracé en mode essentiel) | 'minor' (tracé seulement en mode complet)
-    log: async (type, description, details = {}, level = 'major') => {
-        if(!state.currentProjectId || !state.currentUser) return;
+    // === Helper D1 : capturer le contenu récupérable AVANT suppression ===
+    // Retourne un objet "recoverable" prêt à être inclus dans une entrée d'historique
+    // kind : 'scene', 'actor', 'character', 'location', 'resource', 'crew', 'shot', 'expense', 'episode', 'season'
+    // Le tableau "media" contient des URLs (déjà en Storage). Si l'item a des base64, ils sont uploadés vers history/
+    captureRecoverable: async (item, kind, logId) => {
+        if(!item) return null;
+        const recoverable = { text: null, media: [], metadata: {} };
         
-        // Filtrer selon le mode du journal (par projet, défaut = essentiel)
-        const mode = state.data?.history_mode || 'essential';
-        if(mode === 'essential') {
-            // En mode essentiel, on ignore les types "bruyants" (REORDER, EXPORT) et les EDIT mineurs
-            if(type === 'REORDER' || type === 'EXPORT') return;
-            if(type === 'EDIT' && level === 'minor') return;
+        // Helper local : upload un base64 vers history/ Storage
+        const uploadToHistory = async (dataUrl, label) => {
+            if(!dataUrl || !state.currentProjectId) return null;
+            // Si déjà une URL (Storage), on garde tel quel (pas besoin de re-uploader)
+            if(typeof dataUrl === 'string' && dataUrl.startsWith('http')) return dataUrl;
+            // Sinon c'est du base64, on uploade
+            if(typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return null;
+            try {
+                const blob = await (await fetch(dataUrl)).blob();
+                const ext = blob.type === 'image/png' ? 'png' : (blob.type === 'image/svg+xml' ? 'svg' : 'jpg');
+                const filename = `${logId}_${Date.now()}_${Math.random().toString(36).slice(2,7)}.${ext}`;
+                const filePath = `${state.currentProjectId}/history/${filename}`;
+                const { error } = await supabase.storage.from('projects').upload(filePath, blob, { contentType: blob.type, upsert: false });
+                if(error) { console.warn('Upload history media failed:', error.message); return null; }
+                const { data: urlData } = supabase.storage.from('projects').getPublicUrl(filePath);
+                return urlData?.publicUrl || null;
+            } catch(e) {
+                console.warn('Exception upload history media:', e);
+                return null;
+            }
+        };
+        
+        try {
+            // Spécialisation par type d'item
+            if(kind === 'scene') {
+                recoverable.text = {
+                    label: 'Contenu de la scène',
+                    preview: (item.scriptContent || '').replace(/<[^>]+>/g, '').substring(0, 200),
+                    content: item.scriptContent || ''
+                };
+                recoverable.metadata = {
+                    title: item.title || '',
+                    seasonId: item.seasonId, episodeId: item.episodeId,
+                    breakdown: item.breakdown || {}
+                };
+            } else if(kind === 'actor') {
+                const photoUrl = item.photo ? await uploadToHistory(item.photo, 'photo') : null;
+                if(photoUrl) recoverable.media.push({ kind: 'photo', label: 'Photo principale', url: photoUrl });
+                if(Array.isArray(item.galleryPhotos)) {
+                    for(let i = 0; i < item.galleryPhotos.length; i++) {
+                        const url = await uploadToHistory(item.galleryPhotos[i], 'gallery');
+                        if(url) recoverable.media.push({ kind: 'gallery', label: `Photo galerie ${i+1}`, url });
+                    }
+                }
+                recoverable.metadata = { name: item.name, role: item.role, email: item.email, phone: item.phone, bio: item.bio };
+            } else if(kind === 'character') {
+                recoverable.metadata = { name: item.name, description: item.description, bio: item.bio, role: item.role };
+                if(item.bio) recoverable.text = { label: 'Bio', preview: item.bio.substring(0, 200), content: item.bio };
+            } else if(kind === 'location') {
+                if(Array.isArray(item.galleryPhotos)) {
+                    for(let i = 0; i < item.galleryPhotos.length; i++) {
+                        const url = await uploadToHistory(item.galleryPhotos[i], 'gallery');
+                        if(url) recoverable.media.push({ kind: 'gallery', label: `Photo ${i+1}`, url });
+                    }
+                }
+                recoverable.metadata = { name: item.name, address: item.address, desc: item.desc };
+            } else if(kind === 'resource') {
+                const photoUrl = item.photo ? await uploadToHistory(item.photo, 'photo') : null;
+                if(photoUrl) recoverable.media.push({ kind: 'photo', label: 'Photo', url: photoUrl });
+                recoverable.metadata = { name: item.name, category: item.category, description: item.description, note: item.note };
+                if(item.description) recoverable.text = { label: 'Description', preview: item.description.substring(0, 200), content: item.description };
+            } else if(kind === 'crew') {
+                const photoUrl = item.photo ? await uploadToHistory(item.photo, 'photo') : null;
+                if(photoUrl) recoverable.media.push({ kind: 'photo', label: 'Photo principale', url: photoUrl });
+                if(Array.isArray(item.galleryPhotos)) {
+                    for(let i = 0; i < item.galleryPhotos.length; i++) {
+                        const url = await uploadToHistory(item.galleryPhotos[i], 'gallery');
+                        if(url) recoverable.media.push({ kind: 'gallery', label: `Photo galerie ${i+1}`, url });
+                    }
+                }
+                recoverable.metadata = { name: item.name, role: item.role, email: item.email, phone: item.phone, dailyRate: item.dailyRate };
+            } else if(kind === 'shot') {
+                if(item.imageUrl) {
+                    const url = await uploadToHistory(item.imageUrl, 'main');
+                    if(url) recoverable.media.push({ kind: 'main', label: 'Image principale du plan', url });
+                }
+                // Calques + objets vectoriels par zone
+                if(item.drawings) {
+                    for(const zoneKind of ['original', 'lighting', 'camera', 'actors']) {
+                        const zone = item.drawings[zoneKind];
+                        if(!zone) continue;
+                        if(Array.isArray(zone.objects)) {
+                            for(let i = 0; i < zone.objects.length; i++) {
+                                const obj = zone.objects[i];
+                                if(obj.type === 'image' && obj.imageData) {
+                                    const url = await uploadToHistory(obj.imageData, `${zoneKind}_obj`);
+                                    if(url) recoverable.media.push({ kind: `${zoneKind}_obj`, label: `Image insérée (${zoneKind})`, url });
+                                }
+                            }
+                        }
+                        if(zone.drawingData && Array.isArray(zone.drawingData.layers)) {
+                            for(let i = 0; i < zone.drawingData.layers.length; i++) {
+                                const layer = zone.drawingData.layers[i];
+                                if(layer.imageData) {
+                                    const url = await uploadToHistory(layer.imageData, `${zoneKind}_layer`);
+                                    if(url) recoverable.media.push({ kind: `${zoneKind}_layer`, label: `Calque ${zoneKind} : ${layer.name || i+1}`, url });
+                                }
+                            }
+                        }
+                    }
+                }
+                recoverable.metadata = { sceneId: item.sceneId, name: item.name, description: item.description, shotType: item.shotType, cameraMove: item.cameraMove };
+                if(item.description) recoverable.text = { label: 'Description du plan', preview: item.description.substring(0, 200), content: item.description };
+            } else if(kind === 'expense') {
+                recoverable.metadata = { title: item.title, amount: item.amountTTC || item.amount, category: item.category, date: item.date, note: item.note };
+            } else if(kind === 'episode' || kind === 'season') {
+                recoverable.metadata = { number: item.number, title: item.title, description: item.description || item.synopsis };
+                if(item.synopsis) recoverable.text = { label: 'Synopsis', preview: item.synopsis.substring(0, 200), content: item.synopsis };
+            } else {
+                // Type non spécialisé : on stocke un dump basique
+                recoverable.metadata = Object.fromEntries(
+                    Object.entries(item).filter(([k, v]) => 
+                        typeof v !== 'object' && typeof v !== 'function' && k !== 'id'
+                    ).slice(0, 10)
+                );
+            }
+        } catch(e) {
+            console.warn('captureRecoverable error:', e);
         }
         
+        return recoverable;
+    },
+    
+    // === Helper D1 : nettoyer les médias Storage d'une entrée de log expirée ===
+    // Appelée quand une entrée sort du cap (50 entrées) pour libérer le Storage
+    cleanupExpiredEntry: async (entry) => {
+        if(!entry || !entry.recoverable || !Array.isArray(entry.recoverable.media)) return;
+        for(const media of entry.recoverable.media) {
+            if(media.url && typeof Utils !== 'undefined' && Utils.deleteProjectFile) {
+                Utils.deleteProjectFile(media.url);
+            }
+        }
+    },
+    
+    // === Enregistrer une action dans l'historique (signature v2 Phase D) ===
+    // Signature moderne (recommandée) :
+    //   History.log(type, description, { link, recoverable, target, details })
+    // Signature legacy (encore supportée pour compatibilité) :
+    //   History.log(type, description, details, level)
+    //   → le 3e arg est un objet "détails" libre, le 4e level est ignoré
+    //
+    // type : ADD | EDIT | DELETE | SHARE | EXPORT | REORDER | PERMISSIONS | MERGE
+    // options :
+    //   - link : { tab, id }  → bouton "Aller à" dans la modale Journal
+    //   - recoverable : { text, media, metadata }  → contenu récupérable après suppression
+    //   - target : { kind, id, label }  → l'objet visé
+    //   - details : objet libre pour compat
+    log: async (type, description, options = {}) => {
+        if(!state.currentProjectId || !state.currentUser) return;
+        
+        // Compatibilité backward : si options ressemble à un ancien "details" (n'a pas link/recoverable/target),
+        // on le considère comme details. Sinon c'est la nouvelle signature.
+        const isLegacy = options && typeof options === 'object' 
+                         && !('link' in options) 
+                         && !('recoverable' in options) 
+                         && !('target' in options) 
+                         && !('details' in options);
+        const normalized = isLegacy 
+            ? { details: options, link: null, recoverable: null, target: null }
+            : {
+                link: options.link || null,
+                recoverable: options.recoverable || null,
+                target: options.target || null,
+                details: options.details || {}
+            };
+        
         const entry = {
+            id: 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
             type: type,
             description: description,
-            details: details,
-            level: level,
             user: {
                 email: state.currentUser.email,
                 name: state.currentUser.displayName || state.currentUser.email.split('@')[0]
             },
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            // Nouveaux champs v2
+            link: normalized.link,
+            recoverable: normalized.recoverable,
+            target: normalized.target,
+            // Champ legacy conservé
+            details: normalized.details
         };
         
         try {
             // Stocker l'historique dans les données du projet
             if(!state.data.history) state.data.history = [];
             state.data.history.unshift(entry);
-            // Garder les 100 dernières entrées
-            if(state.data.history.length > 100) {
-                state.data.history = state.data.history.slice(0, 100);
+            
+            // Cap à MAX_ENTRIES (50) avec cleanup Storage pour les entrées qui sortent
+            if(state.data.history.length > History.MAX_ENTRIES) {
+                const expired = state.data.history.slice(History.MAX_ENTRIES);
+                state.data.history = state.data.history.slice(0, History.MAX_ENTRIES);
+                // Nettoyer les médias Storage des entrées expirées (async, sans bloquer)
+                for(const exp of expired) {
+                    History.cleanupExpiredEntry(exp).catch(() => {});
+                }
             }
             // Ne pas appeler Store.save() ici pour éviter les boucles
         } catch(e) {
@@ -44838,10 +45009,6 @@ const History = {
                         <option value="">Tous les utilisateurs</option>
                         ${users.map(u => `<option value="${u}">${u}</option>`).join('')}
                     </select>
-                    <select id="history-mode-toggle" onchange="app.History.setMode(this.value)" title="Niveau de détail du journal" style="margin-left:auto;">
-                        <option value="essential" ${(state.data?.history_mode || 'essential') === 'essential' ? 'selected' : ''}>📋 Essentiel</option>
-                        <option value="full" ${state.data?.history_mode === 'full' ? 'selected' : ''}>📚 Complet</option>
-                    </select>
                 </div>
                 <div class="history-list" id="history-list">
                     ${History.renderEntries(entries)}
@@ -44851,36 +45018,6 @@ const History = {
         
         document.body.appendChild(modal);
         state.historyEntries = entries;
-    },
-    
-    // Changer le niveau de détail du journal (par projet)
-    setMode: (mode) => {
-        if(!state.data) return;
-        if(mode !== 'essential' && mode !== 'full') return;
-        const oldMode = state.data.history_mode || 'essential';
-        if(oldMode === mode) return;
-        state.data.history_mode = mode;
-        Store.save();
-        const modeLabel = mode === 'essential' ? 'Essentiel' : 'Complet';
-        Utils.toast(`Mode journal : ${modeLabel}`, 'success');
-        // Tracer le changement de mode lui-même (toujours, indépendamment du nouveau mode)
-        // → on bypass le filtre en passant directement par state.data.history
-        if(state.currentProjectId && state.currentUser) {
-            if(!state.data.history) state.data.history = [];
-            state.data.history.unshift({
-                type: 'EDIT',
-                description: `Mode journal changé : ${oldMode === 'essential' ? 'Essentiel' : 'Complet'} → ${modeLabel}`,
-                details: {},
-                level: 'major',
-                user: {
-                    email: state.currentUser.email,
-                    name: state.currentUser.displayName || state.currentUser.email.split('@')[0]
-                },
-                timestamp: Date.now()
-            });
-            if(state.data.history.length > 100) state.data.history = state.data.history.slice(0, 100);
-            Store.save();
-        }
     },
     
     // Fermer la modale
