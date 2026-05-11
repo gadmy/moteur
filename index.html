@@ -6957,7 +6957,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.8.9</p>
+      <p>vv3.9.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -26099,54 +26099,21 @@ const Storyboard = {
         const shot = state.data.shots.find(s => s.id === shotId);
         const scene = state.data.scenes.find(s => s.id === shot?.sceneId);
         
-        // === Nettoyer tous les fichiers Storage associés à ce shot ===
-        if(shot) {
-            // 1. Image principale uploadée
-            if(shot.imageUrl) Utils.deleteProjectFile(shot.imageUrl);
-            // 2. Images insérées comme objets vectoriels + calques de dessin
-            if(shot.drawings) {
-                ['original', 'lighting', 'camera', 'actors'].forEach(kind => {
-                    const zone = shot.drawings[kind];
-                    if(zone) {
-                        // Objets vectoriels (images insérées)
-                        if(Array.isArray(zone.objects)) {
-                            zone.objects.forEach(obj => {
-                                if(obj.type === 'image' && obj.imageData) Utils.deleteProjectFile(obj.imageData);
-                            });
-                        }
-                        // Calques de dessin (Phase B2)
-                        if(zone.drawingData && Array.isArray(zone.drawingData.layers)) {
-                            zone.drawingData.layers.forEach(layer => {
-                                if(layer.imageData) Utils.deleteProjectFile(layer.imageData);
-                            });
-                        }
-                    }
-                });
-            }
-            // 3. Versions historiques (saveVersion - Phase B2)
-            if(Array.isArray(shot.versions)) {
-                shot.versions.forEach(v => {
-                    if(v.data && Array.isArray(v.data.layers)) {
-                        v.data.layers.forEach(layer => {
-                            if(layer.imageData) Utils.deleteProjectFile(layer.imageData);
-                        });
-                    }
-                });
-            }
-            // 4. Sécurité : suppression par préfixe des fichiers Storage non répertoriés pour ce shot
-            try {
-                const { data: files } = await supabase.storage.from('projects').list(`${state.currentProjectId}/storyboard`);
-                if(files) {
-                    const toDelete = files.filter(f => f.name.startsWith(`${shotId}_`)).map(f => `${state.currentProjectId}/storyboard/${f.name}`);
-                    if(toDelete.length > 0) {
-                        await supabase.storage.from('projects').remove(toDelete);
-                    }
-                }
-            } catch(e) { /* silent */ }
+        // [Phase D] Capturer le contenu récupérable AVANT suppression (médias gardés dans le journal)
+        // On ne supprime plus immédiatement les fichiers Storage : ils seront nettoyés via cleanupExpiredEntry
+        const logId = 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        const recoverable = shot ? await History.captureRecoverable(shot, 'shot', logId) : null;
+        // Compléter avec le contexte de la scène
+        if(recoverable && scene) {
+            recoverable.metadata = recoverable.metadata || {};
+            recoverable.metadata.sceneTitle = scene.title;
         }
         
         state.data.shots = state.data.shots.filter(s => s.id !== shotId);
-        History.log('DELETE', `Suppression plan storyboard : ${scene?.title || 'Scène inconnue'}`);
+        History.log('DELETE', `Suppression plan storyboard : ${scene?.title || 'Scène inconnue'}`, {
+            target: { kind: 'shot', id: shotId, label: scene?.title || 'Plan' },
+            recoverable: recoverable
+        });
         Store.save();
         Storyboard.renderShots();
         Storyboard.renderScenesList();
