@@ -6976,7 +6976,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.9.9</p>
+      <p>vv4.0.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10186,6 +10186,26 @@ body.presentation-mode .presentation-bar {
                     <input type="radio" name="cfg-layout" id="cfg-layout-compact" value="compact">
                     <label for="cfg-layout-compact"><strong>Compact</strong><br><span style="font-size:0.8rem; color:var(--text-sec);">Max d'images, infos minimales</span></label>
                 </div>
+                
+                <!-- [Phase C.2.6] Toggle calque technique à superposer -->
+                <h4 style="margin: 18px 0 10px 0; border-bottom: 1px solid var(--border); padding-bottom: 8px;">Calque technique à imprimer</h4>
+                <div class="sb-config-item">
+                    <input type="radio" name="cfg-techlayer" id="cfg-techlayer-none" value="none" checked>
+                    <label for="cfg-techlayer-none"><strong>Aucun</strong><br><span style="font-size:0.8rem; color:var(--text-sec);">Seulement le dessin original</span></label>
+                </div>
+                <div class="sb-config-item">
+                    <input type="radio" name="cfg-techlayer" id="cfg-techlayer-lighting" value="lighting">
+                    <label for="cfg-techlayer-lighting"><strong>💡 Lighting</strong><br><span style="font-size:0.8rem; color:var(--text-sec);">Plan lumière par dessus</span></label>
+                </div>
+                <div class="sb-config-item">
+                    <input type="radio" name="cfg-techlayer" id="cfg-techlayer-camera" value="camera">
+                    <label for="cfg-techlayer-camera"><strong>📷 Camera</strong><br><span style="font-size:0.8rem; color:var(--text-sec);">Mouvements/axes caméra par dessus</span></label>
+                </div>
+                <div class="sb-config-item">
+                    <input type="radio" name="cfg-techlayer" id="cfg-techlayer-actors" value="actors">
+                    <label for="cfg-techlayer-actors"><strong>🎭 Actors</strong><br><span style="font-size:0.8rem; color:var(--text-sec);">Positions/déplacements acteurs par dessus</span></label>
+                </div>
+                
                 <button onclick="app.Storyboard.applyConfig()" style="width: 100%; margin-top: 12px; padding: 8px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Appliquer</button>
             </div>
         </div>
@@ -26758,7 +26778,8 @@ const Storyboard = {
         description: true,
         actorDirection: true,
         techDirection: true,
-        sceneTitle: true
+        sceneTitle: true,
+        techLayer: 'none' // [Phase C.2.6] 'none' | 'lighting' | 'camera' | 'actors'
     },
     
     // Extraire l'acronyme entre parenthèses, ex: "Gros plan (GP)" → "GP"
@@ -26792,6 +26813,9 @@ const Storyboard = {
     applyConfig: () => {
         const layout = document.querySelector('input[name="cfg-layout"]:checked').value;
         const fullText = (layout === 'standard' || layout === 'large');
+        // [Phase C.2.6] Lire le calque technique sélectionné
+        const techLayerRadio = document.querySelector('input[name="cfg-techlayer"]:checked');
+        const techLayer = techLayerRadio ? techLayerRadio.value : 'none';
         Storyboard.printConfig = {
             layout: layout,
             shotNumber: true,
@@ -26801,7 +26825,8 @@ const Storyboard = {
             description: fullText,
             actorDirection: fullText,
             techDirection: fullText,
-            sceneTitle: true
+            sceneTitle: true,
+            techLayer: techLayer
         };
         
         document.getElementById('sbConfigPanel').classList.remove('open');
@@ -27074,6 +27099,46 @@ const Storyboard = {
             imageDiv.appendChild(canvas);
         } else {
             imageDiv.innerHTML = '<div style="color: #999;">Pas d\'image</div>';
+        }
+        
+        // [Phase C.2.6] Superposer le calque technique sélectionné (lighting/camera/actors)
+        const techLayer = Storyboard.printConfig && Storyboard.printConfig.techLayer;
+        if(techLayer && techLayer !== 'none' && shot.drawings && shot.drawings[techLayer]) {
+            const techZone = shot.drawings[techLayer];
+            // On crée un canvas overlay par dessus l'image originale
+            const overlayCanvas = document.createElement('canvas');
+            overlayCanvas.width = 800;
+            overlayCanvas.height = 600;
+            overlayCanvas.style.position = 'absolute';
+            overlayCanvas.style.top = '0';
+            overlayCanvas.style.left = '0';
+            overlayCanvas.style.width = '100%';
+            overlayCanvas.style.height = '100%';
+            overlayCanvas.style.pointerEvents = 'none';
+            const octx = overlayCanvas.getContext('2d');
+            
+            // 3 cas : image uploadée, drawingData (calques de dessin), objects (objets vectoriels)
+            if(techZone.imageType === 'upload' && techZone.imageUrl) {
+                const layerImg = new Image();
+                if(typeof techZone.imageUrl === 'string' && techZone.imageUrl.startsWith('http')) {
+                    layerImg.crossOrigin = 'anonymous';
+                }
+                layerImg.onload = () => { octx.drawImage(layerImg, 0, 0, overlayCanvas.width, overlayCanvas.height); };
+                layerImg.src = techZone.imageUrl;
+            } else if(techZone.drawingData) {
+                DrawingEditor.renderDrawingData(octx, techZone.drawingData);
+            }
+            
+            // Objets vectoriels par dessus
+            if(Array.isArray(techZone.objects) && techZone.objects.length > 0) {
+                setTimeout(() => {
+                    Storyboard.renderObjectsOnCanvas(octx, techZone.objects);
+                }, 200);
+            }
+            
+            // L'imageDiv doit être en position relative pour que l'overlay se positionne dessus
+            imageDiv.style.position = 'relative';
+            imageDiv.appendChild(overlayCanvas);
         }
         
         card.appendChild(imageDiv);
