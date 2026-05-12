@@ -6976,7 +6976,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.0.3</p>
+      <p>vv4.0.4</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -9138,7 +9138,7 @@ body.presentation-mode .presentation-bar {
             <div class="menu-dropdown-divider"></div>
             <div class="menu-dropdown-label"><span class="moteur-icon cat-system"><span class="emoji">📁</span><svg><use href="#ico-folder"/></svg></span> Projet complet</div>
             <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.Exporter.productionReport()"><span class="moteur-icon cat-production"><span class="emoji">📋</span><svg><use href="#ico-clipboard"/></svg></span> PDF complet du projet</div>
-            <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.Exporter.exportZIP()"><span class="moteur-icon cat-system"><span class="emoji">📦</span><svg><use href="#ico-box"/></svg></span> Téléchargement Moteur complet (en cas de crash)</div>
+            <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.Exporter.exportMoteurZip()"><span class="moteur-icon cat-system"><span class="emoji">📦</span><svg><use href="#ico-box"/></svg></span> Téléchargement Moteur complet (en cas de crash)</div>
             <div class="menu-dropdown-separator"></div>
             <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.Contracts.openModal()"><span class="moteur-icon cat-admin"><span class="emoji">📝</span><svg><use href="#ico-file-signature"/></svg></span> Contrats</div>
           </div>
@@ -42819,7 +42819,163 @@ const Stats = {
         return stripEmoji ? PdfTheme.cleanText(name) : name;
     }
 };
- 
+
+// ============================================================================
+// === MoteurArchive [Phase B] : helper d'export/import ZIP "moteur" complet ===
+// ============================================================================
+// Crée des archives ZIP signées (.moteur.zip) contenant :
+//   - moteur-manifest.json : signature, version, date, hash
+//   - project.json         : tout state.data (avec URLs Storage RÉÉCRITES en chemins relatifs)
+//   - storage/             : toutes les images Storage downloadées en local
+//
+// Une archive est dite "moteur" si elle contient un moteur-manifest.json
+// avec la clé "signature" === "MOTEUR_PROJECT_ARCHIVE_V1"
+const MoteurArchive = {
+    SIGNATURE: 'MOTEUR_PROJECT_ARCHIVE_V1',
+    VERSION: '1.0',
+    EXTENSION: '.moteur.zip',
+    
+    // === Charge JSZip à la demande ===
+    ensureJSZip: () => {
+        return new Promise((resolve, reject) => {
+            if(typeof JSZip !== 'undefined') { resolve(); return; }
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error('JSZip introuvable'));
+            document.head.appendChild(script);
+        });
+    },
+    
+    // === Trouve récursivement toutes les URLs Storage dans state.data ===
+    // Retourne [{ path: 'chemin.dans.objet', url: 'https://...' }, ...]
+    findAllStorageUrls: (obj, pathPrefix = '') => {
+        const results = [];
+        if(!obj) return results;
+        
+        const isStorageUrl = (s) => {
+            if(typeof s !== 'string') return false;
+            // URLs Supabase Storage publiques
+            return s.startsWith('http') && (s.includes('/storage/v1/object/public/') || s.includes('.supabase.co'));
+        };
+        
+        if(typeof obj === 'string') {
+            if(isStorageUrl(obj)) results.push({ path: pathPrefix, url: obj });
+            return results;
+        }
+        
+        if(Array.isArray(obj)) {
+            obj.forEach((item, idx) => {
+                results.push(...MoteurArchive.findAllStorageUrls(item, `${pathPrefix}[${idx}]`));
+            });
+            return results;
+        }
+        
+        if(typeof obj === 'object') {
+            Object.entries(obj).forEach(([key, val]) => {
+                const newPath = pathPrefix ? `${pathPrefix}.${key}` : key;
+                results.push(...MoteurArchive.findAllStorageUrls(val, newPath));
+            });
+        }
+        
+        return results;
+    },
+    
+    // === Génère un nom de fichier local depuis une URL ===
+    // ex: "https://xxx.supabase.co/storage/v1/object/public/projects/abc/photo.jpg"
+    //     → "storage/abc/photo.jpg"
+    urlToLocalPath: (url) => {
+        try {
+            const u = new URL(url);
+            // Extraire la partie après /public/<bucket>/
+            const match = u.pathname.match(/\/public\/[^/]+\/(.+)$/);
+            if(match) return 'storage/' + decodeURIComponent(match[1]);
+            // Fallback : juste le nom de fichier
+            const fn = u.pathname.split('/').pop();
+            return 'storage/' + (fn || 'unknown.bin');
+        } catch(e) {
+            return 'storage/' + Date.now() + '.bin';
+        }
+    },
+    
+    // === Calcule un hash simple du JSON (pour vérification d'intégrité) ===
+    simpleHash: (str) => {
+        let h = 0;
+        for(let i = 0; i < str.length; i++) {
+            h = ((h << 5) - h) + str.charCodeAt(i);
+            h |= 0;
+        }
+        return 'h' + Math.abs(h).toString(36);
+    },
+    
+    // === Détecte si un fichier ZIP est une archive moteur ===
+    // Retourne le manifest si oui, null sinon
+    detectMoteurArchive: async (zip) => {
+        const manifestFile = zip.file('moteur-manifest.json');
+        if(!manifestFile) return null;
+        try {
+            const txt = await manifestFile.async('string');
+            const manifest = JSON.parse(txt);
+            if(manifest.signature === MoteurArchive.SIGNATURE) return manifest;
+            return null;
+        } catch(e) { return null; }
+    },
+    
+    // === Modal de progression ===
+    // Retourne un objet { update, close, isCancelled }
+    showProgressModal: (titleText) => {
+        // Supprimer toute modale précédente
+        const existing = document.getElementById('moteurArchiveProgress');
+        if(existing) existing.remove();
+        
+        const overlay = document.createElement('div');
+        overlay.id = 'moteurArchiveProgress';
+        overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:10000; display:flex; align-items:center; justify-content:center;';
+        overlay.innerHTML = `
+            <div style="background:var(--panel-bg, #fff); color:var(--text-main, #222); border-radius:12px; padding:30px; min-width:420px; max-width:90vw; box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+                <h3 style="margin:0 0 20px 0; font-size:1.2rem;">${titleText}</h3>
+                <div id="moteurArchiveCurrent" style="font-size:0.9rem; color:var(--text-sec, #666); margin-bottom:10px; min-height:1.2em; word-break:break-all;">Initialisation…</div>
+                <div style="background:#e0e0e0; height:10px; border-radius:5px; overflow:hidden; margin-bottom:8px;">
+                    <div id="moteurArchiveBar" style="background:var(--primary, #2b6ef6); height:100%; width:0%; transition:width 0.2s;"></div>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:0.85rem; color:var(--text-sec, #666); margin-bottom:20px;">
+                    <span id="moteurArchivePct">0%</span>
+                    <span id="moteurArchiveCount"></span>
+                </div>
+                <div style="text-align:right;">
+                    <button id="moteurArchiveCancel" style="padding:8px 18px; background:#dc3545; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Annuler</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        
+        const state = { cancelled: false };
+        document.getElementById('moteurArchiveCancel').onclick = () => {
+            state.cancelled = true;
+            document.getElementById('moteurArchiveCurrent').textContent = 'Annulation en cours…';
+        };
+        
+        return {
+            update: (current, done, total) => {
+                const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                const bar = document.getElementById('moteurArchiveBar');
+                const pctEl = document.getElementById('moteurArchivePct');
+                const countEl = document.getElementById('moteurArchiveCount');
+                const curEl = document.getElementById('moteurArchiveCurrent');
+                if(bar) bar.style.width = pct + '%';
+                if(pctEl) pctEl.textContent = pct + '%';
+                if(countEl && total > 0) countEl.textContent = `${done} / ${total}`;
+                if(curEl && current) curEl.textContent = current;
+            },
+            close: () => { 
+                const o = document.getElementById('moteurArchiveProgress'); 
+                if(o) o.remove(); 
+            },
+            isCancelled: () => state.cancelled
+        };
+    }
+};
+
  const Exporter = {
     toPDF: (opts) => { 
         document.body.className = state.currentRole === 'viewer' ? 'read-only' : ''; 
@@ -43801,6 +43957,155 @@ Généré par Moteur - moteur.studio
         } catch(err) {
             console.error('Erreur export ZIP:', err);
             Utils.toast('Erreur lors de l\'export ZIP', 'error');
+        }
+    },
+    
+    // ========== [Phase B] EXPORT ZIP MOTEUR COMPLET ==========
+    // Génère un fichier .moteur.zip qui peut être réimporté pour restaurer le projet complet.
+    // Inclut : project.json + toutes les images Storage + manifest signé.
+    exportMoteurZip: async () => {
+        try {
+            await MoteurArchive.ensureJSZip();
+        } catch(e) {
+            Utils.toast('Impossible de charger JSZip', 'error');
+            return;
+        }
+        
+        const progress = MoteurArchive.showProgressModal('📦 Téléchargement Moteur complet');
+        
+        try {
+            // 1. Cloner state.data pour ne pas le polluer
+            progress.update('Préparation des données…', 0, 100);
+            await new Promise(r => setTimeout(r, 50));
+            const dataClone = JSON.parse(JSON.stringify(state.data));
+            
+            // 2. Trouver toutes les URLs Storage
+            progress.update('Inventaire des images…', 5, 100);
+            await new Promise(r => setTimeout(r, 50));
+            const urlsFound = MoteurArchive.findAllStorageUrls(dataClone);
+            // Dédupliquer par URL (une même image peut être référencée plusieurs fois)
+            const uniqueUrls = [];
+            const seenUrls = new Set();
+            urlsFound.forEach(item => {
+                if(!seenUrls.has(item.url)) {
+                    seenUrls.add(item.url);
+                    uniqueUrls.push(item);
+                }
+            });
+            
+            // 3. Préparer mapping URL → chemin local
+            const urlToLocal = {};
+            uniqueUrls.forEach(item => {
+                urlToLocal[item.url] = MoteurArchive.urlToLocalPath(item.url);
+            });
+            
+            // 4. Télécharger toutes les images
+            const zip = new JSZip();
+            const totalImages = uniqueUrls.length;
+            let downloaded = 0;
+            let failed = 0;
+            
+            for(const item of uniqueUrls) {
+                if(progress.isCancelled()) {
+                    progress.close();
+                    Utils.toast('Export annulé', 'info');
+                    return;
+                }
+                
+                const localPath = urlToLocal[item.url];
+                const fileName = localPath.split('/').pop();
+                progress.update(`Téléchargement: ${fileName}`, downloaded, totalImages);
+                
+                try {
+                    const response = await fetch(item.url);
+                    if(!response.ok) throw new Error('HTTP ' + response.status);
+                    const blob = await response.blob();
+                    zip.file(localPath, blob);
+                    downloaded++;
+                } catch(e) {
+                    console.warn('Échec download:', item.url, e.message);
+                    failed++;
+                }
+            }
+            
+            // 5. Réécrire les URLs dans le clone vers les chemins locaux relatifs
+            // On parcourt l'objet et on remplace toute string qui est une URL Storage par son chemin local
+            progress.update('Réécriture des chemins…', totalImages, totalImages + 3);
+            await new Promise(r => setTimeout(r, 50));
+            const rewriteUrls = (obj) => {
+                if(typeof obj === 'string') {
+                    return urlToLocal[obj] ? './' + urlToLocal[obj] : obj;
+                }
+                if(Array.isArray(obj)) return obj.map(rewriteUrls);
+                if(obj && typeof obj === 'object') {
+                    const out = {};
+                    Object.entries(obj).forEach(([k, v]) => { out[k] = rewriteUrls(v); });
+                    return out;
+                }
+                return obj;
+            };
+            const dataRewritten = rewriteUrls(dataClone);
+            
+            // 6. Écrire project.json
+            const projectJson = JSON.stringify(dataRewritten, null, 2);
+            zip.file('project.json', projectJson);
+            
+            // 7. Écrire manifest signé
+            progress.update('Génération du manifest…', totalImages + 1, totalImages + 3);
+            await new Promise(r => setTimeout(r, 50));
+            const manifest = {
+                signature: MoteurArchive.SIGNATURE,
+                version: MoteurArchive.VERSION,
+                generatedAt: new Date().toISOString(),
+                generatedBy: state.currentUser?.email || 'unknown',
+                projectTitle: state.data.title || 'Sans titre',
+                projectId: state.currentProjectId || null,
+                stats: {
+                    imagesTotal: totalImages,
+                    imagesDownloaded: downloaded,
+                    imagesFailed: failed
+                },
+                checksum: MoteurArchive.simpleHash(projectJson)
+            };
+            zip.file('moteur-manifest.json', JSON.stringify(manifest, null, 2));
+            
+            // 8. README
+            zip.file('README.txt', 
+                `Archive Moteur — ${state.data.title || 'Sans titre'}\n` +
+                `Générée le : ${new Date().toLocaleString('fr-FR')}\n\n` +
+                `Cette archive contient une sauvegarde complète de votre projet, ` +
+                `incluant toutes les images. Elle ne peut être réouverte que dans moteur.studio.\n\n` +
+                `Pour la restaurer : Menu Fichier > Importer un projet > sélectionnez ce fichier.\n\n` +
+                `⚠️ Ne modifiez pas le contenu de ce ZIP, l'import vérifiera la signature.\n`
+            );
+            
+            // 9. Générer le ZIP
+            progress.update('Compression du ZIP…', totalImages + 2, totalImages + 3);
+            await new Promise(r => setTimeout(r, 50));
+            const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+            
+            // 10. Téléchargement
+            const safeTitle = (state.data.title || 'projet').replace(/[\\/:*?"<>|]/g, '_').trim();
+            const filename = `${safeTitle}${MoteurArchive.EXTENSION}`;
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(link.href);
+            
+            progress.close();
+            
+            // Message final
+            const summary = failed > 0 
+                ? `Export terminé. ${downloaded} images sauvegardées, ${failed} échouées.`
+                : `Export complet ! ${downloaded} image(s) sauvegardée(s).`;
+            Utils.toast(summary, failed > 0 ? 'warning' : 'success');
+            History.log('EXPORT', 'Téléchargement Moteur complet généré');
+            
+        } catch(err) {
+            console.error('Erreur export Moteur ZIP:', err);
+            progress.close();
+            Utils.toast('Erreur : ' + (err.message || 'inconnu'), 'error');
         }
     }
 };
