@@ -5370,9 +5370,28 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
 
   #print-cover, .print-only-title { display: none; }
   @media print {
-    @page { size: A4; margin: 25mm 25mm 25mm 35mm; counter-increment: page; @top-right { content: counter(page) "."; font-family: 'Courier Prime', 'Courier', monospace; font-size: 12pt; margin-top: 15mm; } }
+    /* [Phase C.2.5] Numéro de page en bas à droite (au lieu de haut à droite avant) */
+    @page { size: A4; margin: 25mm 25mm 25mm 35mm; counter-increment: page; @bottom-right { content: counter(page) "."; font-family: 'Courier Prime', 'Courier', monospace; font-size: 12pt; margin-bottom: 10mm; } }
     
     body { background: #fff !important; color: #000 !important; height: auto; overflow: visible; font-family: 'Courier Prime', 'Courier', monospace; -webkit-print-color-adjust: exact; }
+    
+    /* [Phase C.2.5] Suppression de tout effet visuel parasite (couleurs scènes, traits, ombres) */
+    body.print-script .script-row,
+    body.print-script .script-row.is-final,
+    body.print-script .script-row.is-draft,
+    body.print-script .script-write-col,
+    body.print-script .script-editor-box { 
+        background: transparent !important; 
+        background-color: transparent !important; 
+        border: none !important; 
+        border-left: none !important; 
+        border-right: none !important;
+        box-shadow: none !important; 
+    }
+    body.print-script .scene-color-indicator,
+    body.print-script .scene-status-badge,
+    body.print-script .scene-status-container,
+    body.print-script .lock-overlay { display: none !important; }
     main { overflow: visible; padding: 0; margin: 0; }
     
     /* Cacher l'interface */
@@ -6957,7 +6976,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.9.6</p>
+      <p>vv3.9.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10036,6 +10055,7 @@ body.presentation-mode .presentation-bar {
                       <button class="fmt-btn" data-type="sc-centered" onclick="app.ScriptEditor.formatContinuous('sc-centered', event)" onmousedown="event.preventDefault()">Centré</button>
                       <button class="fmt-btn" data-type="sc-note" onclick="app.ScriptEditor.formatContinuous('sc-note', event)" onmousedown="event.preventDefault()">Note</button>
                       <button class="fmt-btn-prefs" onclick="app.ScriptEditor.openPrefsModal()" onmousedown="event.preventDefault()" title="Paramètres éditeur scénario (Tab/Enter)">⚙️</button>
+                      <button class="fmt-btn-prefs" onclick="app.Exporter.toPDF({script: true, author: state.data.scriptMeta?.author || ''})" onmousedown="event.preventDefault()" title="Imprimer / Export PDF du scénario">📄 PDF</button>
                   </div>
               </div>
           </div>
@@ -10509,6 +10529,9 @@ body.presentation-mode .presentation-bar {
 
 <div id="tab-breakdown" class="tab-content">
           <h1 class="print-only-title">DÉPOUILLEMENT</h1>
+          <div style="display:flex; justify-content:flex-end; padding: 10px 15px 0;">
+              <button onclick="app.Breakdown.exportPDF()" class="btn-tool" style="background:var(--primary); color:#fff; padding:8px 16px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📄 Export PDF</button>
+          </div>
           <div class="breakdown-layout">
               <svg id="bd-link-svg"></svg>
               <div class="breakdown-col" id="breakdownScriptCol">
@@ -22491,20 +22514,12 @@ const tabToSection = {
               'NOTES': [158, 158, 158]
           };
           
-          // ===== PAGE DE TITRE =====
-          doc.setFillColor(43, 110, 246);
-          doc.rect(0, 0, pageWidth, 50, 'F');
+          // ===== PAGE DE GARDE (Phase C.1) =====
+          PdfTheme.coverPage(doc, { sectionName: 'Dépouillement' });
           
-          doc.setTextColor(255, 255, 255);
-          doc.setFontSize(24);
-          doc.setFont('helvetica', 'bold');
-          doc.text('DÉPOUILLEMENT', pageWidth / 2, 25, { align: 'center' });
-          
-          doc.setFontSize(14);
-          doc.setFont('helvetica', 'normal');
-          doc.text(projectTitle, pageWidth / 2, 38, { align: 'center' });
-          
-          y = 60;
+          // Nouvelle page pour le contenu
+          doc.addPage();
+          y = margin;
           
           // Légende des catégories
           doc.setFontSize(10);
@@ -22689,20 +22704,11 @@ const tabToSection = {
               y += 8;
           });
           
-          // ===== PIED DE PAGE =====
-          const totalPages = doc.internal.getNumberOfPages();
-          for(let i = 1; i <= totalPages; i++) {
-              doc.setPage(i);
-              doc.setFontSize(8);
-              doc.setTextColor(150, 150, 150);
-              doc.text(`${projectTitle} - Dépouillement`, margin, pageHeight - 8);
-              doc.text(`Page ${i}/${totalPages}`, pageWidth - margin, pageHeight - 8, { align: 'right' });
-              doc.text(`Généré par Moteur - ${new Date().toLocaleDateString('fr-FR')}`, pageWidth / 2, pageHeight - 8, { align: 'center' });
-          }
+          // ===== FOOTERS UNIFIÉS (Phase C.1) =====
+          PdfTheme.applyFooters(doc);
           
-          // Télécharger
-          const filename = (projectTitle.replace(/[^a-z0-9]/gi, '_') || 'depouillement') + '_depouillement.pdf';
-          doc.save(filename);
+          // ===== TÉLÉCHARGEMENT (nom unifié) =====
+          doc.save(PdfTheme.filename('Dépouillement'));
           
           Utils.toast('Dépouillement PDF exporté !', 'success');
           History.log('EXPORT', 'Dépouillement PDF généré');
@@ -26842,12 +26848,73 @@ const Storyboard = {
                 cloneCanvases[idx].parentNode.replaceChild(img, cloneCanvases[idx]);
             } catch(e) { console.warn('Canvas conversion failed', e); }
         });
+        
+        // [Phase C.2.6] 5. Pré-charger les <img> cross-origin Storage en base64 pour qu'elles s'impriment
+        const cloneImgs = clone.querySelectorAll('img');
+        await Promise.all(Array.from(cloneImgs).map(async (img) => {
+            const src = img.getAttribute('src');
+            if(!src || src.startsWith('data:') || src.startsWith('blob:')) return;
+            try {
+                const response = await fetch(src, { mode: 'cors' });
+                if(!response.ok) return;
+                const blob = await response.blob();
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+                img.setAttribute('src', dataUrl);
+            } catch(e) {
+                console.warn('Image preload failed for storyboard:', src, e);
+            }
+        }));
+        
         const content = clone.innerHTML;
         const range = Storyboard._printSceneRange || '';
-        const title = `StoryBoard ${state.data.title || ''}${range ? ' - ' + range : ''}`.trim();
+        const projectTitle = state.data.title || 'Projet';
+        // [Phase C.2.6] Titre HTML propre (pas "Moteur - Logiciel...")
+        const title = `${projectTitle} - Storyboard${range ? ' - ' + range : ''} - moteur.studio`;
+        
+        // [Phase C.2.6] Page de garde Final Draft pour storyboard
+        const storyboarder = (typeof PdfTheme !== 'undefined' && PdfTheme.getAuthorForSection) 
+            ? PdfTheme.getAuthorForSection('Storyboard') 
+            : null;
+        const today = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+        const draft = state.data.scriptMeta?.draft || '';
+        const draftDate = state.data.scriptMeta?.draftDate || '';
+        const contact = state.data.scriptMeta?.contact || '';
+        const coverHtml = `
+            <div class="sb-cover-page">
+                <div class="sb-cover-title">${(projectTitle || '').toUpperCase()}</div>
+                <div class="sb-cover-divider"></div>
+                <div class="sb-cover-subtitle">${storyboarder ? 'Un storyboard de ' + storyboarder.name : 'Storyboard'}</div>
+                ${range ? `<div class="sb-cover-range">${range}</div>` : ''}
+                <div class="sb-cover-bottom">
+                    ${draft ? `<div>${draft}</div>` : ''}
+                    ${draftDate ? `<div>${draftDate}</div>` : ''}
+                    <div>${today}</div>
+                    ${contact ? `<div style="margin-top:10px">${contact}</div>` : ''}
+                </div>
+                <div class="sb-cover-footer">Document généré par Moteur — moteur.studio</div>
+            </div>
+        `;
+        
         const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title><style>
-            @page { size: A4 ${orientation}; margin: 10mm; }
+            /* [Phase C.2.6] Numéro de page en bas à droite (au lieu de header navigateur) */
+            @page { size: A4 ${orientation}; margin: 10mm; @bottom-right { content: counter(page); font-family: system-ui, sans-serif; font-size: 9pt; color: #888; margin-bottom: 5mm; } }
+            @page :first { @bottom-right { content: ""; } }
             body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; background: white; color: #333; }
+            
+            /* Page de garde Final Draft */
+            .sb-cover-page { height: 277mm; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; page-break-after: always; padding: 20mm; }
+            .sb-cover-title { font-size: 32pt; font-weight: bold; text-align: center; letter-spacing: 2px; color: #222; }
+            .sb-cover-divider { width: 80mm; height: 1px; background: #ccc; margin: 10mm 0; }
+            .sb-cover-subtitle { font-size: 14pt; color: #555; text-align: center; }
+            .sb-cover-range { font-size: 11pt; color: #888; margin-top: 5mm; font-style: italic; }
+            .sb-cover-bottom { position: absolute; bottom: 30mm; left: 25mm; font-size: 10pt; color: #666; line-height: 1.5; }
+            .sb-cover-footer { position: absolute; bottom: 12mm; left: 0; right: 0; text-align: center; font-size: 8pt; color: #aaa; font-style: italic; }
+            
             .sb-print-page { page-break-after: always; padding: 0; margin: 0; }
             .sb-print-page:last-child { page-break-after: auto; }
             .sb-print-page h2 { margin: 0 0 15px 0; padding-bottom: 8px; border-bottom: 3px solid #333; font-size: 1.3rem; }
@@ -26871,7 +26938,7 @@ const Storyboard = {
             .sb-print-page--compact .sb-print-shot-image { width: 100%; height: 110px; min-height: 110px; border-right: none; border-bottom: 2px solid #333; }
             .sb-print-page--compact .sb-print-shot-info { font-size: 0.7rem; padding: 6px 8px; line-height: 1.25; }
             .sb-print-page--compact .sb-print-shot-header { font-size: 0.75rem; margin-bottom: 2px; }
-        </style></head><body>${content}<scr` + `ipt>window.addEventListener('load',function(){setTimeout(function(){window.print();},300);});<\/scr` + `ipt></body></html>`;
+        </style></head><body>${coverHtml}${content}<scr` + `ipt>window.addEventListener('load',function(){setTimeout(function(){window.print();},300);});<\/scr` + `ipt></body></html>`;
         const blob = new Blob([html], { type: 'text/html' });
         const blobUrl = URL.createObjectURL(blob);
         const printWindow = window.open(blobUrl, '_blank');
@@ -31598,16 +31665,14 @@ const DrawingEditor = {
         return CONFIG.crewRoles[groupId] || [];
     },
     
-    // ========== EXPORT PDF ÉQUIPE ==========
+    // ========== EXPORT PDF ÉQUIPE [Phase C.2.1 refondu] ==========
     exportPDF: () => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
         const margin = 15;
-        let y = margin;
         
-        const projectTitle = state.data.title || 'Projet sans titre';
         const crew = state.data.crew || [];
         const actors = state.data.actors || [];
         
@@ -31616,178 +31681,135 @@ const DrawingEditor = {
             return;
         }
         
-        // ===== PAGE DE TITRE =====
-        doc.setFillColor(43, 110, 246);
-        doc.rect(0, 0, pageWidth, 50, 'F');
+        // ===== PAGE DE GARDE (Phase C.1) =====
+        PdfTheme.coverPage(doc, { sectionName: 'Équipe' });
         
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(24);
-        doc.setFont('helvetica', 'bold');
-        doc.text('ÉQUIPE DU FILM', pageWidth / 2, 25, { align: 'center' });
+        // ===== CONTENU =====
+        doc.addPage();
+        let y = margin;
         
-        doc.setFontSize(14);
-        doc.setFont('helvetica', 'normal');
-        doc.text(projectTitle, pageWidth / 2, 38, { align: 'center' });
-        
-        y = 60;
-        
-        // Statistiques
+        // Statistiques en haut
         doc.setFontSize(10);
         doc.setTextColor(100, 100, 100);
-        doc.text(`${actors.length} comédien(s) • ${crew.length} technicien(s)`, pageWidth / 2, y, { align: 'center' });
-        y += 15;
+        doc.setFont('helvetica', 'normal');
+        doc.text(`${actors.length} comédien(s) · ${crew.length} technicien(s)`, pageWidth / 2, y + 4, { align: 'center' });
+        y += 14;
         
-        // ===== COMÉDIENS =====
-        if(actors.length > 0) {
-            doc.setFillColor(76, 175, 80);
-            doc.rect(margin, y, pageWidth - margin * 2, 10, 'F');
+        // Helper : dessiner un en-tête de section
+        const drawSectionHeader = (label, count) => {
+            if(y > pageHeight - 30) { doc.addPage(); y = margin; }
+            doc.setFillColor(43, 110, 246);
+            doc.rect(margin, y, pageWidth - margin * 2, 9, 'F');
             doc.setTextColor(255, 255, 255);
-            doc.setFontSize(12);
+            doc.setFontSize(11);
             doc.setFont('helvetica', 'bold');
-            doc.text(`🎭 COMÉDIENS (${actors.length})`, margin + 5, y + 7);
-            y += 15;
-            
-            // En-têtes du tableau
+            doc.text(`${PdfTheme.cleanText(label)} (${count})`, margin + 4, y + 6.2);
+            y += 12;
+        };
+        
+        // Helper : dessiner les en-têtes de tableau
+        const drawTableHeaders = (headers) => {
             doc.setFillColor(240, 240, 240);
-            doc.rect(margin, y, pageWidth - margin * 2, 8, 'F');
+            doc.rect(margin, y, pageWidth - margin * 2, 7, 'F');
             doc.setTextColor(80, 80, 80);
             doc.setFontSize(8);
             doc.setFont('helvetica', 'bold');
-            doc.text('Comédien', margin + 3, y + 5.5);
-            doc.text('Rôle', margin + 55, y + 5.5);
-            doc.text('Téléphone', margin + 100, y + 5.5);
-            doc.text('Email', margin + 135, y + 5.5);
-            y += 10;
-            
+            headers.forEach(h => doc.text(h.label, margin + h.x, y + 5));
+            y += 8;
             doc.setFont('helvetica', 'normal');
-            doc.setTextColor(50, 50, 50);
+        };
+        
+        // ===== COMÉDIENS (tri alphabétique) =====
+        if(actors.length > 0) {
+            drawSectionHeader('COMÉDIENS', actors.length);
             
-            actors.forEach((actor, idx) => {
-                if(y > pageHeight - 20) {
-                    doc.addPage();
-                    y = margin;
-                }
+            drawTableHeaders([
+                { x: 3,   label: 'Comédien' },
+                { x: 55,  label: 'Rôle' },
+                { x: 100, label: 'Téléphone' },
+                { x: 135, label: 'Email' }
+            ]);
+            
+            // Tri alphabétique par nom
+            const sortedActors = [...actors].sort((a, b) => 
+                (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' })
+            );
+            
+            doc.setTextColor(50, 50, 50);
+            sortedActors.forEach((actor, idx) => {
+                if(y > pageHeight - 15) { doc.addPage(); y = margin; }
                 
+                // Alternance de fond pour lisibilité
                 if(idx % 2 === 0) {
                     doc.setFillColor(250, 250, 250);
-                    doc.rect(margin, y - 4, pageWidth - margin * 2, 8, 'F');
+                    doc.rect(margin, y - 4, pageWidth - margin * 2, 7, 'F');
                 }
                 
+                // Trouver le personnage joué (via characterId OU role text)
                 const character = state.data.characters?.find(c => c.id === actor.characterId);
+                const roleLabel = character?.name || actor.role || '-';
                 
                 doc.setFontSize(8);
-                doc.text((actor.name || '-').substring(0, 28), margin + 3, y);
-                doc.text((character?.name || '-').substring(0, 22), margin + 55, y);
+                doc.setTextColor(50, 50, 50);
+                doc.text(PdfTheme.cleanText(actor.name || '-').substring(0, 28), margin + 3, y);
+                doc.text(PdfTheme.cleanText(roleLabel).substring(0, 22), margin + 55, y);
                 doc.text((actor.phone || '-').substring(0, 18), margin + 100, y);
                 doc.setTextColor(43, 110, 246);
                 doc.text((actor.email || '-').substring(0, 28), margin + 135, y);
-                doc.setTextColor(50, 50, 50);
                 
-                y += 7;
+                y += 6.5;
             });
             
             y += 10;
         }
         
-        // ===== ÉQUIPE TECHNIQUE =====
+        // ===== TECHNICIENS (tri alphabétique global, regroupés par département uniquement pour info) =====
         if(crew.length > 0) {
-            if(y > pageHeight - 50) {
-                doc.addPage();
-                y = margin;
-            }
+            if(y > pageHeight - 30) { doc.addPage(); y = margin; }
             
-            // Grouper par département
-            const byDepartment = {};
-            crew.forEach(member => {
-                const dept = member.department || 'Autre';
-                if(!byDepartment[dept]) byDepartment[dept] = [];
-                byDepartment[dept].push(member);
-            });
+            drawSectionHeader('TECHNICIENS', crew.length);
             
-            const deptColors = {
-                'Réalisation': [156, 39, 176],
-                'Image': [33, 150, 243],
-                'Son': [0, 188, 212],
-                'Lumière': [255, 193, 7],
-                'Décor': [121, 85, 72],
-                'HMC': [233, 30, 99],
-                'Régie': [255, 152, 0],
-                'Post-production': [96, 125, 139],
-                'Production': [76, 175, 80]
-            };
+            drawTableHeaders([
+                { x: 3,   label: 'Nom' },
+                { x: 50,  label: 'Fonction' },
+                { x: 95,  label: 'Département' },
+                { x: 135, label: 'Email' }
+            ]);
             
-            Object.entries(byDepartment).forEach(([dept, members]) => {
-                if(y > pageHeight - 40) {
-                    doc.addPage();
-                    y = margin;
+            // Tri alphabétique par nom
+            const sortedCrew = [...crew].sort((a, b) => 
+                (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' })
+            );
+            
+            doc.setTextColor(50, 50, 50);
+            sortedCrew.forEach((member, idx) => {
+                if(y > pageHeight - 15) { doc.addPage(); y = margin; }
+                
+                if(idx % 2 === 0) {
+                    doc.setFillColor(250, 250, 250);
+                    doc.rect(margin, y - 4, pageWidth - margin * 2, 7, 'F');
                 }
                 
-                const rgb = deptColors[dept] || [100, 100, 100];
+                // Convertir group_id (gc3) en label lisible (Réalisation, sans emoji)
+                const deptLabel = PdfTheme.getGroupLabel(member.group_id, true) || '-';
                 
-                // En-tête département
-                doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-                doc.rect(margin, y, pageWidth - margin * 2, 10, 'F');
-                doc.setTextColor(255, 255, 255);
-                doc.setFontSize(11);
-                doc.setFont('helvetica', 'bold');
-                doc.text(`${dept.toUpperCase()} (${members.length})`, margin + 5, y + 7);
-                y += 12;
-                
-                // En-têtes du tableau
-                doc.setFillColor(245, 245, 245);
-                doc.rect(margin, y, pageWidth - margin * 2, 7, 'F');
-                doc.setTextColor(80, 80, 80);
-                doc.setFontSize(7);
-                doc.setFont('helvetica', 'bold');
-                doc.text('Nom', margin + 3, y + 5);
-                doc.text('Fonction', margin + 50, y + 5);
-                doc.text('Téléphone', margin + 100, y + 5);
-                doc.text('Email', margin + 135, y + 5);
-                y += 9;
-                
-                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8);
                 doc.setTextColor(50, 50, 50);
+                doc.text(PdfTheme.cleanText(member.name || '-').substring(0, 22), margin + 3, y);
+                doc.text(PdfTheme.cleanText(member.role || '-').substring(0, 22), margin + 50, y);
+                doc.text(PdfTheme.cleanText(deptLabel).substring(0, 18), margin + 95, y);
+                doc.setTextColor(43, 110, 246);
+                doc.text((member.email || '-').substring(0, 28), margin + 135, y);
                 
-                members.forEach((member, idx) => {
-                    if(y > pageHeight - 15) {
-                        doc.addPage();
-                        y = margin;
-                    }
-                    
-                    if(idx % 2 === 0) {
-                        doc.setFillColor(252, 252, 252);
-                        doc.rect(margin, y - 3.5, pageWidth - margin * 2, 7, 'F');
-                    }
-                    
-                    doc.setFontSize(8);
-                    doc.text((member.name || '-').substring(0, 25), margin + 3, y);
-                    doc.text((member.role || '-').substring(0, 25), margin + 50, y);
-                    doc.text((member.phone || '-').substring(0, 18), margin + 100, y);
-                    doc.setTextColor(43, 110, 246);
-                    doc.text((member.email || '-').substring(0, 28), margin + 135, y);
-                    doc.setTextColor(50, 50, 50);
-                    
-                    y += 7;
-                });
-                
-                y += 8;
+                y += 6.5;
             });
         }
         
-        // ===== PIED DE PAGE =====
-        const totalPages = doc.internal.getNumberOfPages();
-        for(let i = 1; i <= totalPages; i++) {
-            doc.setPage(i);
-            doc.setFontSize(8);
-            doc.setTextColor(150, 150, 150);
-            doc.text(`${projectTitle} - Équipe`, margin, pageHeight - 8);
-            doc.text(`Page ${i}/${totalPages}`, pageWidth - margin, pageHeight - 8, { align: 'right' });
-            doc.text(`Généré par Moteur - ${new Date().toLocaleDateString('fr-FR')}`, pageWidth / 2, pageHeight - 8, { align: 'center' });
-        }
+        // ===== FOOTERS UNIFIÉS (Phase C.1) =====
+        PdfTheme.applyFooters(doc);
         
-        // Télécharger
-        const filename = (projectTitle.replace(/[^a-z0-9]/gi, '_') || 'equipe') + '_equipe.pdf';
-        doc.save(filename);
+        // ===== TÉLÉCHARGEMENT (nom unifié) =====
+        doc.save(PdfTheme.filename('Équipe'));
         
         Utils.toast('Équipe PDF exportée !', 'success');
         History.log('EXPORT', 'Équipe PDF générée');
@@ -42585,6 +42607,14 @@ const Stats = {
         if(opts.breakdown) document.body.classList.add('print-breakdown'); 
         if(opts.stats) { setTimeout(() => UI.printStats(), 100); return; }
         
+        // [Phase C.2.5] Changer le titre HTML pour que le header navigateur soit propre
+        // (au lieu de "Moteur - Logiciel d'écriture...")
+        let sectionLabel = 'Scénario';
+        if(opts.synop) sectionLabel = 'Synopsis';
+        else if(opts.crew) sectionLabel = 'Équipe';
+        else if(opts.breakdown) sectionLabel = 'Dépouillement';
+        document.title = `${state.data.title || 'Projet'} - ${sectionLabel} - moteur.studio`;
+        
         window.print(); 
         document.title = _origTitle;
         try { if(localStorage.getItem(CONFIG.themeKey) === 'dark') document.body.classList.add('dark-mode'); } catch(e) {} 
@@ -42602,37 +42632,15 @@ const Stats = {
         let y = margin;
         
         const projectTitle = state.data.title || 'Projet sans titre';
-        const today = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
         
-        // ===== PAGE DE COUVERTURE =====
-        doc.setFillColor(43, 110, 246);
-        doc.rect(0, 0, pageWidth, 60, 'F');
+        // Helper formatage : évite les espaces insécables qui s'affichent en "/"
+        const fmt = (n) => {
+            const num = parseFloat(n) || 0;
+            return num.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        };
         
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(28);
-        doc.setFont('helvetica', 'bold');
-        doc.text('RAPPORT DE PRODUCTION', pageWidth / 2, 30, { align: 'center' });
-        
-        doc.setFontSize(12);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Document généré par Moteur', pageWidth / 2, 45, { align: 'center' });
-        
-        doc.setTextColor(50, 50, 50);
-        doc.setFontSize(24);
-        doc.setFont('helvetica', 'bold');
-        doc.text(projectTitle, pageWidth / 2, 90, { align: 'center' });
-        
-        doc.setFontSize(12);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(100, 100, 100);
-        doc.text(`Généré le ${today}`, pageWidth / 2, 105, { align: 'center' });
-        
-        // Logo/Affiche si disponible
-        if(state.data.poster) {
-            try {
-                doc.addImage(state.data.poster, 'JPEG', pageWidth/2 - 30, 115, 60, 80);
-            } catch(e) {}
-        }
+        // ===== PAGE DE GARDE (Phase C.1) =====
+        PdfTheme.coverPage(doc, { sectionName: 'Production' });
         
         // ===== FONCTION UTILITAIRES =====
         const addSection = (title, yPos) => {
@@ -42645,7 +42653,8 @@ const Stats = {
             doc.setTextColor(255, 255, 255);
             doc.setFontSize(12);
             doc.setFont('helvetica', 'bold');
-            doc.text(title, margin + 5, yPos + 7);
+            // Phase C.1 : retirer les emojis qui plantent en latin-1
+            doc.text(PdfTheme.cleanText(title), margin + 5, yPos + 7);
             doc.setTextColor(50, 50, 50);
             doc.setFont('helvetica', 'normal');
             return yPos + 15;
@@ -42712,7 +42721,7 @@ const Stats = {
         doc.addPage();
         y = margin;
         
-        y = addSection('📊 RÉSUMÉ GÉNÉRAL', y);
+        y = addSection('RÉSUMÉ GÉNÉRAL', y);
         
         const scenes = state.data.scenes || [];
         const characters = state.data.characters || [];
@@ -42723,7 +42732,7 @@ const Stats = {
         const expenses = state.data.expenses || [];
         const shootingDays = state.data.shootingDays || [];
         
-        y = addKeyValue('Titre du projet', projectTitle, y);
+        y = addKeyValue('Titre du projet', PdfTheme.cleanText(projectTitle), y);
         y = addKeyValue('Nombre de scènes', scenes.length, y);
         y = addKeyValue('Nombre de plans (storyboard)', shots.length, y);
         y = addKeyValue('Personnages', characters.length, y);
@@ -42736,16 +42745,18 @@ const Stats = {
         const totalMinutes = scenes.reduce((sum, s) => sum + (parseFloat(s.time) || 0), 0);
         y = addKeyValue('Durée estimée', `${Math.floor(totalMinutes)} min`, y);
         
-        // Budget
-        const budget = state.data.budget || 0;
-        const totalExpenses = expenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
-        y = addKeyValue('Budget prévu', `${budget.toLocaleString('fr-FR')} €`, y);
-        y = addKeyValue('Dépenses engagées', `${totalExpenses.toLocaleString('fr-FR')} €`, y);
-        y = addKeyValue('Reste disponible', `${(budget - totalExpenses).toLocaleString('fr-FR')} €`, y);
+        // Budget (Phase C.2.4 : fix [object Object] — budget est un objet, pas un nombre)
+        const budgetObj = state.data.budget || {};
+        const budgetTotal = parseFloat(budgetObj.total) || 0;
+        const currency = budgetObj.currency || '€';
+        const totalExpenses = expenses.reduce((sum, e) => sum + (parseFloat(e.amountTTC) || parseFloat(e.amount) || 0), 0);
+        y = addKeyValue('Budget prévu', `${fmt(budgetTotal)} ${currency}`, y);
+        y = addKeyValue('Dépenses engagées', `${fmt(totalExpenses)} ${currency}`, y);
+        y = addKeyValue('Reste disponible', `${fmt(budgetTotal - totalExpenses)} ${currency}`, y);
         
         // Statistiques scènes
         y += 5;
-        y = addSection('🎬 STATISTIQUES SCÈNES', y);
+        y = addSection('STATISTIQUES SCÈNES', y);
         
         const intScenes = scenes.filter(s => s.title && s.title.toUpperCase().startsWith('INT')).length;
         const extScenes = scenes.filter(s => s.title && s.title.toUpperCase().startsWith('EXT')).length;
@@ -42758,42 +42769,68 @@ const Stats = {
         y = addKeyValue('Scènes finalisées', `${finalizedScenes} / ${scenes.length}`, y);
         
         // ===== PERSONNAGES =====
+        // Phase C.2.4 : fix doublon "Nora" — utiliser characterId proprement
         if(characters.length > 0) {
             y += 5;
-            y = addSection('🎭 PERSONNAGES', y);
+            y = addSection('PERSONNAGES', y);
             const charRows = characters.map(c => {
-                const actor = actors.find(a => a.characterId === c.id);
-                return [c.name, c.age || '-', c.gender || '-', actor ? actor.name : '(non casté)'];
+                // Chercher le comédien qui joue ce personnage (peut être plusieurs : prendre le premier)
+                const actorPlaying = actors.find(a => a.characterId === c.id);
+                return [
+                    PdfTheme.cleanText(c.name || '-'),
+                    c.age || '-',
+                    c.gender || '-',
+                    actorPlaying ? PdfTheme.cleanText(actorPlaying.name) : '(non casté)'
+                ];
             });
             y = addTable(['Personnage', 'Âge', 'Genre', 'Comédien'], charRows, y, [50, 25, 25, 60]);
         }
         
         // ===== COMÉDIENS =====
+        // Phase C.2.4 : utilise le bon champ "role" du comédien (pas le perso lié)
         if(actors.length > 0) {
             y += 5;
-            y = addSection('🎬 COMÉDIENS', y);
+            y = addSection('COMÉDIENS', y);
             const actorRows = actors.map(a => {
+                // Le rôle peut être : (1) un personnage lié via characterId, (2) un texte libre dans a.role
                 const char = characters.find(c => c.id === a.characterId);
-                return [a.name, char ? char.name : '-', a.phone || '-', a.email || '-'];
+                const roleLabel = char ? char.name : (a.role || '-');
+                return [
+                    PdfTheme.cleanText(a.name || '-'),
+                    PdfTheme.cleanText(roleLabel),
+                    a.phone || '-',
+                    a.email || '-'
+                ];
             });
             y = addTable(['Nom', 'Rôle', 'Téléphone', 'Email'], actorRows, y, [45, 40, 40, 55]);
         }
         
         // ===== ÉQUIPE TECHNIQUE =====
+        // Phase C.2.4 : fix département (group_id au lieu de department inexistant)
         if(crew.length > 0) {
             y += 5;
-            y = addSection('👥 ÉQUIPE TECHNIQUE', y);
-            const crewRows = crew.map(c => [c.name, c.role || '-', c.department || '-', c.phone || '-']);
+            y = addSection('ÉQUIPE TECHNIQUE', y);
+            const crewRows = crew.map(c => [
+                PdfTheme.cleanText(c.name || '-'),
+                PdfTheme.cleanText(c.role || '-'),
+                PdfTheme.getGroupLabel(c.group_id, true) || '-',
+                c.phone || '-'
+            ]);
             y = addTable(['Nom', 'Poste', 'Département', 'Téléphone'], crewRows, y, [45, 45, 40, 50]);
         }
         
         // ===== DÉCORS =====
         if(locations.length > 0) {
             y += 5;
-            y = addSection('📍 DÉCORS', y);
+            y = addSection('DÉCORS', y);
             const locRows = locations.map(l => {
                 const sceneCount = scenes.filter(s => s.locationId === l.id || (s.title && s.title.includes(l.name))).length;
-                return [l.name, l.realLocation || '-', l.address || '-', sceneCount + ' scène(s)'];
+                return [
+                    PdfTheme.cleanText(l.name || '-'),
+                    PdfTheme.cleanText(l.realLocation || '-'),
+                    PdfTheme.cleanText(l.address || '-'),
+                    sceneCount + ' scène(s)'
+                ];
             });
             y = addTable(['Décor', 'Lieu réel', 'Adresse', 'Scènes'], locRows, y, [40, 45, 55, 30]);
         }
@@ -42801,49 +42838,52 @@ const Stats = {
         // ===== PLANNING =====
         if(shootingDays.length > 0) {
             y += 5;
-            y = addSection('📅 PLANNING DE TOURNAGE', y);
+            y = addSection('PLANNING DE TOURNAGE', y);
             const planRows = shootingDays.map(d => {
                 const date = d.startDate ? new Date(d.startDate).toLocaleDateString('fr-FR') : '-';
-                const scenesList = (d.scenes || []).map(sId => {
+                const scenesList = (d.scenes || []).map(ref => {
+                    // Phase C.2.4 : ref est { sceneId, ... } pas un id direct
+                    const sId = typeof ref === 'string' ? ref : ref.sceneId;
                     const scene = scenes.find(s => s.id === sId);
                     return scene ? `#${scenes.indexOf(scene) + 1}` : '';
                 }).filter(Boolean).join(', ');
-                return [d.name || 'Jour', date, d.location || '-', scenesList || '-'];
+                return [
+                    PdfTheme.cleanText(d.name || 'Jour'),
+                    date,
+                    PdfTheme.cleanText(d.location || '-'),
+                    scenesList || '-'
+                ];
             });
             y = addTable(['Nom', 'Date', 'Lieu', 'Scènes'], planRows, y, [40, 30, 50, 50]);
         }
         
         // ===== BUDGET DÉTAILLÉ =====
+        // Phase C.2.4 : fix "61 /150" (espace insécable) avec fmt()
         if(expenses.length > 0) {
             y += 5;
-            y = addSection('💰 BUDGET & DÉPENSES', y);
+            y = addSection('BUDGET & DÉPENSES', y);
             
             // Par catégorie
             const byCategory = {};
             expenses.forEach(e => {
                 const cat = e.category || 'Autre';
                 if(!byCategory[cat]) byCategory[cat] = 0;
-                byCategory[cat] += parseFloat(e.amount) || 0;
+                byCategory[cat] += parseFloat(e.amountTTC) || parseFloat(e.amount) || 0;
             });
             
-            const budgetRows = Object.entries(byCategory).map(([cat, amount]) => [cat, amount.toLocaleString('fr-FR') + ' €']);
-            budgetRows.push(['TOTAL', totalExpenses.toLocaleString('fr-FR') + ' €']);
+            const budgetRows = Object.entries(byCategory).map(([cat, amount]) => [
+                PdfTheme.cleanText(cat),
+                `${fmt(amount)} ${currency}`
+            ]);
+            budgetRows.push(['TOTAL', `${fmt(totalExpenses)} ${currency}`]);
             y = addTable(['Catégorie', 'Montant'], budgetRows, y, [100, 70]);
         }
         
-        // ===== PIED DE PAGE SUR CHAQUE PAGE =====
-        const totalPages = doc.internal.getNumberOfPages();
-        for(let i = 1; i <= totalPages; i++) {
-            doc.setPage(i);
-            doc.setFontSize(8);
-            doc.setTextColor(150, 150, 150);
-            doc.text(`${projectTitle} - Rapport de production`, margin, pageHeight - 8);
-            doc.text(`Page ${i}/${totalPages}`, pageWidth - margin, pageHeight - 8, { align: 'right' });
-        }
+        // ===== FOOTERS UNIFIÉS (Phase C.1) =====
+        PdfTheme.applyFooters(doc);
         
-        // Télécharger
-        const filename = (projectTitle.replace(/[^a-z0-9]/gi, '_') || 'rapport') + '_production.pdf';
-        doc.save(filename);
+        // ===== TÉLÉCHARGEMENT (nom unifié) =====
+        doc.save(PdfTheme.filename('Production'));
         
         Utils.toast('Rapport de production exporté !', 'success');
         History.log('EXPORT', 'Rapport de production PDF généré');
@@ -49216,7 +49256,7 @@ const Expenses = {
         Expenses.render();
     },
     
-    // Export PDF du budget
+    // Export PDF du budget [Phase C.2.2 refondu]
     exportPDF: () => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
@@ -49227,6 +49267,13 @@ const Expenses = {
         const vatMode = state.data.budget?.vatMode || 'HT';
         const projectTitle = state.data.title || 'Projet sans titre';
         const previsionnel = state.data.budget?.previsionnel || {};
+        
+        // Helper de formatage des montants (évite le bug "38 /260" de toLocaleString avec espace insécable)
+        const fmt = (n) => {
+            const num = parseFloat(n) || 0;
+            // Format français : séparateur de milliers = espace normal, pas d'insécable
+            return num.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        };
         
         // Calculer le budget total depuis le prévisionnel
         let budgetTotal = 0;
@@ -49285,28 +49332,19 @@ const Expenses = {
             return yPos + 9;
         };
         
-        let y = 0;
+        // ===== PAGE DE GARDE (Phase C.1) =====
+        PdfTheme.coverPage(doc, { sectionName: 'Budget' });
         
-        // ===== HEADER BLEU =====
-        doc.setFillColor(43, 110, 246);
-        doc.rect(0, 0, pageWidth, 50, 'F');
-        doc.setFillColor(30, 85, 210);
-        doc.rect(0, 46, pageWidth, 4, 'F');
+        // Nouvelle page pour le contenu
+        doc.addPage();
+        let y = margin;
         
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(22);
-        doc.setFont('helvetica', 'bold');
-        doc.text('BUDGET', pageWidth / 2, 22, { align: 'center' });
-        
-        doc.setFontSize(13);
-        doc.setFont('helvetica', 'normal');
-        doc.text(projectTitle, pageWidth / 2, 33, { align: 'center' });
-        
-        doc.setFontSize(9);
-        doc.setTextColor(180, 210, 255);
-        doc.text('Mode ' + vatMode + ' • ' + new Date().toLocaleDateString('fr-FR'), pageWidth / 2, 43, { align: 'center' });
-        
-        y = 60;
+        // Mention du mode HT/TTC
+        doc.setFontSize(10);
+        doc.setTextColor(100, 100, 100);
+        doc.setFont('helvetica', 'italic');
+        doc.text('Mode ' + vatMode, pageWidth / 2, y + 4, { align: 'center' });
+        y += 12;
         
         // ===== RÉSUMÉ GLOBAL =====
         const reste = budgetTotal - totalApproved;
@@ -49352,13 +49390,13 @@ const Expenses = {
         doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(50, 50, 50);
-        doc.text(budgetTotal.toLocaleString() + ' ' + currency, margin + 5, y + 33);
+        doc.text(fmt(budgetTotal) + ' ' + currency, margin + 5, y + 33);
         doc.setTextColor(76, 175, 80);
-        doc.text(totalApproved.toLocaleString() + ' ' + currency, margin + 65, y + 33);
+        doc.text(fmt(totalApproved) + ' ' + currency, margin + 65, y + 33);
         doc.setTextColor(255, 152, 0);
-        doc.text(totalPending.toLocaleString() + ' ' + currency, margin + 120, y + 33);
+        doc.text(fmt(totalPending) + ' ' + currency, margin + 120, y + 33);
         doc.setTextColor(reste < 0 ? 220 : 43, reste < 0 ? 53 : 110, reste < 0 ? 69 : 246);
-        doc.text(reste.toLocaleString() + ' ' + currency, margin + 158, y + 33);
+        doc.text(fmt(reste) + ' ' + currency, margin + 158, y + 33);
         
         y += 48;
         
@@ -49400,13 +49438,13 @@ const Expenses = {
             doc.setFontSize(8);
             doc.setFont('helvetica', 'normal');
             doc.setTextColor(50, 50, 50);
-            doc.text((`${cat.code}. ${cat.name}`).substring(0, 38), margin + 3, y);
-            doc.text(data.budget > 0 ? data.budget.toLocaleString() + ' ' + currency : '-', margin + 75, y);
-            doc.text(data.approved.toLocaleString() + ' ' + currency, margin + 108, y);
-            doc.text(data.pending > 0 ? data.pending.toLocaleString() + ' ' + currency : '-', margin + 137, y);
+            doc.text(PdfTheme.cleanText(`${cat.code}. ${cat.name}`).substring(0, 38), margin + 3, y);
+            doc.text(data.budget > 0 ? fmt(data.budget) + ' ' + currency : '-', margin + 75, y);
+            doc.text(fmt(data.approved) + ' ' + currency, margin + 108, y);
+            doc.text(data.pending > 0 ? fmt(data.pending) + ' ' + currency : '-', margin + 137, y);
             if(data.budget > 0) {
                 doc.setTextColor(ecart < 0 ? 220 : 76, ecart < 0 ? 53 : 175, ecart < 0 ? 69 : 80);
-                doc.text(ecart.toLocaleString() + ' ' + currency, margin + 167, y);
+                doc.text(fmt(ecart) + ' ' + currency, margin + 167, y);
                 doc.setTextColor(50, 50, 50);
             } else {
                 doc.text('-', margin + 167, y);
@@ -49423,9 +49461,9 @@ const Expenses = {
         doc.setFontSize(8.5);
         doc.setFont('helvetica', 'bold');
         doc.text('TOTAL', margin + 3, y + 1);
-        doc.text(budgetTotal.toLocaleString() + ' ' + currency, margin + 75, y + 1);
-        doc.text(totalApproved.toLocaleString() + ' ' + currency, margin + 108, y + 1);
-        doc.text(totalPending.toLocaleString() + ' ' + currency, margin + 137, y + 1);
+        doc.text(fmt(budgetTotal) + ' ' + currency, margin + 75, y + 1);
+        doc.text(fmt(totalApproved) + ' ' + currency, margin + 108, y + 1);
+        doc.text(fmt(totalPending) + ' ' + currency, margin + 137, y + 1);
         doc.setTextColor(50, 50, 50);
         y += 15;
         
@@ -49468,11 +49506,11 @@ const Expenses = {
                 doc.setFont('helvetica', 'normal');
                 doc.setTextColor(50, 50, 50);
                 doc.text(exp.date ? new Date(exp.date).toLocaleDateString('fr-FR') : '-', margin + 2, y);
-                doc.text((exp.title || 'Sans titre').substring(0, 26), margin + 22, y);
-                doc.text(catLabel.substring(0, 20), margin + 75, y);
-                doc.text(parseFloat(amountHT).toLocaleString(), margin + 112, y);
+                doc.text(PdfTheme.cleanText(exp.title || 'Sans titre').substring(0, 26), margin + 22, y);
+                doc.text(PdfTheme.cleanText(catLabel).substring(0, 20), margin + 75, y);
+                doc.text(fmt(amountHT), margin + 112, y);
                 doc.text(vatRate > 0 ? vatRate + '%' : '-', margin + 132, y);
-                doc.text(parseFloat(amountTTC).toLocaleString(), margin + 148, y);
+                doc.text(fmt(amountTTC), margin + 148, y);
                 const sc = statusColors[exp.status] || [100, 100, 100];
                 doc.setTextColor(sc[0], sc[1], sc[2]);
                 doc.setFont('helvetica', 'bold');
@@ -49496,26 +49534,15 @@ const Expenses = {
                 totalTTC += parseFloat(e.amountTTC) || parseFloat(e.amount) || 0;
             });
             doc.text('TOTAL (validé/payé)', margin + 3, y + 1);
-            doc.text(totalHT.toLocaleString() + ' ' + currency, margin + 112, y + 1);
-            doc.text(totalTTC.toLocaleString() + ' ' + currency, margin + 148, y + 1);
+            doc.text(fmt(totalHT) + ' ' + currency, margin + 112, y + 1);
+            doc.text(fmt(totalTTC) + ' ' + currency, margin + 148, y + 1);
         }
         
-        // ===== FOOTER sur toutes les pages =====
-        const totalPages = doc.internal.getNumberOfPages();
-        for(let i = 1; i <= totalPages; i++) {
-            doc.setPage(i);
-            doc.setDrawColor(200, 200, 200);
-            doc.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);
-            doc.setFontSize(7.5);
-            doc.setTextColor(150, 150, 150);
-            doc.text(projectTitle + ' — Budget ' + vatMode, margin, pageHeight - 7);
-            doc.text('Généré par Moteur — moteur.studio', pageWidth / 2, pageHeight - 7, { align: 'center' });
-            doc.text('Page ' + i + '/' + totalPages, pageWidth - margin, pageHeight - 7, { align: 'right' });
-        }
+        // ===== FOOTERS UNIFIÉS (Phase C.1) =====
+        PdfTheme.applyFooters(doc);
         
-        // Télécharger
-        const filename = (projectTitle.replace(/[^a-z0-9]/gi, '_') || 'budget') + '_budget_CNC.pdf';
-        doc.save(filename);
+        // ===== TÉLÉCHARGEMENT (nom unifié) =====
+        doc.save(PdfTheme.filename('Budget'));
         Utils.toast('Budget PDF exporté !', 'success');
         History.log('EXPORT', 'Budget PDF généré');
     },
