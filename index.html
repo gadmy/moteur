@@ -6976,7 +6976,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.0.1</p>
+      <p>vv4.0.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -27069,6 +27069,35 @@ const Storyboard = {
         return page;
     },
     
+    // [Phase C.2.6] Helper : dessine un calque technique (lighting/camera/actors) PAR-DESSUS un canvas
+    // existant. Utilisé par createPrintShot pour superposer dans un seul canvas (pas 2 séparés).
+    _drawTechLayerOnTop: (ctx, shot, techLayer, wantsTechLayer) => {
+        if(!wantsTechLayer || !shot.drawings || !shot.drawings[techLayer]) return;
+        const techZone = shot.drawings[techLayer];
+        
+        // 3 cas : image uploadée, drawingData (calques de dessin), objects (objets vectoriels)
+        if(techZone.imageType === 'upload' && techZone.imageUrl) {
+            const layerImg = new Image();
+            if(typeof techZone.imageUrl === 'string' && techZone.imageUrl.startsWith('http')) {
+                layerImg.crossOrigin = 'anonymous';
+            }
+            layerImg.onload = () => { 
+                ctx.drawImage(layerImg, 0, 0, ctx.canvas.width, ctx.canvas.height); 
+            };
+            layerImg.src = techZone.imageUrl;
+        } else if(techZone.drawingData) {
+            // Dessine les calques DrawingEditor du zone tech par dessus (renderDrawingData fait drawImage async)
+            DrawingEditor.renderDrawingData(ctx, techZone.drawingData);
+        }
+        
+        // Objets vectoriels du zone tech par-dessus
+        if(Array.isArray(techZone.objects) && techZone.objects.length > 0) {
+            setTimeout(() => {
+                Storyboard.renderObjectsOnCanvas(ctx, techZone.objects);
+            }, 150);
+        }
+    },
+    
     createPrintShot: (shot, sceneIndex, shotIndex) => {
         const card = document.createElement('div');
         card.className = 'sb-print-shot';
@@ -27077,26 +27106,52 @@ const Storyboard = {
         const imageDiv = document.createElement('div');
         imageDiv.className = 'sb-print-shot-image';
         
+        // [Phase C.2.6] Tout est rendu dans UN SEUL canvas pour garantir la superposition
+        // (l'ancien système avec 2 canvas overlay s'imprimait côte à côte au lieu de superposé)
+        const techLayer = (Storyboard.printConfig && Storyboard.printConfig.techLayer) || 'none';
+        const wantsTechLayer = (techLayer !== 'none');
+        
+        const composedCanvas = document.createElement('canvas');
+        composedCanvas.width = 800;
+        composedCanvas.height = 600;
+        const composedCtx = composedCanvas.getContext('2d');
+        let hasContent = false;
+        
+        // 1) Calque ORIGINAL en premier (image uploadée OU drawing original)
         if(shot.imageType === 'upload' && shot.imageUrl) {
-            const img = document.createElement('img');
-            // [Phase C.2.6 fix] crossOrigin obligatoire pour pouvoir convertir en data URL plus tard
+            // Charger l'image avec crossOrigin et la dessiner dans le canvas
+            const img = new Image();
             if(shot.imageUrl.startsWith('http')) img.crossOrigin = 'anonymous';
+            img.onload = () => {
+                // Garder l'aspect ratio : dessiner centré dans le canvas
+                const ratio = Math.min(composedCanvas.width / img.naturalWidth, composedCanvas.height / img.naturalHeight);
+                const w = img.naturalWidth * ratio;
+                const h = img.naturalHeight * ratio;
+                const x = (composedCanvas.width - w) / 2;
+                const y = (composedCanvas.height - h) / 2;
+                composedCtx.drawImage(img, x, y, w, h);
+                // Puis dessiner le calque technique par-dessus (après le load)
+                Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer);
+            };
             img.src = shot.imageUrl;
-            imageDiv.appendChild(img);
+            hasContent = true;
         } else if(shot.imageType === 'drawing' && shot.drawingData) {
-            const canvas = document.createElement('canvas');
-            canvas.width = 800;
-            canvas.height = 600;
-            const ctx = canvas.getContext('2d');
-            DrawingEditor.renderDrawingData(ctx, shot.drawingData);
-            // Phase 4B v2 : rendre les objets de la zone Original (images insérées + autres) par-dessus
+            // Rendu du dessin (renderDrawingData gère ses async via crossOrigin)
+            DrawingEditor.renderDrawingData(composedCtx, shot.drawingData);
+            // Objets vectoriels de la zone Original par-dessus
             const originalZone = shot.drawings && shot.drawings.original;
             if(originalZone && Array.isArray(originalZone.objects) && originalZone.objects.length > 0) {
                 setTimeout(() => {
-                    Storyboard.renderObjectsOnCanvas(ctx, originalZone.objects);
+                    Storyboard.renderObjectsOnCanvas(composedCtx, originalZone.objects);
                 }, 200);
             }
-            imageDiv.appendChild(canvas);
+            // Puis le calque technique par-dessus
+            setTimeout(() => Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer), 250);
+            hasContent = true;
+        }
+        
+        if(hasContent) {
+            imageDiv.appendChild(composedCanvas);
         } else {
             imageDiv.innerHTML = '<div style="color: #999;">Pas d\'image</div>';
         }
