@@ -6976,7 +6976,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.9.7</p>
+      <p>vv3.9.8</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -26815,6 +26815,13 @@ const Storyboard = {
     },
     
     printDirect: async () => {
+        // [Phase C.2.6 fix] Vider le cache d'images pour forcer un rechargement avec crossOrigin
+        if(Storyboard._svgImageCache) {
+            Object.keys(Storyboard._svgImageCache).forEach(key => {
+                if(key.startsWith('uploaded|')) delete Storyboard._svgImageCache[key];
+            });
+        }
+        
         // 1. Force le rendu à jour dans le conteneur plein écran
         Storyboard.renderPrintPreview('sbFullscreenContent');
         const layout = (Storyboard.printConfig && Storyboard.printConfig.layout) || 'standard';
@@ -26849,24 +26856,43 @@ const Storyboard = {
             } catch(e) { console.warn('Canvas conversion failed', e); }
         });
         
-        // [Phase C.2.6] 5. Pré-charger les <img> cross-origin Storage en base64 pour qu'elles s'impriment
+        // [Phase C.2.6 fix v2] Pré-charger les <img> Storage en base64 via canvas
+        // (plus robuste que fetch+blob : marche tant que le serveur envoie Access-Control-Allow-Origin)
         const cloneImgs = clone.querySelectorAll('img');
         await Promise.all(Array.from(cloneImgs).map(async (img) => {
             const src = img.getAttribute('src');
             if(!src || src.startsWith('data:') || src.startsWith('blob:')) return;
-            try {
-                const response = await fetch(src, { mode: 'cors' });
-                if(!response.ok) return;
-                const blob = await response.blob();
-                const dataUrl = await new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = () => resolve(reader.result);
-                    reader.onerror = reject;
-                    reader.readAsDataURL(blob);
-                });
+            
+            const dataUrl = await new Promise((resolve) => {
+                const loaderImg = new Image();
+                loaderImg.crossOrigin = 'anonymous';
+                loaderImg.onload = () => {
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = loaderImg.naturalWidth || 800;
+                        canvas.height = loaderImg.naturalHeight || 600;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(loaderImg, 0, 0);
+                        resolve(canvas.toDataURL('image/png'));
+                    } catch(e) {
+                        console.warn('[Storyboard PDF] Canvas conversion fail:', src.substring(0, 80), e.message);
+                        resolve(null);
+                    }
+                };
+                loaderImg.onerror = () => {
+                    console.warn('[Storyboard PDF] Image load fail:', src.substring(0, 80));
+                    resolve(null);
+                };
+                // Cache-buster pour forcer un rechargement avec crossOrigin
+                // (l'image originale peut être en cache navigateur sans crossOrigin)
+                loaderImg.src = src + (src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+                setTimeout(() => resolve(null), 5000);
+            });
+            
+            if(dataUrl) {
                 img.setAttribute('src', dataUrl);
-            } catch(e) {
-                console.warn('Image preload failed for storyboard:', src, e);
+            } else {
+                console.warn('[Storyboard PDF] Image non convertie, restera vide:', src.substring(0, 80));
             }
         }));
         
@@ -27024,6 +27050,8 @@ const Storyboard = {
         
         if(shot.imageType === 'upload' && shot.imageUrl) {
             const img = document.createElement('img');
+            // [Phase C.2.6 fix] crossOrigin obligatoire pour pouvoir convertir en data URL plus tard
+            if(shot.imageUrl.startsWith('http')) img.crossOrigin = 'anonymous';
             img.src = shot.imageUrl;
             imageDiv.appendChild(img);
         } else if(shot.imageType === 'drawing' && shot.drawingData) {
