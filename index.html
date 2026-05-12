@@ -6957,7 +6957,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.9.5</p>
+      <p>vv3.9.6</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -42346,6 +42346,220 @@ const Stats = {
       }
   };
   
+ // ====================================================================
+ // === PdfTheme [Phase C.1] : helper unifié pour tous les exports PDF ===
+ // ====================================================================
+ // - coverPage(doc, opts) : génère une page de garde façon Final Draft
+ // - footer(doc, pageNum, totalPages) : footer minimaliste (n° page en bas droite)
+ // - filename(section) : nom de fichier standardisé "{projet} - {section} - moteur.studio.pdf"
+ // - cleanText(str) : retire les emojis qui plantent en latin-1 (jsPDF)
+ // - getAuthorForSection(section) : récupère l'auteur contextuel selon le type de document
+ //
+ // Tous les exports PDF de l'app doivent passer par ces helpers pour uniformité.
+ const PdfTheme = {
+    // Mapping section → rôles à chercher dans state.data.crew (par ordre de priorité)
+    AUTHOR_ROLES: {
+        'Scénario':       ['Scénariste', 'Co-scénariste', 'Dialoguiste'],
+        'Séquencier':     ['Scénariste', 'Co-scénariste'],
+        'Storyboard':     ['Story-boarder', 'Storyboardeur', 'Réalisateur·rice'],
+        'Dépouillement':  ['1er·ère assistant·e réalisateur·rice', 'Réalisateur·rice'],
+        'Budget':         ['Producteur·rice', 'Producteur·rice exécutif·ve', 'Directeur·rice de production', 'Administrateur·rice de production'],
+        'Équipe':         ['Producteur·rice', 'Directeur·rice de production', 'Régisseur·euse général·e'],
+        'Production':     ['Producteur·rice', 'Producteur·rice exécutif·ve', 'Directeur·rice de production'],
+        'Planning':       ['1er·ère assistant·e réalisateur·rice', 'Régisseur·euse général·e'],
+        'Ressources':     ['Régisseur·euse général·e', 'Chef·fe décorateur·rice', 'Accessoiriste'],
+        'Mood Board':     ['Réalisateur·rice', 'Directeur·rice de la photographie'],
+        'Page de titre':  ['Scénariste', 'Réalisateur·rice'],
+        'Présentation':   ['Producteur·rice', 'Réalisateur·rice']
+    },
+    
+    // Retire les emojis et caractères non-latin1 qui plantent en jsPDF
+    // Garde les accents français et ponctuation classique
+    cleanText: (str) => {
+        if(!str) return '';
+        // Convertir en string si pas déjà
+        const s = String(str);
+        // Retirer les emojis et symboles unicode au-delà de latin1
+        return s.replace(/[\u{1F000}-\u{1FFFF}]/gu, '')
+                .replace(/[\u{2600}-\u{27BF}]/gu, '')
+                .replace(/[\u{2300}-\u{23FF}]/gu, '')
+                .replace(/[\u{2700}-\u{27BF}]/gu, '')
+                .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')
+                .replace(/[\u{1F900}-\u{1F9FF}]/gu, '')
+                .trim();
+    },
+    
+    // Récupère l'auteur contextuel selon le type de document
+    // Cherche dans state.data.crew le premier technicien avec un rôle qui matche
+    // Retourne { name, role } ou null
+    getAuthorForSection: (sectionName) => {
+        if(!state.data || !state.data.crew) return null;
+        const roles = PdfTheme.AUTHOR_ROLES[sectionName] || [];
+        if(roles.length === 0) return null;
+        
+        // Chercher par ordre de priorité dans les rôles
+        for(const wantedRole of roles) {
+            const member = state.data.crew.find(m => {
+                if(!m.role) return false;
+                // Match sans accents, sans majuscules, sans points
+                const r1 = String(m.role).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[·.]/g, '');
+                const r2 = wantedRole.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[·.]/g, '');
+                return r1 === r2 || r1.includes(r2) || r2.includes(r1);
+            });
+            if(member) return { name: member.name, role: member.role };
+        }
+        
+        // Fallback : pour les sections autre que Page de titre, on prend le scriptMeta.author
+        if(state.data.scriptMeta && state.data.scriptMeta.author) {
+            return { name: state.data.scriptMeta.author, role: 'Auteur' };
+        }
+        
+        // Dernier fallback : le réalisateur même s'il n'est pas dans la liste prioritaire
+        const director = state.data.crew.find(m => {
+            if(!m.role) return false;
+            const r = String(m.role).toLowerCase();
+            return r.includes('réalisateur') || r.includes('realisateur');
+        });
+        if(director) return { name: director.name, role: director.role };
+        
+        return null;
+    },
+    
+    // Construit un nom de fichier propre : "{titre projet} - {section} - moteur.studio.pdf"
+    filename: (sectionName) => {
+        const title = (state.data && state.data.title) ? state.data.title : 'Projet';
+        // Nettoyer les caractères problématiques pour les noms de fichiers
+        const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_').trim();
+        const safeSec = sectionName.replace(/[\\/:*?"<>|]/g, '_').trim();
+        return `${safeTitle} - ${safeSec} - moteur.studio.pdf`;
+    },
+    
+    // Page de garde façon Final Draft
+    // opts: { doc, sectionName, customAuthor?, customSubtitle? }
+    coverPage: (doc, opts = {}) => {
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const sectionName = opts.sectionName || 'Document';
+        const projectTitle = (state.data && state.data.title) ? state.data.title : 'Projet sans titre';
+        
+        // Auteur contextuel
+        let author = opts.customAuthor;
+        if(!author) {
+            const found = PdfTheme.getAuthorForSection(sectionName);
+            author = found ? found.name : null;
+        }
+        
+        // Métadonnées scriptMeta si disponibles
+        const meta = (state.data && state.data.scriptMeta) ? state.data.scriptMeta : {};
+        const draft = meta.draft || '';
+        const draftDate = meta.draftDate || '';
+        const contact = meta.contact || '';
+        const copyright = meta.copyright || '';
+        const basedOn = meta.source || '';
+        
+        // === Layout Final Draft ===
+        // Titre projet : très gros, centré, vers 40% de la page
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(32);
+        doc.setTextColor(20, 20, 20);
+        const titleY = pageHeight * 0.40;
+        doc.text(PdfTheme.cleanText(projectTitle).toUpperCase(), pageWidth / 2, titleY, { align: 'center' });
+        
+        // Trait de séparation discret sous le titre
+        const lineY = titleY + 8;
+        doc.setDrawColor(180, 180, 180);
+        doc.setLineWidth(0.3);
+        doc.line(pageWidth / 2 - 40, lineY, pageWidth / 2 + 40, lineY);
+        
+        // Sous-titre : "Un [section] de [auteur]"
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(14);
+        doc.setTextColor(60, 60, 60);
+        const subtitleY = lineY + 12;
+        if(opts.customSubtitle) {
+            doc.text(PdfTheme.cleanText(opts.customSubtitle), pageWidth / 2, subtitleY, { align: 'center' });
+        } else if(author) {
+            // Style Final Draft : "Un scénario de XXX"
+            const articles = { 'Scénario': 'Un scénario de', 'Storyboard': 'Un storyboard de', 'Dépouillement': 'Un dépouillement de', 'Budget': 'Un budget de', 'Équipe': 'Équipe rassemblée par', 'Production': 'Un rapport de production de', 'Planning': 'Un planning de', 'Ressources': 'Ressources gérées par', 'Mood Board': 'Un mood board de', 'Page de titre': 'Une page de titre de', 'Séquencier': 'Un séquencier de', 'Présentation': 'Une présentation de' };
+            const prefix = articles[sectionName] || 'Document de';
+            doc.text(`${prefix} ${PdfTheme.cleanText(author)}`, pageWidth / 2, subtitleY, { align: 'center' });
+        } else {
+            doc.text(sectionName, pageWidth / 2, subtitleY, { align: 'center' });
+        }
+        
+        // Basé sur (si applicable)
+        let y = subtitleY + 8;
+        if(basedOn) {
+            doc.setFontSize(11);
+            doc.setTextColor(100, 100, 100);
+            doc.setFont('helvetica', 'italic');
+            doc.text(`Basé sur ${PdfTheme.cleanText(basedOn)}`, pageWidth / 2, y, { align: 'center' });
+            y += 7;
+            doc.setFont('helvetica', 'normal');
+        }
+        
+        // Bloc draft / date (en bas à gauche style scénario)
+        const bottomBlockY = pageHeight - 50;
+        doc.setFontSize(10);
+        doc.setTextColor(80, 80, 80);
+        doc.setFont('helvetica', 'normal');
+        let bottomLines = [];
+        if(draft) bottomLines.push(PdfTheme.cleanText(draft));
+        if(draftDate) bottomLines.push(PdfTheme.cleanText(draftDate));
+        bottomLines.push(new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }));
+        if(copyright) bottomLines.push(PdfTheme.cleanText(copyright));
+        if(contact) {
+            bottomLines.push('');
+            bottomLines.push(PdfTheme.cleanText(contact));
+        }
+        
+        let bly = bottomBlockY;
+        bottomLines.forEach(line => {
+            doc.text(line, 25, bly);
+            bly += 5;
+        });
+        
+        // Mention discrète tout en bas
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.setFont('helvetica', 'italic');
+        doc.text('Document généré par Moteur — moteur.studio', pageWidth / 2, pageHeight - 12, { align: 'center' });
+    },
+    
+    // Footer minimaliste : numéro de page seul, en bas à droite
+    // À appeler en boucle après génération du document
+    // doc.internal.pages.length - 1 = nombre total de pages
+    applyFooters: (doc, opts = {}) => {
+        const pageCount = doc.internal.pages.length - 1;
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const skipFirstPage = opts.skipFirstPage !== false; // par défaut on saute la page de garde
+        
+        for(let i = 1; i <= pageCount; i++) {
+            // Skip la page de garde si demandé
+            if(skipFirstPage && i === 1) continue;
+            
+            doc.setPage(i);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(120, 120, 120);
+            // Numéro page en bas à droite
+            doc.text(`${i}`, pageWidth - 15, pageHeight - 8, { align: 'right' });
+        }
+    },
+    
+    // Helper pour récupérer un libellé propre d'un groupe (technique ou perso)
+    // Ex: 'gc3' → '🎬 Réalisation' (ou juste 'Réalisation' si stripEmoji = true)
+    getGroupLabel: (groupId, stripEmoji = false) => {
+        if(!groupId) return '';
+        const allGroups = (state.data && state.data.groups) ? state.data.groups : [];
+        const grp = allGroups.find(g => g.id === groupId);
+        if(!grp) return groupId; // fallback : afficher l'id si rien trouvé
+        const name = grp.name || '';
+        return stripEmoji ? PdfTheme.cleanText(name) : name;
+    }
+};
+ 
  const Exporter = {
     toPDF: (opts) => { 
         document.body.className = state.currentRole === 'viewer' ? 'read-only' : ''; 
@@ -63602,7 +63816,7 @@ const Weather = {
       }
   };
 
-  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons };
+  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme };
 })();
 </script>
 
