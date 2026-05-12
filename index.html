@@ -6957,7 +6957,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv3.9.3</p>
+      <p>vv3.9.4</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -12442,61 +12442,6 @@ crewRoles: {
           }
       },
       
-      // === Diagnostic : taille du projet par section + détection base64 ===
-      // À lancer depuis la console : app.Utils.diagnoseProjectSize()
-      diagnoseProjectSize: () => {
-          const data = state.data;
-          if(!data) { console.log('No data'); return; }
-          const fullSize = JSON.stringify(data).length;
-          console.log(`📊 Taille totale state.data : ${(fullSize/1024/1024).toFixed(2)} Mo (${fullSize} caractères)`);
-          
-          const sizes = [];
-          Object.keys(data).forEach(key => {
-              try {
-                  const size = JSON.stringify(data[key]).length;
-                  sizes.push({ key, size, pct: (size / fullSize * 100).toFixed(1) });
-              } catch(e) {}
-          });
-          sizes.sort((a, b) => b.size - a.size);
-          console.log('\n📁 Top sections par taille :');
-          sizes.slice(0, 15).forEach(s => {
-              console.log(`  ${s.key.padEnd(25)} : ${(s.size/1024).toFixed(0).padStart(8)} Ko (${s.pct}%)`);
-          });
-          
-          // Détecter base64
-          const fullStr = JSON.stringify(data);
-          const base64Count = (fullStr.match(/data:image\//g) || []).length;
-          const base64Pdf = (fullStr.match(/data:application\/pdf/g) || []).length;
-          const base64Other = (fullStr.match(/data:[^"]+;base64/g) || []).length;
-          let base64Size = 0;
-          fullStr.split('"data:').slice(1).forEach(s => { base64Size += s.split('"')[0].length; });
-          console.log(`\n🔍 Détection contenus base64 :`);
-          console.log(`  Images "data:image/" : ${base64Count} occurrences`);
-          console.log(`  PDF "data:application/pdf" : ${base64Pdf} occurrences`);
-          console.log(`  Total "data:...;base64" : ${base64Other} occurrences`);
-          console.log(`  Taille totale base64 : ${(base64Size/1024/1024).toFixed(2)} Mo (${(base64Size/fullSize*100).toFixed(1)}% du projet)`);
-          
-          // Détecter les plus gros champs scalaires (chaînes longues)
-          console.log(`\n🔬 Plus gros champs string (top 10) :`);
-          const longStrings = [];
-          const walk = (obj, path) => {
-              if(typeof obj === 'string' && obj.length > 5000) {
-                  longStrings.push({ path, size: obj.length, preview: obj.substring(0, 80) });
-              } else if(Array.isArray(obj)) {
-                  obj.forEach((item, i) => walk(item, `${path}[${i}]`));
-              } else if(obj && typeof obj === 'object') {
-                  Object.keys(obj).forEach(k => walk(obj[k], path ? `${path}.${k}` : k));
-              }
-          };
-          walk(data, '');
-          longStrings.sort((a, b) => b.size - a.size);
-          longStrings.slice(0, 10).forEach(s => {
-              console.log(`  ${s.path.substring(0, 60).padEnd(60)} : ${(s.size/1024).toFixed(0).padStart(7)} Ko — ${s.preview}...`);
-          });
-          
-          return { totalSize: fullSize, sections: sizes, base64Count, base64Size, longStrings: longStrings.slice(0, 10) };
-      },
-      
       // === Script de migration ponctuelle : extrait les base64 hérités vers Storage ===
       // À lancer manuellement depuis la console : await app.Utils.migrateProjectPhotos()
       // Idempotent : peut être relancé sans risque (les URLs Storage sont skippées)
@@ -12820,6 +12765,111 @@ crewRoles: {
           }
           
           return { totalProcessed, totalSuccess, totalFailed, totalSkipped };
+      },
+      
+      // === [Phase D6] Migration du projet courant vers le nouveau format Journal ===
+      // À lancer depuis la console : await app.Utils.migrateProjectHistory()
+      // 
+      // Effets :
+      //   1. Normalise les anciennes entrées state.data.history (ajoute id, link, recoverable, target = null)
+      //   2. Tronque à History.MAX_ENTRIES (50) si dépassement
+      //   3. Vide state.data.snapshots[] (résidus obsolètes)
+      //   4. Supprime state.data.history_mode (paramètre obsolète)
+      //   5. Sauvegarde le projet allégé
+      //
+      // Idempotent : peut être relancé sans risque.
+      migrateProjectHistory: async () => {
+          if(!state.currentProjectId) { console.error('Aucun projet ouvert'); return; }
+          if(!state.data) { console.error('state.data vide'); return; }
+          
+          console.log('🔄 Démarrage migration journal/snapshots...');
+          
+          let stats = {
+              entriesMigrated: 0,
+              entriesAlreadyOk: 0,
+              entriesTrimmed: 0,
+              snapshotsRemoved: 0,
+              historyModeRemoved: false,
+              snapshotsSizeFreedMo: 0
+          };
+          
+          // 1. Normaliser les anciennes entrées history
+          if(Array.isArray(state.data.history)) {
+              const beforeCount = state.data.history.length;
+              for(const entry of state.data.history) {
+                  // Détection ancienne entrée : pas d'id ou pas de champ 'target'/'link'/'recoverable' explicite
+                  const isLegacy = !entry.id || 
+                                   (entry.link === undefined && 
+                                    entry.recoverable === undefined && 
+                                    entry.target === undefined);
+                  if(isLegacy) {
+                      // Génère un id si absent
+                      if(!entry.id) {
+                          entry.id = 'log_legacy_' + (entry.timestamp || Date.now()) + '_' + Math.random().toString(36).slice(2, 8);
+                      }
+                      // Initialise les nouveaux champs à null s'ils manquent
+                      if(entry.link === undefined) entry.link = null;
+                      if(entry.recoverable === undefined) entry.recoverable = null;
+                      if(entry.target === undefined) entry.target = null;
+                      if(entry.details === undefined) entry.details = {};
+                      // Nettoyer l'ancien champ 'level' (filtrage essentiel/complet)
+                      delete entry.level;
+                      stats.entriesMigrated++;
+                  } else {
+                      stats.entriesAlreadyOk++;
+                  }
+              }
+              
+              // Tronquer à MAX_ENTRIES (50)
+              const cap = (typeof History !== 'undefined' && History.MAX_ENTRIES) ? History.MAX_ENTRIES : 50;
+              if(state.data.history.length > cap) {
+                  const expired = state.data.history.slice(cap);
+                  state.data.history = state.data.history.slice(0, cap);
+                  stats.entriesTrimmed = beforeCount - state.data.history.length;
+                  // Cleanup Storage des entrées qui sortent (médias éventuels)
+                  console.log(`🧹 Nettoyage des médias Storage pour ${expired.length} entrées qui sortent du cap...`);
+                  for(const exp of expired) {
+                      if(typeof History !== 'undefined' && History.cleanupExpiredEntry) {
+                          await History.cleanupExpiredEntry(exp).catch(() => {});
+                      }
+                  }
+              }
+          }
+          
+          // 2. Vider state.data.snapshots (obsolètes depuis Phase D)
+          if(Array.isArray(state.data.snapshots) && state.data.snapshots.length > 0) {
+              stats.snapshotsRemoved = state.data.snapshots.length;
+              stats.snapshotsSizeFreedMo = parseFloat((JSON.stringify(state.data.snapshots).length / 1024 / 1024).toFixed(2));
+              state.data.snapshots = [];
+          }
+          
+          // 3. Supprimer le paramètre obsolète history_mode (ancien filtrage essentiel/complet)
+          if(state.data.history_mode !== undefined) {
+              delete state.data.history_mode;
+              stats.historyModeRemoved = true;
+          }
+          
+          // 4. Sauvegarder
+          console.log('💾 Sauvegarde du projet migré...');
+          await Store.save();
+          
+          // Récapitulatif
+          console.log('✅ Migration terminée :');
+          console.log(`   Entrées historique migrées : ${stats.entriesMigrated}`);
+          console.log(`   Entrées historique déjà OK : ${stats.entriesAlreadyOk}`);
+          if(stats.entriesTrimmed > 0) console.log(`   Entrées historique tronquées (cap 50) : ${stats.entriesTrimmed}`);
+          if(stats.snapshotsRemoved > 0) console.log(`   Snapshots supprimés : ${stats.snapshotsRemoved} (${stats.snapshotsSizeFreedMo} Mo libérés)`);
+          if(stats.historyModeRemoved) console.log(`   Paramètre history_mode obsolète supprimé`);
+          
+          const hasChanges = stats.entriesMigrated > 0 || stats.snapshotsRemoved > 0 || stats.historyModeRemoved;
+          if(hasChanges) {
+              Utils.toast(`Projet migré : ${stats.snapshotsRemoved} snapshots supprimés (${stats.snapshotsSizeFreedMo} Mo)`, 'success', 5000);
+          } else {
+              console.log('ℹ️ Aucune migration nécessaire (projet déjà à jour).');
+              Utils.toast('Projet déjà à jour', 'info');
+          }
+          
+          return stats;
       },
       
       // === Purge des snapshots : garde uniquement les N plus récents (par défaut 3) ===
