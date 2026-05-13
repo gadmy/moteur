@@ -5378,7 +5378,25 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   #print-cover, .print-only-title { display: none; }
   @media print {
     /* [Phase C.2.5] Numéro de page en bas à droite (au lieu de haut à droite avant) */
-    @page { size: A4; margin: 25mm 25mm 25mm 35mm; counter-increment: page; @bottom-right { content: counter(page) "."; font-family: 'Courier Prime', 'Courier', monospace; font-size: 12pt; margin-bottom: 10mm; } }
+    /* [Scénario PDF] Slots @page : tout vide sauf bottom-right (date + N° page X/Y)
+       NOTE : les en-têtes/pieds Firefox natifs (URL, titre, date système) NE PEUVENT PAS être enlevés via CSS.
+       L'utilisateur doit décocher « En-têtes et pieds de page » dans la fenêtre d'impression. */
+    @page { 
+        size: A4; 
+        margin: 25mm 25mm 25mm 35mm; 
+        @top-left { content: none; } 
+        @top-center { content: none; } 
+        @top-right { content: none; } 
+        @bottom-left { content: none; } 
+        @bottom-center { content: none; } 
+        @bottom-right { 
+            content: var(--print-date, "") " — " counter(page) "/" counter(pages); 
+            font-family: 'Courier Prime', 'Courier', monospace; 
+            font-size: 9pt; 
+            color: #555;
+            margin-bottom: 10mm; 
+        } 
+    }
     
     body { background: #fff !important; color: #000 !important; height: auto; overflow: visible; font-family: 'Courier Prime', 'Courier', monospace; -webkit-print-color-adjust: exact; }
     
@@ -5415,7 +5433,8 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
     .script-view { max-width: 100%; width: 100%; font-size: 12pt; line-height: 1; }
     .script-row { display: block; border-bottom: none; padding: 0; margin: 0; page-break-inside: auto; }
     .script-write-col { display: block; width: 100%; margin: 0; }
-    .script-editor-box { border: none; padding: 0; background: white; color: black; box-shadow: none; min-height: auto; width: 100%; overflow: visible; }
+    /* [FIX PDF étroit] Retirer max-width 650px + margin auto + box-shadow qui faisait une barre ombragée à droite */
+    .script-editor-box { border: none !important; padding: 0 !important; background: white !important; color: black !important; box-shadow: none !important; min-height: auto !important; width: 100% !important; max-width: none !important; margin: 0 !important; overflow: visible !important; }
     
     /* Elements Scénario Impression */
     .scene-heading-print { display: block !important; font-weight: bold; text-transform: uppercase; margin-top: 24pt; margin-bottom: 12pt; text-decoration: underline; page-break-after: avoid; }
@@ -6983,7 +7002,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.0.6</p>
+      <p>vv4.0.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -9289,8 +9308,12 @@ body.presentation-mode .presentation-bar {
 
     <main>
       <div id="print-cover">
+          <!-- [Scénario PDF] Page de garde enrichie style Final Draft / Celtx -->
           <h1 id="pc-title">TITRE</h1>
           <p id="pc-author">Auteur</p>
+          <p id="pc-source" class="pc-source"></p>
+          <p id="pc-draft" class="pc-draft"></p>
+          <p id="pc-cnc" class="pc-cnc"></p>
           <div class="print-contact" id="pc-contact"></div>
       </div>
 
@@ -43066,18 +43089,71 @@ const MoteurArchive = {
     toPDF: (opts) => { 
         // [FIX state-not-defined] Fallback automatique : si opts.author absent, lire depuis scriptMeta
         opts = opts || {};
-        if(!opts.author && state.data && state.data.scriptMeta && state.data.scriptMeta.author) {
-            opts.author = state.data.scriptMeta.author;
+        const meta = (state.data && state.data.scriptMeta) ? state.data.scriptMeta : {};
+        if(!opts.author && meta.author) {
+            opts.author = meta.author;
         }
         document.body.className = state.currentRole === 'viewer' ? 'read-only' : ''; 
         if(document.body.classList.contains('dark-mode')) document.body.classList.remove('dark-mode'); 
-        document.getElementById('pc-title').innerText = state.data.title;
-        document.getElementById('pc-author').innerText = opts.author ? `Auteur : ${opts.author}` : "";
-        let contactHtml = ""; 
-        if(opts.phone) contactHtml += `<p>Tél : ${opts.phone}</p>`; 
-        if(opts.web) contactHtml += `<p>Web : ${opts.web}</p>`; 
-        if(opts.reg) contactHtml += `<p>Dépôt : ${opts.reg}</p>`;
+        
+        // [Scénario PDF] Page de garde enrichie style Final Draft / Celtx
+        const _esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        document.getElementById('pc-title').innerText = state.data.title || '';
+        
+        // Ligne auteur : "Auteur : Prénom Nom" + co-auteur éventuel
+        let authorLine = '';
+        if(opts.author || meta.author) {
+            authorLine = 'Auteur : ' + _esc(opts.author || meta.author);
+            if(meta.coAuthor) authorLine += ' & ' + _esc(meta.coAuthor);
+        }
+        document.getElementById('pc-author').innerText = authorLine;
+        
+        // Source : "Adapté de ..."
+        const pcSource = document.getElementById('pc-source');
+        if(pcSource) pcSource.innerText = meta.source ? 'Adapté de : ' + meta.source : '';
+        
+        // Brouillon + date : "Premier jet — 12/03/2026"
+        const pcDraft = document.getElementById('pc-draft');
+        if(pcDraft) {
+            let draftLine = '';
+            if(meta.draft) draftLine = meta.draft;
+            if(meta.draftDate) {
+                const d = new Date(meta.draftDate);
+                if(!isNaN(d)) draftLine += (draftLine ? ' — ' : '') + d.toLocaleDateString('fr-FR');
+            }
+            pcDraft.innerText = draftLine;
+        }
+        
+        // Numéro CNC / dépôt (depuis opts.reg si fourni via modale, sinon depuis copyright si formaté)
+        const pcCnc = document.getElementById('pc-cnc');
+        if(pcCnc) {
+            let cncLine = '';
+            if(opts.reg) cncLine = 'N° de dépôt CNC : ' + opts.reg;
+            pcCnc.innerText = cncLine;
+        }
+        
+        // Bloc contact bas-gauche : reproduit une page de garde Celtx/Final Draft
+        // Affiche TOUJOURS les libellés (même vides) sauf si tout est absent
+        let contactHtml = '';
+        const contactValue = opts.phone || meta.contact || '';
+        const webValue = opts.web || '';
+        const copyrightValue = meta.copyright || '';
+        const notesValue = meta.notes || '';
+        contactHtml += '<p>Contact auteur : ' + _esc(contactValue) + '</p>';
+        if(webValue) contactHtml += '<p>Web : ' + _esc(webValue) + '</p>';
+        if(copyrightValue) contactHtml += '<p>' + _esc(copyrightValue) + '</p>';
+        if(notesValue) contactHtml += '<p>' + _esc(notesValue) + '</p>';
         document.getElementById('pc-contact').innerHTML = contactHtml;
+        
+        // [Scénario PDF] Injecter la date du jour dans la CSS variable --print-date (pour le @page @bottom-right)
+        const today = new Date();
+        const dateFr = String(today.getDate()).padStart(2, '0') + '/' + String(today.getMonth() + 1).padStart(2, '0') + '/' + today.getFullYear();
+        document.documentElement.style.setProperty('--print-date', '"' + dateFr + '"');
+        
+        // Toast d'aide pour les en-têtes Firefox (uniquement pour le scénario)
+        if(opts.script && typeof Utils !== 'undefined' && Utils.toast) {
+            Utils.toast('💡 Pour un PDF propre : dans la fenêtre d\'impression, décochez « En-têtes et pieds de page »', 'info', 8000);
+        }
         
         if(opts.synop) document.body.classList.add('print-synopsis'); 
         if(opts.board) { setTimeout(() => UI.printBoard(), 100); return; } 
