@@ -6983,7 +6983,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.0.8</p>
+      <p>vv4.0.5</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -11327,7 +11327,7 @@ body.presentation-mode .presentation-bar {
         <div style="margin-bottom: 18px; padding: 12px; background: var(--bg); border-radius: 8px; border-left: 4px solid #4a90e2;">
             <h4 style="margin: 0 0 10px 0; color: #4a90e2; font-size: 0.95rem;">✍️ ÉCRITURE</h4>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                <!-- [FIX] Page de titre retirée : la page de garde du Dossier sert de page de titre globale -->
+                <label class="dossier-toggle"><input type="checkbox" id="dos-titlepage" checked><span>Page de titre</span></label>
                 <label class="dossier-toggle"><input type="checkbox" id="dos-presentation" checked><span>Présentation / Synopsis</span></label>
                 <label class="dossier-toggle"><input type="checkbox" id="dos-script" checked><span>Scénario</span></label>
                 <label class="dossier-toggle"><input type="checkbox" id="dos-sequencier" checked><span>Séquencier</span></label>
@@ -22598,7 +22598,7 @@ const tabToSection = {
       },
       
       // ========== EXPORT PDF DÉPOUILLEMENT ==========
-      exportPDF: (opts = {}) => {
+      exportPDF: () => {
           const { jsPDF } = window.jspdf;
           const doc = new jsPDF('p', 'mm', 'a4');
           const pageWidth = doc.internal.pageSize.getWidth();
@@ -22730,19 +22730,7 @@ const tabToSection = {
                   doc.setTextColor(50, 50, 50);
                   doc.setFontSize(8);
                   
-                  // [Vague 2 / FIX] Dédoublonner les items au sein d'une scène (cas: "Guillaume De Mauroy" + "Guillaume de Mauroy" + "de mauroy guillaume")
-                  // On garde la première graphie rencontrée
-                  const _seenKeys = new Set();
-                  const _dedupItems = [];
-                  items.forEach(item => {
-                      const raw = typeof item === 'string' ? item : (item?.name || item);
-                      if(!raw) return;
-                      const key = String(raw).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
-                      if(_seenKeys.has(key)) return;
-                      _seenKeys.add(key);
-                      _dedupItems.push(String(raw));
-                  });
-                  const itemsText = _dedupItems.join(', ');
+                  const itemsText = items.map(item => typeof item === 'string' ? item : item.name || item).join(', ');
                   const lines = doc.splitTextToSize(itemsText, pageWidth - margin * 2 - 10);
                   
                   y += 5;
@@ -22775,38 +22763,27 @@ const tabToSection = {
           y = 30;
           
           // Agrégation par catégorie
-          // [Vague 2 / FIX] Déduplication par normalisation (lowercase + espaces collapsed) pour fusionner
-          // "Lucie" / "LUCIE", "Guillaume De Mauroy" / "Guillaume de Mauroy", etc.
-          // On conserve la première graphie rencontrée comme libellé d'affichage.
-          const _normKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
-          const globalBreakdown = {};  // { cat: Map<normKey, displayLabel> }
+          const globalBreakdown = {};
           scenes.forEach(scene => {
               const breakdown = scene.breakdown || {};
               Object.entries(breakdown).forEach(([cat, items]) => {
                   if(!items || items.length === 0) return;
-                  if(!globalBreakdown[cat]) globalBreakdown[cat] = new Map();
+                  if(!globalBreakdown[cat]) globalBreakdown[cat] = new Set();
                   items.forEach(item => {
-                      const name = typeof item === 'string' ? item : (item.name || item);
-                      if(!name) return;
-                      const key = _normKey(name);
-                      if(!globalBreakdown[cat].has(key)) {
-                          globalBreakdown[cat].set(key, String(name));
-                      }
+                      const name = typeof item === 'string' ? item : item.name || item;
+                      globalBreakdown[cat].add(name);
                   });
               });
           });
           
-          Object.entries(globalBreakdown).forEach(([cat, itemsMap]) => {
+          Object.entries(globalBreakdown).forEach(([cat, itemsSet]) => {
               if(y > pageHeight - 30) {
                   doc.addPage();
                   y = margin;
               }
               
               const rgb = catColors[cat] || [100, 100, 100];
-              // [Vague 2 / FIX] On manipule maintenant une Map<normKey, displayLabel>, pas un Set
-              const items = Array.from(itemsMap.entries()); // [ [normKey, displayLabel], ... ]
-              // Tri alphabétique sur la clé normalisée pour stabilité
-              items.sort((a, b) => a[0].localeCompare(b[0], 'fr'));
+              const items = Array.from(itemsSet);
               
               // En-tête catégorie
               doc.setFillColor(rgb[0], rgb[1], rgb[2]);
@@ -22822,22 +22799,18 @@ const tabToSection = {
               doc.setFontSize(9);
               doc.setFont('helvetica', 'normal');
               
-              items.forEach(([normKey, displayLabel], idx) => {
+              items.forEach((item, idx) => {
                   if(y > pageHeight - 15) {
                       doc.addPage();
                       y = margin;
                   }
-                  // [Vague 2] Compter les scènes en utilisant la clé normalisée
-                  // (ainsi "Lucie" et "LUCIE" comptent toutes deux pour la même ligne fusionnée)
+                  // Compter dans combien de scènes
                   const sceneCount = scenes.filter(s => {
                       const bd = s.breakdown?.[cat] || [];
-                      return bd.some(i => {
-                          const iName = typeof i === 'string' ? i : (i?.name || '');
-                          return _normKey(iName) === normKey;
-                      });
+                      return bd.some(i => (typeof i === 'string' ? i : i.name) === item);
                   }).length;
                   
-                  doc.text(`• ${PdfTheme.cleanText(displayLabel)}`, margin + 3, y);
+                  doc.text(`• ${item}`, margin + 3, y);
                   doc.setTextColor(150, 150, 150);
                   doc.text(`(${sceneCount} scène${sceneCount > 1 ? 's' : ''})`, margin + 100, y);
                   doc.setTextColor(50, 50, 50);
@@ -22849,9 +22822,6 @@ const tabToSection = {
           
           // ===== FOOTERS UNIFIÉS (Phase C.1) =====
           PdfTheme.applyFooters(doc);
-          
-          // ===== [Phase B.2] Si returnBlob, retourner sans sauver =====
-          if(opts.returnBlob) return doc.output('blob');
           
           // ===== TÉLÉCHARGEMENT (nom unifié) =====
           doc.save(PdfTheme.filename('Dépouillement'));
@@ -31556,7 +31526,7 @@ const DrawingEditor = {
       },
       
       // [Phase C.5.2] Export PDF des ressources
-      exportPDF: (opts = {}) => {
+      exportPDF: () => {
           const { jsPDF } = window.jspdf;
           const doc = new jsPDF('p', 'mm', 'a4');
           const pageWidth = doc.internal.pageSize.getWidth();
@@ -31607,16 +31577,16 @@ const DrawingEditor = {
               doc.text(`${PdfTheme.cleanText(catLabels[cat] || cat).toUpperCase()} (${list.length})`, margin + 4, y + 6.2);
               y += 12;
               
-              // En-têtes tableau (colonnes : Nom 48mm, Description 80mm, Propriétaire 30mm, Scènes 15mm)
+              // En-têtes tableau
               doc.setFillColor(240, 240, 240);
               doc.rect(margin, y, pageWidth - margin * 2, 7, 'F');
               doc.setTextColor(80, 80, 80);
               doc.setFontSize(8);
               doc.setFont('helvetica', 'bold');
               doc.text('Nom', margin + 3, y + 5);
-              doc.text('Description', margin + 52, y + 5);
-              doc.text('Propriétaire', margin + 135, y + 5);
-              doc.text('Scènes', margin + 168, y + 5);
+              doc.text('Description', margin + 60, y + 5);
+              doc.text('Propriétaire', margin + 125, y + 5);
+              doc.text('Scènes', margin + 165, y + 5);
               y += 8;
               
               // Tri alphabétique
@@ -31639,14 +31609,10 @@ const DrawingEditor = {
                   
                   doc.setFontSize(8);
                   doc.setTextColor(50, 50, 50);
-                  // [FIX] Au lieu de couper en plein milieu, utiliser splitTextToSize pour wrapping intelligent
-                  const nameTxt = doc.splitTextToSize(PdfTheme.cleanText(res.name || '-'), 47);
-                  const descTxt = doc.splitTextToSize(PdfTheme.cleanText(res.description || '-'), 80);
-                  const ownerTxt = doc.splitTextToSize(PdfTheme.cleanText(owner), 30);
-                  doc.text(nameTxt[0] + (nameTxt.length > 1 ? '…' : ''), margin + 3, y);
-                  doc.text(descTxt[0] + (descTxt.length > 1 ? '…' : ''), margin + 52, y);
-                  doc.text(ownerTxt[0] + (ownerTxt.length > 1 ? '…' : ''), margin + 135, y);
-                  doc.text(String(linkedScenes.length), margin + 168, y);
+                  doc.text(PdfTheme.cleanText(res.name || '-').substring(0, 28), margin + 3, y);
+                  doc.text(PdfTheme.cleanText(res.description || '-').substring(0, 34), margin + 60, y);
+                  doc.text(PdfTheme.cleanText(owner).substring(0, 22), margin + 125, y);
+                  doc.text(String(linkedScenes.length), margin + 165, y);
                   
                   y += 6.5;
               });
@@ -31656,8 +31622,6 @@ const DrawingEditor = {
           
           // Footers + filename
           PdfTheme.applyFooters(doc);
-          // [Phase B.2] Si returnBlob, retourner sans sauver
-          if(opts.returnBlob) return doc.output('blob');
           doc.save(PdfTheme.filename('Ressources'));
           Utils.toast('Ressources PDF exportées !', 'success');
           History.log('EXPORT', 'Ressources PDF générées');
@@ -32025,29 +31989,15 @@ const DrawingEditor = {
     },
     
     // ========== EXPORT PDF ÉQUIPE [Phase C.2.1 refondu] ==========
-    exportPDF: (opts = {}) => {
+    exportPDF: () => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
         const margin = 15;
         
-        // [Vague 2] Déduplication globale crew + actors par nom normalisé
-        // (fusionne "Guillaume De Mauroy" + "Guillaume de Mauroy", "Lucie" + "LUCIE", etc.)
-        const _normNm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
-        const _dedupByName = (arr, scoreFn) => {
-            const map = new Map();
-            (arr || []).forEach(item => {
-                if(!item || !item.name) return;
-                const k = _normNm(item.name);
-                if(!k) return;
-                const ex = map.get(k);
-                if(!ex || scoreFn(item) > scoreFn(ex)) map.set(k, item);
-            });
-            return Array.from(map.values());
-        };
-        const crew = _dedupByName(state.data.crew, m => (m.role ? 1 : 0) + (m.phone ? 1 : 0) + (m.email ? 1 : 0) + (m.group_id ? 1 : 0));
-        const actors = _dedupByName(state.data.actors, a => (a.role ? 1 : 0) + (a.phone ? 1 : 0) + (a.email ? 1 : 0) + (a.characterId ? 1 : 0));
+        const crew = state.data.crew || [];
+        const actors = state.data.actors || [];
         
         if(crew.length === 0 && actors.length === 0) {
             Utils.toast('Aucun membre d\'équipe à exporter', 'warning');
@@ -32098,9 +32048,9 @@ const DrawingEditor = {
             
             drawTableHeaders([
                 { x: 3,   label: 'Comédien' },
-                { x: 50,  label: 'Rôle' },
-                { x: 92,  label: 'Téléphone' },
-                { x: 130, label: 'Email' }
+                { x: 55,  label: 'Rôle' },
+                { x: 100, label: 'Téléphone' },
+                { x: 135, label: 'Email' }
             ]);
             
             // Tri alphabétique par nom
@@ -32124,14 +32074,11 @@ const DrawingEditor = {
                 
                 doc.setFontSize(8);
                 doc.setTextColor(50, 50, 50);
-                const aNameW = doc.splitTextToSize(PdfTheme.cleanText(actor.name || '-'), 46);
-                const aRoleW = doc.splitTextToSize(PdfTheme.cleanText(roleLabel), 40);
-                doc.text(aNameW[0] + (aNameW.length > 1 ? '…' : ''), margin + 3, y);
-                doc.text(aRoleW[0] + (aRoleW.length > 1 ? '…' : ''), margin + 50, y);
-                doc.text(PdfTheme.cleanText(actor.phone || '-').substring(0, 18), margin + 92, y);
+                doc.text(PdfTheme.cleanText(actor.name || '-').substring(0, 28), margin + 3, y);
+                doc.text(PdfTheme.cleanText(roleLabel).substring(0, 22), margin + 55, y);
+                doc.text((actor.phone || '-').substring(0, 18), margin + 100, y);
                 doc.setTextColor(43, 110, 246);
-                const aEmailW = doc.splitTextToSize(PdfTheme.cleanText(actor.email || '-'), 48);
-                doc.text(aEmailW[0] + (aEmailW.length > 1 ? '…' : ''), margin + 130, y);
+                doc.text((actor.email || '-').substring(0, 28), margin + 135, y);
                 
                 y += 6.5;
             });
@@ -32147,24 +32094,13 @@ const DrawingEditor = {
             
             drawTableHeaders([
                 { x: 3,   label: 'Nom' },
-                { x: 48,  label: 'Fonction' },
+                { x: 50,  label: 'Fonction' },
                 { x: 95,  label: 'Département' },
-                { x: 138, label: 'Email' }
+                { x: 135, label: 'Email' }
             ]);
             
-            // [Vague 2] Déduplication par nom normalisé (fusionne "Guillaume De Mauroy" + "Guillaume de Mauroy")
-            // puis tri alphabétique
-            const _normCrewK = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
-            const _crewSc = (m) => (m.role ? 1 : 0) + (m.phone ? 1 : 0) + (m.email ? 1 : 0) + (m.group_id ? 1 : 0);
-            const _crewDedup = new Map();
-            crew.forEach(c => {
-                if(!c || !c.name) return;
-                const k = _normCrewK(c.name);
-                if(!k) return;
-                const ex = _crewDedup.get(k);
-                if(!ex || _crewSc(c) > _crewSc(ex)) _crewDedup.set(k, c);
-            });
-            const sortedCrew = Array.from(_crewDedup.values()).sort((a, b) => 
+            // Tri alphabétique par nom
+            const sortedCrew = [...crew].sort((a, b) => 
                 (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' })
             );
             
@@ -32182,16 +32118,11 @@ const DrawingEditor = {
                 
                 doc.setFontSize(8);
                 doc.setTextColor(50, 50, 50);
-                // [FIX] splitTextToSize au lieu de substring pour éviter de couper en plein milieu d'un mot
-                const nameW = doc.splitTextToSize(PdfTheme.cleanText(member.name || '-'), 43);
-                const roleW = doc.splitTextToSize(PdfTheme.cleanText(member.role || '-'), 45);
-                const deptW = doc.splitTextToSize(PdfTheme.cleanText(deptLabel), 42);
-                const emailW = doc.splitTextToSize(PdfTheme.cleanText(member.email || '-'), 40);
-                doc.text(nameW[0] + (nameW.length > 1 ? '…' : ''), margin + 3, y);
-                doc.text(roleW[0] + (roleW.length > 1 ? '…' : ''), margin + 48, y);
-                doc.text(deptW[0] + (deptW.length > 1 ? '…' : ''), margin + 95, y);
+                doc.text(PdfTheme.cleanText(member.name || '-').substring(0, 22), margin + 3, y);
+                doc.text(PdfTheme.cleanText(member.role || '-').substring(0, 22), margin + 50, y);
+                doc.text(PdfTheme.cleanText(deptLabel).substring(0, 18), margin + 95, y);
                 doc.setTextColor(43, 110, 246);
-                doc.text(emailW[0] + (emailW.length > 1 ? '…' : ''), margin + 138, y);
+                doc.text((member.email || '-').substring(0, 28), margin + 135, y);
                 
                 y += 6.5;
             });
@@ -32199,9 +32130,6 @@ const DrawingEditor = {
         
         // ===== FOOTERS UNIFIÉS (Phase C.1) =====
         PdfTheme.applyFooters(doc);
-        
-        // ===== [Phase B.2] Si returnBlob, retourner sans sauver =====
-        if(opts.returnBlob) return doc.output('blob');
         
         // ===== TÉLÉCHARGEMENT (nom unifié) =====
         doc.save(PdfTheme.filename('Équipe'));
@@ -42803,22 +42731,6 @@ const Stats = {
                 .replace(/[\u{2700}-\u{27BF}]/gu, '')
                 .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')
                 .replace(/[\u{1F900}-\u{1F9FF}]/gu, '')
-                // [FIX] Variation selectors (U+FE00-FE0F) — sinon jsPDF les rend comme "þ" (thorn) avec Helvetica
-                .replace(/[\u{FE00}-\u{FE0F}]/gu, '')
-                // [FIX] Zero-width joiner et autres invisibles
-                .replace(/[\u{200B}-\u{200F}\u{2028}-\u{202F}\u{FEFF}]/gu, '')
-                // [FIX] Tout caractère hors Latin-1 (au-delà de U+00FF) qui pourrait planter Helvetica
-                .replace(/[\u{0100}-\u{1FFFF}]/gu, (ch) => {
-                    // Garder les caractères de ponctuation européens utiles
-                    const code = ch.codePointAt(0);
-                    // Tirets long et court, guillemets typographiques, ellipsis
-                    if(code === 0x2013 || code === 0x2014) return '-';
-                    if(code === 0x2018 || code === 0x2019) return "'";
-                    if(code === 0x201C || code === 0x201D) return '"';
-                    if(code === 0x2026) return '...';
-                    if(code === 0x00A0) return ' '; // espace insécable
-                    return ''; // tout le reste est supprimé
-                })
                 .trim();
     },
     
@@ -43149,356 +43061,6 @@ const MoteurArchive = {
     }
 };
 
-// ============================================================================
-// === DossierProd [Phase B.2] : assemble un PDF complet du dossier de prod ===
-// ============================================================================
-// Stratégie : 
-// 1. Pour chaque section cochée, on appelle la fonction exportPDF correspondante
-//    avec un flag `returnBlob: true`. Les fonctions modifiées renvoient alors
-//    un Blob au lieu de déclencher un téléchargement direct.
-// 2. On fusionne tous les Blobs PDF via pdf-lib en gardant les pages dans l'ordre.
-// 3. On insère une page de garde + un sommaire avec numéros de page.
-const DossierProd = {
-    PDFLIB_URL: 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
-    
-    // Charge pdf-lib à la demande
-    ensurePdfLib: () => {
-        return new Promise((resolve, reject) => {
-            if(typeof PDFLib !== 'undefined') { resolve(); return; }
-            const script = document.createElement('script');
-            script.src = DossierProd.PDFLIB_URL;
-            script.onload = () => resolve();
-            script.onerror = () => reject(new Error('pdf-lib introuvable'));
-            document.head.appendChild(script);
-        });
-    },
-    
-    // Plan d'assemblage : ordre des sections + nom + fonction qui génère le blob PDF
-    // Chaque entrée a : { key, label, generator }
-    // generator() doit retourner une Promise<Blob | null>
-    // Si null, la section est sautée
-    SECTIONS_ORDER: [
-        // [FIX] Plus de section "Page de titre" séparée : la page de garde du dossier sert de page de titre globale.
-        // (Si l'utilisateur veut la page de titre Final Draft, il l'imprime à part depuis l'onglet Écriture.)
-        { key: 'presentation', label: 'Présentation',       generator: () => DossierProd._getBlob(() => Presentation.exportPDF({ returnBlob: true })) },
-        { key: 'script',       label: 'Scénario',           generator: () => DossierProd._placeholderPage('Scénario', 'Le scénario doit être imprimé séparément depuis l\'onglet Écriture (bouton 📄 PDF dans la barre d\'outils).\n\nMerci d\'insérer le PDF du scénario à cet emplacement.') },
-        { key: 'sequencier',   label: 'Séquencier',         generator: () => DossierProd._getBlob(() => BeatBoard.exportSequencerPDF({ returnBlob: true })) },
-        { key: 'storyboard',   label: 'Storyboard',         generator: () => DossierProd._placeholderPage('Storyboard', 'Le storyboard doit être imprimé séparément depuis l\'onglet Écriture > Storyboard (bouton Imprimer / PDF).\n\nMerci d\'insérer le PDF du storyboard à cet emplacement.') },
-        { key: 'breakdown',    label: 'Dépouillement',      generator: () => DossierProd._getBlob(() => Breakdown.exportPDF({ returnBlob: true })) },
-        { key: 'crew',         label: 'Équipe',             generator: () => DossierProd._getBlob(() => Crew.exportPDF({ returnBlob: true })) },
-        { key: 'resources',    label: 'Ressources',         generator: () => DossierProd._getBlob(() => Resources.exportPDF({ returnBlob: true })) },
-        { key: 'planning',     label: 'Planning',           generator: () => DossierProd._placeholderPage('Planning', 'Le planning doit être imprimé séparément depuis l\'onglet Production > Planning (boutons FDS / Plan de travail / Feuille de service).\n\nMerci d\'insérer le PDF du planning à cet emplacement.') },
-        { key: 'budget',       label: 'Budget',             generator: () => DossierProd._getBlob(() => Expenses.exportPDF({ returnBlob: true })) },
-        { key: 'rapport',      label: 'Rapport de synthèse', generator: () => DossierProd._getBlob(() => Exporter.productionReport({ returnBlob: true })) }
-    ],
-    
-    // Wrapper : exécute un générateur de blob, retourne null en cas d'erreur
-    _getBlob: async (fn) => {
-        try {
-            const result = await fn();
-            if(result instanceof Blob) return result;
-            return null;
-        } catch(e) {
-            console.warn('[DossierProd] Erreur génération blob:', e);
-            return null;
-        }
-    },
-    
-    // Génère une page placeholder avec instructions (pour scénario/storyboard/planning)
-    _placeholderPage: async (title, message) => {
-        try {
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF('p', 'mm', 'a4');
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-            
-            // Page de garde de section (sans sous-titre disgracieux : on laisse l'auteur contextuel)
-            PdfTheme.coverPage(doc, { sectionName: title });
-            
-            // Bandeau d'instruction visible au milieu
-            doc.setFillColor(255, 244, 224); // fond jaune pâle
-            doc.setDrawColor(255, 152, 0);   // bordure orange
-            doc.setLineWidth(0.5);
-            const boxW = pageWidth - 50;
-            const boxX = 25;
-            const boxY = pageHeight * 0.45;
-            doc.roundedRect(boxX, boxY, boxW, 50, 3, 3, 'FD');
-            doc.setLineWidth(0.2);
-            
-            // Pictogramme + titre du bandeau
-            doc.setFontSize(13);
-            doc.setFont('helvetica', 'bold');
-            doc.setTextColor(180, 95, 6);
-            doc.text('À insérer manuellement', pageWidth / 2, boxY + 10, { align: 'center' });
-            
-            // Message au milieu du bandeau
-            doc.setFontSize(10);
-            doc.setFont('helvetica', 'normal');
-            doc.setTextColor(80, 80, 80);
-            const lines = doc.splitTextToSize(PdfTheme.cleanText(message), boxW - 16);
-            let y = boxY + 20;
-            lines.forEach(line => {
-                doc.text(line, pageWidth / 2, y, { align: 'center' });
-                y += 5;
-            });
-            
-            PdfTheme.applyFooters(doc, { skipFirstPage: false });
-            
-            // Retourner en blob
-            return doc.output('blob');
-        } catch(e) {
-            console.warn('[DossierProd] Erreur placeholder:', e);
-            return null;
-        }
-    },
-    
-    // Génère la page de couverture du dossier complet
-    _generateCoverBlob: (projectTitle, sectionsLabels) => {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('p', 'mm', 'a4');
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-        
-        // Bandeau supérieur
-        doc.setFillColor(43, 110, 246);
-        doc.rect(0, 0, pageWidth, 5, 'F');
-        
-        // "DOSSIER DE PRODUCTION" au-dessus
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(12);
-        doc.setTextColor(100, 100, 100);
-        doc.text('DOSSIER DE PRODUCTION', pageWidth / 2, 35, { align: 'center' });
-        
-        // Trait fin
-        doc.setDrawColor(43, 110, 246);
-        doc.setLineWidth(0.5);
-        doc.line(pageWidth / 2 - 30, 40, pageWidth / 2 + 30, 40);
-        
-        // Titre projet
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(36);
-        doc.setTextColor(20, 20, 20);
-        doc.text(PdfTheme.cleanText(projectTitle).toUpperCase(), pageWidth / 2, 70, { align: 'center', maxWidth: pageWidth - 40 });
-        
-        // Auteur(s) producteur(s)
-        const producer = PdfTheme.getAuthorForSection('Production');
-        const director = state.data.crew && state.data.crew.find(m => {
-            const r = String(m.role || '').toLowerCase();
-            return r.includes('réalisateur') || r.includes('realisateur');
-        });
-        let y = 95;
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(13);
-        doc.setTextColor(60, 60, 60);
-        if(director) {
-            doc.text(`Réalisé par ${PdfTheme.cleanText(director.name)}`, pageWidth / 2, y, { align: 'center' });
-            y += 8;
-        }
-        if(producer) {
-            doc.text(`Produit par ${PdfTheme.cleanText(producer.name)}`, pageWidth / 2, y, { align: 'center' });
-            y += 8;
-        }
-        
-        // Sections incluses (preview)
-        y = 130;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.setTextColor(43, 110, 246);
-        doc.text('CE DOSSIER CONTIENT :', pageWidth / 2, y, { align: 'center' });
-        y += 8;
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
-        doc.setTextColor(60, 60, 60);
-        sectionsLabels.forEach(label => {
-            doc.text('• ' + PdfTheme.cleanText(label), pageWidth / 2, y, { align: 'center' });
-            y += 6;
-        });
-        
-        // Date en bas
-        const today = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
-        doc.setFont('helvetica', 'italic');
-        doc.setFontSize(10);
-        doc.setTextColor(120, 120, 120);
-        doc.text(today, pageWidth / 2, pageHeight - 30, { align: 'center' });
-        
-        // Mention
-        doc.setFontSize(8);
-        doc.setTextColor(160, 160, 160);
-        doc.text('Document généré par Moteur — moteur.studio', pageWidth / 2, pageHeight - 18, { align: 'center' });
-        
-        return doc.output('blob');
-    },
-    
-    // Génère le sommaire avec numéros de page
-    _generateTOCBlob: (tocEntries) => {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('p', 'mm', 'a4');
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-        const margin = 20;
-        
-        // Titre
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(24);
-        doc.setTextColor(20, 20, 20);
-        doc.text('Sommaire', margin, 30);
-        
-        // Trait
-        doc.setDrawColor(43, 110, 246);
-        doc.setLineWidth(0.5);
-        doc.line(margin, 35, pageWidth - margin, 35);
-        
-        // Entrées
-        let y = 50;
-        tocEntries.forEach(entry => {
-            if(y > pageHeight - 20) return; // évite débordement (rare avec 11 sections)
-            
-            // Titre section
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(12);
-            doc.setTextColor(40, 40, 40);
-            doc.text(PdfTheme.cleanText(entry.label), margin, y);
-            
-            // Pointillés
-            doc.setFontSize(10);
-            doc.setTextColor(180, 180, 180);
-            const dotsX = margin + doc.getTextWidth(entry.label) + 3;
-            const numX = pageWidth - margin - 10;
-            for(let x = dotsX; x < numX; x += 2.5) {
-                doc.text('.', x, y);
-            }
-            
-            // Numéro de page
-            doc.setFontSize(12);
-            doc.setTextColor(43, 110, 246);
-            doc.setFont('helvetica', 'bold');
-            doc.text(String(entry.page), pageWidth - margin, y, { align: 'right' });
-            
-            y += 10;
-        });
-        
-        // Mention bas de page
-        doc.setFont('helvetica', 'italic');
-        doc.setFontSize(8);
-        doc.setTextColor(150, 150, 150);
-        doc.text('Document généré par Moteur — moteur.studio', pageWidth / 2, pageHeight - 12, { align: 'center' });
-        
-        return doc.output('blob');
-    },
-    
-    // Convertit un Blob en ArrayBuffer (nécessaire pour pdf-lib)
-    _blobToBytes: async (blob) => {
-        const buffer = await blob.arrayBuffer();
-        return new Uint8Array(buffer);
-    },
-    
-    // === ASSEMBLAGE PRINCIPAL ===
-    // Reçoit config : { titlepage: true, script: false, ... storyboardLayer: 'lighting' }
-    assemble: async (config, progress) => {
-        await DossierProd.ensurePdfLib();
-        const { PDFDocument } = PDFLib;
-        
-        // 1. Construire la liste des sections cochées en respectant l'ordre
-        const wantedSections = DossierProd.SECTIONS_ORDER.filter(s => config[s.key] === true);
-        if(wantedSections.length === 0) {
-            throw new Error('Aucune section sélectionnée');
-        }
-        
-        // 2. Si l'utilisateur a choisi un calque storyboard, l'appliquer
-        // (cette config est lue par Storyboard.printConfig.techLayer)
-        if(config.storyboardLayer && config.storyboardLayer !== 'none') {
-            if(typeof Storyboard !== 'undefined' && Storyboard.printConfig) {
-                Storyboard.printConfig.techLayer = config.storyboardLayer;
-            }
-        }
-        
-        // 3. Générer chaque section en blob
-        const totalSteps = wantedSections.length + 2; // +cover +toc
-        const sectionBlobs = []; // [{ key, label, blob }]
-        for(let i = 0; i < wantedSections.length; i++) {
-            const section = wantedSections[i];
-            if(progress && progress.isCancelled()) throw new Error('Annulé');
-            if(progress) progress.update(`Génération : ${section.label}…`, i, totalSteps);
-            
-            try {
-                const blob = await section.generator();
-                if(blob) {
-                    sectionBlobs.push({ key: section.key, label: section.label, blob });
-                } else {
-                    console.warn('[DossierProd] Section vide :', section.key);
-                }
-            } catch(e) {
-                console.warn('[DossierProd] Échec section', section.key, e);
-            }
-        }
-        
-        if(sectionBlobs.length === 0) {
-            throw new Error('Aucune section n\'a pu être générée');
-        }
-        
-        // 4. Charger tous les PDF dans pdf-lib pour compter les pages
-        if(progress) progress.update('Comptage des pages…', wantedSections.length, totalSteps);
-        const loadedDocs = []; // [{ key, label, pdfDoc, pageCount }]
-        for(const sec of sectionBlobs) {
-            try {
-                const bytes = await DossierProd._blobToBytes(sec.blob);
-                const pdfDoc = await PDFDocument.load(bytes);
-                loadedDocs.push({ ...sec, pdfDoc, pageCount: pdfDoc.getPageCount() });
-            } catch(e) {
-                console.warn('[DossierProd] PDF illisible:', sec.key, e);
-            }
-        }
-        
-        // 5. Calculer les numéros de page pour le sommaire
-        // Page 1 = couverture, Page 2 = sommaire, Page 3 = début 1ère section
-        let currentPage = 3;
-        const tocEntries = loadedDocs.map(d => {
-            const entry = { label: d.label, page: currentPage };
-            currentPage += d.pageCount;
-            return entry;
-        });
-        
-        // 6. Générer cover + TOC
-        if(progress) progress.update('Création de la couverture…', wantedSections.length + 1, totalSteps);
-        const coverBlob = DossierProd._generateCoverBlob(state.data.title || 'Projet', loadedDocs.map(d => d.label));
-        const tocBlob = DossierProd._generateTOCBlob(tocEntries);
-        
-        // 7. Assembler le PDF final
-        if(progress) progress.update('Assemblage final…', wantedSections.length + 2, totalSteps);
-        const finalDoc = await PDFDocument.create();
-        
-        // Ajouter cover
-        const coverPdf = await PDFDocument.load(await DossierProd._blobToBytes(coverBlob));
-        const coverPages = await finalDoc.copyPages(coverPdf, coverPdf.getPageIndices());
-        coverPages.forEach(p => finalDoc.addPage(p));
-        
-        // Ajouter TOC
-        const tocPdf = await PDFDocument.load(await DossierProd._blobToBytes(tocBlob));
-        const tocPages = await finalDoc.copyPages(tocPdf, tocPdf.getPageIndices());
-        tocPages.forEach(p => finalDoc.addPage(p));
-        
-        // Ajouter chaque section
-        for(const d of loadedDocs) {
-            const pages = await finalDoc.copyPages(d.pdfDoc, d.pdfDoc.getPageIndices());
-            pages.forEach(p => finalDoc.addPage(p));
-        }
-        
-        // 8. Téléchargement
-        const finalBytes = await finalDoc.save();
-        const finalBlob = new Blob([finalBytes], { type: 'application/pdf' });
-        
-        const safeTitle = (state.data.title || 'projet').replace(/[\\/:*?"<>|]/g, '_').trim();
-        const filename = `${safeTitle} - Dossier de production - moteur.studio.pdf`;
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(finalBlob);
-        link.download = filename;
-        link.click();
-        URL.revokeObjectURL(link.href);
-        
-        return { sectionCount: loadedDocs.length, pageCount: finalDoc.getPageCount() };
-    }
-};
-
  const Exporter = {
     toPDF: (opts) => { 
         document.body.className = state.currentRole === 'viewer' ? 'read-only' : ''; 
@@ -43540,7 +43102,7 @@ const DossierProd = {
     },
     
     // ========== RAPPORT DE PRODUCTION PDF ==========
-    productionReport: (opts = {}) => {
+    productionReport: () => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -43686,30 +43248,12 @@ const DossierProd = {
         y = addKeyValue('Scènes finalisées', `${finalizedScenes} / ${scenes.length}`, y);
         
         // ===== PERSONNAGES =====
-        // [Vague 2 / FIX] Déduplication par nom normalisé (lowercase + sans accents)
-        // pour fusionner "Nora" / "NORA" / "Nora Bellamy" risque cassé, donc on ne fusionne
-        // QUE si nom normalisé strictement identique (pas inclusion).
-        // En cas de doublon : on garde la fiche la plus informée (age + gender + comédien lié).
+        // Phase C.2.4 : fix doublon "Nora" — utiliser characterId proprement
         if(characters.length > 0) {
             y += 5;
             y = addSection('PERSONNAGES', y);
-            
-            const _normPersoKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
-            const _persoScore = (c) => (c.age ? 1 : 0) + (c.gender ? 1 : 0) + (c.description ? 1 : 0) + (actors.find(a => a.characterId === c.id) ? 2 : 0);
-            
-            const persoMap = new Map(); // normKey -> character
-            characters.forEach(c => {
-                if(!c || !c.name) return;
-                const key = _normPersoKey(c.name);
-                if(!key) return;
-                const existing = persoMap.get(key);
-                if(!existing || _persoScore(c) > _persoScore(existing)) {
-                    persoMap.set(key, c);
-                }
-            });
-            
-            const uniqueChars = Array.from(persoMap.values());
-            const charRows = uniqueChars.map(c => {
+            const charRows = characters.map(c => {
+                // Chercher le comédien qui joue ce personnage (peut être plusieurs : prendre le premier)
                 const actorPlaying = actors.find(a => a.characterId === c.id);
                 return [
                     PdfTheme.cleanText(c.name || '-'),
@@ -43722,34 +43266,14 @@ const DossierProd = {
         }
         
         // ===== COMÉDIENS =====
-        // [Vague 2 / FIX] (1) Déduplication par nom normalisé.
-        //                 (2) Priorité au champ a.role (texte libre) sur char.name : si tous les comédiens
-        //                     sont liés au même characterId par erreur, a.role sauve l'affichage.
+        // Phase C.2.4 : utilise le bon champ "role" du comédien (pas le perso lié)
         if(actors.length > 0) {
             y += 5;
             y = addSection('COMÉDIENS', y);
-            
-            const _normActorKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
-            const _actorScore = (a) => (a.role ? 1 : 0) + (a.phone ? 1 : 0) + (a.email ? 1 : 0) + (a.characterId ? 1 : 0);
-            
-            const actorMap = new Map();
-            actors.forEach(a => {
-                if(!a || !a.name) return;
-                const key = _normActorKey(a.name);
-                if(!key) return;
-                const existing = actorMap.get(key);
-                if(!existing || _actorScore(a) > _actorScore(existing)) {
-                    actorMap.set(key, a);
-                }
-            });
-            
-            const uniqueActors = Array.from(actorMap.values());
-            uniqueActors.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' }));
-            
-            const actorRows = uniqueActors.map(a => {
-                // Priorité au texte libre a.role (si renseigné), sinon fallback sur char.name
+            const actorRows = actors.map(a => {
+                // Le rôle peut être : (1) un personnage lié via characterId, (2) un texte libre dans a.role
                 const char = characters.find(c => c.id === a.characterId);
-                const roleLabel = (a.role && a.role.trim()) ? a.role : (char ? char.name : '-');
+                const roleLabel = char ? char.name : (a.role || '-');
                 return [
                     PdfTheme.cleanText(a.name || '-'),
                     PdfTheme.cleanText(roleLabel),
@@ -43761,32 +43285,11 @@ const DossierProd = {
         }
         
         // ===== ÉQUIPE TECHNIQUE =====
-        // [Vague 2 / FIX] Déduplication par nom normalisé pour fusionner "Guillaume De Mauroy" + "Guillaume de Mauroy"
-        // (Cas "de mauroy guillaume" = mots inversés → reste séparé, conservateur)
-        // En cas de doublon : on garde la fiche la plus informée (role + phone + email).
+        // Phase C.2.4 : fix département (group_id au lieu de department inexistant)
         if(crew.length > 0) {
             y += 5;
             y = addSection('ÉQUIPE TECHNIQUE', y);
-            
-            const _normCrewKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
-            const _crewScore = (m) => (m.role ? 1 : 0) + (m.phone ? 1 : 0) + (m.email ? 1 : 0) + (m.group_id ? 1 : 0);
-            
-            const crewMap = new Map();
-            crew.forEach(c => {
-                if(!c || !c.name) return;
-                const key = _normCrewKey(c.name);
-                if(!key) return;
-                const existing = crewMap.get(key);
-                if(!existing || _crewScore(c) > _crewScore(existing)) {
-                    crewMap.set(key, c);
-                }
-            });
-            
-            const uniqueCrew = Array.from(crewMap.values());
-            // Tri alphabétique
-            uniqueCrew.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' }));
-            
-            const crewRows = uniqueCrew.map(c => [
+            const crewRows = crew.map(c => [
                 PdfTheme.cleanText(c.name || '-'),
                 PdfTheme.cleanText(c.role || '-'),
                 PdfTheme.getGroupLabel(c.group_id, true) || '-',
@@ -43796,47 +43299,11 @@ const DossierProd = {
         }
         
         // ===== DÉCORS =====
-        // [Vague 2 / FIX] (1) Compter aussi via scene.breakdown['DECORS-LIEUX'] (fiches manuelles + détection auto).
-        //                 (2) Dédupliquer les locations par nom normalisé (case-insensitive).
-        //                 (3) En cas de doublon : garder la fiche la plus informée (realLocation + address).
         if(locations.length > 0) {
             y += 5;
             y = addSection('DÉCORS', y);
-            
-            const _normLocKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
-            const _locScore = (l) => (l.realLocation ? 1 : 0) + (l.address ? 1 : 0) + (l.id ? 1 : 0);
-            
-            const locMap = new Map();
-            locations.forEach(l => {
-                if(!l || !l.name) return;
-                const key = _normLocKey(l.name);
-                if(!key) return;
-                const existing = locMap.get(key);
-                if(!existing || _locScore(l) > _locScore(existing)) {
-                    locMap.set(key, l);
-                }
-            });
-            
-            const uniqueLocs = Array.from(locMap.values());
-            uniqueLocs.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' }));
-            
-            const locRows = uniqueLocs.map(l => {
-                const nameKey = _normLocKey(l.name);
-                const sceneCount = scenes.filter(s => {
-                    // (1) match par id
-                    if(l.id && s.locationId && s.locationId === l.id) return true;
-                    // (2) match par titre (heading de scène)
-                    if(l.name && s.title && typeof s.title === 'string') {
-                        // Comparaison normalisée pour éviter les différences de casse
-                        if(s.title.toLowerCase().includes(String(l.name).toLowerCase())) return true;
-                    }
-                    // (3) match via breakdown DECORS-LIEUX
-                    const bd = s.breakdown?.['DECORS-LIEUX'] || [];
-                    return bd.some(it => {
-                        const itName = typeof it === 'string' ? it : (it?.name || '');
-                        return _normLocKey(itName) === nameKey;
-                    });
-                }).length;
+            const locRows = locations.map(l => {
+                const sceneCount = scenes.filter(s => s.locationId === l.id || (s.title && s.title.includes(l.name))).length;
                 return [
                     PdfTheme.cleanText(l.name || '-'),
                     PdfTheme.cleanText(l.realLocation || '-'),
@@ -43893,9 +43360,6 @@ const DossierProd = {
         
         // ===== FOOTERS UNIFIÉS (Phase C.1) =====
         PdfTheme.applyFooters(doc);
-        
-        // ===== [Phase B.2] Si returnBlob, retourner sans sauver =====
-        if(opts.returnBlob) return doc.output('blob');
         
         // ===== TÉLÉCHARGEMENT (nom unifié) =====
         doc.save(PdfTheme.filename('Production'));
@@ -44581,10 +44045,12 @@ Généré par Moteur - moteur.studio
         }
     },
     
-    // ========== [Phase B.2] GÉNÉRATION DU DOSSIER DE PRODUCTION COMPLET ==========
-    // Assemble tous les PDF sélectionnés en un seul document avec couverture + sommaire.
+    // ========== [Phase B] EXPORT ZIP MOTEUR COMPLET ==========
+    // Génère un fichier .moteur.zip qui peut être réimporté pour restaurer le projet complet.
+    // Inclut : project.json + toutes les images Storage + manifest signé.
+    // [Phase B] Stub : la vraie implémentation viendra en B.2
     generateDossierProd: async () => {
-        // Lire les sections cochées dans la modale
+        // Lire les sections cochées
         const config = {
             titlepage: document.getElementById('dos-titlepage')?.checked,
             presentation: document.getElementById('dos-presentation')?.checked,
@@ -44600,24 +44066,22 @@ Généré par Moteur - moteur.studio
             rapport: document.getElementById('dos-rapport')?.checked
         };
         
+        const selected = Object.entries(config)
+            .filter(([k, v]) => v === true)
+            .map(([k]) => k);
+        
         document.getElementById('dossier-modal').style.display = 'none';
         
-        const progress = MoteurArchive.showProgressModal('📋 Assemblage du Dossier de Production');
+        console.log('[DossierProd] Sections sélectionnées :', selected);
+        console.log('[DossierProd] Calque storyboard :', config.storyboardLayer);
         
-        try {
-            const result = await DossierProd.assemble(config, progress);
-            progress.close();
-            Utils.toast(`Dossier généré : ${result.sectionCount} section(s), ${result.pageCount} page(s) !`, 'success');
-            History.log('EXPORT', 'Dossier de Production complet généré');
-        } catch(err) {
-            progress.close();
-            console.error('[DossierProd] Erreur :', err);
-            if(err.message === 'Annulé') {
-                Utils.toast('Génération annulée', 'info');
-            } else {
-                Utils.toast('Erreur : ' + (err.message || 'inconnu'), 'error');
-            }
-        }
+        Utils.toast(`Préparation du dossier (${selected.length} section${selected.length > 1 ? 's' : ''})… [B.2 à venir]`, 'info');
+        
+        // TODO Phase B.2 : appeler DossierProd.assemble(config) qui :
+        // - Génère chaque section en PDF blob
+        // - Fusionne tous les blobs via pdf-lib
+        // - Ajoute page de garde + sommaire avec numéros de page
+        // - Télécharge le PDF final
     },
     
     exportMoteurZip: async () => {
@@ -48082,7 +47546,7 @@ const Presentation = {
     },
     
     // [Phase C.5.3] Export PDF de la présentation projet
-    exportPDF: (opts = {}) => {
+    exportPDF: () => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -48168,50 +47632,21 @@ const Presentation = {
         }
         
         // === BESOINS ÉQUIPE ===
-        // [FIX] Lire les vraies sources : crewNeeds (postes standards) + customCrewNeeds (postes libres)
-        const crewNeedsArr = [];
-        if(p.crewNeeds) {
-            Object.entries(p.crewNeeds).forEach(([posId, need]) => {
-                if(need && need.needed) {
-                    const pos = Presentation.crewPositions.find(x => x.id === posId);
-                    if(pos) crewNeedsArr.push({ name: pos.name, count: need.count || 1 });
-                }
-            });
-        }
-        if(p.customCrewNeeds && Array.isArray(p.customCrewNeeds)) {
-            p.customCrewNeeds.forEach(cn => {
-                if(cn && cn.name) crewNeedsArr.push({ name: cn.name, count: cn.count || 1 });
-            });
-        }
-        if(crewNeedsArr.length > 0) {
+        if(p.needsCrew && Object.keys(p.needsCrew).length > 0) {
             y += 4;
             section('BESOINS ÉQUIPE');
-            crewNeedsArr.forEach(n => {
-                keyVal(PdfTheme.cleanText(n.name), n.count > 1 ? `${n.count} postes` : '1 poste');
+            Object.entries(p.needsCrew).forEach(([role, count]) => {
+                keyVal(PdfTheme.cleanText(role), count);
             });
         }
         
         // === BESOINS COMÉDIENS ===
-        // [FIX] Utiliser actorNeeds (structure réelle : roleName, gender, ageMin, ageMax, description...)
-        if(p.actorNeeds && Array.isArray(p.actorNeeds) && p.actorNeeds.length > 0) {
+        if(p.needsActors && p.needsActors.length > 0) {
             y += 4;
             section('BESOINS COMÉDIENS');
-            p.actorNeeds.forEach(need => {
-                if(typeof need === 'string') {
-                    keyVal('Rôle', PdfTheme.cleanText(need));
-                    return;
-                }
-                const roleName = need.roleName || need.character || need.name || 'Rôle';
-                const parts = [];
-                if(need.gender) parts.push(need.gender);
-                if(need.ageMin || need.ageMax) {
-                    parts.push(`${need.ageMin || '?'}-${need.ageMax || '?'} ans`);
-                }
-                if(need.type) parts.push(need.type);
-                if(need.count && need.count > 1) parts.push(`x${need.count}`);
-                if(need.description) parts.push(need.description);
-                const desc = parts.join(' · ');
-                keyVal(PdfTheme.cleanText(roleName), PdfTheme.cleanText(desc || '-'));
+            p.needsActors.forEach(need => {
+                const text = typeof need === 'string' ? need : (need.character || need.name || JSON.stringify(need));
+                keyVal('-', PdfTheme.cleanText(String(text)));
             });
         }
         
@@ -48229,8 +47664,6 @@ const Presentation = {
         
         // Footers + filename
         PdfTheme.applyFooters(doc);
-        // [Phase B.2] Si returnBlob, retourner sans sauver
-        if(opts.returnBlob) return doc.output('blob');
         doc.save(PdfTheme.filename('Présentation'));
         Utils.toast('Présentation PDF exportée !', 'success');
         History.log('EXPORT', 'Présentation PDF générée');
@@ -50612,7 +50045,7 @@ const Expenses = {
     },
     
     // Export PDF du budget [Phase C.2.2 refondu]
-    exportPDF: (opts = {}) => {
+    exportPDF: () => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -50650,33 +50083,19 @@ const Expenses = {
             };
         });
         
-        // [FIX] Normaliser le status : les données mélangent ids EN ('approved') et labels FR ('Validé', 'validé', 'en attente'…)
-        const normalizeStatus = (s) => {
-            if(!s) return '';
-            const k = String(s).toLowerCase().trim();
-            if(['approved', 'validé', 'valide', 'validée', 'ok'].includes(k)) return 'approved';
-            if(['done', 'payé', 'paye', 'payée', 'paid'].includes(k)) return 'done';
-            if(['pending', 'en attente', 'attente', 'à valider', 'a valider'].includes(k)) return 'pending';
-            if(['escalated', 'remonté', 'remonte'].includes(k)) return 'escalated';
-            if(['rejected', 'refusé', 'refuse', 'refusée'].includes(k)) return 'rejected';
-            if(['returned', 'renvoyé', 'renvoye'].includes(k)) return 'returned';
-            return k;
-        };
-        
         (state.data.expenses || []).forEach(exp => {
             const catId = exp.category || exp.department;
             const amount = vatMode === 'HT' ? (parseFloat(exp.amountHT) || parseFloat(exp.amount) || 0) : (parseFloat(exp.amountTTC) || parseFloat(exp.amount) || 0);
-            const status = normalizeStatus(exp.status);
             
-            if(status === 'approved' || status === 'done') totalApproved += amount;
-            else if(status === 'pending' || status === 'escalated') totalPending += amount;
-            else if(status === 'rejected') totalRejected += amount;
+            if(exp.status === 'approved' || exp.status === 'done') totalApproved += amount;
+            else if(exp.status === 'pending' || exp.status === 'escalated') totalPending += amount;
+            else if(exp.status === 'rejected') totalRejected += amount;
             
             const mappedCat = Expenses.MIGRATION_MAP[catId] || catId;
             if(!catTotals[mappedCat]) catTotals[mappedCat] = { approved: 0, pending: 0, budget: 0 };
             
-            if(status === 'approved' || status === 'done') catTotals[mappedCat].approved += amount;
-            else if(status === 'pending') catTotals[mappedCat].pending += amount;
+            if(exp.status === 'approved' || exp.status === 'done') catTotals[mappedCat].approved += amount;
+            else if(exp.status === 'pending') catTotals[mappedCat].pending += amount;
         });
         
         const salariesTotal = Expenses.calculateSalariesTotal();
@@ -50880,12 +50299,10 @@ const Expenses = {
                 doc.text(fmt(amountHT), margin + 112, y);
                 doc.text(vatRate > 0 ? vatRate + '%' : '-', margin + 132, y);
                 doc.text(fmt(amountTTC), margin + 148, y);
-                // [FIX] Afficher le label FR normalisé même si le status stocké est déjà en français
-                const normStatus = normalizeStatus(exp.status);
-                const sc = statusColors[normStatus] || [100, 100, 100];
+                const sc = statusColors[exp.status] || [100, 100, 100];
                 doc.setTextColor(sc[0], sc[1], sc[2]);
                 doc.setFont('helvetica', 'bold');
-                doc.text(EXPENSE_STATUS_LABELS[normStatus] || exp.status || '-', margin + 167, y);
+                doc.text(EXPENSE_STATUS_LABELS[exp.status] || exp.status || '-', margin + 167, y);
                 doc.setFont('helvetica', 'normal');
                 doc.setTextColor(50, 50, 50);
                 
@@ -50900,10 +50317,7 @@ const Expenses = {
             doc.setFontSize(8);
             doc.setFont('helvetica', 'bold');
             let totalHT = 0, totalTTC = 0;
-            expenses.filter(e => {
-                const ns = normalizeStatus(e.status);
-                return ns === 'approved' || ns === 'done';
-            }).forEach(e => {
+            expenses.filter(e => e.status === 'approved' || e.status === 'done').forEach(e => {
                 totalHT += parseFloat(e.amountHT) || parseFloat(e.amount) || 0;
                 totalTTC += parseFloat(e.amountTTC) || parseFloat(e.amount) || 0;
             });
@@ -50914,9 +50328,6 @@ const Expenses = {
         
         // ===== FOOTERS UNIFIÉS (Phase C.1) =====
         PdfTheme.applyFooters(doc);
-        
-        // ===== [Phase B.2] Si returnBlob, retourner sans sauver =====
-        if(opts.returnBlob) return doc.output('blob');
         
         // ===== TÉLÉCHARGEMENT (nom unifié) =====
         doc.save(PdfTheme.filename('Budget'));
@@ -61772,7 +61183,7 @@ const TitlePage = {
     },
     
     // [Phase C.5.1] Export PDF de la page de titre seule (style Final Draft)
-    exportPDF: (opts = {}) => {
+    exportPDF: () => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const tp = state.data.titlePage || {};
@@ -61849,9 +61260,6 @@ const TitlePage = {
         doc.setFontSize(8);
         doc.setTextColor(150, 150, 150);
         doc.text('Document généré par Moteur — moteur.studio', pageWidth / 2, pageHeight - 12, { align: 'center' });
-        
-        // [Phase B.2] Si returnBlob, retourner sans sauver
-        if(opts.returnBlob) return doc.output('blob');
         
         // Téléchargement
         doc.save(PdfTheme.filename('Page de titre'));
@@ -65209,7 +64617,7 @@ const Weather = {
       },
       
       // [Phase C.5.4] Export PDF du Séquencier (PAS le BeatBoard)
-      exportSequencerPDF: (opts = {}) => {
+      exportSequencerPDF: () => {
           const { jsPDF } = window.jspdf;
           const doc = new jsPDF('p', 'mm', 'a4');
           const pageWidth = doc.internal.pageSize.getWidth();
@@ -65353,8 +64761,6 @@ const Weather = {
           
           // Footers + filename
           PdfTheme.applyFooters(doc);
-          // [Phase B.2] Si returnBlob, retourner sans sauver
-          if(opts.returnBlob) return doc.output('blob');
           doc.save(PdfTheme.filename('Séquencier'));
           Utils.toast('Séquencier PDF exporté !', 'success');
           History.log('EXPORT', 'Séquencier PDF généré');
