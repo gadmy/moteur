@@ -5381,6 +5381,9 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
     /* [Scénario PDF] Slots @page : tout vide sauf bottom-right (date + N° page X/Y)
        NOTE : les en-têtes/pieds Firefox natifs (URL, titre, date système) NE PEUVENT PAS être enlevés via CSS.
        L'utilisateur doit décocher « En-têtes et pieds de page » dans la fenêtre d'impression. */
+    /* @page : marges A4 standards. Le footer (date + pagination) est injecté dynamiquement
+       par Exporter.toPDF() en utilisant un <style> dans le <head> car les CSS variables
+       ne sont pas supportées dans @page @bottom-right par Chrome. */
     @page { 
         size: A4; 
         margin: 25mm 25mm 25mm 35mm; 
@@ -5388,14 +5391,7 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
         @top-center { content: ""; } 
         @top-right { content: ""; } 
         @bottom-left { content: ""; } 
-        @bottom-center { content: ""; } 
-        @bottom-right { 
-            content: var(--print-date, "") " — " counter(page) "/" counter(pages); 
-            font-family: 'Courier Prime', 'Courier', monospace; 
-            font-size: 9pt; 
-            color: #555;
-            margin-bottom: 10mm; 
-        } 
+        @bottom-center { content: ""; }
     }
     
     body { background: #fff !important; color: #000 !important; height: auto; overflow: visible; font-family: 'Courier Prime', 'Courier', monospace; -webkit-print-color-adjust: exact; }
@@ -5433,7 +5429,7 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
     .script-view { max-width: 100%; width: 100%; font-size: 12pt; line-height: 1; }
     .script-row { display: block; border-bottom: none; padding: 0; margin: 0; page-break-inside: auto; }
     .script-write-col { display: block; width: 100%; margin: 0; }
-    /* [FIX PDF étroit v2] Spécificité maximale pour battre la règle .script-editor-box ligne 4459 */
+    /* [FIX PDF étroit v3] Spécificité maximale + KILL SWITCH global pour ombres parasites */
     body.print-script .script-info-col,
     body.print-script .script-continuous-sidebar { 
         display: none !important; 
@@ -5453,6 +5449,7 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
         max-width: none !important; 
         margin: 0 !important; 
         padding: 0 !important; 
+        overflow: visible !important; 
     }
     body.print-script .script-editor-box { 
         border: none !important; 
@@ -5465,6 +5462,16 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
         max-width: none !important; 
         margin: 0 !important; 
         overflow: visible !important; 
+    }
+    /* KILL SWITCH : aucun box-shadow, aucune ombre filter, aucun border parasitique pour le scénario */
+    body.print-script #tab-script,
+    body.print-script #tab-script *,
+    body.print-script #scriptContainer,
+    body.print-script #scriptContainer * { 
+        box-shadow: none !important; 
+        filter: none !important; 
+        text-shadow: none !important; 
+        -webkit-box-shadow: none !important; 
     }
     
     /* Elements Scénario Impression */
@@ -7033,7 +7040,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.0.8</p>
+      <p>vv4.0.9</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -43176,14 +43183,36 @@ const MoteurArchive = {
         if(notesValue) contactHtml += '<p>' + _esc(notesValue) + '</p>';
         document.getElementById('pc-contact').innerHTML = contactHtml;
         
-        // [Scénario PDF] Injecter la date du jour dans la CSS variable --print-date (pour le @page @bottom-right)
+        // [Scénario PDF] Injecter dynamiquement un <style> avec le footer @page @bottom-right
+        // (car les CSS variables ne sont pas supportées dans @page @bottom-right par Chrome)
         const today = new Date();
         const dateFr = String(today.getDate()).padStart(2, '0') + '/' + String(today.getMonth() + 1).padStart(2, '0') + '/' + today.getFullYear();
-        document.documentElement.style.setProperty('--print-date', '"' + dateFr + '"');
         
-        // Toast d'aide pour les en-têtes Firefox (uniquement pour le scénario)
+        // Retirer l'ancien style s'il existe (pour éviter accumulation à chaque impression)
+        const _oldStyle = document.getElementById('dynamic-print-footer');
+        if(_oldStyle) _oldStyle.remove();
+        
+        // Injecter le nouveau <style> avec la date hardcodée
+        const _printStyle = document.createElement('style');
+        _printStyle.id = 'dynamic-print-footer';
+        _printStyle.textContent = `
+            @media print {
+                @page {
+                    @bottom-right {
+                        content: "${dateFr} — " counter(page) "/" counter(pages);
+                        font-family: 'Courier Prime', 'Courier', monospace;
+                        font-size: 9pt;
+                        color: #555;
+                        margin-bottom: 10mm;
+                    }
+                }
+            }
+        `;
+        document.head.appendChild(_printStyle);
+        
+        // Toast d'aide pour un PDF propre (Chrome / Firefox)
         if(opts.script && typeof Utils !== 'undefined' && Utils.toast) {
-            Utils.toast('💡 Pour un PDF propre : dans la fenêtre d\'impression, décochez « En-têtes et pieds de page »', 'info', 8000);
+            Utils.toast('💡 Pour un PDF propre : décochez « En-têtes et pieds de page » ET mettez « Marges : Aucune »', 'info', 10000);
         }
         
         if(opts.synop) document.body.classList.add('print-synopsis'); 
