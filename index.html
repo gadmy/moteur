@@ -9774,6 +9774,7 @@ body.presentation-mode .presentation-bar {
               <span class="synopsis-nav-label">📚 Résumé long</span>
               <span class="synopsis-nav-count" id="synopsis-count-long">0 caractère</span>
             </button>
+            <button onclick="app.Synopsis.openSynopsisPdfModal()" style="margin-top: 16px; width: 100%; background: var(--primary); color: #fff; padding: 10px 14px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;" title="Export PDF (page de garde + champs au choix)">📄 Export PDF</button>
           </aside>
           
           <!-- Zone principale -->
@@ -43460,7 +43461,7 @@ const MoteurArchive = {
         overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:520px;padding:20px;">
             <div style="font-size:1.05rem;font-weight:bold;margin-bottom:14px;">📄 Scénario PDF — Options</div>
             <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
-                <button type="button" class="fmt-btn active" id="scen-opt-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre Final Draft</button>
+                <button type="button" class="fmt-btn active" id="scen-opt-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre</button>
                 <button type="button" class="fmt-btn" id="scen-opt-numbers" data-active="0" style="padding:10px 14px;font-size:0.85rem;text-align:left;">🔢 Numéroter les scènes (#1, #2…) — style production</button>
                 <button type="button" class="fmt-btn" id="scen-opt-notes" data-active="0" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📝 Inclure les notes de production (sc-note)</button>
             </div>
@@ -62996,6 +62997,593 @@ const Synopsis = {
                 });
             }
         });
+    },
+    
+    // ========================================================
+    // EXPORT PDF DU SYNOPSIS [Vague 3a] — jsPDF natif
+    // 3 champs (synopsis / synopsisShort / synopsisLong)
+    // Conversion HTML riche : p, h1-3, b/strong, i/em, u, s, ul/ol/li, blockquote, hr, img, table
+    // Page de garde Final Draft optionnelle
+    // ========================================================
+    
+    // Point d'entrée : ouvre la modale options
+    openSynopsisPdfModal: () => {
+        // Vérifier qu'au moins un champ a du contenu
+        const hasContent = (state.data.synopsis || state.data.synopsisShort || state.data.synopsisLong);
+        if(!hasContent) {
+            Utils.toast('Aucun synopsis à exporter — remplissez au moins un champ', 'warning');
+            return;
+        }
+        Synopsis._openSynopsisOptionsModal();
+    },
+    
+    // Modale options avec toggles bouton bleu (style cohérent avec le scénario)
+    _openSynopsisOptionsModal: () => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        const hasSynopsis = !!(state.data.synopsis && state.data.synopsis.trim());
+        const hasShort    = !!(state.data.synopsisShort && state.data.synopsisShort.trim());
+        const hasLong     = !!(state.data.synopsisLong && state.data.synopsisLong.trim());
+        
+        // État initial : page de garde activée, et tous les champs non vides cochés
+        const initCover    = '1';
+        const initSynopsis = hasSynopsis ? '1' : '0';
+        const initShort    = hasShort    ? '1' : '0';
+        const initLong     = hasLong     ? '1' : '0';
+        
+        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:520px;padding:20px;">
+            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:14px;">📖 Synopsis PDF — Options</div>
+            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Page de garde :</div>
+            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
+                <button type="button" class="fmt-btn ${initCover==='1'?'active':''}" id="synop-opt-cover" data-active="${initCover}" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre</button>
+            </div>
+            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Champs à inclure :</div>
+            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
+                <button type="button" class="fmt-btn ${initSynopsis==='1'?'active':''}" id="synop-opt-main" data-active="${initSynopsis}" ${!hasSynopsis?'disabled style="padding:10px 14px;font-size:0.85rem;text-align:left;opacity:0.4;cursor:not-allowed;"':'style="padding:10px 14px;font-size:0.85rem;text-align:left;"'}>📖 Synopsis ${hasSynopsis?'':' (vide)'}</button>
+                <button type="button" class="fmt-btn ${initShort==='1'?'active':''}" id="synop-opt-short" data-active="${initShort}" ${!hasShort?'disabled style="padding:10px 14px;font-size:0.85rem;text-align:left;opacity:0.4;cursor:not-allowed;"':'style="padding:10px 14px;font-size:0.85rem;text-align:left;"'}>⚡ Résumé court ${hasShort?'':' (vide)'}</button>
+                <button type="button" class="fmt-btn ${initLong==='1'?'active':''}" id="synop-opt-long" data-active="${initLong}" ${!hasLong?'disabled style="padding:10px 14px;font-size:0.85rem;text-align:left;opacity:0.4;cursor:not-allowed;"':'style="padding:10px 14px;font-size:0.85rem;text-align:left;"'}>📚 Résumé long ${hasLong?'':' (vide)'}</button>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="confirm-modal-btn cancel" id="synop-opt-cancel" style="margin:0;">Annuler</button>
+                <button class="confirm-modal-btn confirm" id="synop-opt-ok" style="margin:0;">📄 Générer le PDF</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        
+        // Toggle : clic sur un .fmt-btn bascule sa classe .active et son data-active (sauf si disabled)
+        ['synop-opt-cover', 'synop-opt-main', 'synop-opt-short', 'synop-opt-long'].forEach(id => {
+            const btn = overlay.querySelector('#' + id);
+            if(btn && !btn.disabled) {
+                btn.onclick = (e) => {
+                    const b = e.currentTarget;
+                    const isActive = b.classList.toggle('active');
+                    b.dataset.active = isActive ? '1' : '0';
+                };
+            }
+        });
+        
+        overlay.querySelector('#synop-opt-cancel').onclick = () => overlay.remove();
+        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+        overlay.querySelector('#synop-opt-ok').onclick = async () => {
+            const includeCover    = overlay.querySelector('#synop-opt-cover').dataset.active === '1';
+            const includeSynopsis = overlay.querySelector('#synop-opt-main').dataset.active === '1';
+            const includeShort    = overlay.querySelector('#synop-opt-short').dataset.active === '1';
+            const includeLong     = overlay.querySelector('#synop-opt-long').dataset.active === '1';
+            
+            if(!includeSynopsis && !includeShort && !includeLong) {
+                Utils.toast('Sélectionnez au moins un champ à inclure', 'warning');
+                return;
+            }
+            overlay.remove();
+            await Synopsis.synopsisToPDF({ includeCover, includeSynopsis, includeShort, includeLong });
+        };
+    },
+    
+    // === HELPER : Parse HTML enrichi en blocs typés pour jsPDF ===
+    // Retourne un array de blocs : [{type, ...payload}]
+    // types : heading, paragraph, list, blockquote, image, hr, table
+    // Pour paragraph/heading/blockquote/list: payload contient `runs` = array de {text, style}
+    _parseRichHtml: (html) => {
+        if(!html || !html.trim()) return [];
+        const container = document.createElement('div');
+        container.innerHTML = html;
+        const blocks = [];
+        
+        // Helper : extraire les "runs" inline d'un élément (gras/italique/souligné)
+        const extractRuns = (node) => {
+            const runs = [];
+            const walk = (el, style) => {
+                el.childNodes.forEach(child => {
+                    if(child.nodeType === Node.TEXT_NODE) {
+                        const txt = child.textContent;
+                        if(txt) runs.push({ text: txt, ...style });
+                    } else if(child.nodeType === Node.ELEMENT_NODE) {
+                        const tag = child.tagName.toLowerCase();
+                        const newStyle = { ...style };
+                        if(tag === 'b' || tag === 'strong') newStyle.bold = true;
+                        else if(tag === 'i' || tag === 'em') newStyle.italic = true;
+                        else if(tag === 'u') newStyle.underline = true;
+                        else if(tag === 's' || tag === 'strike') newStyle.strike = true;
+                        else if(tag === 'br') { runs.push({ text: '\n' }); return; }
+                        walk(child, newStyle);
+                    }
+                });
+            };
+            walk(node, {});
+            return runs.filter(r => r.text);
+        };
+        
+        // Helper : process une liste (ul/ol) récursivement
+        const processList = (listEl, ordered) => {
+            const items = [];
+            listEl.querySelectorAll(':scope > li').forEach((li, idx) => {
+                items.push({ runs: extractRuns(li), marker: ordered ? `${idx+1}.` : '•' });
+            });
+            return { type: 'list', items, ordered };
+        };
+        
+        // Boucle sur les enfants directs du container
+        Array.from(container.children).forEach(el => {
+            const tag = el.tagName.toLowerCase();
+            
+            if(tag === 'h1' || tag === 'h2' || tag === 'h3') {
+                blocks.push({ type: 'heading', level: parseInt(tag[1], 10), runs: extractRuns(el) });
+            } else if(tag === 'p') {
+                // Détecter une image dans le paragraphe (paste/insertion)
+                const img = el.querySelector('img');
+                if(img && img.src) {
+                    blocks.push({ type: 'image', src: img.src, alt: img.alt || '' });
+                    // Ajouter aussi le texte autour si présent
+                    const cloned = el.cloneNode(true);
+                    cloned.querySelectorAll('img').forEach(i => i.remove());
+                    const runs = extractRuns(cloned);
+                    if(runs.length) blocks.push({ type: 'paragraph', runs });
+                } else {
+                    const runs = extractRuns(el);
+                    if(runs.length) blocks.push({ type: 'paragraph', runs });
+                }
+            } else if(tag === 'blockquote') {
+                blocks.push({ type: 'blockquote', runs: extractRuns(el) });
+            } else if(tag === 'ul') {
+                blocks.push(processList(el, false));
+            } else if(tag === 'ol') {
+                blocks.push(processList(el, true));
+            } else if(tag === 'hr') {
+                blocks.push({ type: 'hr' });
+            } else if(tag === 'img') {
+                if(el.src) blocks.push({ type: 'image', src: el.src, alt: el.alt || '' });
+            } else if(tag === 'table') {
+                // Conversion table simple : array d'array de strings
+                const rows = [];
+                el.querySelectorAll('tr').forEach(tr => {
+                    const row = [];
+                    tr.querySelectorAll('td, th').forEach(cell => {
+                        row.push(cell.innerText.trim());
+                    });
+                    if(row.length) rows.push(row);
+                });
+                if(rows.length) blocks.push({ type: 'table', rows });
+            } else if(tag === 'div') {
+                // div générique : on traite comme un paragraphe
+                const runs = extractRuns(el);
+                if(runs.length) blocks.push({ type: 'paragraph', runs });
+            }
+        });
+        
+        return blocks;
+    },
+    
+    // === GÉNÉRATION JSPDF DU SYNOPSIS ===
+    // opts = { includeCover, includeSynopsis, includeShort, includeLong, returnBlob }
+    synopsisToPDF: async (opts = {}) => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();    // 210
+        const pageHeight = doc.internal.pageSize.getHeight();  // 297
+        
+        // Marges A4 standard (pas de reliure pour le synopsis, c'est plus un livret)
+        const margin = 25;
+        const usableWidth = pageWidth - margin * 2;  // 160 mm
+        
+        // État du curseur d'écriture
+        let y = margin;
+        
+        // ===== HELPERS =====
+        
+        // Nouveau saut de page (réinitialise y au top)
+        const newPage = () => {
+            doc.addPage();
+            y = margin;
+        };
+        
+        // S'assure qu'il reste `space` mm avant la fin de page ; sinon saut
+        const ensureSpace = (space) => {
+            if(y + space > pageHeight - margin) {
+                newPage();
+                return true;
+            }
+            return false;
+        };
+        
+        // Écrit une suite de "runs" (text + style inline) en gérant le wrapping
+        // runs : array de {text, bold?, italic?, underline?, strike?}
+        // x : abscisse de départ
+        // maxWidth : largeur disponible
+        // fontSize : taille en pt
+        // lineHeight : hauteur de ligne en mm
+        // textColor : array [r,g,b] ou null pour noir
+        const writeRuns = (runs, opts2 = {}) => {
+            const x = opts2.x || margin;
+            const maxWidth = opts2.maxWidth || usableWidth;
+            const fontSize = opts2.fontSize || 11;
+            const lineHeight = opts2.lineHeight || 5.5;
+            const color = opts2.color || [30, 30, 30];
+            const align = opts2.align || 'left';
+            
+            doc.setFontSize(fontSize);
+            doc.setTextColor(color[0], color[1], color[2]);
+            
+            // Reconstituer le texte complet avec marqueurs de style
+            // On va découper en lignes avec splitTextToSize, puis re-trouver les runs sur chaque ligne
+            // Approche pragmatique : on concatène et on rend ligne par ligne en repassant sur les runs
+            const fullText = runs.map(r => r.text || '').join('');
+            if(!fullText.trim()) return;
+            
+            // Pour simplifier le wrapping avec styles mixtes, on utilise une approche par "mot"
+            // mais on découpe les longs textes en gardant les styles
+            // Stratégie : on rend run par run en mode "écriture continue" avec retour ligne quand on dépasse
+            
+            let curX = x;
+            // Si align=center, on doit pré-calculer (complexe). Fallback : on ne supporte center/right que pour runs simples (1 seul style)
+            if(align === 'center' || align === 'right') {
+                // Pour center/right, on use splitTextToSize sur le texte complet (perd les styles)
+                // mais c'est utilisé surtout pour les headings où il n'y a pas de mix
+                const isBold = runs.length > 0 && runs[0].bold;
+                const isItalic = runs.length > 0 && runs[0].italic;
+                let style = 'normal';
+                if(isBold && isItalic) style = 'bolditalic';
+                else if(isBold) style = 'bold';
+                else if(isItalic) style = 'italic';
+                doc.setFont('helvetica', style);
+                
+                const lines = doc.splitTextToSize(fullText, maxWidth);
+                lines.forEach(line => {
+                    ensureSpace(lineHeight);
+                    let drawX = x;
+                    if(align === 'right') drawX = x + maxWidth;
+                    else if(align === 'center') drawX = x + maxWidth / 2;
+                    doc.text(line, drawX, y, { align });
+                    y += lineHeight;
+                });
+                return;
+            }
+            
+            // Mode left-align : on parcourt chaque run et écrit mot par mot
+            const endX = x + maxWidth;
+            
+            runs.forEach(run => {
+                let style = 'normal';
+                if(run.bold && run.italic) style = 'bolditalic';
+                else if(run.bold) style = 'bold';
+                else if(run.italic) style = 'italic';
+                doc.setFont('helvetica', style);
+                
+                // Découper le run en mots (en gardant les espaces avec les mots qui suivent)
+                const words = run.text.split(/(\s+)/);
+                words.forEach(word => {
+                    if(!word) return;
+                    // Gestion des retours ligne explicites
+                    if(word.includes('\n')) {
+                        const parts = word.split('\n');
+                        parts.forEach((part, idx) => {
+                            if(idx > 0) {
+                                y += lineHeight;
+                                curX = x;
+                                ensureSpace(lineHeight);
+                            }
+                            if(part) {
+                                const w = doc.getTextWidth(part);
+                                if(curX + w > endX && curX > x) {
+                                    y += lineHeight;
+                                    curX = x;
+                                    ensureSpace(lineHeight);
+                                }
+                                doc.text(part, curX, y);
+                                if(run.underline) doc.line(curX, y+0.8, curX + w, y+0.8);
+                                if(run.strike) doc.line(curX, y-1.5, curX + w, y-1.5);
+                                curX += w;
+                            }
+                        });
+                        return;
+                    }
+                    
+                    const wWidth = doc.getTextWidth(word);
+                    // Si le mot ne tient pas, on retourne à la ligne (sauf si on est déjà au début)
+                    if(curX + wWidth > endX && curX > x) {
+                        y += lineHeight;
+                        curX = x;
+                        ensureSpace(lineHeight);
+                    }
+                    doc.text(word, curX, y);
+                    if(run.underline && word.trim()) {
+                        doc.setLineWidth(0.2);
+                        doc.line(curX, y+0.8, curX + wWidth, y+0.8);
+                    }
+                    if(run.strike && word.trim()) {
+                        doc.setLineWidth(0.2);
+                        doc.line(curX, y-1.5, curX + wWidth, y-1.5);
+                    }
+                    curX += wWidth;
+                });
+            });
+            
+            // Retour ligne après le bloc
+            y += lineHeight;
+        };
+        
+        // === Rendu d'un bloc typé ===
+        const renderBlock = (block) => {
+            switch(block.type) {
+                case 'heading': {
+                    const sizes = { 1: 18, 2: 14, 3: 12 };
+                    const spaceBefore = { 1: 8, 2: 6, 3: 4 };
+                    const spaceAfter = { 1: 4, 2: 3, 3: 2 };
+                    if(y > margin) y += spaceBefore[block.level] || 4;
+                    ensureSpace(sizes[block.level] * 0.6 + (spaceAfter[block.level] || 2));
+                    // Forcer bold pour les headings
+                    const boldRuns = block.runs.map(r => ({ ...r, bold: true }));
+                    writeRuns(boldRuns, {
+                        fontSize: sizes[block.level] || 14,
+                        lineHeight: sizes[block.level] * 0.45 + 1,
+                        color: [20, 20, 20]
+                    });
+                    y += spaceAfter[block.level] || 2;
+                    break;
+                }
+                
+                case 'paragraph': {
+                    writeRuns(block.runs, { fontSize: 11, lineHeight: 5.5, color: [40, 40, 40] });
+                    y += 2;
+                    break;
+                }
+                
+                case 'blockquote': {
+                    if(y > margin) y += 3;
+                    const startY = y;
+                    // Décalage indent gauche
+                    writeRuns(block.runs.map(r => ({ ...r, italic: true })), {
+                        x: margin + 8,
+                        maxWidth: usableWidth - 10,
+                        fontSize: 11,
+                        lineHeight: 5.5,
+                        color: [90, 90, 90]
+                    });
+                    // Barre verticale grise à gauche
+                    doc.setDrawColor(180, 180, 180);
+                    doc.setLineWidth(0.8);
+                    doc.line(margin + 2, startY - 3, margin + 2, y - 2);
+                    y += 3;
+                    break;
+                }
+                
+                case 'list': {
+                    block.items.forEach(item => {
+                        ensureSpace(6);
+                        // Marker (puce ou numéro) à gauche
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(11);
+                        doc.setTextColor(80, 80, 80);
+                        doc.text(item.marker, margin + 2, y);
+                        // Contenu indenté
+                        writeRuns(item.runs, {
+                            x: margin + 8,
+                            maxWidth: usableWidth - 8,
+                            fontSize: 11,
+                            lineHeight: 5.5,
+                            color: [40, 40, 40]
+                        });
+                    });
+                    y += 2;
+                    break;
+                }
+                
+                case 'hr': {
+                    if(y > margin) y += 4;
+                    ensureSpace(6);
+                    doc.setDrawColor(200, 200, 200);
+                    doc.setLineWidth(0.4);
+                    doc.line(margin + 20, y, pageWidth - margin - 20, y);
+                    y += 8;
+                    break;
+                }
+                
+                case 'image': {
+                    if(!block.src) break;
+                    try {
+                        // Calcul dimensions : on récupère via Image native
+                        const imgEl = new Image();
+                        imgEl.crossOrigin = 'anonymous';
+                        imgEl.src = block.src;
+                        // Attendre le chargement (déjà chargé si dataURL ou cache)
+                        if(!imgEl.complete) {
+                            // skip async loading dans ce contexte sync - on retourne
+                            break;
+                        }
+                        const naturalW = imgEl.naturalWidth || 400;
+                        const naturalH = imgEl.naturalHeight || 300;
+                        const maxImgWidth = Math.min(usableWidth, 150);
+                        const ratio = naturalH / naturalW;
+                        const w = maxImgWidth;
+                        const h = maxImgWidth * ratio;
+                        // Saut de page si trop grand
+                        ensureSpace(h + 6);
+                        const xCenter = (pageWidth - w) / 2;
+                        doc.addImage(block.src, 'PNG', xCenter, y, w, h);
+                        y += h + 4;
+                    } catch(e) {
+                        console.warn('[Synopsis PDF] Erreur image :', e);
+                    }
+                    break;
+                }
+                
+                case 'table': {
+                    // Rendu basique : N colonnes égales, ligne entête en gras
+                    if(!block.rows || block.rows.length === 0) break;
+                    const nCols = Math.max(...block.rows.map(r => r.length));
+                    const colWidth = usableWidth / nCols;
+                    const rowHeight = 7;
+                    
+                    block.rows.forEach((row, rowIdx) => {
+                        ensureSpace(rowHeight);
+                        const isHeader = rowIdx === 0;
+                        // Fond gris léger pour le header
+                        if(isHeader) {
+                            doc.setFillColor(240, 240, 240);
+                            doc.rect(margin, y - 4, usableWidth, rowHeight, 'F');
+                        }
+                        // Bordures
+                        doc.setDrawColor(200, 200, 200);
+                        doc.setLineWidth(0.2);
+                        doc.rect(margin, y - 4, usableWidth, rowHeight);
+                        for(let c = 1; c < nCols; c++) {
+                            doc.line(margin + c * colWidth, y - 4, margin + c * colWidth, y - 4 + rowHeight);
+                        }
+                        // Texte des cellules
+                        doc.setFont('helvetica', isHeader ? 'bold' : 'normal');
+                        doc.setFontSize(9);
+                        doc.setTextColor(40, 40, 40);
+                        row.forEach((cell, c) => {
+                            const txt = (cell || '').substring(0, 40);
+                            doc.text(txt, margin + c * colWidth + 2, y);
+                        });
+                        y += rowHeight;
+                    });
+                    y += 4;
+                    break;
+                }
+            }
+        };
+        
+        // ===== PAGE DE GARDE FINAL DRAFT =====
+        if(opts.includeCover) {
+            const projectTitle = state.data.title || 'Projet sans titre';
+            const meta = state.data.scriptMeta || {};
+            
+            // Titre centré
+            const titleY = pageHeight * 0.35;
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(28);
+            doc.setTextColor(20, 20, 20);
+            const titleUpper = projectTitle.toUpperCase();
+            doc.text(titleUpper, pageWidth / 2, titleY, { align: 'center' });
+            // Souligné
+            const titleWidth = doc.getTextWidth(titleUpper);
+            doc.setLineWidth(0.5);
+            doc.line(pageWidth/2 - titleWidth/2, titleY + 2, pageWidth/2 + titleWidth/2, titleY + 2);
+            
+            // Sous-titre "SYNOPSIS"
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(16);
+            doc.setTextColor(60, 60, 60);
+            doc.text('SYNOPSIS', pageWidth / 2, titleY + 14, { align: 'center' });
+            
+            // "Un scénario de" + auteur
+            if(meta.author) {
+                doc.setFontSize(13);
+                doc.text('Un scénario de ' + meta.author, pageWidth / 2, titleY + 28, { align: 'center' });
+                if(meta.coAuthor) {
+                    doc.text('& ' + meta.coAuthor, pageWidth / 2, titleY + 36, { align: 'center' });
+                }
+            }
+            
+            // Source
+            if(meta.source) {
+                doc.setFontSize(11);
+                doc.setFont('helvetica', 'italic');
+                doc.text('Basé sur ' + meta.source, pageWidth / 2, titleY + 50, { align: 'center' });
+                doc.setFont('helvetica', 'normal');
+            }
+            
+            // Draft + date en bas
+            doc.setFontSize(11);
+            doc.setTextColor(80, 80, 80);
+            const draftY = pageHeight - 50;
+            if(meta.draft) doc.text(meta.draft, pageWidth / 2, draftY, { align: 'center' });
+            if(meta.draftDate) doc.text(meta.draftDate, pageWidth / 2, draftY + 6, { align: 'center' });
+            
+            // Contact bas-gauche
+            doc.setFontSize(10);
+            let contactY = pageHeight - 35;
+            const writeContact = (txt) => { if(txt) { doc.text(txt, margin, contactY); contactY += 5; } };
+            writeContact(meta.contact || '');
+            writeContact(meta.copyright || '');
+            writeContact(meta.notes || '');
+            
+            // Préparer la 1ère page de contenu
+            doc.addPage();
+            y = margin;
+        }
+        
+        // ===== CONTENU =====
+        const sections = [];
+        if(opts.includeSynopsis && state.data.synopsis) sections.push({ title: 'Synopsis', html: state.data.synopsis });
+        if(opts.includeShort && state.data.synopsisShort) sections.push({ title: 'Résumé court', html: state.data.synopsisShort });
+        if(opts.includeLong && state.data.synopsisLong) sections.push({ title: 'Résumé long', html: state.data.synopsisLong });
+        
+        sections.forEach((section, idx) => {
+            // Nouvelle page pour chaque section (sauf la 1ère)
+            if(idx > 0) {
+                doc.addPage();
+                y = margin;
+            }
+            
+            // Titre de section : grand, centré, souligné
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(20);
+            doc.setTextColor(30, 30, 30);
+            doc.text(section.title.toUpperCase(), pageWidth / 2, y + 6, { align: 'center' });
+            const titW = doc.getTextWidth(section.title.toUpperCase());
+            doc.setLineWidth(0.3);
+            doc.line(pageWidth/2 - titW/2, y + 8, pageWidth/2 + titW/2, y + 8);
+            y += 18;
+            
+            // Parser et rendre les blocs
+            const blocks = Synopsis._parseRichHtml(section.html);
+            blocks.forEach(block => renderBlock(block));
+        });
+        
+        // ===== FOOTERS =====
+        const totalPages = doc.internal.getNumberOfPages();
+        const offset = opts.includeCover ? 1 : 0;
+        const contentTotal = totalPages - offset;
+        const today = new Date();
+        const dateStr = String(today.getDate()).padStart(2, '0') + '/' 
+                      + String(today.getMonth() + 1).padStart(2, '0') + '/' 
+                      + today.getFullYear();
+        const projectName = state.data.title || 'Projet';
+        
+        for(let i = 1; i <= totalPages; i++) {
+            if(opts.includeCover && i === 1) continue;
+            doc.setPage(i);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(120, 120, 120);
+            // Nom projet à gauche
+            doc.text(projectName, margin, pageHeight - 10);
+            // Date + pagination à droite
+            const pageNum = i - offset;
+            doc.text(`${dateStr} — ${pageNum}/${contentTotal}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
+        }
+        
+        // ===== SORTIE =====
+        if(opts.returnBlob) return doc.output('blob');
+        
+        const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
+            ? PdfTheme.filename('Synopsis')
+            : `${state.data.title || 'Projet'} - Synopsis - moteur.studio.pdf`;
+        doc.save(filename);
+        Utils.toast('Synopsis PDF exporté !', 'success');
+        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', 'Synopsis PDF généré');
     }
 };
     
