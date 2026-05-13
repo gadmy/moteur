@@ -6983,7 +6983,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.0.5</p>
+      <p>vv4.0.6</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -22598,7 +22598,7 @@ const tabToSection = {
       },
       
       // ========== EXPORT PDF DÉPOUILLEMENT ==========
-      exportPDF: () => {
+      exportPDF: (opts = {}) => {
           const { jsPDF } = window.jspdf;
           const doc = new jsPDF('p', 'mm', 'a4');
           const pageWidth = doc.internal.pageSize.getWidth();
@@ -22822,6 +22822,9 @@ const tabToSection = {
           
           // ===== FOOTERS UNIFIÉS (Phase C.1) =====
           PdfTheme.applyFooters(doc);
+          
+          // ===== [Phase B.2] Si returnBlob, retourner sans sauver =====
+          if(opts.returnBlob) return doc.output('blob');
           
           // ===== TÉLÉCHARGEMENT (nom unifié) =====
           doc.save(PdfTheme.filename('Dépouillement'));
@@ -31526,7 +31529,7 @@ const DrawingEditor = {
       },
       
       // [Phase C.5.2] Export PDF des ressources
-      exportPDF: () => {
+      exportPDF: (opts = {}) => {
           const { jsPDF } = window.jspdf;
           const doc = new jsPDF('p', 'mm', 'a4');
           const pageWidth = doc.internal.pageSize.getWidth();
@@ -31622,6 +31625,8 @@ const DrawingEditor = {
           
           // Footers + filename
           PdfTheme.applyFooters(doc);
+          // [Phase B.2] Si returnBlob, retourner sans sauver
+          if(opts.returnBlob) return doc.output('blob');
           doc.save(PdfTheme.filename('Ressources'));
           Utils.toast('Ressources PDF exportées !', 'success');
           History.log('EXPORT', 'Ressources PDF générées');
@@ -31989,7 +31994,7 @@ const DrawingEditor = {
     },
     
     // ========== EXPORT PDF ÉQUIPE [Phase C.2.1 refondu] ==========
-    exportPDF: () => {
+    exportPDF: (opts = {}) => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -32130,6 +32135,9 @@ const DrawingEditor = {
         
         // ===== FOOTERS UNIFIÉS (Phase C.1) =====
         PdfTheme.applyFooters(doc);
+        
+        // ===== [Phase B.2] Si returnBlob, retourner sans sauver =====
+        if(opts.returnBlob) return doc.output('blob');
         
         // ===== TÉLÉCHARGEMENT (nom unifié) =====
         doc.save(PdfTheme.filename('Équipe'));
@@ -43061,6 +43069,339 @@ const MoteurArchive = {
     }
 };
 
+// ============================================================================
+// === DossierProd [Phase B.2] : assemble un PDF complet du dossier de prod ===
+// ============================================================================
+// Stratégie : 
+// 1. Pour chaque section cochée, on appelle la fonction exportPDF correspondante
+//    avec un flag `returnBlob: true`. Les fonctions modifiées renvoient alors
+//    un Blob au lieu de déclencher un téléchargement direct.
+// 2. On fusionne tous les Blobs PDF via pdf-lib en gardant les pages dans l'ordre.
+// 3. On insère une page de garde + un sommaire avec numéros de page.
+const DossierProd = {
+    PDFLIB_URL: 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
+    
+    // Charge pdf-lib à la demande
+    ensurePdfLib: () => {
+        return new Promise((resolve, reject) => {
+            if(typeof PDFLib !== 'undefined') { resolve(); return; }
+            const script = document.createElement('script');
+            script.src = DossierProd.PDFLIB_URL;
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error('pdf-lib introuvable'));
+            document.head.appendChild(script);
+        });
+    },
+    
+    // Plan d'assemblage : ordre des sections + nom + fonction qui génère le blob PDF
+    // Chaque entrée a : { key, label, generator }
+    // generator() doit retourner une Promise<Blob | null>
+    // Si null, la section est sautée
+    SECTIONS_ORDER: [
+        { key: 'titlepage',    label: 'Page de titre',      generator: () => DossierProd._getBlob(() => TitlePage.exportPDF({ returnBlob: true })) },
+        { key: 'presentation', label: 'Présentation',       generator: () => DossierProd._getBlob(() => Presentation.exportPDF({ returnBlob: true })) },
+        { key: 'script',       label: 'Scénario',           generator: () => DossierProd._placeholderPage('Scénario', 'Le scénario doit être imprimé séparément depuis l\'onglet Écriture (bouton 📄 PDF dans la barre d\'outils).\n\nMerci d\'insérer le PDF du scénario à cet emplacement.') },
+        { key: 'sequencier',   label: 'Séquencier',         generator: () => DossierProd._getBlob(() => BeatBoard.exportSequencerPDF({ returnBlob: true })) },
+        { key: 'storyboard',   label: 'Storyboard',         generator: () => DossierProd._placeholderPage('Storyboard', 'Le storyboard doit être imprimé séparément depuis l\'onglet Écriture > Storyboard (bouton Imprimer / PDF).\n\nMerci d\'insérer le PDF du storyboard à cet emplacement.') },
+        { key: 'breakdown',    label: 'Dépouillement',      generator: () => DossierProd._getBlob(() => Breakdown.exportPDF({ returnBlob: true })) },
+        { key: 'crew',         label: 'Équipe',             generator: () => DossierProd._getBlob(() => Crew.exportPDF({ returnBlob: true })) },
+        { key: 'resources',    label: 'Ressources',         generator: () => DossierProd._getBlob(() => Resources.exportPDF({ returnBlob: true })) },
+        { key: 'planning',     label: 'Planning',           generator: () => DossierProd._placeholderPage('Planning', 'Le planning doit être imprimé séparément depuis l\'onglet Production > Planning (boutons FDS / Plan de travail / Feuille de service).\n\nMerci d\'insérer le PDF du planning à cet emplacement.') },
+        { key: 'budget',       label: 'Budget',             generator: () => DossierProd._getBlob(() => Expenses.exportPDF({ returnBlob: true })) },
+        { key: 'rapport',      label: 'Rapport de synthèse', generator: () => DossierProd._getBlob(() => Exporter.productionReport({ returnBlob: true })) }
+    ],
+    
+    // Wrapper : exécute un générateur de blob, retourne null en cas d'erreur
+    _getBlob: async (fn) => {
+        try {
+            const result = await fn();
+            if(result instanceof Blob) return result;
+            return null;
+        } catch(e) {
+            console.warn('[DossierProd] Erreur génération blob:', e);
+            return null;
+        }
+    },
+    
+    // Génère une page placeholder avec instructions (pour scénario/storyboard/planning)
+    _placeholderPage: async (title, message) => {
+        try {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('p', 'mm', 'a4');
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            
+            // Page de garde de section
+            PdfTheme.coverPage(doc, { sectionName: title, customSubtitle: '— À insérer ici —' });
+            
+            // Message au milieu
+            doc.setFontSize(11);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(100, 100, 100);
+            const lines = doc.splitTextToSize(PdfTheme.cleanText(message), pageWidth - 50);
+            let y = pageHeight * 0.55;
+            lines.forEach(line => {
+                doc.text(line, pageWidth / 2, y, { align: 'center' });
+                y += 6;
+            });
+            
+            PdfTheme.applyFooters(doc, { skipFirstPage: false });
+            
+            // Retourner en blob
+            return doc.output('blob');
+        } catch(e) {
+            console.warn('[DossierProd] Erreur placeholder:', e);
+            return null;
+        }
+    },
+    
+    // Génère la page de couverture du dossier complet
+    _generateCoverBlob: (projectTitle, sectionsLabels) => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        
+        // Bandeau supérieur
+        doc.setFillColor(43, 110, 246);
+        doc.rect(0, 0, pageWidth, 5, 'F');
+        
+        // "DOSSIER DE PRODUCTION" au-dessus
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(12);
+        doc.setTextColor(100, 100, 100);
+        doc.text('DOSSIER DE PRODUCTION', pageWidth / 2, 35, { align: 'center' });
+        
+        // Trait fin
+        doc.setDrawColor(43, 110, 246);
+        doc.setLineWidth(0.5);
+        doc.line(pageWidth / 2 - 30, 40, pageWidth / 2 + 30, 40);
+        
+        // Titre projet
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(36);
+        doc.setTextColor(20, 20, 20);
+        doc.text(PdfTheme.cleanText(projectTitle).toUpperCase(), pageWidth / 2, 70, { align: 'center', maxWidth: pageWidth - 40 });
+        
+        // Auteur(s) producteur(s)
+        const producer = PdfTheme.getAuthorForSection('Production');
+        const director = state.data.crew && state.data.crew.find(m => {
+            const r = String(m.role || '').toLowerCase();
+            return r.includes('réalisateur') || r.includes('realisateur');
+        });
+        let y = 95;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(13);
+        doc.setTextColor(60, 60, 60);
+        if(director) {
+            doc.text(`Réalisé par ${PdfTheme.cleanText(director.name)}`, pageWidth / 2, y, { align: 'center' });
+            y += 8;
+        }
+        if(producer) {
+            doc.text(`Produit par ${PdfTheme.cleanText(producer.name)}`, pageWidth / 2, y, { align: 'center' });
+            y += 8;
+        }
+        
+        // Sections incluses (preview)
+        y = 130;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(43, 110, 246);
+        doc.text('CE DOSSIER CONTIENT :', pageWidth / 2, y, { align: 'center' });
+        y += 8;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        doc.setTextColor(60, 60, 60);
+        sectionsLabels.forEach(label => {
+            doc.text('• ' + PdfTheme.cleanText(label), pageWidth / 2, y, { align: 'center' });
+            y += 6;
+        });
+        
+        // Date en bas
+        const today = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(10);
+        doc.setTextColor(120, 120, 120);
+        doc.text(today, pageWidth / 2, pageHeight - 30, { align: 'center' });
+        
+        // Mention
+        doc.setFontSize(8);
+        doc.setTextColor(160, 160, 160);
+        doc.text('Document généré par Moteur — moteur.studio', pageWidth / 2, pageHeight - 18, { align: 'center' });
+        
+        return doc.output('blob');
+    },
+    
+    // Génère le sommaire avec numéros de page
+    _generateTOCBlob: (tocEntries) => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 20;
+        
+        // Titre
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(24);
+        doc.setTextColor(20, 20, 20);
+        doc.text('Sommaire', margin, 30);
+        
+        // Trait
+        doc.setDrawColor(43, 110, 246);
+        doc.setLineWidth(0.5);
+        doc.line(margin, 35, pageWidth - margin, 35);
+        
+        // Entrées
+        let y = 50;
+        tocEntries.forEach(entry => {
+            if(y > pageHeight - 20) return; // évite débordement (rare avec 11 sections)
+            
+            // Titre section
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(12);
+            doc.setTextColor(40, 40, 40);
+            doc.text(PdfTheme.cleanText(entry.label), margin, y);
+            
+            // Pointillés
+            doc.setFontSize(10);
+            doc.setTextColor(180, 180, 180);
+            const dotsX = margin + doc.getTextWidth(entry.label) + 3;
+            const numX = pageWidth - margin - 10;
+            for(let x = dotsX; x < numX; x += 2.5) {
+                doc.text('.', x, y);
+            }
+            
+            // Numéro de page
+            doc.setFontSize(12);
+            doc.setTextColor(43, 110, 246);
+            doc.setFont('helvetica', 'bold');
+            doc.text(String(entry.page), pageWidth - margin, y, { align: 'right' });
+            
+            y += 10;
+        });
+        
+        // Mention bas de page
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text('Document généré par Moteur — moteur.studio', pageWidth / 2, pageHeight - 12, { align: 'center' });
+        
+        return doc.output('blob');
+    },
+    
+    // Convertit un Blob en ArrayBuffer (nécessaire pour pdf-lib)
+    _blobToBytes: async (blob) => {
+        const buffer = await blob.arrayBuffer();
+        return new Uint8Array(buffer);
+    },
+    
+    // === ASSEMBLAGE PRINCIPAL ===
+    // Reçoit config : { titlepage: true, script: false, ... storyboardLayer: 'lighting' }
+    assemble: async (config, progress) => {
+        await DossierProd.ensurePdfLib();
+        const { PDFDocument } = PDFLib;
+        
+        // 1. Construire la liste des sections cochées en respectant l'ordre
+        const wantedSections = DossierProd.SECTIONS_ORDER.filter(s => config[s.key] === true);
+        if(wantedSections.length === 0) {
+            throw new Error('Aucune section sélectionnée');
+        }
+        
+        // 2. Si l'utilisateur a choisi un calque storyboard, l'appliquer
+        // (cette config est lue par Storyboard.printConfig.techLayer)
+        if(config.storyboardLayer && config.storyboardLayer !== 'none') {
+            if(typeof Storyboard !== 'undefined' && Storyboard.printConfig) {
+                Storyboard.printConfig.techLayer = config.storyboardLayer;
+            }
+        }
+        
+        // 3. Générer chaque section en blob
+        const totalSteps = wantedSections.length + 2; // +cover +toc
+        const sectionBlobs = []; // [{ key, label, blob }]
+        for(let i = 0; i < wantedSections.length; i++) {
+            const section = wantedSections[i];
+            if(progress && progress.isCancelled()) throw new Error('Annulé');
+            if(progress) progress.update(`Génération : ${section.label}…`, i, totalSteps);
+            
+            try {
+                const blob = await section.generator();
+                if(blob) {
+                    sectionBlobs.push({ key: section.key, label: section.label, blob });
+                } else {
+                    console.warn('[DossierProd] Section vide :', section.key);
+                }
+            } catch(e) {
+                console.warn('[DossierProd] Échec section', section.key, e);
+            }
+        }
+        
+        if(sectionBlobs.length === 0) {
+            throw new Error('Aucune section n\'a pu être générée');
+        }
+        
+        // 4. Charger tous les PDF dans pdf-lib pour compter les pages
+        if(progress) progress.update('Comptage des pages…', wantedSections.length, totalSteps);
+        const loadedDocs = []; // [{ key, label, pdfDoc, pageCount }]
+        for(const sec of sectionBlobs) {
+            try {
+                const bytes = await DossierProd._blobToBytes(sec.blob);
+                const pdfDoc = await PDFDocument.load(bytes);
+                loadedDocs.push({ ...sec, pdfDoc, pageCount: pdfDoc.getPageCount() });
+            } catch(e) {
+                console.warn('[DossierProd] PDF illisible:', sec.key, e);
+            }
+        }
+        
+        // 5. Calculer les numéros de page pour le sommaire
+        // Page 1 = couverture, Page 2 = sommaire, Page 3 = début 1ère section
+        let currentPage = 3;
+        const tocEntries = loadedDocs.map(d => {
+            const entry = { label: d.label, page: currentPage };
+            currentPage += d.pageCount;
+            return entry;
+        });
+        
+        // 6. Générer cover + TOC
+        if(progress) progress.update('Création de la couverture…', wantedSections.length + 1, totalSteps);
+        const coverBlob = DossierProd._generateCoverBlob(state.data.title || 'Projet', loadedDocs.map(d => d.label));
+        const tocBlob = DossierProd._generateTOCBlob(tocEntries);
+        
+        // 7. Assembler le PDF final
+        if(progress) progress.update('Assemblage final…', wantedSections.length + 2, totalSteps);
+        const finalDoc = await PDFDocument.create();
+        
+        // Ajouter cover
+        const coverPdf = await PDFDocument.load(await DossierProd._blobToBytes(coverBlob));
+        const coverPages = await finalDoc.copyPages(coverPdf, coverPdf.getPageIndices());
+        coverPages.forEach(p => finalDoc.addPage(p));
+        
+        // Ajouter TOC
+        const tocPdf = await PDFDocument.load(await DossierProd._blobToBytes(tocBlob));
+        const tocPages = await finalDoc.copyPages(tocPdf, tocPdf.getPageIndices());
+        tocPages.forEach(p => finalDoc.addPage(p));
+        
+        // Ajouter chaque section
+        for(const d of loadedDocs) {
+            const pages = await finalDoc.copyPages(d.pdfDoc, d.pdfDoc.getPageIndices());
+            pages.forEach(p => finalDoc.addPage(p));
+        }
+        
+        // 8. Téléchargement
+        const finalBytes = await finalDoc.save();
+        const finalBlob = new Blob([finalBytes], { type: 'application/pdf' });
+        
+        const safeTitle = (state.data.title || 'projet').replace(/[\\/:*?"<>|]/g, '_').trim();
+        const filename = `${safeTitle} - Dossier de production - moteur.studio.pdf`;
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(finalBlob);
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(link.href);
+        
+        return { sectionCount: loadedDocs.length, pageCount: finalDoc.getPageCount() };
+    }
+};
+
  const Exporter = {
     toPDF: (opts) => { 
         document.body.className = state.currentRole === 'viewer' ? 'read-only' : ''; 
@@ -43102,7 +43443,7 @@ const MoteurArchive = {
     },
     
     // ========== RAPPORT DE PRODUCTION PDF ==========
-    productionReport: () => {
+    productionReport: (opts = {}) => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -43360,6 +43701,9 @@ const MoteurArchive = {
         
         // ===== FOOTERS UNIFIÉS (Phase C.1) =====
         PdfTheme.applyFooters(doc);
+        
+        // ===== [Phase B.2] Si returnBlob, retourner sans sauver =====
+        if(opts.returnBlob) return doc.output('blob');
         
         // ===== TÉLÉCHARGEMENT (nom unifié) =====
         doc.save(PdfTheme.filename('Production'));
@@ -44045,12 +44389,10 @@ Généré par Moteur - moteur.studio
         }
     },
     
-    // ========== [Phase B] EXPORT ZIP MOTEUR COMPLET ==========
-    // Génère un fichier .moteur.zip qui peut être réimporté pour restaurer le projet complet.
-    // Inclut : project.json + toutes les images Storage + manifest signé.
-    // [Phase B] Stub : la vraie implémentation viendra en B.2
+    // ========== [Phase B.2] GÉNÉRATION DU DOSSIER DE PRODUCTION COMPLET ==========
+    // Assemble tous les PDF sélectionnés en un seul document avec couverture + sommaire.
     generateDossierProd: async () => {
-        // Lire les sections cochées
+        // Lire les sections cochées dans la modale
         const config = {
             titlepage: document.getElementById('dos-titlepage')?.checked,
             presentation: document.getElementById('dos-presentation')?.checked,
@@ -44066,22 +44408,24 @@ Généré par Moteur - moteur.studio
             rapport: document.getElementById('dos-rapport')?.checked
         };
         
-        const selected = Object.entries(config)
-            .filter(([k, v]) => v === true)
-            .map(([k]) => k);
-        
         document.getElementById('dossier-modal').style.display = 'none';
         
-        console.log('[DossierProd] Sections sélectionnées :', selected);
-        console.log('[DossierProd] Calque storyboard :', config.storyboardLayer);
+        const progress = MoteurArchive.showProgressModal('📋 Assemblage du Dossier de Production');
         
-        Utils.toast(`Préparation du dossier (${selected.length} section${selected.length > 1 ? 's' : ''})… [B.2 à venir]`, 'info');
-        
-        // TODO Phase B.2 : appeler DossierProd.assemble(config) qui :
-        // - Génère chaque section en PDF blob
-        // - Fusionne tous les blobs via pdf-lib
-        // - Ajoute page de garde + sommaire avec numéros de page
-        // - Télécharge le PDF final
+        try {
+            const result = await DossierProd.assemble(config, progress);
+            progress.close();
+            Utils.toast(`Dossier généré : ${result.sectionCount} section(s), ${result.pageCount} page(s) !`, 'success');
+            History.log('EXPORT', 'Dossier de Production complet généré');
+        } catch(err) {
+            progress.close();
+            console.error('[DossierProd] Erreur :', err);
+            if(err.message === 'Annulé') {
+                Utils.toast('Génération annulée', 'info');
+            } else {
+                Utils.toast('Erreur : ' + (err.message || 'inconnu'), 'error');
+            }
+        }
     },
     
     exportMoteurZip: async () => {
@@ -47546,7 +47890,7 @@ const Presentation = {
     },
     
     // [Phase C.5.3] Export PDF de la présentation projet
-    exportPDF: () => {
+    exportPDF: (opts = {}) => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -47664,6 +48008,8 @@ const Presentation = {
         
         // Footers + filename
         PdfTheme.applyFooters(doc);
+        // [Phase B.2] Si returnBlob, retourner sans sauver
+        if(opts.returnBlob) return doc.output('blob');
         doc.save(PdfTheme.filename('Présentation'));
         Utils.toast('Présentation PDF exportée !', 'success');
         History.log('EXPORT', 'Présentation PDF générée');
@@ -50045,7 +50391,7 @@ const Expenses = {
     },
     
     // Export PDF du budget [Phase C.2.2 refondu]
-    exportPDF: () => {
+    exportPDF: (opts = {}) => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -50328,6 +50674,9 @@ const Expenses = {
         
         // ===== FOOTERS UNIFIÉS (Phase C.1) =====
         PdfTheme.applyFooters(doc);
+        
+        // ===== [Phase B.2] Si returnBlob, retourner sans sauver =====
+        if(opts.returnBlob) return doc.output('blob');
         
         // ===== TÉLÉCHARGEMENT (nom unifié) =====
         doc.save(PdfTheme.filename('Budget'));
@@ -61183,7 +61532,7 @@ const TitlePage = {
     },
     
     // [Phase C.5.1] Export PDF de la page de titre seule (style Final Draft)
-    exportPDF: () => {
+    exportPDF: (opts = {}) => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const tp = state.data.titlePage || {};
@@ -61260,6 +61609,9 @@ const TitlePage = {
         doc.setFontSize(8);
         doc.setTextColor(150, 150, 150);
         doc.text('Document généré par Moteur — moteur.studio', pageWidth / 2, pageHeight - 12, { align: 'center' });
+        
+        // [Phase B.2] Si returnBlob, retourner sans sauver
+        if(opts.returnBlob) return doc.output('blob');
         
         // Téléchargement
         doc.save(PdfTheme.filename('Page de titre'));
@@ -64617,7 +64969,7 @@ const Weather = {
       },
       
       // [Phase C.5.4] Export PDF du Séquencier (PAS le BeatBoard)
-      exportSequencerPDF: () => {
+      exportSequencerPDF: (opts = {}) => {
           const { jsPDF } = window.jspdf;
           const doc = new jsPDF('p', 'mm', 'a4');
           const pageWidth = doc.internal.pageSize.getWidth();
@@ -64761,6 +65113,8 @@ const Weather = {
           
           // Footers + filename
           PdfTheme.applyFooters(doc);
+          // [Phase B.2] Si returnBlob, retourner sans sauver
+          if(opts.returnBlob) return doc.output('blob');
           doc.save(PdfTheme.filename('Séquencier'));
           Utils.toast('Séquencier PDF exporté !', 'success');
           History.log('EXPORT', 'Séquencier PDF généré');
