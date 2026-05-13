@@ -7009,7 +7009,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.0.9</p>
+      <p>vv4.1.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -43152,16 +43152,19 @@ const MoteurArchive = {
         if(notesValue) contactHtml += '<p>' + _esc(notesValue) + '</p>';
         document.getElementById('pc-contact').innerHTML = contactHtml;
         
-        // [Scénario PDF] Injecter dynamiquement un <style> avec le footer @page @bottom-right
-        // (car les CSS variables ne sont pas supportées dans @page @bottom-right par Chrome)
+        // [Scénario PDF] Footer en bas à droite de chaque page
+        // Stratégie : @page @bottom-right natif pour Chromium (date + X/Y), 
+        // overlay HTML simple pour Firefox/Safari (date seule, plus fiable que la pagination JS)
         const today = new Date();
         const dateFr = String(today.getDate()).padStart(2, '0') + '/' + String(today.getMonth() + 1).padStart(2, '0') + '/' + today.getFullYear();
         
-        // Retirer l'ancien style s'il existe (pour éviter accumulation à chaque impression)
+        // Nettoyer anciens styles
         const _oldStyle = document.getElementById('dynamic-print-footer');
         if(_oldStyle) _oldStyle.remove();
+        const _oldOverlayStyle = document.getElementById('dynamic-print-footer-overlay');
+        if(_oldOverlayStyle) _oldOverlayStyle.remove();
         
-        // Injecter le nouveau <style> avec la date hardcodée
+        // ── Couche 1 : @page @bottom-right natif (Chromium 131+ : Chrome/Edge/Opera/Brave) ──
         const _printStyle = document.createElement('style');
         _printStyle.id = 'dynamic-print-footer';
         _printStyle.textContent = `
@@ -43179,9 +43182,110 @@ const MoteurArchive = {
         `;
         document.head.appendChild(_printStyle);
         
-        // Toast d'aide pour un PDF propre (Chrome / Firefox)
-        if(opts.script && typeof Utils !== 'undefined' && Utils.toast) {
-            Utils.toast('💡 Pour un PDF propre : décochez « En-têtes et pieds de page » ET mettez « Marges : Aucune »', 'info', 10000);
+        // ── Couche 2 : Overlay HTML "date seule" pour Firefox/Safari (date sans pagination, fiable) ──
+        // Position fixed à l'impression : répété automatiquement sur chaque page par le navigateur.
+        // En Chromium, cet overlay sera caché car @bottom-right occupe déjà la place.
+        const _overlayStyle = document.createElement('style');
+        _overlayStyle.id = 'dynamic-print-footer-overlay';
+        _overlayStyle.textContent = `
+            @media screen { .print-footer-overlay { display: none !important; } }
+            @media print {
+                .print-footer-overlay {
+                    position: fixed;
+                    bottom: 10mm;
+                    right: 25mm;
+                    font-family: 'Courier Prime', 'Courier', monospace;
+                    font-size: 9pt;
+                    color: #555 !important;
+                    background: transparent !important;
+                    z-index: 9999;
+                }
+                /* Masquer l'overlay en Chromium 131+ : il a déjà @page @bottom-right */
+                @supports (page-orientation: portrait) {
+                    .print-footer-overlay { display: none !important; }
+                }
+            }
+        `;
+        document.head.appendChild(_overlayStyle);
+        
+        // Injecter l'élément overlay (un seul, le navigateur le répète sur chaque page via position:fixed)
+        document.querySelectorAll('.print-footer-overlay').forEach(el => el.remove());
+        if(opts.script) {
+            const _footerEl = document.createElement('div');
+            _footerEl.className = 'print-footer-overlay';
+            _footerEl.textContent = dateFr;
+            document.body.appendChild(_footerEl);
+        }
+        
+        // Modale d'information avant impression (uniquement pour le scénario)
+        // → Confirme à l'utilisateur ce qui va se passer et donne les conseils navigateur
+        if(opts.script) {
+            const _isChromiumBrowser = /Chrome|Chromium|Edg|OPR|Brave/.test(navigator.userAgent) && !/Firefox/.test(navigator.userAgent);
+            const _footerDescription = _isChromiumBrowser
+                ? `Footer : <strong>Date + numéro de page</strong> (ex : ${dateFr} — 3/33)`
+                : `Footer : <strong>Date</strong> uniquement (la numérotation X/Y n'est supportée que sur Chrome/Edge)`;
+            
+            const _confirmHtml = `
+                <div id="print-confirm-modal" style="position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:99999; display:flex; align-items:center; justify-content:center;">
+                    <div style="background:var(--panel-bg, #fff); color:var(--text-main, #222); border-radius:12px; padding:30px; max-width:520px; width:90vw; box-shadow:0 10px 40px rgba(0,0,0,0.3); font-family:system-ui,-apple-system,sans-serif;">
+                        <h2 style="margin:0 0 16px 0; font-size:1.3rem;">📄 Export PDF du scénario</h2>
+                        <p style="margin:0 0 12px 0; line-height:1.5;">Une fenêtre d'impression va s'ouvrir. Pour un PDF propre style Final Draft :</p>
+                        <ul style="margin:0 0 16px 0; padding-left:24px; line-height:1.7;">
+                            <li><strong>Destination</strong> : « Enregistrer au format PDF »</li>
+                            <li><strong>Décochez</strong> « En-têtes et pieds de page »</li>
+                            <li><strong>Marges</strong> : « Par défaut » (le CSS gère la mise en page)</li>
+                        </ul>
+                        <div style="background:rgba(0,0,0,0.04); border-left:3px solid var(--primary, #2b6ef6); padding:10px 14px; margin:0 0 16px 0; font-size:0.9rem; border-radius:4px;">
+                            ${_footerDescription}
+                        </div>
+                        <div style="display:flex; gap:10px; justify-content:flex-end;">
+                            <button id="print-confirm-cancel" style="padding:10px 20px; background:transparent; color:var(--text-main, #222); border:1px solid var(--border, #ccc); border-radius:6px; cursor:pointer; font-weight:500;">Annuler</button>
+                            <button id="print-confirm-ok" style="padding:10px 20px; background:var(--primary, #2b6ef6); color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Imprimer</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Injecter et attendre la décision utilisateur
+            const _wrapper = document.createElement('div');
+            _wrapper.innerHTML = _confirmHtml;
+            document.body.appendChild(_wrapper.firstElementChild);
+            
+            // Cleanup function pour rétablir l'UI si Annuler
+            const _cleanupPrint = () => {
+                const _modal = document.getElementById('print-confirm-modal');
+                if(_modal) _modal.remove();
+                document.body.classList.remove('print-script');
+                document.querySelectorAll('.print-footer-overlay').forEach(el => el.remove());
+                const _s1 = document.getElementById('dynamic-print-footer');
+                if(_s1) _s1.remove();
+                const _s2 = document.getElementById('dynamic-print-footer-overlay');
+                if(_s2) _s2.remove();
+                try { if(localStorage.getItem(CONFIG.themeKey) === 'dark') document.body.classList.add('dark-mode'); } catch(e) {}
+            };
+            
+            return new Promise((resolve) => {
+                document.getElementById('print-confirm-cancel').onclick = () => {
+                    _cleanupPrint();
+                    resolve();
+                };
+                document.getElementById('print-confirm-ok').onclick = () => {
+                    document.getElementById('print-confirm-modal').remove();
+                    // Continuer le flow normal : ajouter print-script et déclencher l'impression
+                    document.body.classList.add('print-script');
+                    const _origTitle = document.title;
+                    document.title = `${state.data.title || 'Projet'} - Scénario - moteur.studio`;
+                    setTimeout(() => {
+                        window.print();
+                        document.title = _origTitle;
+                        try { if(localStorage.getItem(CONFIG.themeKey) === 'dark') document.body.classList.add('dark-mode'); } catch(e) {}
+                        if(state.currentRole === 'viewer') document.body.classList.add('read-only');
+                        document.body.className = document.body.className.replace(/print-\w+/g, "").trim();
+                        document.querySelectorAll('.print-footer-overlay').forEach(el => el.remove());
+                        resolve();
+                    }, 100);
+                };
+            });
         }
         
         if(opts.synop) document.body.classList.add('print-synopsis'); 
