@@ -43455,21 +43455,14 @@ const MoteurArchive = {
         const meta = state.data.scriptMeta || {};
         const overlay = document.createElement('div');
         overlay.className = 'confirm-modal-overlay';
-        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:480px;padding:20px;">
-            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">📄 Scénario PDF — Options</div>
-            <div style="text-align:left;font-size:0.85rem;margin-bottom:12px;">
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px;background:var(--bg);border-radius:4px;margin-bottom:6px;">
-                    <input type="checkbox" id="scen-opt-numbers" style="margin:0;">
-                    <span>Numéroter les scènes (#1, #2…) — style production</span>
-                </label>
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px;background:var(--bg);border-radius:4px;margin-bottom:6px;">
-                    <input type="checkbox" id="scen-opt-cover" checked style="margin:0;">
-                    <span>Inclure la page de titre Final Draft</span>
-                </label>
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px;background:var(--bg);border-radius:4px;">
-                    <input type="checkbox" id="scen-opt-notes" style="margin:0;">
-                    <span>Inclure les notes de production (sc-note)</span>
-                </label>
+        // Style "toggle bouton bleu en surbrillance" — réutilise .fmt-btn / .fmt-btn.active de la barre scénario
+        // Chaque option a son propre <button class="fmt-btn"> avec data-active="0|1" qu'on toggle au clic
+        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:520px;padding:20px;">
+            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:14px;">📄 Scénario PDF — Options</div>
+            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
+                <button type="button" class="fmt-btn active" id="scen-opt-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre Final Draft</button>
+                <button type="button" class="fmt-btn" id="scen-opt-numbers" data-active="0" style="padding:10px 14px;font-size:0.85rem;text-align:left;">🔢 Numéroter les scènes (#1, #2…) — style production</button>
+                <button type="button" class="fmt-btn" id="scen-opt-notes" data-active="0" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📝 Inclure les notes de production (sc-note)</button>
             </div>
             <div style="text-align:left;font-size:0.78rem;color:var(--text-sec);margin-bottom:14px;font-style:italic;">
                 💡 Police Courier Prime téléchargée au 1ᵉʳ usage (~320 Ko, mis en cache ensuite)
@@ -43480,12 +43473,22 @@ const MoteurArchive = {
             </div>
         </div>`;
         document.body.appendChild(overlay);
+        
+        // Toggle des options : clic sur un .fmt-btn bascule sa classe .active et son data-active
+        ['scen-opt-cover', 'scen-opt-numbers', 'scen-opt-notes'].forEach(id => {
+            overlay.querySelector('#' + id).onclick = (e) => {
+                const btn = e.currentTarget;
+                const isActive = btn.classList.toggle('active');
+                btn.dataset.active = isActive ? '1' : '0';
+            };
+        });
+        
         overlay.querySelector('#scen-opt-cancel').onclick = () => overlay.remove();
         overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
         overlay.querySelector('#scen-opt-ok').onclick = async () => {
-            const sceneNumbers = overlay.querySelector('#scen-opt-numbers').checked;
-            const includeCover = overlay.querySelector('#scen-opt-cover').checked;
-            const includeNotes = overlay.querySelector('#scen-opt-notes').checked;
+            const sceneNumbers = overlay.querySelector('#scen-opt-numbers').dataset.active === '1';
+            const includeCover = overlay.querySelector('#scen-opt-cover').dataset.active === '1';
+            const includeNotes = overlay.querySelector('#scen-opt-notes').dataset.active === '1';
             overlay.remove();
             await Exporter.scenarioToPDF({ sceneNumbers, includeCover, includeNotes, episodeIds });
         };
@@ -43537,18 +43540,27 @@ const MoteurArchive = {
             y = marginTop;
         };
         
-        // Inscrit le numéro de page en bas à droite (style Final Draft : "N.")
+        // Footer "Date — N/Total" en bas à droite (style production)
+        // Pas de footer sur la page de garde (Final Draft)
         const drawPageNumbers = () => {
             const totalPages = doc.internal.getNumberOfPages();
+            const offset = opts.includeCover ? 1 : 0;
+            const contentTotal = totalPages - offset; // nombre de pages utiles (hors garde)
+            // Date du jour au format français JJ/MM/AAAA
+            const today = new Date();
+            const dateStr = String(today.getDate()).padStart(2, '0') + '/' 
+                          + String(today.getMonth() + 1).padStart(2, '0') + '/' 
+                          + today.getFullYear();
+            
             for(let i = 1; i <= totalPages; i++) {
-                if(opts.includeCover && i === 1) continue; // pas de numéro sur la page de garde
+                if(opts.includeCover && i === 1) continue; // pas de footer sur la page de garde
                 doc.setPage(i);
                 doc.setFont(FONT, 'normal');
-                doc.setFontSize(11);
-                doc.setTextColor(0, 0, 0);
-                const offset = opts.includeCover ? 1 : 0;
-                const num = String(i - offset) + '.';
-                doc.text(num, pageWidth - marginRight, pageHeight - 10, { align: 'right' });
+                doc.setFontSize(9);
+                doc.setTextColor(85, 85, 85); // gris doux comme en CSS print
+                const pageNum = i - offset;
+                const footerText = `${dateStr} — ${pageNum}/${contentTotal}`;
+                doc.text(footerText, pageWidth - marginRight, pageHeight - 10, { align: 'right' });
             }
         };
         
