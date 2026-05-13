@@ -6983,7 +6983,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.0.7</p>
+      <p>vv4.0.8</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -22730,7 +22730,19 @@ const tabToSection = {
                   doc.setTextColor(50, 50, 50);
                   doc.setFontSize(8);
                   
-                  const itemsText = items.map(item => typeof item === 'string' ? item : item.name || item).join(', ');
+                  // [Vague 2 / FIX] Dédoublonner les items au sein d'une scène (cas: "Guillaume De Mauroy" + "Guillaume de Mauroy" + "de mauroy guillaume")
+                  // On garde la première graphie rencontrée
+                  const _seenKeys = new Set();
+                  const _dedupItems = [];
+                  items.forEach(item => {
+                      const raw = typeof item === 'string' ? item : (item?.name || item);
+                      if(!raw) return;
+                      const key = String(raw).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+                      if(_seenKeys.has(key)) return;
+                      _seenKeys.add(key);
+                      _dedupItems.push(String(raw));
+                  });
+                  const itemsText = _dedupItems.join(', ');
                   const lines = doc.splitTextToSize(itemsText, pageWidth - margin * 2 - 10);
                   
                   y += 5;
@@ -22763,27 +22775,38 @@ const tabToSection = {
           y = 30;
           
           // Agrégation par catégorie
-          const globalBreakdown = {};
+          // [Vague 2 / FIX] Déduplication par normalisation (lowercase + espaces collapsed) pour fusionner
+          // "Lucie" / "LUCIE", "Guillaume De Mauroy" / "Guillaume de Mauroy", etc.
+          // On conserve la première graphie rencontrée comme libellé d'affichage.
+          const _normKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+          const globalBreakdown = {};  // { cat: Map<normKey, displayLabel> }
           scenes.forEach(scene => {
               const breakdown = scene.breakdown || {};
               Object.entries(breakdown).forEach(([cat, items]) => {
                   if(!items || items.length === 0) return;
-                  if(!globalBreakdown[cat]) globalBreakdown[cat] = new Set();
+                  if(!globalBreakdown[cat]) globalBreakdown[cat] = new Map();
                   items.forEach(item => {
-                      const name = typeof item === 'string' ? item : item.name || item;
-                      globalBreakdown[cat].add(name);
+                      const name = typeof item === 'string' ? item : (item.name || item);
+                      if(!name) return;
+                      const key = _normKey(name);
+                      if(!globalBreakdown[cat].has(key)) {
+                          globalBreakdown[cat].set(key, String(name));
+                      }
                   });
               });
           });
           
-          Object.entries(globalBreakdown).forEach(([cat, itemsSet]) => {
+          Object.entries(globalBreakdown).forEach(([cat, itemsMap]) => {
               if(y > pageHeight - 30) {
                   doc.addPage();
                   y = margin;
               }
               
               const rgb = catColors[cat] || [100, 100, 100];
-              const items = Array.from(itemsSet);
+              // [Vague 2 / FIX] On manipule maintenant une Map<normKey, displayLabel>, pas un Set
+              const items = Array.from(itemsMap.entries()); // [ [normKey, displayLabel], ... ]
+              // Tri alphabétique sur la clé normalisée pour stabilité
+              items.sort((a, b) => a[0].localeCompare(b[0], 'fr'));
               
               // En-tête catégorie
               doc.setFillColor(rgb[0], rgb[1], rgb[2]);
@@ -22799,18 +22822,22 @@ const tabToSection = {
               doc.setFontSize(9);
               doc.setFont('helvetica', 'normal');
               
-              items.forEach((item, idx) => {
+              items.forEach(([normKey, displayLabel], idx) => {
                   if(y > pageHeight - 15) {
                       doc.addPage();
                       y = margin;
                   }
-                  // Compter dans combien de scènes
+                  // [Vague 2] Compter les scènes en utilisant la clé normalisée
+                  // (ainsi "Lucie" et "LUCIE" comptent toutes deux pour la même ligne fusionnée)
                   const sceneCount = scenes.filter(s => {
                       const bd = s.breakdown?.[cat] || [];
-                      return bd.some(i => (typeof i === 'string' ? i : i.name) === item);
+                      return bd.some(i => {
+                          const iName = typeof i === 'string' ? i : (i?.name || '');
+                          return _normKey(iName) === normKey;
+                      });
                   }).length;
                   
-                  doc.text(`• ${item}`, margin + 3, y);
+                  doc.text(`• ${PdfTheme.cleanText(displayLabel)}`, margin + 3, y);
                   doc.setTextColor(150, 150, 150);
                   doc.text(`(${sceneCount} scène${sceneCount > 1 ? 's' : ''})`, margin + 100, y);
                   doc.setTextColor(50, 50, 50);
@@ -32005,8 +32032,22 @@ const DrawingEditor = {
         const pageHeight = doc.internal.pageSize.getHeight();
         const margin = 15;
         
-        const crew = state.data.crew || [];
-        const actors = state.data.actors || [];
+        // [Vague 2] Déduplication globale crew + actors par nom normalisé
+        // (fusionne "Guillaume De Mauroy" + "Guillaume de Mauroy", "Lucie" + "LUCIE", etc.)
+        const _normNm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+        const _dedupByName = (arr, scoreFn) => {
+            const map = new Map();
+            (arr || []).forEach(item => {
+                if(!item || !item.name) return;
+                const k = _normNm(item.name);
+                if(!k) return;
+                const ex = map.get(k);
+                if(!ex || scoreFn(item) > scoreFn(ex)) map.set(k, item);
+            });
+            return Array.from(map.values());
+        };
+        const crew = _dedupByName(state.data.crew, m => (m.role ? 1 : 0) + (m.phone ? 1 : 0) + (m.email ? 1 : 0) + (m.group_id ? 1 : 0));
+        const actors = _dedupByName(state.data.actors, a => (a.role ? 1 : 0) + (a.phone ? 1 : 0) + (a.email ? 1 : 0) + (a.characterId ? 1 : 0));
         
         if(crew.length === 0 && actors.length === 0) {
             Utils.toast('Aucun membre d\'équipe à exporter', 'warning');
@@ -32111,8 +32152,19 @@ const DrawingEditor = {
                 { x: 138, label: 'Email' }
             ]);
             
-            // Tri alphabétique par nom
-            const sortedCrew = [...crew].sort((a, b) => 
+            // [Vague 2] Déduplication par nom normalisé (fusionne "Guillaume De Mauroy" + "Guillaume de Mauroy")
+            // puis tri alphabétique
+            const _normCrewK = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+            const _crewSc = (m) => (m.role ? 1 : 0) + (m.phone ? 1 : 0) + (m.email ? 1 : 0) + (m.group_id ? 1 : 0);
+            const _crewDedup = new Map();
+            crew.forEach(c => {
+                if(!c || !c.name) return;
+                const k = _normCrewK(c.name);
+                if(!k) return;
+                const ex = _crewDedup.get(k);
+                if(!ex || _crewSc(c) > _crewSc(ex)) _crewDedup.set(k, c);
+            });
+            const sortedCrew = Array.from(_crewDedup.values()).sort((a, b) => 
                 (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' })
             );
             
@@ -43634,12 +43686,30 @@ const DossierProd = {
         y = addKeyValue('Scènes finalisées', `${finalizedScenes} / ${scenes.length}`, y);
         
         // ===== PERSONNAGES =====
-        // Phase C.2.4 : fix doublon "Nora" — utiliser characterId proprement
+        // [Vague 2 / FIX] Déduplication par nom normalisé (lowercase + sans accents)
+        // pour fusionner "Nora" / "NORA" / "Nora Bellamy" risque cassé, donc on ne fusionne
+        // QUE si nom normalisé strictement identique (pas inclusion).
+        // En cas de doublon : on garde la fiche la plus informée (age + gender + comédien lié).
         if(characters.length > 0) {
             y += 5;
             y = addSection('PERSONNAGES', y);
-            const charRows = characters.map(c => {
-                // Chercher le comédien qui joue ce personnage (peut être plusieurs : prendre le premier)
+            
+            const _normPersoKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+            const _persoScore = (c) => (c.age ? 1 : 0) + (c.gender ? 1 : 0) + (c.description ? 1 : 0) + (actors.find(a => a.characterId === c.id) ? 2 : 0);
+            
+            const persoMap = new Map(); // normKey -> character
+            characters.forEach(c => {
+                if(!c || !c.name) return;
+                const key = _normPersoKey(c.name);
+                if(!key) return;
+                const existing = persoMap.get(key);
+                if(!existing || _persoScore(c) > _persoScore(existing)) {
+                    persoMap.set(key, c);
+                }
+            });
+            
+            const uniqueChars = Array.from(persoMap.values());
+            const charRows = uniqueChars.map(c => {
                 const actorPlaying = actors.find(a => a.characterId === c.id);
                 return [
                     PdfTheme.cleanText(c.name || '-'),
@@ -43652,14 +43722,34 @@ const DossierProd = {
         }
         
         // ===== COMÉDIENS =====
-        // Phase C.2.4 : utilise le bon champ "role" du comédien (pas le perso lié)
+        // [Vague 2 / FIX] (1) Déduplication par nom normalisé.
+        //                 (2) Priorité au champ a.role (texte libre) sur char.name : si tous les comédiens
+        //                     sont liés au même characterId par erreur, a.role sauve l'affichage.
         if(actors.length > 0) {
             y += 5;
             y = addSection('COMÉDIENS', y);
-            const actorRows = actors.map(a => {
-                // Le rôle peut être : (1) un personnage lié via characterId, (2) un texte libre dans a.role
+            
+            const _normActorKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+            const _actorScore = (a) => (a.role ? 1 : 0) + (a.phone ? 1 : 0) + (a.email ? 1 : 0) + (a.characterId ? 1 : 0);
+            
+            const actorMap = new Map();
+            actors.forEach(a => {
+                if(!a || !a.name) return;
+                const key = _normActorKey(a.name);
+                if(!key) return;
+                const existing = actorMap.get(key);
+                if(!existing || _actorScore(a) > _actorScore(existing)) {
+                    actorMap.set(key, a);
+                }
+            });
+            
+            const uniqueActors = Array.from(actorMap.values());
+            uniqueActors.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' }));
+            
+            const actorRows = uniqueActors.map(a => {
+                // Priorité au texte libre a.role (si renseigné), sinon fallback sur char.name
                 const char = characters.find(c => c.id === a.characterId);
-                const roleLabel = char ? char.name : (a.role || '-');
+                const roleLabel = (a.role && a.role.trim()) ? a.role : (char ? char.name : '-');
                 return [
                     PdfTheme.cleanText(a.name || '-'),
                     PdfTheme.cleanText(roleLabel),
@@ -43671,11 +43761,32 @@ const DossierProd = {
         }
         
         // ===== ÉQUIPE TECHNIQUE =====
-        // Phase C.2.4 : fix département (group_id au lieu de department inexistant)
+        // [Vague 2 / FIX] Déduplication par nom normalisé pour fusionner "Guillaume De Mauroy" + "Guillaume de Mauroy"
+        // (Cas "de mauroy guillaume" = mots inversés → reste séparé, conservateur)
+        // En cas de doublon : on garde la fiche la plus informée (role + phone + email).
         if(crew.length > 0) {
             y += 5;
             y = addSection('ÉQUIPE TECHNIQUE', y);
-            const crewRows = crew.map(c => [
+            
+            const _normCrewKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+            const _crewScore = (m) => (m.role ? 1 : 0) + (m.phone ? 1 : 0) + (m.email ? 1 : 0) + (m.group_id ? 1 : 0);
+            
+            const crewMap = new Map();
+            crew.forEach(c => {
+                if(!c || !c.name) return;
+                const key = _normCrewKey(c.name);
+                if(!key) return;
+                const existing = crewMap.get(key);
+                if(!existing || _crewScore(c) > _crewScore(existing)) {
+                    crewMap.set(key, c);
+                }
+            });
+            
+            const uniqueCrew = Array.from(crewMap.values());
+            // Tri alphabétique
+            uniqueCrew.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' }));
+            
+            const crewRows = uniqueCrew.map(c => [
                 PdfTheme.cleanText(c.name || '-'),
                 PdfTheme.cleanText(c.role || '-'),
                 PdfTheme.getGroupLabel(c.group_id, true) || '-',
@@ -43685,16 +43796,46 @@ const DossierProd = {
         }
         
         // ===== DÉCORS =====
+        // [Vague 2 / FIX] (1) Compter aussi via scene.breakdown['DECORS-LIEUX'] (fiches manuelles + détection auto).
+        //                 (2) Dédupliquer les locations par nom normalisé (case-insensitive).
+        //                 (3) En cas de doublon : garder la fiche la plus informée (realLocation + address).
         if(locations.length > 0) {
             y += 5;
             y = addSection('DÉCORS', y);
-            const locRows = locations.map(l => {
-                // [FIX] Le filtre s.locationId === l.id retournait true pour undefined === undefined,
-                // matchant TOUTES les scènes. On exige des valeurs définies non vides.
+            
+            const _normLocKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+            const _locScore = (l) => (l.realLocation ? 1 : 0) + (l.address ? 1 : 0) + (l.id ? 1 : 0);
+            
+            const locMap = new Map();
+            locations.forEach(l => {
+                if(!l || !l.name) return;
+                const key = _normLocKey(l.name);
+                if(!key) return;
+                const existing = locMap.get(key);
+                if(!existing || _locScore(l) > _locScore(existing)) {
+                    locMap.set(key, l);
+                }
+            });
+            
+            const uniqueLocs = Array.from(locMap.values());
+            uniqueLocs.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' }));
+            
+            const locRows = uniqueLocs.map(l => {
+                const nameKey = _normLocKey(l.name);
                 const sceneCount = scenes.filter(s => {
-                    const byId = l.id && s.locationId && s.locationId === l.id;
-                    const byName = l.name && s.title && typeof s.title === 'string' && s.title.includes(l.name);
-                    return byId || byName;
+                    // (1) match par id
+                    if(l.id && s.locationId && s.locationId === l.id) return true;
+                    // (2) match par titre (heading de scène)
+                    if(l.name && s.title && typeof s.title === 'string') {
+                        // Comparaison normalisée pour éviter les différences de casse
+                        if(s.title.toLowerCase().includes(String(l.name).toLowerCase())) return true;
+                    }
+                    // (3) match via breakdown DECORS-LIEUX
+                    const bd = s.breakdown?.['DECORS-LIEUX'] || [];
+                    return bd.some(it => {
+                        const itName = typeof it === 'string' ? it : (it?.name || '');
+                        return _normLocKey(itName) === nameKey;
+                    });
                 }).length;
                 return [
                     PdfTheme.cleanText(l.name || '-'),
