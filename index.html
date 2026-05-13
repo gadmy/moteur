@@ -10294,7 +10294,7 @@ body.presentation-mode .presentation-bar {
           <div id="chars-toolbar" class="data-toolbar" style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap;align-items:center;">
               <button onclick="app.Actions.addGroup('perso')" class="btn-tool">➕ Nouveau Groupe</button>
               <button onclick="app.Actions.addDataItem('characters')" class="btn-tool">➕ Nouveau Personnage</button>
-              <button onclick="app.UI.printChars()" class="btn-tool-print">📄 Imprimer / PDF</button>
+              <button onclick="app.FichesPDF.openCharactersModal()" class="btn-tool-print" style="background:var(--primary); color:#fff;">📄 Export PDF</button>
           </div>
           <div id="charContainer"></div>
       </div>
@@ -63588,6 +63588,714 @@ const Synopsis = {
 };
     
 // Module Help remplacé par Tutorial
+
+
+// ============================================================
+// MODULE FICHES PDF [Vague 2] — Personnages / Comédiens / Lieux
+// Génération jsPDF avec 3 modes par section (detailed / list / card)
+// + page de garde Final Draft + footer + filtrage par saisons
+// ============================================================
+
+const FichesPDF = {
+    // ============================================================
+    // ===== HELPERS COMMUNS (réutilisables pour les 3 sections) =====
+    // ============================================================
+    
+    // Convertit une URL d'image en dataURL via canvas (gère CORS Supabase)
+    // Retourne null si échec. Cache interne pour ne pas refaire le travail.
+    _imageCache: {},
+    _loadImageDataURL: (url) => {
+        return new Promise((resolve) => {
+            if(!url) { resolve(null); return; }
+            // Déjà en dataURL ?
+            if(url.startsWith('data:')) { resolve(url); return; }
+            // Dans le cache ?
+            if(FichesPDF._imageCache[url]) { resolve(FichesPDF._imageCache[url]); return; }
+            
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    // Limiter la résolution pour ne pas faire un PDF de 50Mo
+                    const maxDim = 600;
+                    let w = img.naturalWidth;
+                    let h = img.naturalHeight;
+                    if(w > maxDim || h > maxDim) {
+                        const ratio = Math.min(maxDim / w, maxDim / h);
+                        w = Math.round(w * ratio);
+                        h = Math.round(h * ratio);
+                    }
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, w, h);
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                    FichesPDF._imageCache[url] = dataUrl;
+                    resolve(dataUrl);
+                } catch(e) {
+                    console.warn('[FichesPDF] Image conversion échouée :', e);
+                    resolve(null);
+                }
+            };
+            img.onerror = () => {
+                console.warn('[FichesPDF] Image chargement échoué :', url);
+                resolve(null);
+            };
+            img.src = url;
+        });
+    },
+    
+    // Précharge un array d'URLs et retourne un objet { url: dataURL }
+    _preloadImages: async (urls) => {
+        const unique = [...new Set(urls.filter(Boolean))];
+        const results = await Promise.all(unique.map(u => FichesPDF._loadImageDataURL(u)));
+        const map = {};
+        unique.forEach((u, i) => { map[u] = results[i]; });
+        return map;
+    },
+    
+    // Dessine la page de garde Final Draft (style sobre, cohérent avec scénario/synopsis)
+    // Note : ne réutilise PAS PdfTheme.coverPage (qui est trop générique). On veut un style propre.
+    _drawCoverPage: (doc, sectionName) => {
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 25;
+        const projectTitle = state.data.title || 'Projet sans titre';
+        const meta = state.data.scriptMeta || {};
+        
+        // Titre projet centré au tiers supérieur
+        const titleY = pageHeight * 0.35;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(28);
+        doc.setTextColor(20, 20, 20);
+        const titleUpper = projectTitle.toUpperCase();
+        doc.text(titleUpper, pageWidth / 2, titleY, { align: 'center' });
+        const titleWidth = doc.getTextWidth(titleUpper);
+        doc.setLineWidth(0.5);
+        doc.line(pageWidth/2 - titleWidth/2, titleY + 2, pageWidth/2 + titleWidth/2, titleY + 2);
+        
+        // Sous-titre = nom de section
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(16);
+        doc.setTextColor(60, 60, 60);
+        doc.text(sectionName.toUpperCase(), pageWidth / 2, titleY + 14, { align: 'center' });
+        
+        // Auteur (contextuel)
+        const sectionAuthorMap = {
+            'Personnages': ['Scénariste', 'Réalisateur·rice'],
+            'Comédiens':   ['Directeur·rice de casting', 'Régisseur·euse général·e'],
+            'Décors':      ['Repéreur·euse', 'Directeur·rice de production', 'Régisseur·euse général·e']
+        };
+        let author = null;
+        const wantedRoles = sectionAuthorMap[sectionName] || [];
+        for(const role of wantedRoles) {
+            if(author) break;
+            const member = (state.data.crew || []).find(m => {
+                if(!m.role) return false;
+                const r1 = String(m.role).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[·.]/g, '');
+                const r2 = role.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[·.]/g, '');
+                return r1 === r2 || r1.includes(r2);
+            });
+            if(member) author = member.name;
+        }
+        if(!author && meta.author) author = meta.author;
+        if(author) {
+            doc.setFontSize(13);
+            doc.text('Établi par ' + author, pageWidth / 2, titleY + 28, { align: 'center' });
+        }
+        
+        // Source si présente
+        if(meta.source) {
+            doc.setFontSize(11);
+            doc.setFont('helvetica', 'italic');
+            doc.text('Basé sur ' + meta.source, pageWidth / 2, titleY + 42, { align: 'center' });
+            doc.setFont('helvetica', 'normal');
+        }
+        
+        // Date génération en bas centré
+        const today = new Date();
+        const dateLong = today.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+        doc.setFontSize(10);
+        doc.setTextColor(120, 120, 120);
+        doc.text('Document établi le ' + dateLong, pageWidth / 2, pageHeight - 50, { align: 'center' });
+        
+        // Contact/copyright bas-gauche
+        let cy = pageHeight - 35;
+        doc.setFontSize(10);
+        doc.setTextColor(80, 80, 80);
+        if(meta.contact)   { doc.text(meta.contact, margin, cy); cy += 5; }
+        if(meta.copyright) { doc.text(meta.copyright, margin, cy); cy += 5; }
+    },
+    
+    // Dessine le footer sur toutes les pages (sauf la page de garde si présente)
+    // "Date — N/Total" à droite, nom projet à gauche
+    _drawFooters: (doc, includeCover) => {
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 25;
+        const totalPages = doc.internal.getNumberOfPages();
+        const offset = includeCover ? 1 : 0;
+        const contentTotal = totalPages - offset;
+        const today = new Date();
+        const dateStr = String(today.getDate()).padStart(2, '0') + '/' 
+                      + String(today.getMonth() + 1).padStart(2, '0') + '/' 
+                      + today.getFullYear();
+        const projectName = state.data.title || 'Projet';
+        
+        for(let i = 1; i <= totalPages; i++) {
+            if(includeCover && i === 1) continue;
+            doc.setPage(i);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(120, 120, 120);
+            doc.text(projectName, margin, pageHeight - 10);
+            const pageNum = i - offset;
+            doc.text(`${dateStr} — ${pageNum}/${contentTotal}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
+        }
+    },
+    
+    // Dessine une photo (depuis dataURL) ou un placeholder "Pas de photo"
+    _drawPhotoOrPlaceholder: (doc, dataUrl, x, y, w, h) => {
+        if(dataUrl) {
+            try {
+                doc.addImage(dataUrl, 'JPEG', x, y, w, h);
+                // Cadre fin autour
+                doc.setDrawColor(160, 160, 160);
+                doc.setLineWidth(0.3);
+                doc.rect(x, y, w, h);
+                return;
+            } catch(e) {
+                console.warn('[FichesPDF] addImage failed :', e);
+            }
+        }
+        // Placeholder
+        doc.setFillColor(245, 245, 245);
+        doc.rect(x, y, w, h, 'F');
+        doc.setDrawColor(180, 180, 180);
+        doc.setLineWidth(0.3);
+        doc.setLineDashPattern([1, 1], 0);
+        doc.rect(x, y, w, h);
+        doc.setLineDashPattern([], 0);
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 150);
+        doc.text('Pas de photo', x + w/2, y + h/2, { align: 'center' });
+    },
+    
+    // Dessine un bandeau "GROUPE : XXX" stylé
+    _drawGroupHeader: (doc, groupName, y, marginX, usableWidth) => {
+        const h = 8;
+        doc.setFillColor(50, 50, 50);
+        doc.rect(marginX, y, usableWidth, h, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(255, 255, 255);
+        doc.text(groupName.toUpperCase(), marginX + 4, y + h - 2.5);
+        return y + h + 4;
+    },
+    
+    // Assure qu'il reste `space` mm avant la fin de la page sinon saut
+    // Retourne le nouveau y (peut être margin si saut)
+    _ensureSpace: (doc, y, space, pageHeight, marginBottom) => {
+        if(y + space > pageHeight - marginBottom) {
+            doc.addPage();
+            return marginBottom;  // reset to top margin
+        }
+        return y;
+    },
+    
+    // ============================================================
+    // ===== PICKER COMMUN : Modale choix saisons (séries) =====
+    // ============================================================
+    // kind : 'chars' | 'actors' | 'locs' (pour les ids des inputs)
+    // emoji + titre adaptés ; callback reçoit les episodeIds
+    _openSeasonChooser: (kind, emoji, title, callback) => {
+        const seasons = (state.data.seasons || []).slice().sort((a,b) => (a.number||0) - (b.number||0));
+        const episodes = state.data.episodes || [];
+        if(seasons.length === 0) { callback([]); return; }
+        const currentEp = episodes.find(e => e.id === state.currentEpisodeId);
+        const currentSeasonId = currentEp ? currentEp.seasonId : null;
+        const items = seasons.map(s => {
+            const sNum = String(s.number).padStart(2, '0');
+            const epCount = episodes.filter(e => e.seasonId === s.id).length;
+            const checked = s.id === currentSeasonId ? 'checked' : '';
+            const sTitle = s.title ? ' — ' + Utils.escape(s.title) : '';
+            return `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()"><td style="width:24px;padding:4px 8px;vertical-align:middle;"><input type="checkbox" class="fp-seachk" value="${s.id}" ${checked} style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td><td style="padding:4px 8px;font-size:0.88rem;line-height:1.3;vertical-align:middle;"><strong>Saison ${sNum}</strong>${sTitle} <span style="color:var(--text-sec);font-size:0.78rem;">(${epCount} ép.)</span></td></tr>`;
+        }).join('');
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:420px;padding:20px;">
+            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">${emoji} ${title}</div>
+            <div style="text-align:left;font-size:0.85rem;color:var(--text-sec);margin-bottom:8px;">Saisons à inclure :</div>
+            <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;"><table style="width:100%;border-collapse:collapse;">${items}</table></div>
+            <div style="display:flex;gap:6px;margin-bottom:14px;">
+                <button type="button" id="fp-sea-all" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout cocher</button>
+                <button type="button" id="fp-sea-none" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout décocher</button>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="confirm-modal-btn cancel" id="fp-sea-cancel" style="margin:0;">Annuler</button>
+                <button class="confirm-modal-btn confirm" id="fp-sea-ok" style="margin:0;">Suivant →</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#fp-sea-all').onclick  = () => overlay.querySelectorAll('.fp-seachk').forEach(cb => cb.checked = true);
+        overlay.querySelector('#fp-sea-none').onclick = () => overlay.querySelectorAll('.fp-seachk').forEach(cb => cb.checked = false);
+        overlay.querySelector('#fp-sea-cancel').onclick = () => overlay.remove();
+        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+        overlay.querySelector('#fp-sea-ok').onclick = () => {
+            const seasonIds = Array.from(overlay.querySelectorAll('.fp-seachk:checked')).map(cb => cb.value);
+            if(seasonIds.length === 0) { Utils.toast('Aucune saison sélectionnée', 'warning'); return; }
+            const epIds = episodes.filter(e => seasonIds.includes(e.seasonId)).map(e => e.id);
+            overlay.remove();
+            setTimeout(() => callback(epIds), 100);
+        };
+    },
+    
+    // ============================================================
+    // ===== MODALE OPTIONS COMMUNE (mode + page de garde) =====
+    // ============================================================
+    // modes : array de {value, label, desc} — 2 ou 3 modes
+    // emoji, title : pour le header
+    // callback(opts) reçoit { mode, includeCover }
+    _openOptionsModal: (emoji, title, modes, callback) => {
+        const initialMode = modes[0].value;
+        const modeButtons = modes.map((m, i) => 
+            `<button type="button" class="fmt-btn ${i === 0 ? 'active' : ''}" data-mode="${m.value}" style="padding:10px 14px;font-size:0.85rem;text-align:left;">${m.label}<br><span style="font-size:0.75rem;color:var(--text-sec);font-weight:normal;">${m.desc}</span></button>`
+        ).join('');
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:520px;padding:20px;">
+            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:14px;">${emoji} ${title}</div>
+            
+            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Page de garde :</div>
+            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
+                <button type="button" class="fmt-btn active" id="fp-opt-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre</button>
+            </div>
+            
+            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Mode de rendu :</div>
+            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;" id="fp-opt-modes">
+                ${modeButtons}
+            </div>
+            
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="confirm-modal-btn cancel" id="fp-opt-cancel" style="margin:0;">Annuler</button>
+                <button class="confirm-modal-btn confirm" id="fp-opt-ok" style="margin:0;">📄 Générer le PDF</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        
+        // Toggle page de garde
+        const coverBtn = overlay.querySelector('#fp-opt-cover');
+        coverBtn.onclick = () => {
+            const isActive = coverBtn.classList.toggle('active');
+            coverBtn.dataset.active = isActive ? '1' : '0';
+        };
+        
+        // Boutons mode = radio (un seul actif)
+        let selectedMode = initialMode;
+        overlay.querySelectorAll('#fp-opt-modes .fmt-btn').forEach(btn => {
+            btn.onclick = () => {
+                overlay.querySelectorAll('#fp-opt-modes .fmt-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedMode = btn.dataset.mode;
+            };
+        });
+        
+        overlay.querySelector('#fp-opt-cancel').onclick = () => overlay.remove();
+        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+        overlay.querySelector('#fp-opt-ok').onclick = () => {
+            const includeCover = coverBtn.dataset.active === '1';
+            overlay.remove();
+            callback({ mode: selectedMode, includeCover });
+        };
+    },
+    
+    // ============================================================
+    // ===== PERSONNAGES =====
+    // ============================================================
+    
+    openCharactersModal: () => {
+        const chars = state.data.characters || [];
+        if(chars.length === 0) {
+            Utils.toast('Aucun personnage à exporter', 'warning');
+            return;
+        }
+        const isSeries = state.currentProjectType === 'series';
+        const continueToOptions = (episodeIds) => {
+            const modes = [
+                { value: 'detailed', label: 'Détaillé', desc: 'Photo + bio + sexe + comédien lié + scènes (1 par ligne)' },
+                { value: 'list',     label: 'Liste',    desc: '2 colonnes compactes : nom + nombre de scènes' },
+                { value: 'card',     label: 'Fiche',    desc: '1 page A4 par personnage (grande photo + tous les détails)' }
+            ];
+            FichesPDF._openOptionsModal('👥', 'Personnages PDF — Options', modes, (opts) => {
+                FichesPDF.exportCharacters({ ...opts, episodeIds });
+            });
+        };
+        if(isSeries) {
+            FichesPDF._openSeasonChooser('chars', '👥', 'Personnages — Choix des saisons', continueToOptions);
+        } else {
+            continueToOptions(null);
+        }
+    },
+    
+    exportCharacters: async (opts = {}) => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 25;
+        const usableWidth = pageWidth - margin * 2;
+        const isSeries = state.currentProjectType === 'series';
+        
+        // ========= Données =========
+        const allChars = state.data.characters || [];
+        const actors = state.data.actors || [];
+        const groups = (state.data.groups || []).filter(g => g.type === 'perso');
+        const allScenes = state.data.scenes || [];
+        
+        // Filtrage par saisons (si série)
+        let scenesScope = allScenes;
+        if(isSeries && opts.episodeIds && opts.episodeIds.length > 0) {
+            scenesScope = allScenes.filter(s => opts.episodeIds.includes(s.episodeId));
+        }
+        
+        // Filtrer personnages : si série + saisons choisies, ne garder que ceux qui apparaissent
+        const charsInScope = isSeries ? allChars.filter(ch => {
+            return scenesScope.some(s => {
+                if(!s.perso) return false;
+                const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
+                return names.includes(ch.name.toUpperCase());
+            });
+        }) : allChars;
+        
+        if(charsInScope.length === 0) {
+            Utils.toast('Aucun personnage à exporter dans cette sélection', 'warning');
+            return;
+        }
+        
+        // Helpers
+        const sceneLabel = (s) => {
+            if(isSeries) {
+                const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
+                if(ep) {
+                    const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
+                    return UI.formatSceneNumber(s, scenesInEp.indexOf(s));
+                }
+            }
+            return '#' + (allScenes.indexOf(s) + 1);
+        };
+        const charScenes = (ch) => scenesScope.filter(s => {
+            if(!s.perso) return false;
+            const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
+            return names.includes(ch.name.toUpperCase());
+        });
+        
+        // Précharger toutes les photos en parallèle (depuis les acteurs liés)
+        Utils.toast('Préparation des photos...', 'info');
+        const urls = charsInScope.map(ch => {
+            const actor = ch.actor_id ? actors.find(a => a.id === ch.actor_id) : null;
+            return actor && actor.photo ? actor.photo : null;
+        }).filter(Boolean);
+        const photoMap = await FichesPDF._preloadImages(urls);
+        
+        // ========= Page de garde =========
+        if(opts.includeCover) {
+            FichesPDF._drawCoverPage(doc, 'Personnages');
+            doc.addPage();
+        }
+        let y = margin;
+        
+        // ========= Grouper =========
+        const grouped = {};
+        charsInScope.forEach(ch => {
+            const gid = ch.group_id || 'orphan';
+            if(!grouped[gid]) grouped[gid] = [];
+            grouped[gid].push(ch);
+        });
+        const groupOrder = Object.keys(grouped).sort((a, b) => {
+            if(a === 'orphan') return 1;
+            if(b === 'orphan') return -1;
+            return 0;
+        });
+        
+        // ========= Rendu selon mode =========
+        const getActor = (ch) => ch.actor_id ? actors.find(a => a.id === ch.actor_id) : null;
+        const genderLabel = (g) => ({ homme: 'Homme', femme: 'Femme', 'non-binaire': 'Non-binaire' }[g] || g || '');
+        
+        // ----- MODE DETAILED : 1 fiche par ligne, photo 30x40mm + nom + bio + scènes -----
+        const renderDetailed = (ch) => {
+            const cardHeight = 50;  // hauteur minimum d'une carte
+            y = FichesPDF._ensureSpace(doc, y, cardHeight, pageHeight, margin);
+            
+            const photoW = 28, photoH = 36;
+            const actor = getActor(ch);
+            const photoUrl = actor && actor.photo ? photoMap[actor.photo] : null;
+            FichesPDF._drawPhotoOrPlaceholder(doc, photoUrl, margin, y, photoW, photoH);
+            
+            const textX = margin + photoW + 6;
+            const textWidth = usableWidth - photoW - 6;
+            let ty = y + 5;
+            
+            // Nom (grand, gras)
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(13);
+            doc.setTextColor(30, 30, 30);
+            doc.text(ch.name, textX, ty);
+            ty += 5;
+            
+            // Sexe
+            const gender = genderLabel(ch.gender);
+            if(gender) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(100, 100, 100);
+                doc.text('Sexe : ' + gender, textX, ty);
+                ty += 4;
+            }
+            
+            // Comédien lié
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(100, 100, 100);
+            doc.text(actor ? '🎭 Joué par : ' + actor.name : '— Aucun comédien lié —', textX, ty);
+            ty += 4;
+            
+            // Bio
+            if(ch.bio) {
+                doc.setFontSize(9);
+                doc.setTextColor(60, 60, 60);
+                const bioLines = doc.splitTextToSize(ch.bio, textWidth);
+                bioLines.slice(0, 4).forEach(line => {
+                    doc.text(line, textX, ty);
+                    ty += 3.8;
+                });
+                if(bioLines.length > 4) {
+                    doc.setFont('helvetica', 'italic');
+                    doc.text('…', textX, ty);
+                    ty += 3.8;
+                }
+            }
+            
+            // Scènes
+            const cs = charScenes(ch);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8);
+            doc.setTextColor(80, 80, 80);
+            if(cs.length > 0) {
+                const labels = cs.map(s => sceneLabel(s)).join('  ');
+                const sceneText = `📍 Apparaît dans (${cs.length}) : ${labels}`;
+                const scLines = doc.splitTextToSize(sceneText, textWidth);
+                scLines.slice(0, 2).forEach(line => {
+                    doc.text(line, textX, ty);
+                    ty += 3.5;
+                });
+            } else {
+                doc.setFont('helvetica', 'italic');
+                doc.setTextColor(150, 150, 150);
+                doc.text(`N'apparaît dans aucune scène`, textX, ty);
+                ty += 3.5;
+            }
+            
+            // Cadre autour de la fiche
+            const actualHeight = Math.max(photoH + 4, ty - y + 2);
+            doc.setDrawColor(200, 200, 200);
+            doc.setLineWidth(0.2);
+            doc.rect(margin - 2, y - 2, usableWidth + 4, actualHeight);
+            
+            y += actualHeight + 3;
+        };
+        
+        // ----- MODE LIST : 2 colonnes compactes -----
+        const renderList = (chars) => {
+            const colWidth = usableWidth / 2 - 3;
+            let col = 0;
+            let lineY = y;
+            const lineHeight = 5.5;
+            
+            chars.forEach(ch => {
+                if(col === 0) {
+                    lineY = FichesPDF._ensureSpace(doc, lineY, lineHeight, pageHeight, margin);
+                }
+                const cs = charScenes(ch);
+                const x = margin + col * (colWidth + 6);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(40, 40, 40);
+                // Nom (tronqué si trop long)
+                const nameW = colWidth - 18;
+                let name = ch.name;
+                while(doc.getTextWidth(name) > nameW && name.length > 5) {
+                    name = name.substring(0, name.length - 2) + '…';
+                }
+                doc.text(name, x, lineY);
+                // Nombre de scènes à droite de la colonne
+                doc.setTextColor(120, 120, 120);
+                doc.setFontSize(8);
+                doc.text(`${cs.length} sc.`, x + colWidth, lineY, { align: 'right' });
+                // Ligne pointillée sous le nom
+                doc.setDrawColor(220, 220, 220);
+                doc.setLineWidth(0.1);
+                doc.setLineDashPattern([0.5, 0.5], 0);
+                doc.line(x, lineY + 1.2, x + colWidth, lineY + 1.2);
+                doc.setLineDashPattern([], 0);
+                
+                col = (col + 1) % 2;
+                if(col === 0) lineY += lineHeight;
+            });
+            // Si fin sur la 1ère colonne, on passe à la ligne suivante
+            if(col === 1) lineY += lineHeight;
+            y = lineY + 2;
+        };
+        
+        // ----- MODE CARD : 1 page A4 par personnage -----
+        const renderCard = (ch) => {
+            // Nouvelle page pour chaque personnage (sauf la 1ère qui est déjà neuve)
+            // (on assume que le caller a déjà fait addPage ou est sur la 1ère page)
+            
+            const actor = getActor(ch);
+            const photoUrl = actor && actor.photo ? photoMap[actor.photo] : null;
+            
+            // Bandeau titre coloré en haut
+            doc.setFillColor(40, 40, 60);
+            doc.rect(0, 0, pageWidth, 18, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(16);
+            doc.setTextColor(255, 255, 255);
+            doc.text('PERSONNAGE', margin, 12);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(11);
+            const projT = state.data.title || '';
+            doc.text(projT, pageWidth - margin, 12, { align: 'right' });
+            
+            // Grande photo à gauche (70 x 95mm)
+            const photoW2 = 70, photoH2 = 95;
+            const photoX = margin;
+            const photoY = 28;
+            FichesPDF._drawPhotoOrPlaceholder(doc, photoUrl, photoX, photoY, photoW2, photoH2);
+            
+            // Bloc infos à droite
+            const infoX = photoX + photoW2 + 10;
+            const infoWidth = usableWidth - photoW2 - 10;
+            let iy = photoY + 6;
+            
+            // Nom XXL
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(22);
+            doc.setTextColor(20, 20, 20);
+            const nameLines = doc.splitTextToSize(ch.name, infoWidth);
+            nameLines.forEach(line => { doc.text(line, infoX, iy); iy += 8; });
+            iy += 3;
+            
+            // Sexe
+            const gender = genderLabel(ch.gender);
+            if(gender) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(11);
+                doc.setTextColor(80, 80, 80);
+                doc.text(gender, infoX, iy);
+                iy += 6;
+            }
+            
+            // Comédien
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.setTextColor(100, 100, 100);
+            doc.text('🎭 INCARNÉ PAR', infoX, iy);
+            iy += 4;
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(11);
+            doc.setTextColor(40, 40, 40);
+            doc.text(actor ? actor.name : '(non assigné)', infoX, iy);
+            iy += 8;
+            
+            // Bio
+            if(ch.bio) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(100, 100, 100);
+                doc.text('PORTRAIT', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(10);
+                doc.setTextColor(50, 50, 50);
+                const bioLines = doc.splitTextToSize(ch.bio, infoWidth);
+                bioLines.forEach(line => {
+                    if(iy < pageHeight - 30) {
+                        doc.text(line, infoX, iy);
+                        iy += 4.5;
+                    }
+                });
+            }
+            
+            // Section scènes en bas
+            const cs = charScenes(ch);
+            const bottomY = pageHeight - 50;
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.setTextColor(100, 100, 100);
+            doc.text(`📍 APPARAÎT DANS ${cs.length} SCÈNE${cs.length > 1 ? 'S' : ''}`, margin, bottomY);
+            doc.setLineWidth(0.3);
+            doc.setDrawColor(180, 180, 180);
+            doc.line(margin, bottomY + 1.5, pageWidth - margin, bottomY + 1.5);
+            if(cs.length > 0) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(60, 60, 60);
+                const labels = cs.map(s => sceneLabel(s)).join('  ');
+                const scLines = doc.splitTextToSize(labels, usableWidth);
+                let sy = bottomY + 6;
+                scLines.slice(0, 4).forEach(line => {
+                    doc.text(line, margin, sy);
+                    sy += 4;
+                });
+            } else {
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(9);
+                doc.setTextColor(150, 150, 150);
+                doc.text(`N'apparaît dans aucune scène`, margin, bottomY + 6);
+            }
+        };
+        
+        // ========= Exécution selon mode =========
+        if(opts.mode === 'card') {
+            // Mode fiche : 1 page A4 par perso, pas de groupes (chaque fiche est autonome)
+            charsInScope.forEach((ch, idx) => {
+                if(idx > 0) doc.addPage();
+                renderCard(ch);
+            });
+        } else {
+            // Modes detailed et list : par groupes
+            groupOrder.forEach((gid, gIdx) => {
+                const group = groups.find(g => g.id === gid);
+                const groupName = group ? group.name : 'Non classé';
+                
+                // Saut de page si plus de place pour le bandeau + au moins 1 fiche
+                y = FichesPDF._ensureSpace(doc, y, 30, pageHeight, margin);
+                y = FichesPDF._drawGroupHeader(doc, groupName, y, margin, usableWidth);
+                
+                if(opts.mode === 'detailed') {
+                    grouped[gid].forEach(ch => renderDetailed(ch));
+                } else if(opts.mode === 'list') {
+                    renderList(grouped[gid]);
+                }
+            });
+        }
+        
+        // ========= Footer =========
+        FichesPDF._drawFooters(doc, opts.includeCover);
+        
+        // ========= Sauvegarde =========
+        if(opts.returnBlob) return doc.output('blob');
+        const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
+            ? PdfTheme.filename('Personnages')
+            : `${state.data.title || 'Projet'} - Personnages - moteur.studio.pdf`;
+        doc.save(filename);
+        Utils.toast('Personnages PDF exporté !', 'success');
+        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', 'Personnages PDF généré');
+    }
+};
 
 
 // ========== MODULE EXPORT SCÉNARIO ==========
