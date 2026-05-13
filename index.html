@@ -7009,7 +7009,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.1.2</p>
+      <p>vv4.1.3</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10307,7 +10307,7 @@ body.presentation-mode .presentation-bar {
               <button onclick="app.Contacts.importToProject('actors')" class="btn-tool">📇 Mes contacts</button>
               <button onclick="app.GlobalSearch.openActors()" class="btn-tool">🔍 Rechercher un.e comédien.ne</button>
               <button onclick="app.ActorSearch.toggleFilters()" class="btn-tool">⚙️ Filtrer projet</button>
-              <button onclick="app.UI.printActors()" class="btn-tool-print">📄 Imprimer / PDF</button>
+              <button onclick="app.FichesPDF.openActorsModal()" class="btn-tool-print" style="background:var(--primary); color:#fff;">📄 Export PDF</button>
           </div>
           <div id="actor-filters" style="display:none; margin-top:15px; padding:15px; background:var(--panel-bg); border:1px solid var(--border); border-radius:8px;">
               <div class="flex-wrap-gap10">
@@ -10379,7 +10379,7 @@ body.presentation-mode .presentation-bar {
           <div id="locations-toolbar" class="data-toolbar" style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap;align-items:center;">
               <button onclick="app.Actions.addGroup('lieu')" class="btn-tool">➕ Nouveau Groupe</button>
               <button onclick="app.Actions.addDataItem('locations')" class="btn-tool">➕ Nouveau Décor</button>
-              <button onclick="app.UI.printLocations()" class="btn-tool-print">📄 Imprimer / PDF</button>
+              <button onclick="app.FichesPDF.openLocationsModal()" class="btn-tool-print" style="background:var(--primary); color:#fff;">📄 Export PDF</button>
           </div>
           <div id="locContainer"></div>
       </div>
@@ -10420,7 +10420,7 @@ body.presentation-mode .presentation-bar {
     <h1 class="print-only-title">STATISTIQUES</h1>
     
     <div style="display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap;">
-        <button onclick="app.UI.printStats()" class="btn-tool-print">📄 Imprimer / PDF</button>
+        <button onclick="app.Stats.openExportModal()" class="btn-tool-print" style="background:var(--primary); color:#fff;">📄 Export PDF</button>
     </div>
     
     <!-- Sélecteur de scope (séries uniquement) -->
@@ -10720,6 +10720,7 @@ body.presentation-mode .presentation-bar {
         <div class="planning-actions" style="justify-content: center;">
             <button class="planning-action-btn primary" onclick="app.Planning.addShootDay()">➕ Ajouter Jour</button>
             <button class="planning-action-btn success" onclick="app.Planning.openCallSheets()">📄 Feuilles de Service</button>
+            <button class="planning-action-btn primary" onclick="app.Planning.openExportModal()" style="background:var(--primary); color:#fff;">📄 Export PDF Planning</button>
             <button class="planning-action-btn secondary" onclick="app.Planning.exportICS()">📅 Export .ICS</button>
             <button class="planning-action-btn secondary" onclick="app.Planning.showAvailabilityView()">👥 Disponibilités</button>
         </div>
@@ -41986,6 +41987,610 @@ END:VEVENT
         }
         
         container.innerHTML = html;
+    },
+    
+    // ============================================================
+    // ===== EXPORT PDF PLANNING (jsPDF natif) =====
+    // ============================================================
+    // Génère 1 PDF contenant N jours de tournage, 1 jour = ~1 page avec
+    // toutes les infos utiles : date, lieu, horaires, programme scènes,
+    // convocations groupées (comédiens par groupe + techniciens par dept),
+    // dépouillement, notes, météo perso.
+    
+    openExportModal: () => {
+        const days = state.data.shootingDays || [];
+        if(days.length === 0) {
+            Utils.toast('Aucun jour de tournage à exporter', 'warning');
+            return;
+        }
+        
+        const sorted = [...days].sort((a, b) => {
+            const da = new Date(a.startDate || a.date || 0);
+            const db = new Date(b.startDate || b.date || 0);
+            return da - db;
+        });
+        
+        const items = sorted.map((d, i) => {
+            const startDate = d.startDate || d.date;
+            const dateObj = startDate ? new Date(startDate) : null;
+            const dateStr = dateObj && !isNaN(dateObj)
+                ? dateObj.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+                : '(date non définie)';
+            const dayName = d.name || `Jour ${d.dayNumber || (i + 1)}`;
+            const location = d.location || d.locationRealName || '—';
+            const sceneCount = (d.scenes || []).length;
+            const callCount = (d.callSheet || []).length;
+            const validBadge = d.validated ? '<span style="background:var(--success);color:#fff;padding:1px 6px;border-radius:4px;font-size:0.7rem;margin-left:6px;">✅ Validé</span>' : '';
+            return `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()">
+                <td style="width:24px;padding:5px 8px;vertical-align:middle;"><input type="checkbox" class="fds-pdfchk" value="${d.id}" checked style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td>
+                <td style="padding:5px 8px;font-size:0.85rem;line-height:1.3;vertical-align:middle;">
+                    <strong>${Utils.escape(dayName)}</strong> — ${dateStr}${validBadge}
+                    <div style="color:var(--text-sec);font-size:0.78rem;margin-top:2px;">📍 ${Utils.escape(location)} · 🎬 ${sceneCount} sc. · 👥 ${callCount} convoqué(s)</div>
+                </td>
+            </tr>`;
+        }).join('');
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:560px;padding:20px;">
+            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">📅 Export Planning PDF</div>
+            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:8px;">Jours de tournage à inclure (${sorted.length}) :</div>
+            <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;"><table style="width:100%;border-collapse:collapse;">${items}</table></div>
+            <div style="display:flex;gap:6px;margin-bottom:14px;">
+                <button type="button" id="fds-pdf-all" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout cocher</button>
+                <button type="button" id="fds-pdf-none" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout décocher</button>
+                <button type="button" id="fds-pdf-validated" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">✅ Validés uniquement</button>
+            </div>
+            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Page de garde :</div>
+            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
+                <button type="button" class="fmt-btn active" id="fds-pdf-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre</button>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="confirm-modal-btn cancel" id="fds-pdf-cancel" style="margin:0;">Annuler</button>
+                <button class="confirm-modal-btn confirm" id="fds-pdf-ok" style="margin:0;">📄 Générer le PDF</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        
+        overlay.querySelector('#fds-pdf-all').onclick = () => overlay.querySelectorAll('.fds-pdfchk').forEach(cb => cb.checked = true);
+        overlay.querySelector('#fds-pdf-none').onclick = () => overlay.querySelectorAll('.fds-pdfchk').forEach(cb => cb.checked = false);
+        overlay.querySelector('#fds-pdf-validated').onclick = () => {
+            const validIds = new Set(sorted.filter(d => d.validated).map(d => d.id));
+            overlay.querySelectorAll('.fds-pdfchk').forEach(cb => { cb.checked = validIds.has(cb.value); });
+        };
+        const coverBtn = overlay.querySelector('#fds-pdf-cover');
+        coverBtn.onclick = () => {
+            const isActive = coverBtn.classList.toggle('active');
+            coverBtn.dataset.active = isActive ? '1' : '0';
+        };
+        overlay.querySelector('#fds-pdf-cancel').onclick = () => overlay.remove();
+        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+        overlay.querySelector('#fds-pdf-ok').onclick = () => {
+            const dayIds = Array.from(overlay.querySelectorAll('.fds-pdfchk:checked')).map(cb => cb.value);
+            if(dayIds.length === 0) { Utils.toast('Aucun jour sélectionné', 'warning'); return; }
+            const includeCover = coverBtn.dataset.active === '1';
+            overlay.remove();
+            Planning.exportPlanningPDF({ dayIds, includeCover });
+        };
+    },
+    
+    exportPlanningPDF: async (opts = {}) => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 18;
+        const usableWidth = pageWidth - margin * 2;
+        
+        const allDays = state.data.shootingDays || [];
+        const days = (opts.dayIds && opts.dayIds.length > 0)
+            ? allDays.filter(d => opts.dayIds.includes(d.id))
+            : allDays;
+        
+        if(days.length === 0) {
+            Utils.toast('Aucun jour à exporter', 'warning');
+            return;
+        }
+        
+        days.sort((a, b) => {
+            const da = new Date(a.startDate || a.date || 0);
+            const db = new Date(b.startDate || b.date || 0);
+            return da - db;
+        });
+        
+        Utils.toast('Génération du PDF planning...', 'info');
+        
+        if(opts.includeCover && typeof FichesPDF !== 'undefined' && FichesPDF._drawCoverPage) {
+            FichesPDF._drawCoverPage(doc, 'Planning');
+            doc.addPage();
+        }
+        
+        const allScenes = state.data.scenes || [];
+        const allActors = state.data.actors || [];
+        const allCrew = state.data.crew || [];
+        const allCharacters = state.data.characters || [];
+        const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
+        const crewGroupsAll = (state.data.groups || []).filter(g => g.type === 'crew');
+        const isSeries = state.currentProjectType === 'series';
+        
+        const categoryToCrewGroup = {
+            'ACCESSOIRES': 'gc5', 'DECORS-LIEUX': 'gc5',
+            'COSTUMES': 'gc6',
+            'MAQUILLAGE-COIFFURE': 'gc7',
+            'VEHICULES': 'gc12', 'LOGISTIQUE': 'gc12',
+            'SON-MUSIQUE': 'gc4',
+            'LUMIERE': 'gc2',
+            'FIGURATION': 'gc9', 'ANIMAUX': 'gc9',
+            'EFFETS SPECIAUX (SFX)': 'gc16',
+            'EFFETS VISUELS (VFX)': 'gc13'
+        };
+        
+        const transportLabel = (call) => {
+            const t = call.transport;
+            const lookupNames = () => (call.withWho || []).map(id => {
+                const sep = id.indexOf('_');
+                if(sep < 0) return '';
+                const type = id.substring(0, sep);
+                const personId = id.substring(sep + 1);
+                const p = type === 'actor' ? allActors.find(a => a.id === personId) : allCrew.find(c => c.id === personId);
+                return p ? p.name : '';
+            }).filter(Boolean).join(', ');
+            if(t === 'own')         return 'Véhicule perso';
+            if(t === 'own-brings')  { const n = lookupNames(); return 'Véhic. perso + ' + (n || 'pers.'); }
+            if(t === 'with')        { const n = lookupNames(); return 'Avec ' + (n || '—'); }
+            if(t === 'taxi')        return 'Taxi';
+            if(t === 'public')      return 'Transp. en commun';
+            return '—';
+        };
+        
+        let y = margin;
+        const ensureSpace = (space) => {
+            if(y + space > pageHeight - margin - 8) {
+                doc.addPage();
+                y = margin;
+            }
+        };
+        
+        const drawSectionHeader = (title) => {
+            ensureSpace(8 + 3);
+            doc.setFillColor(55, 55, 65);
+            doc.rect(margin, y, usableWidth, 6, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(255, 255, 255);
+            doc.text(title.toUpperCase(), margin + 3, y + 4.2);
+            y += 6 + 2.5;
+        };
+        
+        const drawSubGroupHeader = (text) => {
+            ensureSpace(5);
+            doc.setFillColor(225, 225, 232);
+            doc.rect(margin, y, usableWidth, 4.5, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8);
+            doc.setTextColor(60, 60, 80);
+            doc.text(text, margin + 2, y + 3.2);
+            y += 4.5 + 1;
+        };
+        
+        const drawTableRow = (cols, cells, opts = {}) => {
+            const rowH = opts.height || 5;
+            ensureSpace(rowH);
+            if(opts.fillRow) {
+                doc.setFillColor(248, 248, 251);
+                doc.rect(margin, y, usableWidth, rowH, 'F');
+            }
+            doc.setFont('helvetica', opts.bold ? 'bold' : 'normal');
+            doc.setFontSize(opts.fontSize || 8.5);
+            doc.setTextColor(opts.color || 50, opts.color || 50, opts.color || 50);
+            cells.forEach((cell, i) => {
+                const col = cols[i];
+                let txt = String(cell || '');
+                while(doc.getTextWidth(txt) > col.w - 2 && txt.length > 3) {
+                    txt = txt.substring(0, txt.length - 2) + '…';
+                }
+                const tx = col.align === 'right' ? col.x + col.w - 1 : col.x + 1;
+                doc.text(txt, tx, y + rowH - 1.4, { align: col.align || 'left' });
+            });
+            if(opts.divider) {
+                doc.setDrawColor(225, 225, 230);
+                doc.setLineWidth(0.1);
+                doc.setLineDashPattern([0.5, 0.5], 0);
+                doc.line(margin, y + rowH, margin + usableWidth, y + rowH);
+                doc.setLineDashPattern([], 0);
+            }
+            y += rowH;
+        };
+        
+        const drawTextBlock = (text, opts = {}) => {
+            if(!text) return;
+            doc.setFont('helvetica', opts.italic ? 'italic' : 'normal');
+            doc.setFontSize(opts.fontSize || 8.5);
+            doc.setTextColor(opts.color || 60, opts.color || 60, opts.color || 60);
+            const lines = doc.splitTextToSize(String(text), usableWidth - 2);
+            lines.forEach(line => {
+                ensureSpace(4);
+                doc.text(line, margin + 1, y + 3);
+                y += 4;
+            });
+            y += 1;
+        };
+        
+        const sceneLabel = (s) => {
+            if(isSeries && s.episodeId) {
+                const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
+                if(ep) {
+                    const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
+                    return UI.formatSceneNumber(s, scenesInEp.indexOf(s));
+                }
+            }
+            return '#' + (allScenes.indexOf(s) + 1);
+        };
+        
+        // ========= INDEX =========
+        ensureSpace(20);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(16);
+        doc.setTextColor(20, 20, 20);
+        doc.text('PLANNING DE TOURNAGE', margin, y + 6);
+        y += 9;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(11);
+        doc.setTextColor(80, 80, 80);
+        doc.text(state.data.title || 'Projet sans titre', margin, y + 5);
+        y += 7;
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(9.5);
+        doc.setTextColor(120, 120, 120);
+        doc.text(`${days.length} jour${days.length > 1 ? 's' : ''} de tournage`, margin, y + 4);
+        y += 6;
+        doc.setDrawColor(180, 180, 180);
+        doc.setLineWidth(0.4);
+        doc.line(margin, y + 2, margin + usableWidth, y + 2);
+        y += 8;
+        
+        drawSectionHeader('Sommaire');
+        const sumCols = [
+            { x: margin,       w: 8 },
+            { x: margin + 9,   w: 35 },
+            { x: margin + 45,  w: 38 },
+            { x: margin + 84,  w: 50 },
+            { x: margin + 135, w: usableWidth - 135 - 2, align: 'right' }
+        ];
+        drawTableRow(sumCols, ['#', 'Date', 'Nom', 'Lieu', 'Scènes'], { bold: true, fontSize: 8.5, fillRow: true });
+        days.forEach((d, i) => {
+            const startDate = d.startDate || d.date;
+            const dObj = startDate ? new Date(startDate) : null;
+            const dateStr = dObj && !isNaN(dObj)
+                ? dObj.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' })
+                : '—';
+            const dayName = d.name || `Jour ${d.dayNumber || (i + 1)}`;
+            const loc = d.location || d.locationRealName || '—';
+            const sc = (d.scenes || []).length;
+            drawTableRow(sumCols, [String(i + 1), dateStr, dayName, loc, `${sc} sc.`], { fontSize: 8.5, divider: true });
+        });
+        y += 4;
+        
+        // ========= UNE PAGE PAR JOUR =========
+        days.forEach((shootDay, dayIdx) => {
+            doc.addPage();
+            y = margin;
+            
+            const startDate = shootDay.startDate || shootDay.date;
+            const dateObj = startDate ? new Date(startDate) : null;
+            const dateStr = dateObj && !isNaN(dateObj)
+                ? dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+                : '(date non définie)';
+            const dayName = shootDay.name || `Jour ${shootDay.dayNumber || (dayIdx + 1)}`;
+            
+            // En-tête
+            doc.setFillColor(35, 35, 55);
+            doc.rect(0, 0, pageWidth, 18, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(13);
+            doc.setTextColor(255, 255, 255);
+            doc.text('FEUILLE DE SERVICE', margin, 8);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(10);
+            doc.text(`${dayIdx + 1} / ${days.length}`, pageWidth - margin, 8, { align: 'right' });
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(11);
+            doc.text(`${dayName} — ${dateStr}`, margin, 14.5);
+            if(shootDay.validated) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(140, 220, 140);
+                doc.text('VALIDÉ', pageWidth - margin, 14.5, { align: 'right' });
+            }
+            y = 22;
+            
+            // LIEU
+            drawSectionHeader('Lieu de tournage');
+            const locName = shootDay.location || shootDay.locationRealName || '—';
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.setTextColor(30, 30, 30);
+            ensureSpace(5);
+            doc.text(locName, margin + 1, y + 3.5);
+            y += 5;
+            if(shootDay.locationAddress) drawTextBlock('Adresse : ' + shootDay.locationAddress);
+            if(shootDay.contactName || shootDay.contactPhone) {
+                const cBits = [];
+                if(shootDay.contactName)  cBits.push('Contact : ' + shootDay.contactName);
+                if(shootDay.contactPhone) cBits.push('Tél : ' + shootDay.contactPhone);
+                drawTextBlock(cBits.join('   ·   '));
+            }
+            if(shootDay.locationNotes) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8.5);
+                doc.setTextColor(140, 100, 40);
+                const accLines = doc.splitTextToSize('Accès : ' + shootDay.locationNotes, usableWidth - 2);
+                accLines.forEach(line => { ensureSpace(4); doc.text(line, margin + 1, y + 3); y += 4; });
+                y += 1;
+            }
+            if(shootDay.locationLat && shootDay.locationLng) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(7.5);
+                doc.setTextColor(120, 120, 120);
+                ensureSpace(4);
+                doc.text(`GPS : ${shootDay.locationLat}, ${shootDay.locationLng}`, margin + 1, y + 3);
+                y += 5;
+            }
+            
+            // HORAIRES
+            drawSectionHeader('Horaires généraux');
+            const horCols = [
+                { x: margin,                          w: usableWidth * 0.25 },
+                { x: margin + usableWidth * 0.25,     w: usableWidth * 0.25 },
+                { x: margin + usableWidth * 0.50,     w: usableWidth * 0.25 },
+                { x: margin + usableWidth * 0.75,     w: usableWidth * 0.25 }
+            ];
+            drawTableRow(horCols,
+                ['Convocation', shootDay.crewCall || '--:--', 'Prêt à tourner', shootDay.readyToShoot || '--:--'],
+                { bold: true, fontSize: 8.5, divider: true });
+            drawTableRow(horCols,
+                ['Déjeuner', `${shootDay.lunchStart || '--:--'} - ${shootDay.lunchEnd || '--:--'}`, 'Fin estimée', shootDay.estimatedWrap || '--:--'],
+                { bold: true, fontSize: 8.5, divider: true });
+            y += 2;
+            
+            // PROGRAMME
+            drawSectionHeader('Programme du jour');
+            const scenes = shootDay.scenes || [];
+            if(scenes.length === 0) {
+                drawTextBlock('Aucune scène planifiée pour ce jour.', { italic: true, color: 150 });
+            } else {
+                const scCols = [
+                    { x: margin,                          w: 18 },
+                    { x: margin + 18,                     w: 16 },
+                    { x: margin + 34,                     w: usableWidth - 34 - 50 - 18 },
+                    { x: margin + usableWidth - 50 - 18,  w: 32 },
+                    { x: margin + usableWidth - 36,       w: 16, align: 'right' },
+                    { x: margin + usableWidth - 20,       w: 20, align: 'right' }
+                ];
+                drawTableRow(scCols, ['Heure', 'N°', 'Scène', 'Personnages', 'Durée', 'Plans'],
+                    { bold: true, fontSize: 8, fillRow: true });
+                scenes.forEach(ref => {
+                    const sc = allScenes.find(s => s.id === ref.sceneId);
+                    if(!sc) return;
+                    const allShots = (state.data.shots || []).filter(s => s.sceneId === ref.sceneId || String(s.sceneId) === String(ref.sceneId));
+                    const totalShots = allShots.length;
+                    const selectedShots = ref.selectedShots || [];
+                    let shotsInfo = totalShots === 0 ? '—' : (selectedShots.length > 0 ? `${selectedShots.length}/${totalShots}` : `0/${totalShots}`);
+                    
+                    drawTableRow(scCols, [
+                        ref.startTime || '--:--',
+                        sceneLabel(sc),
+                        sc.title || '(sans titre)',
+                        sc.perso || '—',
+                        sc.time ? sc.time + ' min' : '—',
+                        shotsInfo
+                    ], { fontSize: 8, divider: true });
+                });
+            }
+            y += 2;
+            
+            // CONVOCATIONS
+            drawSectionHeader('Convocations');
+            const callsAll = shootDay.callSheet || [];
+            if(callsAll.length === 0) {
+                drawTextBlock('Aucune convocation.', { italic: true, color: 150 });
+            } else {
+                const callCols = [
+                    { x: margin,                          w: usableWidth * 0.30 },
+                    { x: margin + usableWidth * 0.30,     w: usableWidth * 0.22 },
+                    { x: margin + usableWidth * 0.52,     w: usableWidth * 0.13 },
+                    { x: margin + usableWidth * 0.65,     w: usableWidth * 0.20 },
+                    { x: margin + usableWidth * 0.85,     w: usableWidth * 0.15 }
+                ];
+                
+                const actorCalls = callsAll.filter(c => c.type === 'actor');
+                const crewCalls = callsAll.filter(c => c.type === 'crew');
+                
+                if(actorCalls.length > 0) {
+                    drawTableRow(callCols, ['Nom', 'Rôle', 'Convoc.', 'Transport', 'Notes'],
+                        { bold: true, fontSize: 8, fillRow: true });
+                    
+                    actorGroups.forEach(grp => {
+                        const groupCalls = actorCalls.filter(call => {
+                            const actor = allActors.find(a => a.id === call.personId);
+                            return actor && actor.group_id === grp.id;
+                        });
+                        if(groupCalls.length === 0) return;
+                        drawSubGroupHeader('COMÉDIENS — ' + grp.name);
+                        groupCalls.forEach(call => {
+                            const person = allActors.find(a => a.id === call.personId);
+                            if(!person) return;
+                            const character = allCharacters.find(c => c.actor_id === person.id);
+                            const role = character ? character.name : 'Comédien·ne';
+                            drawTableRow(callCols, [
+                                person.name || '—',
+                                role,
+                                call.callTime || '--:--',
+                                transportLabel(call),
+                                call.notes || '—'
+                            ], { fontSize: 8, divider: true });
+                        });
+                    });
+                    
+                    const noGroupActorCalls = actorCalls.filter(call => {
+                        const actor = allActors.find(a => a.id === call.personId);
+                        return actor && (!actor.group_id || !actorGroups.find(g => g.id === actor.group_id));
+                    });
+                    if(noGroupActorCalls.length > 0) {
+                        drawSubGroupHeader('COMÉDIENS — Non classés');
+                        noGroupActorCalls.forEach(call => {
+                            const person = allActors.find(a => a.id === call.personId);
+                            if(!person) return;
+                            const character = allCharacters.find(c => c.actor_id === person.id);
+                            const role = character ? character.name : 'Comédien·ne';
+                            drawTableRow(callCols, [
+                                person.name || '—',
+                                role,
+                                call.callTime || '--:--',
+                                transportLabel(call),
+                                call.notes || '—'
+                            ], { fontSize: 8, divider: true });
+                        });
+                    }
+                }
+                
+                if(crewCalls.length > 0) {
+                    if(actorCalls.length === 0) {
+                        drawTableRow(callCols, ['Nom', 'Fonction', 'Convoc.', 'Transport', 'Notes'],
+                            { bold: true, fontSize: 8, fillRow: true });
+                    }
+                    
+                    crewGroupsAll.forEach(grp => {
+                        const groupCalls = crewCalls.filter(call => {
+                            const member = allCrew.find(c => c.id === call.personId);
+                            return member && member.group_id === grp.id;
+                        });
+                        if(groupCalls.length === 0) return;
+                        drawSubGroupHeader('ÉQUIPE — ' + grp.name);
+                        groupCalls.forEach(call => {
+                            const person = allCrew.find(c => c.id === call.personId);
+                            if(!person) return;
+                            drawTableRow(callCols, [
+                                person.name || '—',
+                                person.role || 'Technicien·ne',
+                                call.callTime || '--:--',
+                                transportLabel(call),
+                                call.notes || '—'
+                            ], { fontSize: 8, divider: true });
+                        });
+                    });
+                    
+                    const noGroupCrewCalls = crewCalls.filter(call => {
+                        const member = allCrew.find(c => c.id === call.personId);
+                        return member && (!member.group_id || !crewGroupsAll.find(g => g.id === member.group_id));
+                    });
+                    if(noGroupCrewCalls.length > 0) {
+                        drawSubGroupHeader('ÉQUIPE — Non classés');
+                        noGroupCrewCalls.forEach(call => {
+                            const person = allCrew.find(c => c.id === call.personId);
+                            if(!person) return;
+                            drawTableRow(callCols, [
+                                person.name || '—',
+                                person.role || 'Technicien·ne',
+                                call.callTime || '--:--',
+                                transportLabel(call),
+                                call.notes || '—'
+                            ], { fontSize: 8, divider: true });
+                        });
+                    }
+                }
+            }
+            y += 2;
+            
+            // DÉPOUILLEMENT
+            const allCategories = {};
+            scenes.forEach(ref => {
+                const sc = allScenes.find(s => s.id === ref.sceneId);
+                if(sc && sc.breakdown) {
+                    Object.entries(sc.breakdown).forEach(([category, items]) => {
+                        if(Array.isArray(items) && items.length > 0) {
+                            if(!allCategories[category]) allCategories[category] = new Set();
+                            items.forEach(item => allCategories[category].add(item));
+                        }
+                    });
+                }
+            });
+            
+            const getResponsibleForCategory = (category) => {
+                const groupId = categoryToCrewGroup[category];
+                if(!groupId) return null;
+                const responsible = (shootDay.callSheet || []).find(call => {
+                    if(call.type !== 'crew') return false;
+                    const crew = allCrew.find(c => c.id === call.personId);
+                    return crew && crew.group_id === groupId;
+                });
+                if(responsible) {
+                    const crew = allCrew.find(c => c.id === responsible.personId);
+                    return crew ? crew.name : null;
+                }
+                return null;
+            };
+            
+            if(Object.keys(allCategories).length > 0) {
+                drawSectionHeader('Dépouillement / besoins');
+                Object.entries(allCategories).forEach(([cat, itemsSet]) => {
+                    const items = Array.from(itemsSet);
+                    const resp = getResponsibleForCategory(cat);
+                    ensureSpace(4);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(8.5);
+                    doc.setTextColor(40, 40, 40);
+                    const respText = resp ? '  (Responsable : ' + resp + ')' : '';
+                    doc.text(cat + respText, margin + 1, y + 3);
+                    y += 4;
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(8);
+                    doc.setTextColor(60, 60, 60);
+                    const line = '• ' + items.join('   ·   ');
+                    const lines = doc.splitTextToSize(line, usableWidth - 4);
+                    lines.forEach(l => { ensureSpace(3.5); doc.text(l, margin + 3, y + 2.8); y += 3.5; });
+                    y += 1;
+                });
+            }
+            
+            // NOTES & MÉTÉO
+            const hasNotes = shootDay.notes || shootDay.customWeather;
+            if(hasNotes) {
+                drawSectionHeader('Notes & consignes');
+                if(shootDay.customWeather) {
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(8.5);
+                    doc.setTextColor(40, 40, 40);
+                    ensureSpace(4);
+                    doc.text('Météo / consignes :', margin + 1, y + 3);
+                    y += 4;
+                    drawTextBlock(shootDay.customWeather, { fontSize: 8.5, color: 60 });
+                }
+                if(shootDay.notes) {
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(8.5);
+                    doc.setTextColor(40, 40, 40);
+                    ensureSpace(4);
+                    doc.text('Notes générales :', margin + 1, y + 3);
+                    y += 4;
+                    drawTextBlock(shootDay.notes, { fontSize: 8.5, color: 60 });
+                }
+            }
+        });
+        
+        // Footer
+        if(typeof FichesPDF !== 'undefined' && FichesPDF._drawFooters) {
+            FichesPDF._drawFooters(doc, opts.includeCover);
+        }
+        
+        // Sauvegarde
+        if(opts.returnBlob) return doc.output('blob');
+        const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
+            ? PdfTheme.filename('Planning')
+            : `${state.data.title || 'Projet'} - Planning - moteur.studio.pdf`;
+        doc.save(filename);
+        Utils.toast(`Planning PDF exporté (${days.length} jour${days.length > 1 ? 's' : ''}) !`, 'success');
+        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', `Planning PDF généré (${days.length} jours)`);
     }
 };
   
@@ -42720,7 +43325,515 @@ const Stats = {
                   }
               }
           });
-      }
+      },
+    
+    // ============================================================
+    // ===== EXPORT PDF STATS (jsPDF natif) =====
+    // ============================================================
+    // Stratégie hybride :
+    // 1. Force un Stats.render() pour s'assurer que tous les canvas Chart.js sont à jour
+    // 2. Capture les canvas Chart.js en PNG via toDataURL
+    // 3. Recompute les bar-charts "maison" et le tableau saisons en jsPDF natif
+    // 4. Une seule modale : page de garde oui/non
+    
+    openExportModal: () => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        const scopeLabel = Stats.getScopeLabel();
+        const scopeNote = scopeLabel ? `<div style="font-size:0.8rem;color:var(--text-sec);margin-bottom:14px;text-align:left;">📊 Périmètre actuel : <strong>${Utils.escape(scopeLabel)}</strong></div>` : '';
+        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:460px;padding:20px;">
+            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:14px;">📊 Statistiques PDF — Options</div>
+            ${scopeNote}
+            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Page de garde :</div>
+            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
+                <button type="button" class="fmt-btn active" id="stats-opt-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre</button>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="confirm-modal-btn cancel" id="stats-opt-cancel" style="margin:0;">Annuler</button>
+                <button class="confirm-modal-btn confirm" id="stats-opt-ok" style="margin:0;">📄 Générer le PDF</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        const coverBtn = overlay.querySelector('#stats-opt-cover');
+        coverBtn.onclick = () => {
+            const isActive = coverBtn.classList.toggle('active');
+            coverBtn.dataset.active = isActive ? '1' : '0';
+        };
+        overlay.querySelector('#stats-opt-cancel').onclick = () => overlay.remove();
+        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+        overlay.querySelector('#stats-opt-ok').onclick = () => {
+            const includeCover = coverBtn.dataset.active === '1';
+            overlay.remove();
+            Stats.exportPDF({ includeCover });
+        };
+    },
+    
+    exportPDF: async (opts = {}) => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 25;
+        const usableWidth = pageWidth - margin * 2;
+        
+        // ========= S'assurer que les canvas Chart.js sont à jour =========
+        Utils.toast('Préparation des graphiques...', 'info');
+        try {
+            Stats.render();
+            // Laisser le temps à Chart.js de finir le rendu
+            await new Promise(r => setTimeout(r, 400));
+        } catch(e) {
+            console.warn('[Stats.exportPDF] render failed :', e);
+        }
+        
+        // ========= Page de garde =========
+        if(opts.includeCover && typeof FichesPDF !== 'undefined' && FichesPDF._drawCoverPage) {
+            FichesPDF._drawCoverPage(doc, 'Statistiques');
+            doc.addPage();
+        }
+        let y = margin;
+        
+        // ========= Helpers internes =========
+        const isSeries = state.currentProjectType === 'series';
+        const scopeLabel = Stats.getScopeLabel();
+        
+        const ensureSpace = (space) => {
+            if(y + space > pageHeight - margin - 5) {
+                doc.addPage();
+                y = margin;
+            }
+        };
+        
+        const drawSectionHeader = (title) => {
+            ensureSpace(14);
+            doc.setFillColor(50, 50, 50);
+            doc.rect(margin, y, usableWidth, 8, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.setTextColor(255, 255, 255);
+            doc.text(title.toUpperCase(), margin + 4, y + 5.5);
+            y += 8 + 4;
+        };
+        
+        // Capture d'un canvas Chart.js → dataURL PNG
+        const captureCanvas = (canvasId) => {
+            try {
+                const cv = document.getElementById(canvasId);
+                if(!cv || cv.width === 0 || cv.height === 0) return null;
+                if(!cv.toDataURL) return null;
+                return { dataUrl: cv.toDataURL('image/png'), w: cv.width, h: cv.height };
+            } catch(e) {
+                console.warn('[Stats.exportPDF] capture failed for', canvasId, e);
+                return null;
+            }
+        };
+        
+        // Insère une image Chart.js capturée, redimensionnée pour le PDF
+        const insertChartImage = (img, maxWidthMm, maxHeightMm) => {
+            if(!img) return false;
+            const ratio = img.w / img.h;
+            let w = maxWidthMm;
+            let h = w / ratio;
+            if(h > maxHeightMm) {
+                h = maxHeightMm;
+                w = h * ratio;
+            }
+            ensureSpace(h + 4);
+            const x = margin + (usableWidth - w) / 2;
+            try {
+                doc.addImage(img.dataUrl, 'PNG', x, y, w, h);
+                y += h + 4;
+                return true;
+            } catch(e) {
+                console.warn('[Stats.exportPDF] addImage failed :', e);
+                return false;
+            }
+        };
+        
+        // Dessine un bar-chart horizontal natif jsPDF
+        const drawHBarChart = (dataObj, limit) => {
+            const sorted = Object.entries(dataObj).sort((a, b) => b[1] - a[1]).slice(0, limit);
+            if(sorted.length === 0) {
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(9);
+                doc.setTextColor(150, 150, 150);
+                ensureSpace(6);
+                doc.text('Pas de données', margin, y + 4);
+                y += 8;
+                return;
+            }
+            const max = sorted[0][1];
+            const labelW = 50;
+            const valW = 12;
+            const barAreaW = usableWidth - labelW - valW - 4;
+            const rowH = 5.5;
+            
+            sorted.forEach(([label, val]) => {
+                ensureSpace(rowH);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8.5);
+                doc.setTextColor(60, 60, 60);
+                let txtLabel = String(label);
+                while(doc.getTextWidth(txtLabel) > labelW - 2 && txtLabel.length > 4) {
+                    txtLabel = txtLabel.substring(0, txtLabel.length - 2) + '…';
+                }
+                doc.text(txtLabel, margin, y + 3.8);
+                
+                doc.setFillColor(235, 235, 240);
+                doc.rect(margin + labelW, y + 1.5, barAreaW, rowH - 2, 'F');
+                
+                const pct = max > 0 ? val / max : 0;
+                doc.setFillColor(76, 175, 80);
+                doc.rect(margin + labelW, y + 1.5, barAreaW * pct, rowH - 2, 'F');
+                
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(8.5);
+                doc.setTextColor(60, 60, 60);
+                doc.text(String(val), margin + usableWidth, y + 3.8, { align: 'right' });
+                
+                y += rowH;
+            });
+            y += 2;
+        };
+        
+        // Carte stat (compteur)
+        const drawStatCard = (x, y, w, h, label, value) => {
+            doc.setFillColor(245, 245, 248);
+            doc.rect(x, y, w, h, 'F');
+            doc.setDrawColor(220, 220, 225);
+            doc.setLineWidth(0.2);
+            doc.rect(x, y, w, h);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8);
+            doc.setTextColor(110, 110, 110);
+            doc.text(String(label).toUpperCase(), x + w/2, y + 5, { align: 'center' });
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(16);
+            doc.setTextColor(30, 30, 30);
+            doc.text(String(value), x + w/2, y + h - 4, { align: 'center' });
+        };
+        
+        // ========= EN-TÊTE DU RAPPORT =========
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(18);
+        doc.setTextColor(20, 20, 20);
+        doc.text('RAPPORT DE STATISTIQUES', margin, y + 6);
+        y += 9;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(11);
+        doc.setTextColor(80, 80, 80);
+        doc.text(state.data.title || 'Projet sans titre', margin, y + 5);
+        y += 7;
+        if(scopeLabel) {
+            doc.setFont('helvetica', 'italic');
+            doc.setFontSize(9.5);
+            doc.setTextColor(120, 120, 120);
+            doc.text('Périmètre : ' + scopeLabel, margin, y + 4);
+            y += 6;
+        }
+        doc.setDrawColor(180, 180, 180);
+        doc.setLineWidth(0.4);
+        doc.line(margin, y + 2, margin + usableWidth, y + 2);
+        y += 8;
+        
+        // ========= CARTES COMPTEURS =========
+        const readStat = (id) => {
+            const el = document.getElementById(id);
+            return el ? (el.innerText || el.textContent || '—').trim() : '—';
+        };
+        const counters = [
+            { label: 'Total Scènes',     value: readStat('stat-total-scenes') },
+            { label: 'Total Dialogues',  value: readStat('stat-total-dials') },
+            { label: 'Durée Estimée',    value: readStat('stat-total-time') },
+            { label: 'Total Plans',      value: readStat('stat-total-shots') }
+        ];
+        const isProjectScope = !state.statsFilter || state.statsFilter.scope === 'all';
+        if(isProjectScope) {
+            counters.push({ label: 'Équipe Technique', value: readStat('stat-total-crew') });
+            counters.push({ label: 'Budget Équipe',    value: readStat('stat-total-budget') });
+        }
+        
+        const perRow = 3;
+        const cardH = 18;
+        const cardGap = 4;
+        const cardW = (usableWidth - cardGap * (perRow - 1)) / perRow;
+        const rowCount = Math.ceil(counters.length / perRow);
+        ensureSpace(rowCount * (cardH + cardGap));
+        counters.forEach((c, i) => {
+            const col = i % perRow;
+            const row = Math.floor(i / perRow);
+            const cx = margin + col * (cardW + cardGap);
+            const cy = y + row * (cardH + cardGap);
+            drawStatCard(cx, cy, cardW, cardH, c.label, c.value);
+        });
+        y += rowCount * (cardH + cardGap) + 2;
+        
+        // ========= SECTION : AVANCEMENT =========
+        if(isProjectScope) {
+            drawSectionHeader('Avancement du projet');
+            
+            const totalScenes = state.data.scenes?.length || 0;
+            const plannedSceneIds = new Set();
+            (state.data.shootingDays || []).forEach(day => {
+                (day.scenes || []).forEach(s => plannedSceneIds.add(s.sceneId));
+            });
+            const plannedCount = plannedSceneIds.size;
+            const pctPlanned = totalScenes > 0 ? Math.round((plannedCount / totalScenes) * 100) : 0;
+            
+            ensureSpace(16);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9.5);
+            doc.setTextColor(60, 60, 60);
+            doc.text('Scènes planifiées', margin, y + 4);
+            y += 6;
+            const barH = 6;
+            doc.setFillColor(235, 235, 240);
+            doc.rect(margin, y, usableWidth, barH, 'F');
+            doc.setFillColor(76, 175, 80);
+            doc.rect(margin, y, usableWidth * (pctPlanned / 100), barH, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8.5);
+            doc.setTextColor(40, 40, 40);
+            doc.text(`${pctPlanned}%  —  ${plannedCount} / ${totalScenes} scènes`, margin + usableWidth/2, y + 4.2, { align: 'center' });
+            y += barH + 4;
+        }
+        
+        // Camemberts INT/EXT et Jour/Nuit côte à côte
+        drawSectionHeader('Répartition INT/EXT  et  JOUR/NUIT');
+        const chartIntExt = captureCanvas('chart-int-ext');
+        const chartJourNuit = captureCanvas('chart-jour-nuit');
+        if(chartIntExt || chartJourNuit) {
+            const halfW = (usableWidth - 8) / 2;
+            const targetH = 60;
+            ensureSpace(targetH + 4);
+            const yStart = y;
+            if(chartIntExt) {
+                const ratio = chartIntExt.w / chartIntExt.h;
+                let h = targetH;
+                let w = h * ratio;
+                if(w > halfW) { w = halfW; h = w / ratio; }
+                const x = margin + (halfW - w) / 2;
+                try { doc.addImage(chartIntExt.dataUrl, 'PNG', x, yStart, w, h); } catch(e){}
+            }
+            if(chartJourNuit) {
+                const ratio = chartJourNuit.w / chartJourNuit.h;
+                let h = targetH;
+                let w = h * ratio;
+                if(w > halfW) { w = halfW; h = w / ratio; }
+                const x = margin + halfW + 8 + (halfW - w) / 2;
+                try { doc.addImage(chartJourNuit.dataUrl, 'PNG', x, yStart, w, h); } catch(e){}
+            }
+            y = yStart + targetH + 4;
+        } else {
+            doc.setFont('helvetica', 'italic');
+            doc.setFontSize(9);
+            doc.setTextColor(150, 150, 150);
+            doc.text('Pas de données disponibles', margin, y + 4);
+            y += 8;
+        }
+        
+        // ========= SECTION : BUDGET =========
+        if(isProjectScope) {
+            drawSectionHeader('Budget');
+            
+            const budgetPrevu = readStat('budget-prevu');
+            const budgetDepense = readStat('budget-depense');
+            const budgetReste = readStat('budget-reste');
+            
+            ensureSpace(20);
+            const bCardH = 16;
+            const bCardW = (usableWidth - 8) / 3;
+            drawStatCard(margin, y, bCardW, bCardH, 'Budget prévu', budgetPrevu);
+            drawStatCard(margin + bCardW + 4, y, bCardW, bCardH, 'Dépensé', budgetDepense);
+            drawStatCard(margin + (bCardW + 4) * 2, y, bCardW, bCardH, 'Reste', budgetReste);
+            y += bCardH + 4;
+            
+            const chartBudget = captureCanvas('chart-budget-cat');
+            if(chartBudget) {
+                insertChartImage(chartBudget, usableWidth * 0.7, 70);
+            } else {
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(9);
+                doc.setTextColor(150, 150, 150);
+                ensureSpace(6);
+                doc.text('Aucune dépense enregistrée', margin, y + 4);
+                y += 8;
+            }
+        }
+        
+        // ========= SECTION : TEMPS PAR TAG =========
+        drawSectionHeader('Temps par tag/acte');
+        const chartTimeTags = captureCanvas('chart-time-tags');
+        if(chartTimeTags) {
+            insertChartImage(chartTimeTags, usableWidth, 80);
+        } else {
+            doc.setFont('helvetica', 'italic');
+            doc.setFontSize(9);
+            doc.setTextColor(150, 150, 150);
+            ensureSpace(6);
+            doc.text('Pas de données', margin, y + 4);
+            y += 8;
+        }
+        
+        // ========= SECTION : PERSONNAGES & LIEUX & TAGS =========
+        drawSectionHeader('Personnages — Nombre de mots prononcés');
+        const charCounts = {};
+        const tagCounts = {};
+        Stats.getFilteredScenes().forEach(s => {
+            const tid = s.tag_id || 't1';
+            tagCounts[tid] = (tagCounts[tid] || 0) + 1;
+            const div = document.createElement('div');
+            div.innerHTML = s.scriptContent || '';
+            const dials = div.querySelectorAll('.sc-dial');
+            dials.forEach(d => {
+                const text = d.innerText.trim();
+                const words = text.split(/\s+/).filter(w => w.length > 0).length;
+                let prev = d.previousElementSibling;
+                while(prev && !prev.classList.contains('sc-perso')) prev = prev.previousElementSibling;
+                if(prev) {
+                    const name = prev.innerText.trim().replace(/\(.*\)/, '').trim().toUpperCase();
+                    charCounts[name] = (charCounts[name] || 0) + words;
+                }
+            });
+        });
+        drawHBarChart(charCounts, 15);
+        
+        drawSectionHeader('Répartition par axe (tags)');
+        const tagData = {};
+        (state.data.tags || []).forEach(t => {
+            if(tagCounts[t.id]) tagData[t.name] = tagCounts[t.id];
+        });
+        drawHBarChart(tagData, 10);
+        
+        drawSectionHeader('Lieux — Nombre de scènes');
+        const lieuxCounts = {};
+        Stats.getFilteredScenes().forEach(s => {
+            if(!s.title) return;
+            const m = s.title.match(/^(?:INT\.|EXT\.|I\/E)\s*([^\-]+)/i);
+            if(m && m[1]) {
+                const lieu = m[1].trim().toUpperCase();
+                lieuxCounts[lieu] = (lieuxCounts[lieu] || 0) + 1;
+            }
+        });
+        drawHBarChart(lieuxCounts, 15);
+        
+        // ========= SECTION : ÉQUIPE & STORYBOARD =========
+        if(isProjectScope) {
+            drawSectionHeader('Équipe par département');
+            const crewGroups = (state.data.groups || []).filter(g => g.type === 'crew');
+            const deptCounts = {};
+            crewGroups.forEach(grp => {
+                const count = (state.data.crew || []).filter(m => m.group_id === grp.id).length;
+                if(count > 0) deptCounts[grp.name] = count;
+            });
+            const unassigned = (state.data.crew || []).filter(m => !m.group_id).length;
+            if(unassigned > 0) deptCounts['Non classé'] = unassigned;
+            drawHBarChart(deptCounts, 15);
+            
+            drawSectionHeader('Plans par type');
+            const shotTypeCounts = {};
+            (state.data.shots || []).forEach(s => {
+                if(s.shotType) shotTypeCounts[s.shotType] = (shotTypeCounts[s.shotType] || 0) + 1;
+            });
+            drawHBarChart(shotTypeCounts, 15);
+            
+            drawSectionHeader('Jours de tournage par comédien');
+            const daysByActor = {};
+            (state.data.shootingDays || []).forEach(day => {
+                if(!day.callSheet || day.callSheet.length === 0) return;
+                day.callSheet.forEach(call => {
+                    if(call.type === 'actor') {
+                        const actor = (state.data.actors || []).find(a => a.id === call.personId);
+                        if(actor) {
+                            const name = actor.name || 'Sans nom';
+                            daysByActor[name] = (daysByActor[name] || 0) + 1;
+                        }
+                    }
+                });
+            });
+            drawHBarChart(daysByActor, 20);
+        }
+        
+        // ========= TABLEAU SAISONS (séries, scope projet uniquement) =========
+        if(isSeries && isProjectScope) {
+            const seasons = state.data.seasons || [];
+            if(seasons.length > 0) {
+                drawSectionHeader('Statistiques par saison');
+                const sortedSeasons = [...seasons].sort((a, b) => (a.number || 0) - (b.number || 0));
+                const episodes = state.data.episodes || [];
+                const allScenes = state.data.scenes || [];
+                
+                const colSx = [margin, margin + 18, margin + 90, margin + 120, margin + 150];
+                ensureSpace(8);
+                doc.setFillColor(60, 60, 70);
+                doc.rect(margin, y, usableWidth, 6, 'F');
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(8.5);
+                doc.setTextColor(255, 255, 255);
+                doc.text('Saison', colSx[0] + 1, y + 4);
+                doc.text('Titre',  colSx[1] + 1, y + 4);
+                doc.text('Épisodes', colSx[2], y + 4);
+                doc.text('Scènes',   colSx[3], y + 4);
+                doc.text('Durée',    colSx[4], y + 4);
+                y += 6;
+                
+                let totalEpisodes = 0, totalScenesCount = 0, grandTotalTime = 0;
+                sortedSeasons.forEach((s, idx) => {
+                    const seasonEpisodes = episodes.filter(ep => ep.seasonId === s.id);
+                    const epIds = seasonEpisodes.map(ep => ep.id);
+                    const seasonScenes = allScenes.filter(sc => epIds.includes(sc.episodeId));
+                    const totalTime = seasonScenes.reduce((sum, sc) => sum + (parseFloat(sc.time) || 0), 0);
+                    totalEpisodes += seasonEpisodes.length;
+                    totalScenesCount += seasonScenes.length;
+                    grandTotalTime += totalTime;
+                    
+                    ensureSpace(6);
+                    if(idx % 2 === 0) {
+                        doc.setFillColor(248, 248, 250);
+                        doc.rect(margin, y, usableWidth, 5.5, 'F');
+                    }
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(8.5);
+                    doc.setTextColor(40, 40, 40);
+                    doc.text('S' + String(s.number).padStart(2, '0'), colSx[0] + 1, y + 3.8);
+                    doc.setFont('helvetica', 'normal');
+                    let title = s.title || '—';
+                    while(doc.getTextWidth(title) > 70 && title.length > 4) title = title.substring(0, title.length - 2) + '…';
+                    doc.text(title, colSx[1] + 1, y + 3.8);
+                    doc.text(String(seasonEpisodes.length), colSx[2], y + 3.8);
+                    doc.text(String(seasonScenes.length), colSx[3], y + 3.8);
+                    doc.text(Math.round(totalTime) + ' min', colSx[4], y + 3.8);
+                    y += 5.5;
+                });
+                
+                ensureSpace(6);
+                doc.setFillColor(230, 230, 235);
+                doc.rect(margin, y, usableWidth, 6, 'F');
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(8.5);
+                doc.setTextColor(30, 30, 30);
+                doc.text(`TOTAL (${seasons.length} saison${seasons.length > 1 ? 's' : ''})`, colSx[0] + 1, y + 4);
+                doc.text(String(totalEpisodes), colSx[2], y + 4);
+                doc.text(String(totalScenesCount), colSx[3], y + 4);
+                doc.text(Math.round(grandTotalTime) + ' min', colSx[4], y + 4);
+                y += 6 + 4;
+            }
+        }
+        
+        // ========= Footer =========
+        if(typeof FichesPDF !== 'undefined' && FichesPDF._drawFooters) {
+            FichesPDF._drawFooters(doc, opts.includeCover);
+        }
+        
+        // ========= Sauvegarde =========
+        if(opts.returnBlob) return doc.output('blob');
+        const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
+            ? PdfTheme.filename('Statistiques')
+            : `${state.data.title || 'Projet'} - Statistiques - moteur.studio.pdf`;
+        doc.save(filename);
+        Utils.toast('Statistiques PDF exporté !', 'success');
+        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', 'Statistiques PDF généré');
+    }
   };
   
  // ====================================================================
@@ -63683,9 +64796,10 @@ const FichesPDF = {
         
         // Auteur (contextuel)
         const sectionAuthorMap = {
-            'Personnages': ['Scénariste', 'Réalisateur·rice'],
-            'Comédiens':   ['Directeur·rice de casting', 'Régisseur·euse général·e'],
-            'Décors':      ['Repéreur·euse', 'Directeur·rice de production', 'Régisseur·euse général·e']
+            'Personnages':   ['Scénariste', 'Réalisateur·rice'],
+            'Comédiens':     ['Directeur·rice de casting', 'Régisseur·euse général·e'],
+            'Décors':        ['Repéreur·euse', 'Directeur·rice de production', 'Régisseur·euse général·e'],
+            'Statistiques':  ['Producteur·rice', 'Directeur·rice de production', '1er·ère assistant·e réalisateur·rice']
         };
         let author = null;
         const wantedRoles = sectionAuthorMap[sectionName] || [];
@@ -64059,7 +65173,7 @@ const FichesPDF = {
             doc.setFont('helvetica', 'normal');
             doc.setFontSize(9);
             doc.setTextColor(100, 100, 100);
-            doc.text(actor ? '🎭 Joué par : ' + actor.name : '— Aucun comédien lié —', textX, ty);
+            doc.text(actor ? 'Joué par : ' + actor.name : '— Aucun comédien lié —', textX, ty);
             ty += 4;
             
             // Bio
@@ -64085,7 +65199,7 @@ const FichesPDF = {
             doc.setTextColor(80, 80, 80);
             if(cs.length > 0) {
                 const labels = cs.map(s => sceneLabel(s)).join('  ');
-                const sceneText = `📍 Apparaît dans (${cs.length}) : ${labels}`;
+                const sceneText = `Apparaît dans (${cs.length}) : ${labels}`;
                 const scLines = doc.splitTextToSize(sceneText, textWidth);
                 scLines.slice(0, 2).forEach(line => {
                     doc.text(line, textX, ty);
@@ -64202,7 +65316,7 @@ const FichesPDF = {
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(10);
             doc.setTextColor(100, 100, 100);
-            doc.text('🎭 INCARNÉ PAR', infoX, iy);
+            doc.text('INCARNÉ PAR', infoX, iy);
             iy += 4;
             doc.setFont('helvetica', 'normal');
             doc.setFontSize(11);
@@ -64235,7 +65349,7 @@ const FichesPDF = {
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(10);
             doc.setTextColor(100, 100, 100);
-            doc.text(`📍 APPARAÎT DANS ${cs.length} SCÈNE${cs.length > 1 ? 'S' : ''}`, margin, bottomY);
+            doc.text(`APPARAÎT DANS ${cs.length} SCÈNE${cs.length > 1 ? 'S' : ''}`, margin, bottomY);
             doc.setLineWidth(0.3);
             doc.setDrawColor(180, 180, 180);
             doc.line(margin, bottomY + 1.5, pageWidth - margin, bottomY + 1.5);
@@ -64294,6 +65408,970 @@ const FichesPDF = {
         doc.save(filename);
         Utils.toast('Personnages PDF exporté !', 'success');
         if(typeof History !== 'undefined' && History.log) History.log('EXPORT', 'Personnages PDF généré');
+    },
+    
+    // ============================================================
+    // ===== COMÉDIENS =====
+    // ============================================================
+    
+    openActorsModal: () => {
+        const actorsAll = state.data.actors || [];
+        if(actorsAll.length === 0) {
+            Utils.toast('Aucun comédien à exporter', 'warning');
+            return;
+        }
+        const isSeries = state.currentProjectType === 'series';
+        const continueToOptions = (episodeIds) => {
+            const modes = [
+                { value: 'detailed', label: 'Détaillé', desc: 'Photo + contact + bio + physique + statut + compétences (1 par ligne)' },
+                { value: 'list',     label: 'Liste',    desc: '1 colonne dense : nom · personnage · email · tél' },
+                { value: 'card',     label: 'Fiche',    desc: '1 page A4 paysage par comédien (casting book : photo + tous les détails)' }
+            ];
+            FichesPDF._openOptionsModal('🎭', 'Comédiens PDF — Options', modes, (opts) => {
+                FichesPDF.exportActors({ ...opts, episodeIds });
+            });
+        };
+        if(isSeries) {
+            FichesPDF._openSeasonChooser('actors', '🎭', 'Comédiens — Choix des saisons', continueToOptions);
+        } else {
+            continueToOptions(null);
+        }
+    },
+    
+    exportActors: async (opts = {}) => {
+        const { jsPDF } = window.jspdf;
+        // Mode card → page A4 paysage (casting book). Autres modes → portrait.
+        const isCard = opts.mode === 'card';
+        const doc = new jsPDF(isCard ? 'l' : 'p', 'mm', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 25;
+        const usableWidth = pageWidth - margin * 2;
+        const isSeries = state.currentProjectType === 'series';
+        
+        // ========= Données =========
+        const allActors = state.data.actors || [];
+        const allChars = state.data.characters || [];
+        const groups = (state.data.groups || []).filter(g => g.type === 'actor');
+        const allScenes = state.data.scenes || [];
+        
+        // Filtrage par saisons (si série) : on garde les comédiens dont le perso joué apparaît
+        let scenesScope = allScenes;
+        if(isSeries && opts.episodeIds && opts.episodeIds.length > 0) {
+            scenesScope = allScenes.filter(s => opts.episodeIds.includes(s.episodeId));
+        }
+        
+        const actorsInScope = isSeries ? allActors.filter(a => {
+            const linked = allChars.find(c => c.actor_id === a.id);
+            if(!linked) return true; // Comédiens sans rôle assigné : on les garde
+            return scenesScope.some(s => {
+                if(!s.perso) return false;
+                const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
+                return names.includes(linked.name.toUpperCase());
+            });
+        }) : allActors;
+        
+        if(actorsInScope.length === 0) {
+            Utils.toast('Aucun comédien à exporter dans cette sélection', 'warning');
+            return;
+        }
+        
+        // Helpers : labels via ProfileRenderer.selectOptions
+        const optLabel = (cat, val) => {
+            if(!val) return '';
+            const opts = (typeof ProfileRenderer !== 'undefined' && ProfileRenderer.selectOptions && ProfileRenderer.selectOptions[cat]) || [];
+            const found = opts.find(o => o.value === val);
+            return found ? found.label : val;
+        };
+        const getLinkedChar = (a) => allChars.find(c => c.actor_id === a.id) || null;
+        const charScenes = (ch) => scenesScope.filter(s => {
+            if(!s.perso) return false;
+            const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
+            return names.includes(ch.name.toUpperCase());
+        });
+        const collabLabel = (c) => ({ pro: 'Pro', 'semi-pro': 'Semi-pro', benevole: 'Bénévole' }[c] || '');
+        
+        // Précharger toutes les photos en parallèle
+        Utils.toast('Préparation des photos...', 'info');
+        const urls = actorsInScope.map(a => a.photo).filter(Boolean);
+        const photoMap = await FichesPDF._preloadImages(urls);
+        
+        // ========= Page de garde =========
+        if(opts.includeCover) {
+            FichesPDF._drawCoverPage(doc, 'Comédiens');
+            doc.addPage();
+        }
+        let y = margin;
+        
+        // ========= Grouper =========
+        const grouped = {};
+        actorsInScope.forEach(a => {
+            const gid = a.group_id || 'orphan';
+            if(!grouped[gid]) grouped[gid] = [];
+            grouped[gid].push(a);
+        });
+        const groupOrder = Object.keys(grouped).sort((a, b) => {
+            if(a === 'orphan') return 1;
+            if(b === 'orphan') return -1;
+            return 0;
+        });
+        
+        // ----- MODE DETAILED : 1 fiche par ligne (portrait A4) -----
+        const renderDetailed = (a) => {
+            const cardHeight = 56;
+            y = FichesPDF._ensureSpace(doc, y, cardHeight, pageHeight, margin);
+            
+            const photoW = 28, photoH = 36;
+            const photoUrl = a.photo ? photoMap[a.photo] : null;
+            FichesPDF._drawPhotoOrPlaceholder(doc, photoUrl, margin, y, photoW, photoH);
+            
+            const textX = margin + photoW + 6;
+            const textWidth = usableWidth - photoW - 6;
+            let ty = y + 5;
+            
+            // Nom (grand, gras)
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(13);
+            doc.setTextColor(30, 30, 30);
+            doc.text(a.name || '(sans nom)', textX, ty);
+            ty += 5;
+            
+            // Personnage joué (en italique, couleur accent)
+            const linked = getLinkedChar(a);
+            doc.setFont('helvetica', 'italic');
+            doc.setFontSize(9);
+            doc.setTextColor(80, 80, 120);
+            doc.text(linked ? 'Rôle : ' + linked.name : '— Aucun personnage attribué —', textX, ty);
+            ty += 4.2;
+            
+            // Contact (email + tél sur une ligne, ville en dessous si présente)
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(100, 100, 100);
+            const contactBits = [];
+            if(a.email) contactBits.push('Email : ' + a.email);
+            if(a.phone) contactBits.push('Tél : ' + a.phone);
+            if(contactBits.length > 0) {
+                const contactLine = contactBits.join('   ·   ');
+                const cLines = doc.splitTextToSize(contactLine, textWidth);
+                cLines.slice(0, 1).forEach(line => { doc.text(line, textX, ty); ty += 3.8; });
+            }
+            if(a.city) {
+                doc.text('Ville : ' + a.city, textX, ty);
+                ty += 3.8;
+            }
+            
+            // Statut pro + type collab
+            const statusBits = [];
+            const stat = optLabel('professionalStatus', a.professionalStatus);
+            if(stat) statusBits.push(stat);
+            const collab = collabLabel(a.collabType);
+            if(collab) statusBits.push(collab);
+            if(statusBits.length > 0) {
+                doc.setTextColor(120, 100, 60);
+                doc.text('Statut : ' + statusBits.join(' · '), textX, ty);
+                ty += 3.8;
+                doc.setTextColor(100, 100, 100);
+            }
+            
+            // Bio (max 2 lignes)
+            if(a.bio) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(60, 60, 60);
+                const bioLines = doc.splitTextToSize(a.bio, textWidth);
+                bioLines.slice(0, 2).forEach(line => { doc.text(line, textX, ty); ty += 3.7; });
+                if(bioLines.length > 2) {
+                    doc.setFont('helvetica', 'italic');
+                    doc.text('…', textX, ty);
+                    ty += 3.7;
+                }
+            }
+            
+            // Physique compact : sexe · âge · taille · yeux · cheveux · corpulence
+            const physBits = [];
+            const gender = optLabel('gender', a.gender);
+            if(gender && gender !== '-- Sexe --') physBits.push(gender);
+            if(a.age)    physBits.push(a.age + ' ans');
+            if(a.height) physBits.push(a.height + ' cm');
+            const eyes = optLabel('eyeColor', a.eyeColor);
+            if(eyes && !eyes.startsWith('--')) physBits.push('yeux ' + eyes.toLowerCase());
+            const hairC = optLabel('hairColor', a.hairColor);
+            if(hairC && !hairC.startsWith('--')) physBits.push('cheveux ' + hairC.toLowerCase());
+            const corp = optLabel('corpulence', a.corpulence);
+            if(corp && !corp.startsWith('--')) physBits.push(corp.toLowerCase());
+            if(physBits.length > 0) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8);
+                doc.setTextColor(110, 110, 110);
+                const physLine = 'Physique : ' + physBits.join(' · ');
+                const pLines = doc.splitTextToSize(physLine, textWidth);
+                pLines.slice(0, 1).forEach(line => { doc.text(line, textX, ty); ty += 3.5; });
+            }
+            
+            // Compétences : sports / langues
+            const skillBits = [];
+            if(a.sports)    skillBits.push('Sports : ' + a.sports);
+            if(a.languages) skillBits.push('Langues : ' + a.languages);
+            if(skillBits.length > 0) {
+                doc.setFontSize(8);
+                doc.setTextColor(110, 110, 110);
+                const sLine = skillBits.join('   ·   ');
+                const sLines = doc.splitTextToSize(sLine, textWidth);
+                sLines.slice(0, 1).forEach(line => { doc.text(line, textX, ty); ty += 3.5; });
+            }
+            
+            // Cadre autour de la fiche
+            const actualHeight = Math.max(photoH + 4, ty - y + 2);
+            doc.setDrawColor(200, 200, 200);
+            doc.setLineWidth(0.2);
+            doc.rect(margin - 2, y - 2, usableWidth + 4, actualHeight);
+            
+            y += actualHeight + 3;
+        };
+        
+        // ----- MODE LIST : 1 colonne dense, nom · perso · email · tél -----
+        const renderList = (actorsArr) => {
+            const lineHeight = 5.5;
+            actorsArr.forEach(a => {
+                y = FichesPDF._ensureSpace(doc, y, lineHeight, pageHeight, margin);
+                const linked = getLinkedChar(a);
+                
+                // Colonnes calculées
+                const nameW = usableWidth * 0.28;
+                const roleW = usableWidth * 0.22;
+                const emailW = usableWidth * 0.30;
+                const phoneW = usableWidth * 0.20;
+                
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(9);
+                doc.setTextColor(30, 30, 30);
+                let txtName = a.name || '(sans nom)';
+                while(doc.getTextWidth(txtName) > nameW - 2 && txtName.length > 5) txtName = txtName.substring(0, txtName.length - 2) + '…';
+                doc.text(txtName, margin, y);
+                
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(9);
+                doc.setTextColor(80, 80, 120);
+                let txtRole = linked ? linked.name : '—';
+                while(doc.getTextWidth(txtRole) > roleW - 2 && txtRole.length > 3) txtRole = txtRole.substring(0, txtRole.length - 2) + '…';
+                doc.text(txtRole, margin + nameW, y);
+                
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(90, 90, 90);
+                let txtEmail = a.email || '—';
+                while(doc.getTextWidth(txtEmail) > emailW - 2 && txtEmail.length > 5) txtEmail = txtEmail.substring(0, txtEmail.length - 2) + '…';
+                doc.text(txtEmail, margin + nameW + roleW, y);
+                
+                doc.setTextColor(90, 90, 90);
+                doc.text(a.phone || '—', margin + nameW + roleW + emailW, y);
+                
+                // Ligne pointillée sous
+                doc.setDrawColor(225, 225, 225);
+                doc.setLineWidth(0.1);
+                doc.setLineDashPattern([0.5, 0.5], 0);
+                doc.line(margin, y + 1.5, margin + usableWidth, y + 1.5);
+                doc.setLineDashPattern([], 0);
+                
+                y += lineHeight;
+            });
+            y += 2;
+        };
+        
+        // ----- MODE CARD : 1 page A4 PAYSAGE par comédien (casting book) -----
+        const renderCard = (a) => {
+            const linked = getLinkedChar(a);
+            const photoUrl = a.photo ? photoMap[a.photo] : null;
+            
+            // Bandeau titre coloré en haut
+            doc.setFillColor(40, 40, 60);
+            doc.rect(0, 0, pageWidth, 18, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(16);
+            doc.setTextColor(255, 255, 255);
+            doc.text('COMÉDIEN·NE', margin, 12);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(11);
+            const projT = state.data.title || '';
+            doc.text(projT, pageWidth - margin, 12, { align: 'right' });
+            
+            // Grande photo à gauche (75 x 100mm en paysage)
+            const photoW2 = 75, photoH2 = 100;
+            const photoX = margin;
+            const photoY = 28;
+            FichesPDF._drawPhotoOrPlaceholder(doc, photoUrl, photoX, photoY, photoW2, photoH2);
+            
+            // Bloc infos à droite
+            const infoX = photoX + photoW2 + 12;
+            const infoWidth = pageWidth - infoX - margin;
+            let iy = photoY + 6;
+            
+            // Nom XXL
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(22);
+            doc.setTextColor(20, 20, 20);
+            const nameLines = doc.splitTextToSize(a.name || '(sans nom)', infoWidth);
+            nameLines.forEach(line => { doc.text(line, infoX, iy); iy += 8; });
+            iy += 2;
+            
+            // Rôle joué
+            if(linked) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(100, 100, 100);
+                doc.text('RÔLE', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(12);
+                doc.setTextColor(40, 40, 40);
+                doc.text(linked.name, infoX, iy);
+                iy += 7;
+            }
+            
+            // Contact bloc
+            const hasContact = a.email || a.phone || a.city || a.address || a.website;
+            if(hasContact) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(100, 100, 100);
+                doc.text('CONTACT', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9.5);
+                doc.setTextColor(50, 50, 50);
+                if(a.email)   { doc.text('Email : ' + a.email, infoX, iy); iy += 4.2; }
+                if(a.phone)   { doc.text('Tél : '   + a.phone, infoX, iy); iy += 4.2; }
+                if(a.city)    { doc.text('Ville : ' + a.city,  infoX, iy); iy += 4.2; }
+                if(a.website) { doc.text('Web : '   + a.website, infoX, iy); iy += 4.2; }
+                if(a.address) {
+                    const addrLines = doc.splitTextToSize('Adresse : ' + a.address, infoWidth);
+                    addrLines.slice(0, 2).forEach(l => { doc.text(l, infoX, iy); iy += 4.2; });
+                }
+                iy += 3;
+            }
+            
+            // Statut professionnel
+            const statText = optLabel('professionalStatus', a.professionalStatus);
+            const collabText = collabLabel(a.collabType);
+            if(statText || collabText) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(100, 100, 100);
+                doc.text('STATUT', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9.5);
+                doc.setTextColor(50, 50, 50);
+                if(statText)   { doc.text(statText, infoX, iy); iy += 4.2; }
+                if(collabText) { doc.text('Type : ' + collabText, infoX, iy); iy += 4.2; }
+                iy += 3;
+            }
+            
+            // Bio
+            if(a.bio) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(100, 100, 100);
+                doc.text('PORTRAIT', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9.5);
+                doc.setTextColor(50, 50, 50);
+                const bioLines = doc.splitTextToSize(a.bio, infoWidth);
+                bioLines.forEach(line => {
+                    if(iy < pageHeight - 40) {
+                        doc.text(line, infoX, iy);
+                        iy += 4.3;
+                    }
+                });
+            }
+            
+            // Bas de page : description physique + compétences en grille
+            const bottomY = pageHeight - 38;
+            doc.setLineWidth(0.3);
+            doc.setDrawColor(180, 180, 180);
+            doc.line(margin, bottomY - 4, pageWidth - margin, bottomY - 4);
+            
+            // Colonne gauche : Physique
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(100, 100, 100);
+            doc.text('PHYSIQUE', margin, bottomY);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8.5);
+            doc.setTextColor(50, 50, 50);
+            const physLines = [];
+            const gender = optLabel('gender', a.gender);
+            if(gender && !gender.startsWith('--')) physLines.push('Sexe : ' + gender);
+            if(a.age)    physLines.push('Âge : ' + a.age + ' ans');
+            if(a.height) physLines.push('Taille : ' + a.height + ' cm');
+            if(a.weight) physLines.push('Poids : ' + a.weight + ' kg');
+            const eyes = optLabel('eyeColor', a.eyeColor);
+            if(eyes && !eyes.startsWith('--')) physLines.push('Yeux : ' + eyes);
+            const hairC2 = optLabel('hairColor', a.hairColor);
+            if(hairC2 && !hairC2.startsWith('--')) physLines.push('Cheveux : ' + hairC2);
+            const hairL = optLabel('hairLength', a.hairLength);
+            if(hairL && !hairL.startsWith('--')) physLines.push('Longueur : ' + hairL);
+            const corp2 = optLabel('corpulence', a.corpulence);
+            if(corp2 && !corp2.startsWith('--')) physLines.push('Corpulence : ' + corp2);
+            const eth = optLabel('ethnicity', a.ethnicity);
+            if(eth && !eth.startsWith('--')) physLines.push('Origine : ' + eth);
+            
+            // 2 sous-colonnes pour le bloc physique (compact)
+            const physColW = (pageWidth / 2 - margin - 6) / 2;
+            physLines.forEach((line, i) => {
+                const subCol = Math.floor(i / 4);
+                const row = i % 4;
+                doc.text(line, margin + subCol * physColW, bottomY + 5 + row * 4);
+            });
+            
+            // Colonne droite : Compétences
+            const rightColX = pageWidth / 2 + 5;
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(100, 100, 100);
+            doc.text('COMPÉTENCES', rightColX, bottomY);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8.5);
+            doc.setTextColor(50, 50, 50);
+            let sy = bottomY + 5;
+            const skillW = pageWidth - rightColX - margin;
+            if(a.sports) {
+                const sLines = doc.splitTextToSize('Sports : ' + a.sports, skillW);
+                sLines.slice(0, 2).forEach(l => { doc.text(l, rightColX, sy); sy += 4; });
+            }
+            if(a.languages) {
+                const lLines = doc.splitTextToSize('Langues : ' + a.languages, skillW);
+                lLines.slice(0, 2).forEach(l => { doc.text(l, rightColX, sy); sy += 4; });
+            }
+            if(!a.sports && !a.languages) {
+                doc.setFont('helvetica', 'italic');
+                doc.setTextColor(160, 160, 160);
+                doc.text('—', rightColX, sy);
+            }
+        };
+        
+        // ========= Exécution selon mode =========
+        if(opts.mode === 'card') {
+            // Mode fiche : 1 page A4 paysage par comédien, pas de groupes
+            actorsInScope.forEach((a, idx) => {
+                if(idx > 0) doc.addPage();
+                renderCard(a);
+            });
+        } else {
+            // Modes detailed et list : par groupes
+            groupOrder.forEach((gid) => {
+                const group = groups.find(g => g.id === gid);
+                const groupName = group ? group.name : 'Non classé';
+                
+                y = FichesPDF._ensureSpace(doc, y, 30, pageHeight, margin);
+                y = FichesPDF._drawGroupHeader(doc, groupName, y, margin, usableWidth);
+                
+                if(opts.mode === 'detailed') {
+                    grouped[gid].forEach(a => renderDetailed(a));
+                } else if(opts.mode === 'list') {
+                    renderList(grouped[gid]);
+                }
+            });
+        }
+        
+        // ========= Footer =========
+        FichesPDF._drawFooters(doc, opts.includeCover);
+        
+        // ========= Sauvegarde =========
+        if(opts.returnBlob) return doc.output('blob');
+        const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
+            ? PdfTheme.filename('Comédiens')
+            : `${state.data.title || 'Projet'} - Comédiens - moteur.studio.pdf`;
+        doc.save(filename);
+        Utils.toast('Comédiens PDF exporté !', 'success');
+        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', 'Comédiens PDF généré');
+    },
+    
+    // ============================================================
+    // ===== LIEUX =====
+    // ============================================================
+    
+    openLocationsModal: () => {
+        const locsAll = state.data.locations || [];
+        if(locsAll.length === 0) {
+            Utils.toast('Aucun décor à exporter', 'warning');
+            return;
+        }
+        const isSeries = state.currentProjectType === 'series';
+        const continueToOptions = (episodeIds) => {
+            const modes = [
+                { value: 'detailed', label: 'Détaillé', desc: '1 par ligne : vignette + adresse + contact + scènes' },
+                { value: 'list',     label: 'Liste',    desc: '1 colonne dense : nom · lieu réel · ville · nb scènes' },
+                { value: 'card',     label: 'Fiche',    desc: '1 page A4 paysage par décor + planche-contact des photos' }
+            ];
+            FichesPDF._openOptionsModal('🏠', 'Décors PDF — Options', modes, (opts) => {
+                FichesPDF.exportLocations({ ...opts, episodeIds });
+            });
+        };
+        if(isSeries) {
+            FichesPDF._openSeasonChooser('locs', '🏠', 'Décors — Choix des saisons', continueToOptions);
+        } else {
+            continueToOptions(null);
+        }
+    },
+    
+    exportLocations: async (opts = {}) => {
+        const { jsPDF } = window.jspdf;
+        // Mode card → page A4 paysage. Autres modes → portrait.
+        const isCard = opts.mode === 'card';
+        const doc = new jsPDF(isCard ? 'l' : 'p', 'mm', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 25;
+        const usableWidth = pageWidth - margin * 2;
+        const isSeries = state.currentProjectType === 'series';
+        
+        // ========= Données =========
+        const allLocs = state.data.locations || [];
+        const groups = (state.data.groups || []).filter(g => g.type === 'lieu');
+        const allScenes = state.data.scenes || [];
+        
+        // Filtrage par saisons (si série)
+        let scenesScope = allScenes;
+        if(isSeries && opts.episodeIds && opts.episodeIds.length > 0) {
+            scenesScope = allScenes.filter(s => opts.episodeIds.includes(s.episodeId));
+        }
+        
+        // Helper : scènes tournées dans un lieu (matche le titre INT./EXT. NOM)
+        const locationScenes = (loc, scenePool) => scenePool.filter(s => {
+            if(!s.title) return false;
+            const m = s.title.match(/^(?:INT\.|EXT\.|I\/E)\s*([^\-]+)/i);
+            if(m && m[1]) return m[1].trim().toUpperCase() === (loc.name || '').toUpperCase();
+            return false;
+        });
+        
+        // Filtrer lieux : si série filtrée, ne garder que ceux qui ont au moins 1 scène dans le scope
+        const locsInScope = isSeries && opts.episodeIds && opts.episodeIds.length > 0
+            ? allLocs.filter(loc => locationScenes(loc, scenesScope).length > 0)
+            : allLocs;
+        
+        if(locsInScope.length === 0) {
+            Utils.toast('Aucun décor à exporter dans cette sélection', 'warning');
+            return;
+        }
+        
+        // Helper : label scène avec notation série S01E01-SC01 si série
+        const sceneLabel = (s) => {
+            if(isSeries) {
+                const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
+                if(ep) {
+                    const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
+                    return UI.formatSceneNumber(s, scenesInEp.indexOf(s));
+                }
+            }
+            return '#' + (allScenes.indexOf(s) + 1);
+        };
+        
+        // Précharger toutes les photos en parallèle (1ère photo pour detailed, toutes pour card)
+        Utils.toast('Préparation des photos...', 'info');
+        const allUrls = [];
+        locsInScope.forEach(loc => {
+            const photos = loc.galleryPhotos || [];
+            if(opts.mode === 'card') {
+                photos.forEach(u => allUrls.push(u));
+            } else if(opts.mode === 'detailed') {
+                if(photos[0]) allUrls.push(photos[0]);
+            }
+        });
+        const photoMap = await FichesPDF._preloadImages(allUrls);
+        
+        // ========= Page de garde =========
+        if(opts.includeCover) {
+            FichesPDF._drawCoverPage(doc, 'Décors');
+            doc.addPage();
+        }
+        let y = margin;
+        
+        // ========= Grouper =========
+        const grouped = {};
+        locsInScope.forEach(loc => {
+            const gid = loc.group_id || 'orphan';
+            if(!grouped[gid]) grouped[gid] = [];
+            grouped[gid].push(loc);
+        });
+        const groupOrder = Object.keys(grouped).sort((a, b) => {
+            if(a === 'orphan') return 1;
+            if(b === 'orphan') return -1;
+            return 0;
+        });
+        
+        // ----- MODE DETAILED : 1 fiche par ligne (portrait A4) -----
+        const renderDetailed = (loc) => {
+            const cardHeight = 50;
+            y = FichesPDF._ensureSpace(doc, y, cardHeight, pageHeight, margin);
+            
+            // Vignette paysage 38x28mm (1ère photo de la galerie)
+            const photoW = 38, photoH = 28;
+            const photos = loc.galleryPhotos || [];
+            const photoUrl = photos[0] ? photoMap[photos[0]] : null;
+            FichesPDF._drawPhotoOrPlaceholder(doc, photoUrl, margin, y, photoW, photoH);
+            
+            const textX = margin + photoW + 6;
+            const textWidth = usableWidth - photoW - 6;
+            let ty = y + 5;
+            
+            // Nom (grand, gras)
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(13);
+            doc.setTextColor(30, 30, 30);
+            doc.text(loc.name || '(sans nom)', textX, ty);
+            ty += 5;
+            
+            // Lieu réel (en italique) si différent du nom scénaristique
+            if(loc.realName) {
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(9.5);
+                doc.setTextColor(80, 80, 120);
+                doc.text('Lieu réel : ' + loc.realName, textX, ty);
+                ty += 4.2;
+            }
+            
+            // Adresse
+            if(loc.address) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(100, 100, 100);
+                const addrLines = doc.splitTextToSize('Adresse : ' + loc.address, textWidth);
+                addrLines.slice(0, 2).forEach(line => { doc.text(line, textX, ty); ty += 3.8; });
+            }
+            
+            // Contact (nom + tél sur une ligne)
+            const contactBits = [];
+            if(loc.contactName)  contactBits.push('Contact : ' + loc.contactName);
+            if(loc.contactPhone) contactBits.push('Tél : ' + loc.contactPhone);
+            if(contactBits.length > 0) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(100, 100, 100);
+                const cLine = contactBits.join('   ·   ');
+                const cLines = doc.splitTextToSize(cLine, textWidth);
+                cLines.slice(0, 1).forEach(line => { doc.text(line, textX, ty); ty += 3.8; });
+            }
+            
+            // Notes d'accès (max 2 lignes)
+            if(loc.accessNotes) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8.5);
+                doc.setTextColor(120, 100, 60);
+                const accLines = doc.splitTextToSize('Accès : ' + loc.accessNotes, textWidth);
+                accLines.slice(0, 2).forEach(line => { doc.text(line, textX, ty); ty += 3.5; });
+            }
+            
+            // Scènes
+            const sList = locationScenes(loc, scenesScope);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8);
+            doc.setTextColor(80, 80, 80);
+            if(sList.length > 0) {
+                const labels = sList.map(s => sceneLabel(s)).join('  ');
+                const sceneText = `Scènes tournées (${sList.length}) : ${labels}`;
+                const scLines = doc.splitTextToSize(sceneText, textWidth);
+                scLines.slice(0, 2).forEach(line => { doc.text(line, textX, ty); ty += 3.5; });
+            } else {
+                doc.setFont('helvetica', 'italic');
+                doc.setTextColor(150, 150, 150);
+                doc.text('Aucune scène dans ce décor', textX, ty);
+                ty += 3.5;
+            }
+            
+            // Badge "X photos disponibles" en haut à droite si galerie non vide
+            if(photos.length > 0) {
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(7.5);
+                doc.setTextColor(140, 140, 140);
+                const photoBadge = photos.length === 1 ? '1 photo' : `${photos.length} photos`;
+                doc.text(photoBadge, margin + usableWidth, y + 4, { align: 'right' });
+            }
+            
+            // Cadre autour de la fiche
+            const actualHeight = Math.max(photoH + 4, ty - y + 2);
+            doc.setDrawColor(200, 200, 200);
+            doc.setLineWidth(0.2);
+            doc.rect(margin - 2, y - 2, usableWidth + 4, actualHeight);
+            
+            y += actualHeight + 3;
+        };
+        
+        // ----- MODE LIST : 1 colonne dense -----
+        const renderList = (locsArr) => {
+            const lineHeight = 5.5;
+            locsArr.forEach(loc => {
+                y = FichesPDF._ensureSpace(doc, y, lineHeight, pageHeight, margin);
+                const sList = locationScenes(loc, scenesScope);
+                
+                // Colonnes : nom (28%) · realName (32%) · adresse courte (28%) · nb scènes (12%)
+                const nameW = usableWidth * 0.28;
+                const realW = usableWidth * 0.32;
+                const addrW = usableWidth * 0.28;
+                
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(9);
+                doc.setTextColor(30, 30, 30);
+                let txtName = loc.name || '(sans nom)';
+                while(doc.getTextWidth(txtName) > nameW - 2 && txtName.length > 5) txtName = txtName.substring(0, txtName.length - 2) + '…';
+                doc.text(txtName, margin, y);
+                
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(9);
+                doc.setTextColor(80, 80, 120);
+                let txtReal = loc.realName || '—';
+                while(doc.getTextWidth(txtReal) > realW - 2 && txtReal.length > 3) txtReal = txtReal.substring(0, txtReal.length - 2) + '…';
+                doc.text(txtReal, margin + nameW, y);
+                
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(90, 90, 90);
+                let txtAddr = loc.address || '—';
+                while(doc.getTextWidth(txtAddr) > addrW - 2 && txtAddr.length > 5) txtAddr = txtAddr.substring(0, txtAddr.length - 2) + '…';
+                doc.text(txtAddr, margin + nameW + realW, y);
+                
+                doc.setTextColor(120, 120, 120);
+                doc.text(`${sList.length} sc.`, margin + usableWidth, y, { align: 'right' });
+                
+                // Ligne pointillée sous
+                doc.setDrawColor(225, 225, 225);
+                doc.setLineWidth(0.1);
+                doc.setLineDashPattern([0.5, 0.5], 0);
+                doc.line(margin, y + 1.5, margin + usableWidth, y + 1.5);
+                doc.setLineDashPattern([], 0);
+                
+                y += lineHeight;
+            });
+            y += 2;
+        };
+        
+        // ----- MODE CARD : 1 page A4 paysage par décor + pages photos -----
+        // Page principale = grande photo gauche + grid infos droite
+        // Pages galerie suivantes = 2x2 = 4 photos par page paysage si galerie > 1
+        const renderCard = (loc) => {
+            const photos = loc.galleryPhotos || [];
+            const coverPhotoUrl = photos[0] ? photoMap[photos[0]] : null;
+            
+            // ===== PAGE 1 : Page principale =====
+            // Bandeau titre coloré en haut
+            doc.setFillColor(40, 60, 50);
+            doc.rect(0, 0, pageWidth, 18, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(16);
+            doc.setTextColor(255, 255, 255);
+            doc.text('DÉCOR', margin, 12);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(11);
+            const projT = state.data.title || '';
+            doc.text(projT, pageWidth - margin, 12, { align: 'right' });
+            
+            // Grande photo de couverture à gauche (110 x 80mm en paysage)
+            const photoW2 = 110, photoH2 = 80;
+            const photoX = margin;
+            const photoY = 28;
+            FichesPDF._drawPhotoOrPlaceholder(doc, coverPhotoUrl, photoX, photoY, photoW2, photoH2);
+            
+            // Bloc infos à droite
+            const infoX = photoX + photoW2 + 12;
+            const infoWidth = pageWidth - infoX - margin;
+            let iy = photoY + 6;
+            
+            // Nom XXL
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(20);
+            doc.setTextColor(20, 20, 20);
+            const nameLines = doc.splitTextToSize(loc.name || '(sans nom)', infoWidth);
+            nameLines.forEach(line => { doc.text(line, infoX, iy); iy += 7.5; });
+            iy += 2;
+            
+            // Lieu réel
+            if(loc.realName) {
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(11);
+                doc.setTextColor(80, 80, 120);
+                const rLines = doc.splitTextToSize(loc.realName, infoWidth);
+                rLines.forEach(line => { doc.text(line, infoX, iy); iy += 5; });
+                iy += 3;
+            }
+            
+            // Adresse
+            if(loc.address) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(9);
+                doc.setTextColor(100, 100, 100);
+                doc.text('ADRESSE', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9.5);
+                doc.setTextColor(50, 50, 50);
+                const aLines = doc.splitTextToSize(loc.address, infoWidth);
+                aLines.forEach(line => { doc.text(line, infoX, iy); iy += 4.2; });
+                iy += 3;
+            }
+            
+            // Contact
+            if(loc.contactName || loc.contactPhone) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(9);
+                doc.setTextColor(100, 100, 100);
+                doc.text('CONTACT SUR PLACE', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9.5);
+                doc.setTextColor(50, 50, 50);
+                if(loc.contactName)  { doc.text('Nom : ' + loc.contactName, infoX, iy); iy += 4.2; }
+                if(loc.contactPhone) { doc.text('Tél : ' + loc.contactPhone, infoX, iy); iy += 4.2; }
+                iy += 3;
+            }
+            
+            // Notes d'accès
+            if(loc.accessNotes) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(9);
+                doc.setTextColor(100, 100, 100);
+                doc.text('ACCÈS', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(50, 50, 50);
+                const accLines = doc.splitTextToSize(loc.accessNotes, infoWidth);
+                accLines.forEach(line => {
+                    if(iy < pageHeight - 50) {
+                        doc.text(line, infoX, iy); iy += 4;
+                    }
+                });
+                iy += 3;
+            }
+            
+            // Description scénaristique
+            if(loc.desc) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(9);
+                doc.setTextColor(100, 100, 100);
+                doc.text('DESCRIPTION', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(50, 50, 50);
+                const dLines = doc.splitTextToSize(loc.desc, infoWidth);
+                dLines.forEach(line => {
+                    if(iy < pageHeight - 50) {
+                        doc.text(line, infoX, iy); iy += 4;
+                    }
+                });
+            }
+            
+            // Bas de page : scènes tournées
+            const sList = locationScenes(loc, scenesScope);
+            const bottomY = pageHeight - 32;
+            doc.setLineWidth(0.3);
+            doc.setDrawColor(180, 180, 180);
+            doc.line(margin, bottomY - 4, pageWidth - margin, bottomY - 4);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.setTextColor(100, 100, 100);
+            doc.text(`SCÈNES TOURNÉES DANS CE DÉCOR (${sList.length})`, margin, bottomY);
+            if(sList.length > 0) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(60, 60, 60);
+                const labels = sList.map(s => sceneLabel(s)).join('   ·   ');
+                const scLines = doc.splitTextToSize(labels, pageWidth - margin * 2);
+                let sy = bottomY + 5;
+                scLines.slice(0, 3).forEach(line => {
+                    doc.text(line, margin, sy);
+                    sy += 4;
+                });
+            } else {
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(9);
+                doc.setTextColor(150, 150, 150);
+                doc.text('Aucune scène dans ce décor', margin, bottomY + 5);
+            }
+            
+            // ===== PAGES GALERIE : planche-contact 2x2 si galerie > 1 =====
+            // (la 1ère photo est déjà en couverture page principale, on inclut quand même toutes les photos en planche pour cohérence)
+            if(photos.length > 0) {
+                const photosPerPage = 4; // 2x2 grid
+                const pageCount = Math.ceil(photos.length / photosPerPage);
+                
+                for(let pi = 0; pi < pageCount; pi++) {
+                    doc.addPage();
+                    
+                    // Bandeau galerie
+                    doc.setFillColor(40, 60, 50);
+                    doc.rect(0, 0, pageWidth, 18, 'F');
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(14);
+                    doc.setTextColor(255, 255, 255);
+                    doc.text('PHOTOS — ' + (loc.name || '(sans nom)'), margin, 12);
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(10);
+                    doc.text(`Planche ${pi + 1}/${pageCount}`, pageWidth - margin, 12, { align: 'right' });
+                    
+                    // Grille 2x2
+                    const gridStartY = 26;
+                    const gridGap = 6;
+                    const cellW = (pageWidth - margin * 2 - gridGap) / 2;
+                    const cellH = (pageHeight - gridStartY - margin - gridGap) / 2;
+                    
+                    for(let i = 0; i < photosPerPage; i++) {
+                        const photoIdx = pi * photosPerPage + i;
+                        if(photoIdx >= photos.length) break;
+                        const url = photos[photoIdx];
+                        const dataUrl = photoMap[url];
+                        const col = i % 2;
+                        const row = Math.floor(i / 2);
+                        const cx = margin + col * (cellW + gridGap);
+                        const cy = gridStartY + row * (cellH + gridGap);
+                        FichesPDF._drawPhotoOrPlaceholder(doc, dataUrl, cx, cy, cellW, cellH);
+                        // Numéro de la photo en bas-droit de la cellule
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(8);
+                        doc.setTextColor(120, 120, 120);
+                        doc.text(`Photo ${photoIdx + 1}/${photos.length}`, cx + cellW - 2, cy + cellH - 2, { align: 'right' });
+                    }
+                }
+            }
+        };
+        
+        // ========= Exécution selon mode =========
+        if(opts.mode === 'card') {
+            // Mode fiche : 1 page A4 paysage par décor + pages photos, pas de groupes
+            locsInScope.forEach((loc, idx) => {
+                if(idx > 0) doc.addPage();
+                renderCard(loc);
+            });
+        } else {
+            // Modes detailed et list : par groupes
+            groupOrder.forEach((gid) => {
+                const group = groups.find(g => g.id === gid);
+                const groupName = group ? group.name : 'Non classé';
+                
+                y = FichesPDF._ensureSpace(doc, y, 30, pageHeight, margin);
+                y = FichesPDF._drawGroupHeader(doc, groupName, y, margin, usableWidth);
+                
+                if(opts.mode === 'detailed') {
+                    grouped[gid].forEach(loc => renderDetailed(loc));
+                } else if(opts.mode === 'list') {
+                    renderList(grouped[gid]);
+                }
+            });
+        }
+        
+        // ========= Footer =========
+        FichesPDF._drawFooters(doc, opts.includeCover);
+        
+        // ========= Sauvegarde =========
+        if(opts.returnBlob) return doc.output('blob');
+        const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
+            ? PdfTheme.filename('Décors')
+            : `${state.data.title || 'Projet'} - Décors - moteur.studio.pdf`;
+        doc.save(filename);
+        Utils.toast('Décors PDF exporté !', 'success');
+        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', 'Décors PDF généré');
     }
 };
 
