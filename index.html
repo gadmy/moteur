@@ -6983,7 +6983,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.0.5</p>
+      <p>vv4.0.6</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -9134,7 +9134,8 @@ body.presentation-mode .presentation-bar {
             <div class="menu-dropdown-label">Scénario</div>
             <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.ScriptExport.toFountain()"><span class="moteur-icon cat-writing"><span class="emoji">📜</span><svg><use href="#ico-file-text"/></svg></span> Fountain (.fountain)</div>
             <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.ScriptExport.toFDX()"><span class="moteur-icon cat-writing"><span class="emoji">🎬</span><svg><use href="#ico-clapperboard"/></svg></span> Final Draft (.fdx)</div>
-            <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.Actions.openExportModal()"><span class="moteur-icon cat-writing"><span class="emoji">🖨️</span><svg><use href="#ico-download"/></svg></span> PDF / Imprimer</div>
+            <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.Actions.openExportModal()"><span class="moteur-icon cat-writing"><span class="emoji">🖨️</span><svg><use href="#ico-download"/></svg></span> PDF / Imprimer (navigateur)</div>
+            <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.Exporter.openScenarioPdfModal()"><span class="moteur-icon cat-writing"><span class="emoji">📄</span><svg><use href="#ico-file-text"/></svg></span> Scénario PDF (Final Draft)</div>
             <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.Breakdown.exportPDF()"><span class="moteur-icon cat-production"><span class="emoji">📋</span><svg><use href="#ico-clipboard"/></svg></span> Dépouillement PDF</div>
             <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.Storyboard.exportPDF()"><span class="moteur-icon cat-visual"><span class="emoji">🎨</span><svg><use href="#ico-grid"/></svg></span> Storyboard PDF</div>
             <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.Crew.exportPDF()"><span class="moteur-icon cat-production"><span class="emoji">👥</span><svg><use href="#ico-users"/></svg></span> Équipe PDF</div>
@@ -43099,6 +43100,566 @@ const MoteurArchive = {
         try { if(localStorage.getItem(CONFIG.themeKey) === 'dark') document.body.classList.add('dark-mode'); } catch(e) {} 
         if(state.currentRole === 'viewer') document.body.classList.add('read-only'); 
         document.body.className = document.body.className.replace(/print-\w+/g, "").trim();
+    },
+    
+    // ========== [Phase Scénario jsPDF] EXPORT PDF SCÉNARIO STYLE FINAL DRAFT ==========
+    // Police Courier Prime via CDN (320Ko, chargée 1× par session)
+    // Spec : A4, marges 25mm haut/bas/droite, 35mm gauche, Courier 12pt, line-height 1.0
+    // Format Final Draft : page de garde + scènes avec heading souligné, perso/dial/paren/trans
+    
+    _courierPrimeLoaded: false,
+    _courierPrimeLoading: null,
+    
+    // Charge Courier Prime depuis CDN et l'enregistre dans une instance jsPDF
+    // Retourne true si OK, false si échec → fallback sur Courier built-in
+    loadCourierPrime: async (doc) => {
+        // Si déjà chargée dans cette session, on enregistre juste dans le doc passé
+        if(Exporter._courierPrimeFonts) {
+            try {
+                doc.addFileToVFS('CourierPrime-Regular.ttf', Exporter._courierPrimeFonts.regular);
+                doc.addFont('CourierPrime-Regular.ttf', 'CourierPrime', 'normal');
+                doc.addFileToVFS('CourierPrime-Bold.ttf', Exporter._courierPrimeFonts.bold);
+                doc.addFont('CourierPrime-Bold.ttf', 'CourierPrime', 'bold');
+                doc.addFileToVFS('CourierPrime-Italic.ttf', Exporter._courierPrimeFonts.italic);
+                doc.addFont('CourierPrime-Italic.ttf', 'CourierPrime', 'italic');
+                doc.addFileToVFS('CourierPrime-BoldItalic.ttf', Exporter._courierPrimeFonts.boldItalic);
+                doc.addFont('CourierPrime-BoldItalic.ttf', 'CourierPrime', 'bolditalic');
+                return true;
+            } catch(e) {
+                console.warn('[Scenario PDF] Échec injection police déjà téléchargée :', e);
+                return false;
+            }
+        }
+        
+        // Si un chargement est déjà en cours, on l'attend
+        if(Exporter._courierPrimeLoading) {
+            try { await Exporter._courierPrimeLoading; return Exporter.loadCourierPrime(doc); }
+            catch(e) { return false; }
+        }
+        
+        // Premier chargement : on télécharge les 4 variantes en base64 via fetch
+        const urls = {
+            regular:    'https://cdn.jsdelivr.net/fontsource/fonts/courier-prime@latest/latin-400-normal.ttf',
+            bold:       'https://cdn.jsdelivr.net/fontsource/fonts/courier-prime@latest/latin-700-normal.ttf',
+            italic:     'https://cdn.jsdelivr.net/fontsource/fonts/courier-prime@latest/latin-400-italic.ttf',
+            boldItalic: 'https://cdn.jsdelivr.net/fontsource/fonts/courier-prime@latest/latin-700-italic.ttf'
+        };
+        
+        const ttfToBase64 = async (url) => {
+            const res = await fetch(url);
+            if(!res.ok) throw new Error('HTTP ' + res.status + ' on ' + url);
+            const buf = await res.arrayBuffer();
+            // ArrayBuffer → base64 (sans utiliser btoa avec chaîne longue qui plante en stack overflow)
+            let binary = '';
+            const bytes = new Uint8Array(buf);
+            const chunk = 0x8000;
+            for(let i = 0; i < bytes.length; i += chunk) {
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+            }
+            return btoa(binary);
+        };
+        
+        Exporter._courierPrimeLoading = (async () => {
+            const fonts = {};
+            await Promise.all(Object.entries(urls).map(async ([variant, url]) => {
+                fonts[variant] = await ttfToBase64(url);
+            }));
+            Exporter._courierPrimeFonts = fonts;
+            Exporter._courierPrimeLoaded = true;
+        })();
+        
+        try {
+            await Exporter._courierPrimeLoading;
+            return Exporter.loadCourierPrime(doc); // recurse pour injecter dans le doc
+        } catch(e) {
+            console.warn('[Scenario PDF] Échec téléchargement Courier Prime, fallback Courier built-in :', e);
+            Exporter._courierPrimeLoading = null;
+            return false;
+        }
+    },
+    
+    // Ouvre la modale de configuration du PDF scénario.
+    // Pour les séries multi-épisodes : popup choix saisons d'abord.
+    openScenarioPdfModal: () => {
+        if(!state.data.scenes || state.data.scenes.length === 0) {
+            Utils.toast('Aucune scène à exporter', 'warning');
+            return;
+        }
+        const isSeries = state.currentProjectType === 'series';
+        if(isSeries) {
+            Exporter._openScenarioSeasonChooser();
+        } else {
+            Exporter._openScenarioOptionsModal(null);
+        }
+    },
+    
+    // Étape série : choix des saisons à inclure (modèle identique à openBoardPrintEpisodeChooser)
+    _openScenarioSeasonChooser: () => {
+        const seasons = (state.data.seasons || []).slice().sort((a,b) => (a.number||0) - (b.number||0));
+        const episodes = state.data.episodes || [];
+        if(seasons.length === 0) { Exporter._openScenarioOptionsModal(null); return; }
+        const currentEp = episodes.find(e => e.id === state.currentEpisodeId);
+        const currentSeasonId = currentEp ? currentEp.seasonId : null;
+        const items = seasons.map(s => {
+            const sNum = String(s.number).padStart(2, '0');
+            const epCount = episodes.filter(e => e.seasonId === s.id).length;
+            const checked = s.id === currentSeasonId ? 'checked' : '';
+            const sTitle = s.title ? ' — ' + Utils.escape(s.title) : '';
+            return `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()"><td style="width:24px;padding:4px 8px;vertical-align:middle;"><input type="checkbox" class="scenseachk" value="${s.id}" ${checked} style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td><td style="padding:4px 8px;font-size:0.88rem;line-height:1.3;vertical-align:middle;"><strong>Saison ${sNum}</strong>${sTitle} <span style="color:var(--text-sec);font-size:0.78rem;">(${epCount} ép.)</span></td></tr>`;
+        }).join('');
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:420px;padding:20px;">
+            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">📄 Scénario PDF — Choix des saisons</div>
+            <div style="text-align:left;font-size:0.85rem;color:var(--text-sec);margin-bottom:8px;">Saisons à inclure :</div>
+            <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;"><table style="width:100%;border-collapse:collapse;">${items}</table></div>
+            <div style="display:flex;gap:6px;margin-bottom:14px;">
+                <button type="button" id="scen-sea-all" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout cocher</button>
+                <button type="button" id="scen-sea-none" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout décocher</button>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="confirm-modal-btn cancel" id="scen-sea-cancel" style="margin:0;">Annuler</button>
+                <button class="confirm-modal-btn confirm" id="scen-sea-ok" style="margin:0;">Suivant →</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#scen-sea-all').onclick = () => overlay.querySelectorAll('.scenseachk').forEach(cb => cb.checked = true);
+        overlay.querySelector('#scen-sea-none').onclick = () => overlay.querySelectorAll('.scenseachk').forEach(cb => cb.checked = false);
+        overlay.querySelector('#scen-sea-cancel').onclick = () => overlay.remove();
+        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+        overlay.querySelector('#scen-sea-ok').onclick = () => {
+            const seasonIds = Array.from(overlay.querySelectorAll('.scenseachk:checked')).map(cb => cb.value);
+            if(seasonIds.length === 0) { Utils.toast('Aucune saison sélectionnée', 'warning'); return; }
+            const epIds = episodes.filter(e => seasonIds.includes(e.seasonId)).map(e => e.id);
+            overlay.remove();
+            setTimeout(() => Exporter._openScenarioOptionsModal(epIds), 100);
+        };
+    },
+    
+    // Étape commune : options de mise en forme (numérotation scènes, etc.)
+    _openScenarioOptionsModal: (episodeIds) => {
+        const meta = state.data.scriptMeta || {};
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:480px;padding:20px;">
+            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">📄 Scénario PDF — Options</div>
+            <div style="text-align:left;font-size:0.85rem;margin-bottom:12px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px;background:var(--bg);border-radius:4px;margin-bottom:6px;">
+                    <input type="checkbox" id="scen-opt-numbers" style="margin:0;">
+                    <span>Numéroter les scènes (#1, #2…) — style production</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px;background:var(--bg);border-radius:4px;margin-bottom:6px;">
+                    <input type="checkbox" id="scen-opt-cover" checked style="margin:0;">
+                    <span>Inclure la page de titre Final Draft</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px;background:var(--bg);border-radius:4px;">
+                    <input type="checkbox" id="scen-opt-notes" style="margin:0;">
+                    <span>Inclure les notes de production (sc-note)</span>
+                </label>
+            </div>
+            <div style="text-align:left;font-size:0.78rem;color:var(--text-sec);margin-bottom:14px;font-style:italic;">
+                💡 Police Courier Prime téléchargée au 1ᵉʳ usage (~320 Ko, mis en cache ensuite)
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="confirm-modal-btn cancel" id="scen-opt-cancel" style="margin:0;">Annuler</button>
+                <button class="confirm-modal-btn confirm" id="scen-opt-ok" style="margin:0;">📄 Générer le PDF</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#scen-opt-cancel').onclick = () => overlay.remove();
+        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+        overlay.querySelector('#scen-opt-ok').onclick = async () => {
+            const sceneNumbers = overlay.querySelector('#scen-opt-numbers').checked;
+            const includeCover = overlay.querySelector('#scen-opt-cover').checked;
+            const includeNotes = overlay.querySelector('#scen-opt-notes').checked;
+            overlay.remove();
+            await Exporter.scenarioToPDF({ sceneNumbers, includeCover, includeNotes, episodeIds });
+        };
+    },
+    
+    // === GÉNÉRATION JSPDF DU SCÉNARIO ===
+    // opts = { returnBlob, sceneNumbers, includeCover, includeNotes, episodeIds }
+    scenarioToPDF: async (opts = {}) => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();   // 210 mm
+        const pageHeight = doc.internal.pageSize.getHeight(); // 297 mm
+        
+        // Marges Final Draft : 25mm haut/droite/bas, 35mm gauche (reliure)
+        const marginLeft = 35;
+        const marginRight = 25;
+        const marginTop = 25;
+        const marginBottom = 25;
+        const usableWidth = pageWidth - marginLeft - marginRight; // 150 mm
+        
+        // Toast pendant le téléchargement de la police
+        let toast = null;
+        if(!Exporter._courierPrimeLoaded && !opts.returnBlob) {
+            toast = Utils.toast('Téléchargement de la police Courier Prime…', 'info');
+        }
+        
+        // Charger Courier Prime (ou fallback Courier built-in)
+        const usingPrime = await Exporter.loadCourierPrime(doc);
+        const FONT = usingPrime ? 'CourierPrime' : 'courier';
+        
+        // Métriques Final Draft : Courier 12pt → 10 char/inch → 2.54mm par char
+        // 60 caractères de largeur action = 152mm → tient dans 150mm utile (avec petite tolérance)
+        const fontSize = 12;
+        const lineHeight = 5.0; // mm — équivaut à line-height 1.0 en 12pt
+        doc.setFontSize(fontSize);
+        doc.setFont(FONT, 'normal');
+        
+        // ===== HELPERS =====
+        let y = marginTop;
+        let pageNum = 0; // sera incrémenté à chaque addPage
+        const projectTitle = state.data.title || 'Projet sans titre';
+        const meta = state.data.scriptMeta || {};
+        
+        // Ajoute un saut de page et inscrit le numéro en bas à droite
+        // (skipFirstPage : la page de garde n'a pas de numéro)
+        const newPage = (firstPage = false) => {
+            if(!firstPage) doc.addPage();
+            pageNum++;
+            y = marginTop;
+        };
+        
+        // Inscrit le numéro de page en bas à droite (style Final Draft : "N.")
+        const drawPageNumbers = () => {
+            const totalPages = doc.internal.getNumberOfPages();
+            for(let i = 1; i <= totalPages; i++) {
+                if(opts.includeCover && i === 1) continue; // pas de numéro sur la page de garde
+                doc.setPage(i);
+                doc.setFont(FONT, 'normal');
+                doc.setFontSize(11);
+                doc.setTextColor(0, 0, 0);
+                const offset = opts.includeCover ? 1 : 0;
+                const num = String(i - offset) + '.';
+                doc.text(num, pageWidth - marginRight, pageHeight - 10, { align: 'right' });
+            }
+        };
+        
+        // Assure qu'on a la place pour `linesNeeded` lignes ; sinon nouvelle page
+        const ensureSpace = (linesNeeded) => {
+            const required = linesNeeded * lineHeight;
+            if(y + required > pageHeight - marginBottom) {
+                newPage();
+                return true;
+            }
+            return false;
+        };
+        
+        // Écrit un bloc texte multilignes à une indentation donnée, avec wrapping
+        // indentMm : décalage horizontal en mm depuis marginLeft
+        // widthMm : largeur de wrap en mm
+        // align : 'left' | 'right' | 'center'
+        // style : 'normal' | 'bold' | 'italic' | 'bolditalic'
+        // returns true si le bloc a été coupé en deux pages (utile pour widows/orphans)
+        const writeBlock = (text, opts2 = {}) => {
+            const indent = opts2.indent || 0;
+            const width = opts2.width || (usableWidth - indent);
+            const align = opts2.align || 'left';
+            const style = opts2.style || 'normal';
+            const upper = opts2.upper || false;
+            const underline = opts2.underline || false;
+            const spaceBefore = opts2.spaceBefore || 0;
+            const spaceAfter = opts2.spaceAfter || 0;
+            const avoidBreakBefore = opts2.avoidBreakBefore || false; // ne pas casser AVANT la 1ère ligne
+            
+            let txt = String(text || '');
+            if(upper) txt = txt.toUpperCase();
+            
+            doc.setFont(FONT, style);
+            doc.setFontSize(fontSize);
+            doc.setTextColor(0, 0, 0);
+            
+            // Espace avant (sauf en début de page)
+            if(spaceBefore > 0 && y > marginTop) y += spaceBefore;
+            
+            // Wrapping
+            const lines = doc.splitTextToSize(txt, width);
+            if(lines.length === 0) return;
+            
+            // Vérifie le saut de page anticipé (pour heading/perso : on ne veut pas qu'ils soient isolés en bas)
+            if(avoidBreakBefore) {
+                // S'il ne reste pas la place pour cette ligne + au moins 1 ligne suivante
+                if(y + (Math.max(2, lines.length + 1)) * lineHeight > pageHeight - marginBottom) {
+                    newPage();
+                }
+            }
+            
+            const x = marginLeft + indent;
+            lines.forEach((line, idx) => {
+                // Si on déborde, saut de page
+                if(y + lineHeight > pageHeight - marginBottom) {
+                    newPage();
+                }
+                
+                let drawX = x;
+                if(align === 'right') drawX = marginLeft + indent + width;
+                else if(align === 'center') drawX = marginLeft + indent + (width / 2);
+                
+                doc.text(line, drawX, y, { align });
+                
+                if(underline) {
+                    const txtWidth = doc.getTextWidth(line);
+                    let underlineX = drawX;
+                    if(align === 'right') underlineX = drawX - txtWidth;
+                    else if(align === 'center') underlineX = drawX - (txtWidth / 2);
+                    doc.setLineWidth(0.2);
+                    doc.line(underlineX, y + 0.8, underlineX + txtWidth, y + 0.8);
+                }
+                
+                y += lineHeight;
+            });
+            
+            if(spaceAfter > 0) y += spaceAfter;
+        };
+        
+        // ===== PAGE DE GARDE FINAL DRAFT (optionnelle) =====
+        if(opts.includeCover) {
+            newPage(true); // 1ère page sans addPage
+            
+            // Titre centré au tiers supérieur, gras MAJUSCULES souligné
+            const titleY = pageHeight * 0.35;
+            doc.setFont(FONT, 'bold');
+            doc.setFontSize(28);
+            doc.setTextColor(0, 0, 0);
+            const titleUpper = projectTitle.toUpperCase();
+            doc.text(titleUpper, pageWidth / 2, titleY, { align: 'center' });
+            // Souligné sous le titre
+            const titleWidth = doc.getTextWidth(titleUpper);
+            doc.setLineWidth(0.5);
+            doc.line(pageWidth/2 - titleWidth/2, titleY + 2, pageWidth/2 + titleWidth/2, titleY + 2);
+            
+            // Sous-titre "Un scénario de" + auteur
+            doc.setFont(FONT, 'normal');
+            doc.setFontSize(14);
+            doc.text('Un scénario de', pageWidth / 2, titleY + 18, { align: 'center' });
+            if(meta.author) {
+                doc.text(meta.author, pageWidth / 2, titleY + 28, { align: 'center' });
+                if(meta.coAuthor) {
+                    doc.text('& ' + meta.coAuthor, pageWidth / 2, titleY + 38, { align: 'center' });
+                }
+            }
+            
+            // Source / Basé sur (si présent)
+            if(meta.source) {
+                doc.setFontSize(12);
+                doc.text('Basé sur ' + meta.source, pageWidth / 2, titleY + 55, { align: 'center' });
+            }
+            
+            // Brouillon / Date (centré bas)
+            doc.setFontSize(11);
+            const draftY = pageHeight - 50;
+            if(meta.draft) doc.text(meta.draft, pageWidth / 2, draftY, { align: 'center' });
+            if(meta.draftDate) doc.text(meta.draftDate, pageWidth / 2, draftY + 6, { align: 'center' });
+            
+            // Contact bas-gauche
+            doc.setFontSize(10);
+            const contactY = pageHeight - 35;
+            let contactLine = 0;
+            const writeContact = (txt) => { if(txt) { doc.text(txt, marginLeft, contactY + (contactLine++ * 5)); } };
+            writeContact(meta.contact || '');
+            writeContact(meta.copyright || '');
+            writeContact(meta.notes || '');
+        }
+        
+        // ===== SCÈNES =====
+        // Filtrer par épisodes si demandé (séries)
+        let scenes = state.data.scenes || [];
+        if(opts.episodeIds && Array.isArray(opts.episodeIds) && opts.episodeIds.length > 0) {
+            scenes = scenes.filter(s => opts.episodeIds.includes(s.episodeId));
+        }
+        
+        if(scenes.length === 0) {
+            if(toast && toast.remove) toast.remove();
+            Utils.toast('Aucune scène à exporter dans la sélection', 'warning');
+            return;
+        }
+        
+        // 1ère page de contenu
+        if(!opts.includeCover) {
+            newPage(true);
+        } else {
+            newPage();
+        }
+        
+        scenes.forEach((scene, sceneIdx) => {
+            const sceneNum = sceneIdx + 1;
+            
+            // Heading de scène : INT./EXT. ... — JOUR/NUIT
+            // Format Final Draft : gras MAJUSCULES souligné, espace 24pt avant, 12pt après, page-break-after avoid
+            const headingText = scene.title || `SCÈNE ${sceneNum}`;
+            
+            // Numérotation optionnelle en marge (à gauche et à droite)
+            if(opts.sceneNumbers && y > marginTop) {
+                // ensureSpace pour la ligne suivante avant d'inscrire les marqueurs
+                if(y + lineHeight * 3 > pageHeight - marginBottom) {
+                    newPage();
+                }
+            }
+            
+            // Avoid break before heading + au moins 2 lignes après
+            writeBlock(headingText, {
+                style: 'bold',
+                upper: true,
+                underline: true,
+                spaceBefore: sceneIdx === 0 ? 0 : 10, // 10mm ≈ 24pt
+                spaceAfter: 5,                         // 5mm ≈ 12pt
+                avoidBreakBefore: true
+            });
+            
+            // Numéros de scène inscrits en marge SI option activée
+            if(opts.sceneNumbers) {
+                // Position de la 1ère ligne du heading qu'on vient d'écrire
+                const headingY = y - 5 - lineHeight; // remonter pour pointer la ligne du heading
+                doc.setFont(FONT, 'normal');
+                doc.setFontSize(10);
+                doc.setTextColor(80, 80, 80);
+                const numLabel = '#' + sceneNum;
+                // Marge gauche (sur la marge de reliure)
+                doc.text(numLabel, marginLeft - 8, headingY, { align: 'right' });
+                // Marge droite
+                doc.text(numLabel, pageWidth - marginRight + 2, headingY, { align: 'left' });
+                doc.setTextColor(0, 0, 0);
+            }
+            
+            // Parse le scriptContent pour obtenir les blocs typés
+            const blocks = ScriptExport.parseScriptContent(scene.scriptContent || '');
+            
+            blocks.forEach((blk, blkIdx) => {
+                const txt = blk.text;
+                if(!txt) return;
+                const nextBlk = blocks[blkIdx + 1];
+                
+                switch(blk.type) {
+                    case 'action':
+                        // Indent 0, largeur pleine, espace 12pt avant/après
+                        writeBlock(txt, {
+                            indent: 0,
+                            width: usableWidth,
+                            spaceBefore: 5,
+                            spaceAfter: 0
+                        });
+                        break;
+                    
+                    case 'character':
+                        // Indent 40% de la largeur utile, MAJUSCULES, espace 12pt avant, avoid break (perso ne doit pas être isolé)
+                        writeBlock(txt, {
+                            indent: usableWidth * 0.40,
+                            width: usableWidth * 0.50,
+                            upper: true,
+                            spaceBefore: 5,
+                            spaceAfter: 0,
+                            avoidBreakBefore: true
+                        });
+                        break;
+                    
+                    case 'dialogue':
+                        // Indent 20%, largeur 60%
+                        writeBlock(txt, {
+                            indent: usableWidth * 0.20,
+                            width: usableWidth * 0.60,
+                            spaceBefore: 0,
+                            spaceAfter: 0
+                        });
+                        break;
+                    
+                    case 'parenthetical':
+                        // Indent 30%, largeur 40%, italique, avoid break
+                        // Wrapper avec ( ) si pas déjà présent
+                        const parenTxt = txt.replace(/^\(\s*/, '').replace(/\s*\)$/, '');
+                        writeBlock('(' + parenTxt + ')', {
+                            indent: usableWidth * 0.30,
+                            width: usableWidth * 0.40,
+                            style: 'italic',
+                            spaceBefore: 0,
+                            spaceAfter: 0,
+                            avoidBreakBefore: true
+                        });
+                        break;
+                    
+                    case 'transition':
+                        // Aligné à droite, MAJUSCULES, espace 12pt avant et après
+                        writeBlock(txt, {
+                            indent: 0,
+                            width: usableWidth,
+                            align: 'right',
+                            upper: true,
+                            spaceBefore: 5,
+                            spaceAfter: 5
+                        });
+                        break;
+                    
+                    case 'centered':
+                        // Centré, MAJUSCULES, espace 24pt
+                        writeBlock(txt, {
+                            indent: 0,
+                            width: usableWidth,
+                            align: 'center',
+                            upper: true,
+                            spaceBefore: 10,
+                            spaceAfter: 10
+                        });
+                        break;
+                    
+                    case 'general':
+                        // Italique gris, espace 12pt
+                        const prevFillColor = [80, 80, 80];
+                        doc.setTextColor(prevFillColor[0], prevFillColor[1], prevFillColor[2]);
+                        writeBlock(txt, {
+                            indent: 0,
+                            width: usableWidth,
+                            style: 'italic',
+                            spaceBefore: 5,
+                            spaceAfter: 0
+                        });
+                        doc.setTextColor(0, 0, 0);
+                        break;
+                    
+                    case 'note':
+                        // Optionnel : si opts.includeNotes, on imprime en gris encadré ; sinon on saute
+                        if(!opts.includeNotes) break;
+                        const noteTxt = txt.replace(/^\{\s*/, '').replace(/\s*\}$/, '');
+                        doc.setTextColor(150, 100, 50);
+                        writeBlock('[NOTE] ' + noteTxt, {
+                            indent: 0,
+                            width: usableWidth,
+                            style: 'italic',
+                            spaceBefore: 3,
+                            spaceAfter: 3
+                        });
+                        doc.setTextColor(0, 0, 0);
+                        break;
+                    
+                    default:
+                        // Fallback action
+                        writeBlock(txt, {
+                            indent: 0,
+                            width: usableWidth,
+                            spaceBefore: 5,
+                            spaceAfter: 0
+                        });
+                }
+            });
+        });
+        
+        // ===== FOOTERS / NUMÉROS DE PAGE =====
+        drawPageNumbers();
+        
+        // Toast d'achèvement
+        if(toast && toast.remove) toast.remove();
+        
+        // ===== SORTIE =====
+        if(opts.returnBlob) return doc.output('blob');
+        
+        // Nom de fichier : utiliser PdfTheme si dispo, sinon fallback
+        const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
+            ? PdfTheme.filename('Scénario')
+            : `${projectTitle} - Scénario - moteur.studio.pdf`;
+        doc.save(filename);
+        Utils.toast('Scénario PDF exporté !', 'success');
+        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', 'Scénario PDF (Final Draft) généré');
     },
     
     // ========== RAPPORT DE PRODUCTION PDF ==========
