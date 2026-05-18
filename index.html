@@ -7068,7 +7068,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.2.3</p>
+      <p>vv4.2.4</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -28216,41 +28216,155 @@ if(hasContent) {
     
     // ========== EXPORT PDF STORYBOARD ==========
     // opts = { includeCover, returnBlob, imageOnly, techLayer ('none'|'lighting'|'camera'|'actors') }
-    // - imageOnly : masque tous les textes techniques (n° plan, type, mouvement, descriptions...)
-    // - techLayer : préférence stockée dans printConfig (rendu actif dans la preview HTML
-    //                ; pas encore composé en jsPDF natif)
+    // [Phase D refonte v2] Export Storyboard par rasterisation HORS-ÉCRAN
+    // - Utilise renderPrintPreview qui sait déjà rendre toutes les pages
+    // - html2canvas rasterise chaque page (.sb-print-page)
+    // - Marche depuis n'importe quel onglet, capture images + calques techniques
     exportPDF: async (opts = {}) => {
-        const { jsPDF } = window.jspdf;
-        const scenes = state.data.scenes || [];
         const shots = state.data.shots || [];
         
         if(shots.length === 0) {
-            Utils.toast('Aucun plan à exporter', 'warning');
+            if(!opts.returnBlob) Utils.toast('Aucun plan à exporter', 'warning');
             return;
         }
         
-        Utils.toast('Génération du PDF en cours...', 'info');
+        if(typeof html2canvas === 'undefined') {
+            Utils.toast('html2canvas non chargé', 'error');
+            return;
+        }
         
-        const doc = new jsPDF('l', 'mm', 'a4'); // Paysage
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-        const margin = 10;
+        if(!opts.returnBlob) Utils.toast('Génération du PDF Storyboard...', 'info');
+        
+        const { jsPDF } = window.jspdf;
         const projectTitle = state.data.title || 'Projet sans titre';
+        const cleanT = (t) => (typeof PdfTheme !== 'undefined' && PdfTheme.cleanText) ? PdfTheme.cleanText(t || '') : (t || '');
         
-        // Page de garde optionnelle (par défaut activée)
-        if(opts.includeCover !== false && typeof PdfTheme !== 'undefined' && PdfTheme.coverPage) {
-            PdfTheme.coverPage(doc, { sectionName: 'Storyboard' });
-            doc.addPage();
+        // ===== 1. Créer un container HORS-ÉCRAN pour rendre les pages HTML =====
+        const offscreen = document.createElement('div');
+        offscreen.id = 'storyboardOffscreenPreview';
+        offscreen.style.position = 'absolute';
+        offscreen.style.left = '-99999px';
+        offscreen.style.top = '0';
+        offscreen.style.pointerEvents = 'none';
+        offscreen.style.background = 'white';
+        // Largeur cohérente avec le CSS de .sb-print-page (max-width: 210mm = 794px à 96dpi)
+        offscreen.style.width = '794px';
+        document.body.appendChild(offscreen);
+        
+        // ===== 2. Appeler renderPrintPreview qui sait déjà tout rendre =====
+        try {
+            Storyboard.renderPrintPreview('storyboardOffscreenPreview');
+        } catch(e) {
+            console.warn('[Storyboard PDF] Échec renderPrintPreview:', e);
+            try { document.body.removeChild(offscreen); } catch(_) {}
+            return;
         }
         
-        // Mémoriser printConfig original pour pouvoir surcharger temporairement
-        const originalPrintConfig = Storyboard.printConfig ? Object.assign({}, Storyboard.printConfig) : null;
-        if(opts.techLayer) {
-            Storyboard.printConfig = Object.assign({}, Storyboard.printConfig || {}, { techLayer: opts.techLayer });
+        // Laisser le temps au DOM de se mettre à jour ET aux images async
+        await new Promise(r => setTimeout(r, 600));
+        
+        // Attendre toutes les images du container
+        const allImgs = offscreen.querySelectorAll('img');
+        await Promise.all(Array.from(allImgs).map(img => {
+            if(img.complete && img.naturalWidth > 0) return Promise.resolve();
+            return new Promise(resolve => {
+                img.onload = () => resolve();
+                img.onerror = () => resolve();
+                setTimeout(() => resolve(), 5000);
+            });
+        }));
+        // Laisser le temps aux canvas (drawings + tech layers) de finir leur composition
+        await new Promise(r => setTimeout(r, 500));
+        
+        // ===== 3. Récupérer toutes les pages générées =====
+        const pages = offscreen.querySelectorAll('.sb-print-page');
+        if(pages.length === 0) {
+            if(!opts.returnBlob) Utils.toast('Aucune page à exporter', 'warning');
+            try { document.body.removeChild(offscreen); } catch(_) {}
+            return;
         }
         
-        // Configuration d'affichage - utiliser la config complète
-        const config = Storyboard.printConfig || {};
+        const A4 = { w: 210, h: 297 };
+        let doc = null;
+        
+        // ===== 4. Rasteriser chaque page et l'ajouter au PDF =====
+        try {
+            for(let i = 0; i < pages.length; i++) {
+                const pageEl = pages[i];
+                const isLarge = pageEl.classList.contains('sb-print-page--large');
+                const orientation = isLarge ? 'landscape' : 'portrait';
+                const pageW = orientation === 'landscape' ? A4.h : A4.w;
+                const pageH = orientation === 'landscape' ? A4.w : A4.h;
+                
+                // Rasteriser
+                let dataUrl = null;
+                try {
+                    const rendered = await html2canvas(pageEl, {
+                        scale: 1.5,
+                        useCORS: true,
+                        allowTaint: false,
+                        backgroundColor: '#ffffff',
+                        logging: false
+                    });
+                    dataUrl = rendered.toDataURL('image/jpeg', 0.85);
+                } catch(err) {
+                    console.warn('[Storyboard PDF] html2canvas fail page', i, err);
+                    continue;
+                }
+                if(!dataUrl) continue;
+                
+                // Créer la page PDF
+                if(!doc) {
+                    doc = new jsPDF(orientation === 'landscape' ? 'l' : 'p', 'mm', 'a4');
+                    if(opts.includeCover !== false && typeof PdfTheme !== 'undefined' && PdfTheme.coverPage) {
+                        PdfTheme.coverPage(doc, { sectionName: 'Storyboard' });
+                        doc.addPage(orientation === 'landscape' ? [A4.h, A4.w] : [A4.w, A4.h], orientation);
+                    }
+                } else {
+                    doc.addPage(orientation === 'landscape' ? [A4.h, A4.w] : [A4.w, A4.h], orientation);
+                }
+                
+                // Insérer l'image plein page (avec petite marge)
+                const m = 5;
+                const availW = pageW - m * 2;
+                const availH = pageH - m * 2 - 8; // 8 pour footer
+                const rect = pageEl.getBoundingClientRect();
+                const ratio = rect.width / rect.height;
+                let imgW = availW;
+                let imgH = imgW / ratio;
+                if(imgH > availH) {
+                    imgH = availH;
+                    imgW = imgH * ratio;
+                }
+                const imgX = (pageW - imgW) / 2;
+                const imgY = m;
+                
+                try {
+                    doc.addImage(dataUrl, 'JPEG', imgX, imgY, imgW, imgH);
+                } catch(err) {
+                    console.warn('[Storyboard PDF] addImage fail:', err);
+                }
+                
+                // Footer discret
+                doc.setTextColor(150, 150, 150);
+                doc.setFontSize(7);
+                doc.setFont('helvetica', 'italic');
+                doc.text(cleanT(`${projectTitle} - Page ${i + 1}/${pages.length}`), pageW / 2, pageH - 3, { align: 'center' });
+            }
+        } finally {
+            // ===== 5. Cleanup =====
+            try { document.body.removeChild(offscreen); } catch(_) {}
+        }
+        
+        if(!doc) {
+            if(!opts.returnBlob) Utils.toast('Échec génération Storyboard PDF', 'error');
+            return;
+        }
+        
+        // (Ancien code de rendu natif jsPDF retiré - on utilise maintenant la rasterisation HTML)
+        
+        // (Ancienne config retirée - inutile car on rasterise le DOM)
+        /* RETRAIT_DEBUT */ const _ignored_old_config = (() => {
         // Mode "image seule" : on masque tout sauf le numéro
         const imageOnly = !!opts.imageOnly;
         const showShotNumber = imageOnly ? true : config.shotNumber !== false;
@@ -28429,16 +28543,15 @@ if(hasContent) {
             }
         }
         
-        // Restaurer printConfig original
-        if(originalPrintConfig) Storyboard.printConfig = originalPrintConfig;
+        } // fin BLOC SUPPRIMÉ
         
-        // Nom de fichier explicite
-        const filename = `${projectTitle}_Storyboard`.replace(/[^a-z0-9àâäéèêëïîôùûüç_-]/gi, '_') + '.pdf';
+        // ===== 6. Téléchargement / blob =====
+        const filename = (cleanT(projectTitle) || 'Projet').replace(/[^a-zA-Z0-9àâäéèêëïîôùûüç_-]/gi, '_') + ' - Storyboard - moteur.studio.pdf';
         if(opts.returnBlob) return doc.output('blob');
         doc.save(filename);
         
-        Utils.toast('Storyboard PDF exporté !', 'success');
-        History.log('EXPORT', 'Storyboard PDF généré');
+        Utils.toast(`Storyboard exporté ! (${pages.length} page(s))`, 'success');
+        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', `Storyboard PDF généré (${pages.length} pages)`);
     }
 };
 
@@ -47028,6 +47141,26 @@ const MoteurArchive = {
             }
         } catch(e) {
             console.warn('[Dossier Prod] Échec numérotation globale + lien sommaire :', e);
+        }
+        
+        // ===== 7quater. ROTATION DES PAGES PAYSAGE pour impression cohérente =====
+        // Toutes les pages paysage (Mood Board large, Storyboard, Planning, etc.) sont
+        // tournées de 90° pour qu'à l'impression, l'utilisateur garde la feuille en
+        // portrait et tourne juste la tête pour lire le contenu paysage.
+        // L'orientation logique du contenu n'est PAS modifiée, seul l'attribut /Rotate du PDF.
+        try {
+            const { degrees } = window.PDFLib;
+            const rotPages = masterDoc.getPages();
+            for(let i = 0; i < rotPages.length; i++) {
+                const p = rotPages[i];
+                const { width: w, height: h } = p.getSize();
+                if(w > h) {
+                    // Page paysage : appliquer rotation 90° pour impression portrait
+                    p.setRotation(degrees(90));
+                }
+            }
+        } catch(e) {
+            console.warn('[Dossier Prod] Échec rotation pages paysage :', e);
         }
         
         // ===== 8. SAUVEGARDER ET TÉLÉCHARGER =====
