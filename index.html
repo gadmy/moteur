@@ -1562,6 +1562,7 @@ V1.0 - Base solide (Déc. 2024)
 <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -7067,7 +7068,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.2.2</p>
+      <p>vv4.2.3</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -26340,18 +26341,217 @@ const MoodBoard = {
     },
     
     exportPDF: async (opts = {}) => {
-        // Si pas de board courant (ex: export depuis un autre onglet), prendre le premier
-        let board = MoodBoard.getCurrentBoard();
-        if(!board) {
-            const all = state.data.moodboards || [];
-            board = all[0] || null;
-        }
-        if(!board) {
-            // Aucun moodboard du tout : skip silencieux en mode returnBlob, sinon avertir
+        // [Phase D refonte v2] Export MoodBoard par rasterisation HORS-ÉCRAN
+        // - Marche depuis n'importe quel onglet
+        // - Toutes les planches du projet, même non affichées
+        // - Crée un canvas invisible (-99999px), rasterise, supprime
+        
+        const allBoards = state.data.moodboards || [];
+        if(allBoards.length === 0) {
             if(!opts.returnBlob) Utils.toast('Aucune planche disponible', 'warning');
             return;
         }
         
+        if(typeof html2canvas === 'undefined') {
+            Utils.toast('html2canvas non chargé', 'error');
+            return;
+        }
+        
+        if(!opts.returnBlob) Utils.toast('Génération du PDF MoodBoard...', 'info');
+        
+        const { jsPDF } = window.jspdf;
+        const projectTitle = state.data.title || 'Projet';
+        const cleanT = (t) => (typeof PdfTheme !== 'undefined' && PdfTheme.cleanText) ? PdfTheme.cleanText(t || '') : (t || '');
+        
+        // ===== 1. Créer un canvas HORS-ÉCRAN (invisible à l'utilisateur) =====
+        // Ce <div> est positionné à -99999px : invisible, mais dans le DOM
+        // donc html2canvas peut le rasteriser. Il sera supprimé après l'export.
+        const canvasEl = document.createElement('div');
+        canvasEl.id = 'moodboardCanvasOffscreen';
+        canvasEl.className = 'moodboard-canvas';
+        canvasEl.style.position = 'absolute';
+        canvasEl.style.left = '-99999px';
+        canvasEl.style.top = '0';
+        canvasEl.style.pointerEvents = 'none';
+        canvasEl.style.zIndex = '-9999';
+        document.body.appendChild(canvasEl);
+        
+        // Dimensions exactes selon le format de planche (cohérent avec le CSS)
+        const formatDimensions = {
+            'free':            { w: 5000, h: 5000 },
+            'a4-landscape':    { w: 1190, h: 842 },
+            'a4-portrait':     { w: 842,  h: 1190 },
+            'a3-landscape':    { w: 1684, h: 1190 },
+            'a3-portrait':     { w: 1190, h: 1684 },
+            'a2-landscape':    { w: 2384, h: 1684 },
+            'a2-portrait':     { w: 1684, h: 2384 },
+            'a0-landscape':    { w: 4768, h: 3370 },
+            'a0-portrait':     { w: 3370, h: 4768 }
+        };
+        
+        // ===== 2. Créer le PDF =====
+        let doc = null;
+        const A4 = { w: 210, h: 297 }; // mm
+        
+        try {
+            // Pour chaque planche du projet : générer une page
+            for(let bi = 0; bi < allBoards.length; bi++) {
+                const board = allBoards[bi];
+                const format = board.format || 'free';
+                const dims = formatDimensions[format] || formatDimensions['free'];
+                
+                // Configurer le canvas hors-écran pour cette planche
+                canvasEl.className = 'moodboard-canvas format-' + format;
+                canvasEl.style.width = dims.w + 'px';
+                canvasEl.style.height = dims.h + 'px';
+                canvasEl.style.background = 'white';
+                
+                // Rendre les éléments de la planche dedans
+                const elements = board.elements || [];
+                canvasEl.innerHTML = elements.map(el => MoodBoard.renderElement(el)).join('');
+                
+                // Attendre le rendu et le chargement des images
+                await new Promise(r => setTimeout(r, 300));
+                const imgs = canvasEl.querySelectorAll('img');
+                await Promise.all(Array.from(imgs).map(img => {
+                    if(img.complete && img.naturalWidth > 0) return Promise.resolve();
+                    return new Promise(resolve => {
+                        img.onload = () => resolve();
+                        img.onerror = () => resolve();
+                        setTimeout(() => resolve(), 5000);
+                    });
+                }));
+                await new Promise(r => setTimeout(r, 150));
+                
+                // ===== 3. Calculer la bounding box du contenu =====
+                let captureRect;
+                if(elements.length === 0) {
+                    captureRect = { x: 0, y: 0, w: 600, h: 400 };
+                } else if(format !== 'free') {
+                    // Format fixe (a4, a3, a2 portrait/landscape) : capturer toute la planche
+                    captureRect = { x: 0, y: 0, w: dims.w, h: dims.h };
+                } else {
+                    // Mode free : bounding box des éléments + marge
+                    let bx1 = Infinity, by1 = Infinity, bx2 = -Infinity, by2 = -Infinity;
+                    elements.forEach(el => {
+                        const x = el.x || 0;
+                        const y = el.y || 0;
+                        const w = el.width || 100;
+                        const h = el.height || 100;
+                        if(x < bx1) bx1 = x;
+                        if(y < by1) by1 = y;
+                        if(x + w > bx2) bx2 = x + w;
+                        if(y + h > by2) by2 = y + h;
+                    });
+                    const m = 50;
+                    captureRect = {
+                        x: Math.max(0, bx1 - m),
+                        y: Math.max(0, by1 - m),
+                        w: Math.min(dims.w, (bx2 - bx1) + m * 2),
+                        h: Math.min(dims.h, (by2 - by1) + m * 2)
+                    };
+                }
+                
+                // ===== 4. Rasteriser avec html2canvas =====
+                let dataUrl = null;
+                try {
+                    const rendered = await html2canvas(canvasEl, {
+                        x: captureRect.x,
+                        y: captureRect.y,
+                        width: captureRect.w,
+                        height: captureRect.h,
+                        scale: 1.5,
+                        useCORS: true,
+                        allowTaint: false,
+                        backgroundColor: '#ffffff',
+                        logging: false
+                    });
+                    dataUrl = rendered.toDataURL('image/jpeg', 0.85);
+                } catch(err) {
+                    console.warn('[MoodBoard PDF] html2canvas fail planche', board.name, err);
+                    continue; // skip cette planche
+                }
+                
+                if(!dataUrl) continue;
+                
+                // ===== 5. Déterminer l'orientation A4 selon le ratio =====
+                const ratio = captureRect.w / captureRect.h;
+                const orientation = ratio > 1 ? 'landscape' : 'portrait';
+                const pageW = orientation === 'landscape' ? A4.h : A4.w;
+                const pageH = orientation === 'landscape' ? A4.w : A4.h;
+                
+                // Créer le PDF avec la 1ère page (ou ajouter une nouvelle)
+                if(!doc) {
+                    doc = new jsPDF(orientation === 'landscape' ? 'l' : 'p', 'mm', 'a4');
+                    // Page de garde optionnelle
+                    if(opts.includeCover !== false && typeof PdfTheme !== 'undefined' && PdfTheme.coverPage) {
+                        PdfTheme.coverPage(doc, { sectionName: 'Mood Board' });
+                        doc.addPage(orientation === 'landscape' ? [A4.h, A4.w] : [A4.w, A4.h], orientation);
+                    }
+                } else {
+                    doc.addPage(orientation === 'landscape' ? [A4.h, A4.w] : [A4.w, A4.h], orientation);
+                }
+                
+                // ===== 6. En-tête de page =====
+                const margin = 8;
+                doc.setFillColor(43, 110, 246);
+                doc.rect(0, 0, pageW, 12, 'F');
+                doc.setTextColor(255, 255, 255);
+                doc.setFontSize(11);
+                doc.setFont('helvetica', 'bold');
+                doc.text(cleanT(board.name || 'MoodBoard'), margin, 8);
+                doc.setFontSize(9);
+                doc.setFont('helvetica', 'normal');
+                doc.text(cleanT(projectTitle), pageW - margin, 8, { align: 'right' });
+                
+                // ===== 7. Insérer l'image rasterisée =====
+                // Calculer la taille maximale de l'image sur la page (avec marges)
+                const availW = pageW - margin * 2;
+                const availH = pageH - 12 - margin - 8; // 12 header + 8 footer
+                
+                // Calculer les dimensions en respectant le ratio
+                let imgW = availW;
+                let imgH = imgW / ratio;
+                if(imgH > availH) {
+                    imgH = availH;
+                    imgW = imgH * ratio;
+                }
+                const imgX = (pageW - imgW) / 2;
+                const imgY = 12 + ((availH - imgH) / 2) + margin;
+                
+                try {
+                    doc.addImage(dataUrl, 'JPEG', imgX, imgY, imgW, imgH);
+                } catch(err) {
+                    console.warn('[MoodBoard PDF] addImage fail:', err);
+                }
+                
+                // ===== 8. Pied de page =====
+                doc.setTextColor(150, 150, 150);
+                doc.setFontSize(7);
+                doc.setFont('helvetica', 'italic');
+                doc.text(cleanT(`Genere par Moteur - ${new Date().toLocaleDateString('fr-FR')}`), margin, pageH - 3);
+                doc.text(cleanT(`Planche ${bi + 1}/${allBoards.length} - ${(elements.length)} element(s)`), pageW - margin, pageH - 3, { align: 'right' });
+            }
+        } finally {
+            // ===== 9. Supprimer le canvas hors-écran =====
+            try { document.body.removeChild(canvasEl); } catch(e) {}
+        }
+        
+        if(!doc) {
+            if(!opts.returnBlob) Utils.toast('Echec generation MoodBoard PDF', 'error');
+            return;
+        }
+        
+        // ===== 10. Téléchargement / blob =====
+        if(opts.returnBlob) return doc.output('blob');
+        
+        const filename = (cleanT(projectTitle) || 'Projet').replace(/[^a-zA-Z0-9àâäéèêëïîôùûüç_-]/gi, '_') + ' - Mood Board - moteur.studio.pdf';
+        doc.save(filename);
+        Utils.toast(`Mood Board exporte ! (${allBoards.length} planche(s))`, 'success');
+        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', `MoodBoard PDF généré (${allBoards.length} planches)`);
+    },
+    
+    _legacy_exportPDF_orphan_to_remove: async (opts = {}) => {
         if(!opts.returnBlob) Utils.toast('Génération du PDF en cours...', 'info');
         
         const { jsPDF } = window.jspdf;
