@@ -7067,7 +7067,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.2.1</p>
+      <p>vv4.2.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -23455,7 +23455,7 @@ const tabToSection = {
               });
           });
           
-          Object.entries(globalBreakdown).forEach(([cat, itemsSet]) => {
+          Object.entries(globalBreakdown).forEach(([cat, itemsSet], catIdx) => {
               if(y > pageHeight - 30) {
                   doc.addPage();
                   y = margin;
@@ -23464,14 +23464,20 @@ const tabToSection = {
               const rgb = catColors[cat] || [100, 100, 100];
               const items = Array.from(itemsSet);
               
+              // Espace avant chaque nouvelle catégorie (sauf la 1ère)
+              if(catIdx > 0) y += 4;
+              
               // En-tête catégorie
               doc.setFillColor(rgb[0], rgb[1], rgb[2]);
               doc.rect(margin, y, pageWidth - margin * 2, 8, 'F');
               doc.setTextColor(255, 255, 255);
               doc.setFontSize(10);
               doc.setFont('helvetica', 'bold');
-              doc.text(`${cat} (${items.length})`, margin + 3, y + 6);
-              y += 10;
+              doc.text(PdfTheme.cleanText(`${cat} (${items.length})`), margin + 3, y + 6);
+              y += 8;
+              
+              // Espace entre bandeau coloré et 1ère ligne du tableau
+              y += 4;
               
               // Liste
               doc.setTextColor(50, 50, 50);
@@ -23489,14 +23495,14 @@ const tabToSection = {
                       return bd.some(i => (typeof i === 'string' ? i : i.name) === item);
                   }).length;
                   
-                  doc.text(`• ${item}`, margin + 3, y);
+                  doc.text(PdfTheme.cleanText(`• ${item}`), margin + 3, y);
                   doc.setTextColor(150, 150, 150);
                   doc.text(`(${sceneCount} scène${sceneCount > 1 ? 's' : ''})`, margin + 100, y);
                   doc.setTextColor(50, 50, 50);
                   y += 5;
               });
               
-              y += 8;
+              y += 10;
           });
           
           // ===== FOOTERS UNIFIÉS (Phase C.1) =====
@@ -26375,12 +26381,13 @@ const MoodBoard = {
         doc.setTextColor(255, 255, 255);
         doc.setFontSize(14);
         doc.setFont('helvetica', 'bold');
-        doc.text(board.name || 'MoodBoard', 10, 10);
+        const cleanT = (t) => (typeof PdfTheme !== 'undefined' && PdfTheme.cleanText) ? PdfTheme.cleanText(t || '') : (t || '');
+        doc.text(cleanT(board.name) || 'MoodBoard', 10, 10);
         
         doc.setFontSize(9);
         doc.setFont('helvetica', 'normal');
         const projectTitle = state.data?.title || 'Projet';
-        doc.text(projectTitle, pageWidth - 10, 10, { align: 'right' });
+        doc.text(cleanT(projectTitle), pageWidth - 10, 10, { align: 'right' });
         
         // Liaison si elle existe
         if(board.linkedTo) {
@@ -26454,7 +26461,7 @@ const MoodBoard = {
                     doc.setTextColor(el.textColor || el.color || '#333333');
                     doc.setFontSize(Math.max(8, (el.fontSize || 14) * scale * 0.5));
                     doc.setFont('helvetica', el.bold ? 'bold' : 'normal');
-                    const textLines = doc.splitTextToSize(el.content || '', w);
+                    const textLines = doc.splitTextToSize(cleanT(el.content), w);
                     doc.text(textLines, x + 2, y + 5);
                 } else if(el.type === 'palette') {
                     const colors = el.colors || [];
@@ -26473,7 +26480,7 @@ const MoodBoard = {
                     if(el.paletteName) {
                         doc.setFontSize(8);
                         doc.setTextColor(100, 100, 100);
-                        doc.text(el.paletteName, x, y - 2);
+                        doc.text(cleanT(el.paletteName), x, y - 2);
                     }
                 } else if(el.type === 'shape') {
                     if(shapeImages[el.id]) {
@@ -26493,7 +26500,15 @@ const MoodBoard = {
                     doc.setTextColor(43, 110, 246);
                     doc.setFontSize(8);
                     const urlText = el.url ? (el.url.length > 40 ? el.url.substring(0, 40) + '...' : el.url) : 'Lien';
-                    doc.text('🔗 ' + urlText, x + 3, y + h/2 + 2);
+                    // Pas d'emoji 🔗 (corrompu en latin1). On utilise la flèche → comme indicateur
+                    doc.text('> ' + cleanT(urlText), x + 3, y + h/2 + 2);
+                    // Et on rajoute si possible la description en bas
+                    if(el.description) {
+                        doc.setTextColor(80, 80, 80);
+                        doc.setFontSize(7);
+                        const descLines = doc.splitTextToSize(cleanT(el.description), w - 6);
+                        descLines.slice(0, 2).forEach((ln, i) => doc.text(ln, x + 3, y + h/2 + 8 + (i * 3)));
+                    }
                 }
             } catch(err) {
                 console.warn('Erreur export élément:', el.type, err);
@@ -26503,8 +26518,8 @@ const MoodBoard = {
         // Pied de page
         doc.setTextColor(150, 150, 150);
         doc.setFontSize(7);
-        doc.text(`Généré par Moteur - ${new Date().toLocaleDateString('fr-FR')}`, margin, pageHeight - 3);
-        doc.text(`${elements.length} élément(s)`, pageWidth - margin, pageHeight - 3, { align: 'right' });
+        doc.text(cleanT(`Généré par Moteur - ${new Date().toLocaleDateString('fr-FR')}`), margin, pageHeight - 3);
+        doc.text(cleanT(`${elements.length} élément(s)`), pageWidth - margin, pageHeight - 3, { align: 'right' });
         
         // Nom de fichier explicite
         const boardName = board.name || 'MoodBoard';
@@ -28106,18 +28121,19 @@ if(hasContent) {
                     doc.rect(x, y, shotWidth, imageHeight, 'F');
                     
                     // Image du plan
+                    const _cT = (t) => (typeof PdfTheme !== 'undefined' && PdfTheme.cleanText) ? PdfTheme.cleanText(t || '') : (t || '');
                     if(shot.image) {
                         try {
                             doc.addImage(shot.image, 'PNG', x + 2, y + 2, shotWidth - 4, imageHeight - 4);
                         } catch(e) {
                             doc.setTextColor(180, 180, 180);
-                            doc.setFontSize(20);
-                            doc.text('🎬', x + shotWidth/2, y + imageHeight/2, { align: 'center' });
+                            doc.setFontSize(11);
+                            doc.text('Image non chargee', x + shotWidth/2, y + imageHeight/2, { align: 'center' });
                         }
                     } else {
                         doc.setTextColor(180, 180, 180);
-                        doc.setFontSize(20);
-                        doc.text('🎬', x + shotWidth/2, y + imageHeight/2, { align: 'center' });
+                        doc.setFontSize(11);
+                        doc.text('Pas d\'image', x + shotWidth/2, y + imageHeight/2, { align: 'center' });
                     }
                     
                     // Infos du plan
@@ -28136,7 +28152,7 @@ if(hasContent) {
                     if(showCameraMode && shot.cameraMode) header.push(cameraModes[shot.cameraMode] || Storyboard.extractAcronym(shot.cameraMode));
                     
                     if(header.length > 0) {
-                        doc.text(header.join(' • '), x + 3, infoY);
+                        doc.text(_cT(header.join(' - ')), x + 3, infoY);
                         infoY += 4;
                     }
                     
@@ -28145,7 +28161,7 @@ if(hasContent) {
                     
                     // Description
                     if(showDescription && shot.description && infoY < maxInfoY) {
-                        const lines = doc.splitTextToSize(`📝 ${shot.description}`, shotWidth - 6);
+                        const lines = doc.splitTextToSize(_cT(`Desc: ${shot.description}`), shotWidth - 6);
                         lines.slice(0, 2).forEach(line => {
                             if(infoY < maxInfoY) { doc.text(line, x + 3, infoY); infoY += 3.5; }
                         });
@@ -28153,7 +28169,7 @@ if(hasContent) {
                     
                     // Direction acteurs
                     if(showActorDirection && shot.actorDirection && infoY < maxInfoY) {
-                        const lines = doc.splitTextToSize(`🎭 ${shot.actorDirection}`, shotWidth - 6);
+                        const lines = doc.splitTextToSize(_cT(`Acteurs: ${shot.actorDirection}`), shotWidth - 6);
                         lines.slice(0, 2).forEach(line => {
                             if(infoY < maxInfoY) { doc.text(line, x + 3, infoY); infoY += 3.5; }
                         });
@@ -28161,7 +28177,7 @@ if(hasContent) {
                     
                     // Direction technique
                     if(showTechDirection && shot.technicalDirection && infoY < maxInfoY) {
-                        const lines = doc.splitTextToSize(`⚙️ ${shot.technicalDirection}`, shotWidth - 6);
+                        const lines = doc.splitTextToSize(_cT(`Technique: ${shot.technicalDirection}`), shotWidth - 6);
                         lines.slice(0, 2).forEach(line => {
                             if(infoY < maxInfoY) { doc.text(line, x + 3, infoY); infoY += 3.5; }
                         });
@@ -46571,6 +46587,7 @@ const MoteurArchive = {
         const marginX = 60;
         const titleSomY = A4_H - 80;
         let sumPage = masterDoc.addPage([A4_W, A4_H]);
+        const summaryFirstPageRef = sumPage.ref; // référence pour le lien "Sommaire" en bas de chaque page
         
         // Titre "SOMMAIRE"
         sumPage.drawText('SOMMAIRE', { x: marginX, y: titleSomY, size: 22, font: fontHelvBold, color: rgb(0.15, 0.15, 0.15) });
@@ -46694,6 +46711,85 @@ const MoteurArchive = {
             });
         } catch(e) {
             console.warn('[Dossier Prod] Échec ajout liens hypertextes au sommaire :', e);
+        }
+        
+        // ===== 7ter. NUMÉROTATION GLOBALE + LIEN "Sommaire" sur toutes les pages =====
+        // Pour chaque page après la cover et le sommaire :
+        // - Dessiner un rectangle blanc sur la bande du bas (masque les footers individuels)
+        // - Réécrire le numéro de page global "X / N"
+        // - Ajouter un lien "← Sommaire" en bas à droite (clic = retour au sommaire)
+        try {
+            const allPages = masterDoc.getPages();
+            const totalPages = allPages.length;
+            const linkSommaireText = 'Sommaire';
+            const linkSommaireSize = 9;
+            const linkSommaireW = fontHelv.widthOfTextAtSize(linkSommaireText, linkSommaireSize);
+            
+            for(let i = 0; i < totalPages; i++) {
+                // Skip la cover (i=0) et les pages de sommaire (i < prefixPages)
+                if(i < prefixPages) continue;
+                
+                const pg = allPages[i];
+                const { width: pw, height: ph } = pg.getSize();
+                
+                // 1. Bande blanche pour masquer l'ancien footer (12mm = ~34pt en bas)
+                pg.drawRectangle({
+                    x: 0,
+                    y: 0,
+                    width: pw,
+                    height: 34,
+                    color: rgb(1, 1, 1),
+                    opacity: 1
+                });
+                
+                // 2. Numéro de page global "X / N" centré en bas
+                const pageStr = `${i + 1} / ${totalPages}`;
+                const pageStrW = fontHelv.widthOfTextAtSize(pageStr, 9);
+                pg.drawText(pageStr, {
+                    x: (pw - pageStrW) / 2,
+                    y: 14,
+                    size: 9,
+                    font: fontHelv,
+                    color: rgb(0.5, 0.5, 0.5)
+                });
+                
+                // 3. Lien "Sommaire" en bas à droite
+                const linkX = pw - 40 - linkSommaireW;
+                const linkY = 14;
+                pg.drawText(linkSommaireText, {
+                    x: linkX,
+                    y: linkY,
+                    size: linkSommaireSize,
+                    font: fontHelv,
+                    color: rgb(0.16, 0.43, 0.96)
+                });
+                
+                // Annotation Link sur cette zone
+                if(summaryFirstPageRef) {
+                    const destArr = masterDoc.context.obj([summaryFirstPageRef, PDFName.of('Fit')]);
+                    const act = masterDoc.context.obj({
+                        Type: PDFName.of('Action'),
+                        S: PDFName.of('GoTo'),
+                        D: destArr
+                    });
+                    const linkAnnot = masterDoc.context.obj({
+                        Type: PDFName.of('Annot'),
+                        Subtype: PDFName.of('Link'),
+                        Rect: masterDoc.context.obj([linkX - 2, linkY - 2, linkX + linkSommaireW + 2, linkY + linkSommaireSize + 2]),
+                        Border: masterDoc.context.obj([0, 0, 0]),
+                        A: act
+                    });
+                    const linkRef = masterDoc.context.register(linkAnnot);
+                    let annots = pg.node.lookup(PDFName.of('Annots'), PDFArray);
+                    if(!annots) {
+                        annots = masterDoc.context.obj([]);
+                        pg.node.set(PDFName.of('Annots'), annots);
+                    }
+                    annots.push(linkRef);
+                }
+            }
+        } catch(e) {
+            console.warn('[Dossier Prod] Échec numérotation globale + lien sommaire :', e);
         }
         
         // ===== 8. SAUVEGARDER ET TÉLÉCHARGER =====
