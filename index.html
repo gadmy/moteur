@@ -7039,7 +7039,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.1.5</p>
+      <p>vv4.1.6</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10412,7 +10412,7 @@ body.presentation-mode .presentation-bar {
           <h1 class="print-only-title">RESSOURCES</h1>
           <div style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; align-items:center;">
               <button onclick="app.Resources.add()" class="btn-tool">➕ Nouvelle Ressource</button>
-              <button onclick="app.Resources.exportPDF()" class="btn-tool" style="background:var(--primary); color:#fff;">📄 Export PDF</button>
+              <button onclick="app.Resources.openExportModal()" class="btn-tool" style="background:var(--primary); color:#fff;">📄 Export PDF</button>
               <div style="display:flex; gap:5px; margin-left:auto;">
                   <button class="res-filter-btn active" data-filter="all" onclick="app.Resources.filter('all')">Tous</button>
                   <button class="res-filter-btn" data-filter="accessoire" onclick="app.Resources.filter('accessoire')">🎭 Accessoires</button>
@@ -10436,7 +10436,7 @@ body.presentation-mode .presentation-bar {
 			<button onclick="app.Crew.addMember()" class="btn-tool">➕ Ajouter Technicien</button>
             <button onclick="app.Contacts.importToProject('crew')" class="btn-tool">📇 Mes contacts</button>
             <button onclick="app.GlobalSearch.openCrew()" class="btn-tool">🔍 Rechercher un.e technicien.ne</button>
-            <button onclick="app.Crew.exportPDF()" class="btn-tool-print" style="background:var(--primary); color:#fff;">📄 Export PDF</button>
+            <button onclick="app.Crew.openExportModal()" class="btn-tool-print" style="background:var(--primary); color:#fff;">📄 Export PDF</button>
 		</div>
 		<div id="crewContainer"></div>
 	</div>
@@ -11545,10 +11545,22 @@ body.presentation-mode .presentation-bar {
             
             <div class="exp-section-row">
                 <label class="exp-row-main"><input type="checkbox" class="exp-section-chk" data-section="crew"><span>Équipe</span></label>
+                <label class="exp-row-cover"><input type="checkbox" class="exp-cover-chk" data-section="crew" checked><span>📋 Page de garde</span></label>
+                <div class="exp-row-opts">
+                    <label class="exp-suboption"><input type="radio" name="exp-crew-mode" value="detailed" checked><span>Détaillé</span></label>
+                    <label class="exp-suboption"><input type="radio" name="exp-crew-mode" value="list"><span>Liste</span></label>
+                    <label class="exp-suboption"><input type="radio" name="exp-crew-mode" value="card"><span>Fiche/page</span></label>
+                </div>
             </div>
             
             <div class="exp-section-row">
                 <label class="exp-row-main"><input type="checkbox" class="exp-section-chk" data-section="resources"><span>Ressources</span></label>
+                <label class="exp-row-cover"><input type="checkbox" class="exp-cover-chk" data-section="resources" checked><span>📋 Page de garde</span></label>
+                <div class="exp-row-opts">
+                    <label class="exp-suboption"><input type="radio" name="exp-resources-mode" value="detailed" checked><span>Détaillé</span></label>
+                    <label class="exp-suboption"><input type="radio" name="exp-resources-mode" value="list"><span>Liste</span></label>
+                    <label class="exp-suboption"><input type="radio" name="exp-resources-mode" value="card"><span>Fiche/page</span></label>
+                </div>
             </div>
             
             <div class="exp-section-row">
@@ -22207,8 +22219,8 @@ const tabToSection = {
               actors:       { label: 'Comédiens',             run: () => FichesPDF.exportActors({ includeCover: getCover('actors'), ...opts.actors }) },
               locs:         { label: 'Lieux',                 run: () => FichesPDF.exportLocations({ includeCover: getCover('locs'), ...opts.locs }) },
               breakdown:    { label: 'Dépouillement',         run: () => Breakdown.exportPDF() },
-              crew:         { label: 'Équipe',                run: () => Crew.exportPDF() },
-              resources:    { label: 'Ressources',            run: () => Resources.exportPDF() },
+              crew:         { label: 'Équipe',                run: () => Crew.exportPDF({ includeCover: getCover('crew'), mode: document.querySelector('input[name="exp-crew-mode"]:checked')?.value || 'detailed' }) },
+              resources:    { label: 'Ressources',            run: () => Resources.exportPDF({ includeCover: getCover('resources'), mode: document.querySelector('input[name="exp-resources-mode"]:checked')?.value || 'detailed' }) },
               planning:     { label: 'Planning',              run: () => Planning.exportPlanningPDF({ includeCover: getCover('planning') }) },
               report:       { label: 'Rapport de production', run: () => Exporter.productionReport() },
               budget:       { label: 'Budget',                run: () => Expenses.exportPDF() },
@@ -31817,108 +31829,367 @@ const DrawingEditor = {
           }, 0);
       },
       
-      // [Phase C.5.2] Export PDF des ressources
-      exportPDF: () => {
+      // [Phase C.5.2 → refonte multi-modes Phase D] Export PDF des ressources
+      // 3 modes : detailed (par cat, fiche compacte) | list (tableau dense) | card (1 page/ressource)
+      openExportModal: () => {
+          const resources = state.data.resources || [];
+          if(resources.length === 0) {
+              Utils.toast('Aucune ressource à exporter', 'warning');
+              return;
+          }
+          const modes = [
+              { value: 'detailed', label: 'Détaillé', desc: 'Par catégorie, vignette + description + propriétaire + scènes' },
+              { value: 'list',     label: 'Liste',    desc: 'Tableau dense : nom · description · propriétaire · note · scènes' },
+              { value: 'card',     label: 'Fiche',    desc: '1 page A4 par ressource (photo + tous les détails)' }
+          ];
+          if(typeof FichesPDF !== 'undefined' && FichesPDF._openOptionsModal) {
+              FichesPDF._openOptionsModal('📦', 'Ressources PDF — Options', modes, (opts) => {
+                  Resources.exportPDF(opts);
+              });
+          } else {
+              Resources.exportPDF({ mode: 'detailed', includeCover: true });
+          }
+      },
+      
+      exportPDF: async (opts = {}) => {
           const { jsPDF } = window.jspdf;
-          const doc = new jsPDF('p', 'mm', 'a4');
+          opts.mode = opts.mode || 'detailed';
+          const isCard = opts.mode === 'card';
+          const doc = new jsPDF(isCard ? 'l' : 'p', 'mm', 'a4');
           const pageWidth = doc.internal.pageSize.getWidth();
           const pageHeight = doc.internal.pageSize.getHeight();
-          const margin = 15;
+          const margin = 20;
+          const usableWidth = pageWidth - margin * 2;
           
           const resources = state.data.resources || [];
-          
           if(resources.length === 0) {
               Utils.toast('Aucune ressource à exporter', 'warning');
               return;
           }
           
-          // Page de garde
-          PdfTheme.coverPage(doc, { sectionName: 'Ressources' });
+          const catLabels = { accessoire: 'Accessoires', costume: 'Costumes', vehicule: 'Véhicules', autre: 'Autres' };
+          const CAT_TO_BD = { accessoire: 'ACCESSOIRES', costume: 'COSTUMES', vehicule: 'VEHICULES' };
           
-          doc.addPage();
+          if(opts.mode !== 'list') Utils.toast('Préparation des photos...', 'info');
+          let photoMap = {};
+          if(opts.mode !== 'list' && typeof FichesPDF !== 'undefined' && FichesPDF._preloadImages) {
+              const urls = resources.map(r => r.photo).filter(Boolean);
+              photoMap = await FichesPDF._preloadImages(urls);
+          }
+          
+          const scenesUsing = (resource) => {
+              const bdCat = CAT_TO_BD[resource.category];
+              if(!bdCat) return [];
+              const terms = [resource.name.toLowerCase(), ...(resource.aliases || []).map(a => a.toLowerCase())];
+              const found = [];
+              (state.data.scenes || []).forEach((scene, idx) => {
+                  if(!scene.breakdown || !scene.breakdown[bdCat]) return;
+                  if(scene.breakdown[bdCat].some(item => terms.includes(item.toLowerCase()))) {
+                      found.push({ scene, idx });
+                  }
+              });
+              return found;
+          };
+          
+          const isSeries = state.currentProjectType === 'series';
+          const sceneLabel = (scene, idx) => {
+              if(isSeries && scene.episodeId) {
+                  const ep = (state.data.episodes || []).find(e => e.id === scene.episodeId);
+                  if(ep && typeof UI !== 'undefined' && UI.formatSceneNumber) {
+                      const scenesInEp = (state.data.scenes || []).filter(x => x.episodeId === ep.id);
+                      return UI.formatSceneNumber(scene, scenesInEp.indexOf(scene));
+                  }
+              }
+              return '#' + (idx + 1);
+          };
+          
+          if(opts.includeCover !== false) {
+              if(typeof FichesPDF !== 'undefined' && FichesPDF._drawCoverPage) {
+                  FichesPDF._drawCoverPage(doc, 'Ressources');
+              } else {
+                  PdfTheme.coverPage(doc, { sectionName: 'Ressources' });
+              }
+              doc.addPage();
+          }
           let y = margin;
           
-          // Stats en haut
-          const catLabels = { accessoire: 'Accessoires', costume: 'Costumes', vehicule: 'Véhicules' };
           const byCat = {};
           resources.forEach(r => {
               const c = r.category || 'autre';
               if(!byCat[c]) byCat[c] = [];
               byCat[c].push(r);
           });
+          const catOrder = ['accessoire', 'costume', 'vehicule', 'autre'].filter(c => byCat[c]);
           
-          doc.setFontSize(10);
-          doc.setTextColor(100, 100, 100);
-          doc.setFont('helvetica', 'normal');
-          const statLine = Object.entries(byCat)
-              .map(([c, arr]) => `${catLabels[c] || c} : ${arr.length}`)
-              .join('  ·  ');
-          doc.text(statLine, pageWidth / 2, y + 4, { align: 'center' });
-          y += 14;
+          const ensureSpace = (space) => {
+              if(y + space > pageHeight - margin - 5) { doc.addPage(); y = margin; }
+          };
           
-          // Pour chaque catégorie : section + liste
-          Object.entries(byCat).forEach(([cat, list]) => {
-              if(y > pageHeight - 30) { doc.addPage(); y = margin; }
-              
-              // En-tête catégorie
+          const drawCatHeader = (catKey, count) => {
+              ensureSpace(14);
               doc.setFillColor(43, 110, 246);
-              doc.rect(margin, y, pageWidth - margin * 2, 9, 'F');
+              doc.rect(margin, y, usableWidth, 9, 'F');
               doc.setTextColor(255, 255, 255);
               doc.setFontSize(11);
               doc.setFont('helvetica', 'bold');
-              doc.text(`${PdfTheme.cleanText(catLabels[cat] || cat).toUpperCase()} (${list.length})`, margin + 4, y + 6.2);
+              const lbl = (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText(catLabels[catKey] || catKey) : (catLabels[catKey] || catKey);
+              doc.text(`${lbl.toUpperCase()} (${count})`, margin + 4, y + 6.2);
               y += 12;
-              
-              // En-têtes tableau
-              doc.setFillColor(240, 240, 240);
-              doc.rect(margin, y, pageWidth - margin * 2, 7, 'F');
-              doc.setTextColor(80, 80, 80);
-              doc.setFontSize(8);
-              doc.setFont('helvetica', 'bold');
-              doc.text('Nom', margin + 3, y + 5);
-              doc.text('Description', margin + 60, y + 5);
-              doc.text('Propriétaire', margin + 125, y + 5);
-              doc.text('Scènes', margin + 165, y + 5);
-              y += 11;
-              
-              // Tri alphabétique
-              const sorted = [...list].sort((a, b) => 
-                  (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' })
-              );
-              
-              doc.setFont('helvetica', 'normal');
-              doc.setTextColor(50, 50, 50);
-              sorted.forEach((res, idx) => {
-                  if(y > pageHeight - 15) { doc.addPage(); y = margin; }
-                  
-                  if(idx % 2 === 0) {
-                      doc.setFillColor(250, 250, 250);
-                      doc.rect(margin, y - 4, pageWidth - margin * 2, 7, 'F');
-                  }
-                  
-                  const linkedScenes = (Resources.getLinkedScenes && Resources.getLinkedScenes(res)) || [];
-                  const owner = (Resources.getOwnerText && Resources.getOwnerText(res)) || '-';
-                  
-                  doc.setFontSize(8);
-                  doc.setTextColor(50, 50, 50);
-                  doc.text(PdfTheme.cleanText(res.name || '-').substring(0, 28), margin + 3, y);
-                  doc.text(PdfTheme.cleanText(res.description || '-').substring(0, 34), margin + 60, y);
-                  doc.text(PdfTheme.cleanText(owner).substring(0, 22), margin + 125, y);
-                  doc.text(String(linkedScenes.length), margin + 165, y);
-                  
-                  y += 6.5;
-              });
-              
-              y += 6;
-          });
+          };
           
-          // Footers + filename
-          PdfTheme.applyFooters(doc);
-          doc.save(PdfTheme.filename('Ressources'));
+          const drawPhoto = (url, x, y, w, h) => {
+              if(typeof FichesPDF !== 'undefined' && FichesPDF._drawPhotoOrPlaceholder) {
+                  FichesPDF._drawPhotoOrPlaceholder(doc, url, x, y, w, h);
+              } else {
+                  doc.setFillColor(240, 240, 240);
+                  doc.rect(x, y, w, h, 'F');
+                  if(url) { try { doc.addImage(url, 'JPEG', x, y, w, h); } catch(e){} }
+              }
+          };
+          
+          const cleanT = (t) => (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText(t || '') : (t || '');
+          
+          // ===== MODE DETAILED =====
+          const renderDetailed = (r) => {
+              const cardH = 38;
+              ensureSpace(cardH);
+              const photoW = 32, photoH = 32;
+              const photoUrl = r.photo ? photoMap[r.photo] : null;
+              drawPhoto(photoUrl, margin, y, photoW, photoH);
+              const textX = margin + photoW + 5;
+              const textWidth = usableWidth - photoW - 7;
+              let ty = y + 5;
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(11);
+              doc.setTextColor(30, 30, 30);
+              doc.text(cleanT(r.name) || '(sans nom)', textX, ty);
+              ty += 4.5;
+              if(r.description) {
+                  doc.setFont('helvetica', 'normal');
+                  doc.setFontSize(9);
+                  doc.setTextColor(80, 80, 80);
+                  const dLines = doc.splitTextToSize(cleanT(r.description), textWidth);
+                  dLines.slice(0, 2).forEach(line => { doc.text(line, textX, ty); ty += 3.8; });
+              }
+              if(r.owner) {
+                  doc.setFont('helvetica', 'normal');
+                  doc.setFontSize(8.5);
+                  doc.setTextColor(110, 110, 110);
+                  doc.text('Propriétaire : ' + cleanT(r.owner), textX, ty);
+                  ty += 3.6;
+              }
+              if(r.note) {
+                  doc.setFont('helvetica', 'italic');
+                  doc.setFontSize(8);
+                  doc.setTextColor(140, 100, 40);
+                  const nLines = doc.splitTextToSize('Note : ' + cleanT(r.note), textWidth);
+                  nLines.slice(0, 1).forEach(line => { doc.text(line, textX, ty); ty += 3.5; });
+              }
+              const used = scenesUsing(r);
+              doc.setFont('helvetica', 'normal');
+              doc.setFontSize(8);
+              if(used.length > 0) {
+                  doc.setTextColor(80, 80, 80);
+                  const labels = used.map(u => sceneLabel(u.scene, u.idx)).join('  ');
+                  const sLines = doc.splitTextToSize(`Utilisée dans (${used.length}) : ${labels}`, textWidth);
+                  sLines.slice(0, 1).forEach(line => { doc.text(line, textX, ty); ty += 3.5; });
+              } else {
+                  doc.setFont('helvetica', 'italic');
+                  doc.setTextColor(160, 160, 160);
+                  doc.text('Non assignée à une scène', textX, ty);
+                  ty += 3.5;
+              }
+              const actualH = Math.max(photoH + 4, ty - y + 2);
+              doc.setDrawColor(200, 200, 200);
+              doc.setLineWidth(0.2);
+              doc.rect(margin - 2, y - 2, usableWidth + 4, actualH);
+              y += actualH + 3;
+          };
+          
+          // ===== MODE LIST =====
+          const renderList = (catResources) => {
+              const lineH = 5.5;
+              ensureSpace(lineH);
+              doc.setFillColor(235, 235, 240);
+              doc.rect(margin, y, usableWidth, lineH, 'F');
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(8);
+              doc.setTextColor(70, 70, 70);
+              const colsW = [usableWidth * 0.22, usableWidth * 0.40, usableWidth * 0.18, usableWidth * 0.10, usableWidth * 0.10];
+              const colsX = [margin];
+              for(let i = 1; i < colsW.length; i++) colsX.push(colsX[i-1] + colsW[i-1]);
+              doc.text('Nom',           colsX[0] + 1, y + 3.8);
+              doc.text('Description',   colsX[1] + 1, y + 3.8);
+              doc.text('Propriétaire',  colsX[2] + 1, y + 3.8);
+              doc.text('Note',          colsX[3] + 1, y + 3.8);
+              doc.text('Scènes',        colsX[4] + colsW[4] - 1, y + 3.8, { align: 'right' });
+              y += lineH + 1;
+              catResources.forEach(r => {
+                  ensureSpace(lineH);
+                  const used = scenesUsing(r);
+                  doc.setFont('helvetica', 'bold');
+                  doc.setFontSize(8.5);
+                  doc.setTextColor(30, 30, 30);
+                  let txtName = cleanT(r.name) || '(sans nom)';
+                  while(doc.getTextWidth(txtName) > colsW[0] - 2 && txtName.length > 4) txtName = txtName.substring(0, txtName.length - 2) + '…';
+                  doc.text(txtName, colsX[0] + 1, y + 3.8);
+                  doc.setFont('helvetica', 'normal');
+                  doc.setTextColor(80, 80, 80);
+                  let txtDesc = cleanT(r.description) || '—';
+                  while(doc.getTextWidth(txtDesc) > colsW[1] - 2 && txtDesc.length > 4) txtDesc = txtDesc.substring(0, txtDesc.length - 2) + '…';
+                  doc.text(txtDesc, colsX[1] + 1, y + 3.8);
+                  let txtOwn = cleanT(r.owner) || '—';
+                  while(doc.getTextWidth(txtOwn) > colsW[2] - 2 && txtOwn.length > 4) txtOwn = txtOwn.substring(0, txtOwn.length - 2) + '…';
+                  doc.text(txtOwn, colsX[2] + 1, y + 3.8);
+                  doc.setFont('helvetica', 'italic');
+                  doc.setTextColor(120, 100, 60);
+                  let txtNote = r.note ? cleanT(r.note) : '—';
+                  while(doc.getTextWidth(txtNote) > colsW[3] - 2 && txtNote.length > 4) txtNote = txtNote.substring(0, txtNote.length - 2) + '…';
+                  doc.text(txtNote, colsX[3] + 1, y + 3.8);
+                  doc.setFont('helvetica', 'normal');
+                  doc.setTextColor(110, 110, 110);
+                  doc.text(`${used.length} sc.`, colsX[4] + colsW[4] - 1, y + 3.8, { align: 'right' });
+                  doc.setDrawColor(225, 225, 230);
+                  doc.setLineWidth(0.1);
+                  doc.setLineDashPattern([0.5, 0.5], 0);
+                  doc.line(margin, y + lineH, margin + usableWidth, y + lineH);
+                  doc.setLineDashPattern([], 0);
+                  y += lineH;
+              });
+              y += 2;
+          };
+          
+          // ===== MODE CARD (A4 paysage) =====
+          const renderCard = (r) => {
+              const photoUrl = r.photo ? photoMap[r.photo] : null;
+              doc.setFillColor(50, 50, 70);
+              doc.rect(0, 0, pageWidth, 18, 'F');
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(14);
+              doc.setTextColor(255, 255, 255);
+              const catLbl = (catLabels[r.category] || r.category || '—').toUpperCase();
+              doc.text(catLbl, margin, 11);
+              doc.setFont('helvetica', 'normal');
+              doc.setFontSize(10);
+              doc.text(state.data.title || '', pageWidth - margin, 11, { align: 'right' });
+              const photoW2 = 95, photoH2 = 85;
+              const photoX = margin, photoY = 28;
+              drawPhoto(photoUrl, photoX, photoY, photoW2, photoH2);
+              const infoX = photoX + photoW2 + 12;
+              const infoW = pageWidth - infoX - margin;
+              let iy = photoY + 6;
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(20);
+              doc.setTextColor(20, 20, 20);
+              const nLines = doc.splitTextToSize(cleanT(r.name) || '(sans nom)', infoW);
+              nLines.forEach(l => { doc.text(l, infoX, iy); iy += 7.5; });
+              iy += 3;
+              if(r.description) {
+                  doc.setFont('helvetica', 'bold');
+                  doc.setFontSize(9);
+                  doc.setTextColor(100, 100, 100);
+                  doc.text('DESCRIPTION', infoX, iy);
+                  iy += 4;
+                  doc.setFont('helvetica', 'normal');
+                  doc.setFontSize(10);
+                  doc.setTextColor(50, 50, 50);
+                  const dLines = doc.splitTextToSize(cleanT(r.description), infoW);
+                  dLines.forEach(l => { if(iy < pageHeight - 50) { doc.text(l, infoX, iy); iy += 4.5; } });
+                  iy += 3;
+              }
+              if(r.owner) {
+                  doc.setFont('helvetica', 'bold');
+                  doc.setFontSize(9);
+                  doc.setTextColor(100, 100, 100);
+                  doc.text('PROPRIÉTAIRE', infoX, iy);
+                  iy += 4;
+                  doc.setFont('helvetica', 'normal');
+                  doc.setFontSize(10);
+                  doc.setTextColor(50, 50, 50);
+                  doc.text(cleanT(r.owner), infoX, iy);
+                  iy += 6;
+              }
+              if(r.note) {
+                  doc.setFont('helvetica', 'bold');
+                  doc.setFontSize(9);
+                  doc.setTextColor(100, 100, 100);
+                  doc.text('NOTE', infoX, iy);
+                  iy += 4;
+                  doc.setFont('helvetica', 'italic');
+                  doc.setFontSize(9.5);
+                  doc.setTextColor(140, 100, 40);
+                  const nLines2 = doc.splitTextToSize(cleanT(r.note), infoW);
+                  nLines2.forEach(l => { if(iy < pageHeight - 50) { doc.text(l, infoX, iy); iy += 4.2; } });
+                  iy += 3;
+              }
+              if(r.aliases && r.aliases.length > 0) {
+                  doc.setFont('helvetica', 'bold');
+                  doc.setFontSize(9);
+                  doc.setTextColor(100, 100, 100);
+                  doc.text('ALIAS', infoX, iy);
+                  iy += 4;
+                  doc.setFont('helvetica', 'normal');
+                  doc.setFontSize(9);
+                  doc.setTextColor(50, 50, 50);
+                  doc.text(r.aliases.join(', '), infoX, iy);
+                  iy += 5;
+              }
+              const used = scenesUsing(r);
+              const bottomY = pageHeight - 30;
+              doc.setLineWidth(0.3);
+              doc.setDrawColor(180, 180, 180);
+              doc.line(margin, bottomY - 4, pageWidth - margin, bottomY - 4);
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(10);
+              doc.setTextColor(100, 100, 100);
+              doc.text(`UTILISÉE DANS (${used.length})`, margin, bottomY);
+              if(used.length > 0) {
+                  doc.setFont('helvetica', 'normal');
+                  doc.setFontSize(9);
+                  doc.setTextColor(60, 60, 60);
+                  const labels = used.map(u => sceneLabel(u.scene, u.idx)).join('  ·  ');
+                  const sLines = doc.splitTextToSize(labels, pageWidth - margin * 2);
+                  let sy = bottomY + 5;
+                  sLines.slice(0, 3).forEach(l => { doc.text(l, margin, sy); sy += 4; });
+              } else {
+                  doc.setFont('helvetica', 'italic');
+                  doc.setFontSize(9);
+                  doc.setTextColor(150, 150, 150);
+                  doc.text('Non assignée à une scène', margin, bottomY + 5);
+              }
+          };
+          
+          // ===== EXÉCUTION =====
+          if(opts.mode === 'card') {
+              resources.forEach((r, idx) => {
+                  if(idx > 0) doc.addPage();
+                  renderCard(r);
+              });
+          } else {
+              catOrder.forEach(catKey => {
+                  drawCatHeader(catKey, byCat[catKey].length);
+                  if(opts.mode === 'list') renderList(byCat[catKey]);
+                  else byCat[catKey].forEach(r => renderDetailed(r));
+                  y += 2;
+              });
+          }
+          
+          if(typeof FichesPDF !== 'undefined' && FichesPDF._drawFooters) {
+              FichesPDF._drawFooters(doc, opts.includeCover !== false);
+          } else if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
+              PdfTheme.applyFooters(doc);
+          }
+          
+          if(opts.returnBlob) return doc.output('blob');
+          const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
+              ? PdfTheme.filename('Ressources')
+              : `${state.data.title || 'Projet'} - Ressources - moteur.studio.pdf`;
+          doc.save(filename);
           Utils.toast('Ressources PDF exportées !', 'success');
-          History.log('EXPORT', 'Ressources PDF générées');
+          if(typeof History !== 'undefined' && History.log) History.log('EXPORT', `Ressources PDF générées (${opts.mode})`);
       }
   };
+
   
   const Crew = {
     addMember: async () => {
