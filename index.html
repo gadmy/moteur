@@ -7067,7 +7067,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.1.9</p>
+      <p>vv4.2.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -11480,7 +11480,7 @@ body.presentation-mode .presentation-bar {
         
         <div class="exp-modal-actions-top">
             <button type="button" class="exp-btn-toggle exp-btn-state" id="exp-toggle-all" data-active="0" onclick="app.Actions.expToggleAll()">☑ Tout cocher</button>
-            <button type="button" class="exp-btn-toggle exp-btn-state" id="exp-toggle-covers" data-active="0" onclick="app.Actions.expToggleAllCovers()">📋 Toutes les pages de garde</button>
+            <button type="button" class="exp-btn-toggle exp-btn-state" id="exp-toggle-covers" data-active="0" onclick="app.Actions.expToggleAllCovers()">📋 Pages de garde</button>
             <button type="button" class="exp-btn-toggle exp-btn-state" id="exp-toggle-merged" data-active="0" onclick="app.Actions.expToggleMerged()" title="Fusionner toutes les sections en un seul PDF (Dossier de production)">📦 PDF fusionné</button>
             <button type="button" class="exp-btn-toggle" onclick="app.Actions.expResetOrder()" title="Remettre l'ordre par défaut">↩️ Réinitialiser l'ordre</button>
         </div>
@@ -11545,7 +11545,7 @@ body.presentation-mode .presentation-bar {
                         <label class="exp-row-main"><input type="checkbox" class="exp-section-chk" data-section="storyboard"><span>Storyboard</span></label>
                         <label class="exp-row-cover"><input type="checkbox" class="exp-cover-chk" data-section="storyboard" checked><span>📋 Page de garde</span></label>
                         <div class="exp-row-opts">
-                            <label class="exp-suboption" title="Image seule, sans détails techniques"><input type="checkbox" id="exp-storyboard-imageonly"><span>Image seule</span></label>
+                            <label class="exp-suboption" title="Image seule, sans détails techniques"><input type="checkbox" id="exp-storyboard-imageonly" checked><span>Image seule</span></label>
                             <label class="exp-suboption"><input type="radio" name="exp-storyboard-techlayer" value="none" checked><span>Aucun calque</span></label>
                             <label class="exp-suboption"><input type="radio" name="exp-storyboard-techlayer" value="lighting"><span>Lumière</span></label>
                             <label class="exp-suboption"><input type="radio" name="exp-storyboard-techlayer" value="camera"><span>Caméra</span></label>
@@ -11597,7 +11597,7 @@ body.presentation-mode .presentation-bar {
                         <div class="exp-row-opts">
                             <label class="exp-suboption"><input type="radio" name="exp-locs-mode" value="detailed" checked><span>Détaillé</span></label>
                             <label class="exp-suboption"><input type="radio" name="exp-locs-mode" value="list"><span>Liste</span></label>
-                            <label class="exp-suboption"><input type="radio" name="exp-locs-mode" value="card"><span>Fiche + photos</span></label>
+                            <label class="exp-suboption"><input type="radio" name="exp-locs-mode" value="card"><span>Fiche+photos</span></label>
                         </div>
                     </div>
                 </div>
@@ -22263,7 +22263,7 @@ const tabToSection = {
           });
       },
       
-      // Toggle "Toutes les pages de garde" : bascule l'état
+      // Toggle "Pages de garde" : bascule l'état
       expToggleAllCovers: () => {
           const btn = document.getElementById('exp-toggle-covers');
           if(!btn) return;
@@ -26334,13 +26334,19 @@ const MoodBoard = {
     },
     
     exportPDF: async (opts = {}) => {
-        const board = MoodBoard.getCurrentBoard();
+        // Si pas de board courant (ex: export depuis un autre onglet), prendre le premier
+        let board = MoodBoard.getCurrentBoard();
         if(!board) {
-            Utils.toast('Aucune planche sélectionnée', 'warning');
+            const all = state.data.moodboards || [];
+            board = all[0] || null;
+        }
+        if(!board) {
+            // Aucun moodboard du tout : skip silencieux en mode returnBlob, sinon avertir
+            if(!opts.returnBlob) Utils.toast('Aucune planche disponible', 'warning');
             return;
         }
         
-        Utils.toast('Génération du PDF en cours...', 'info');
+        if(!opts.returnBlob) Utils.toast('Génération du PDF en cours...', 'info');
         
         const { jsPDF } = window.jspdf;
         const format = board.format || 'a4-landscape';
@@ -46461,7 +46467,7 @@ const MoteurArchive = {
             return;
         }
         
-        const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+        const { PDFDocument, StandardFonts, rgb, PDFName, PDFArray, PDFDict } = window.PDFLib;
         
         // Filtrer les sections sans blob (erreurs lors de la génération individuelle)
         const validSections = sections.filter(s => s.blob);
@@ -46570,12 +46576,13 @@ const MoteurArchive = {
         sumPage.drawText('SOMMAIRE', { x: marginX, y: titleSomY, size: 22, font: fontHelvBold, color: rgb(0.15, 0.15, 0.15) });
         sumPage.drawLine({ start: { x: marginX, y: titleSomY - 8 }, end: { x: A4_W - marginX, y: titleSomY - 8 }, thickness: 0.6, color: rgb(0.7, 0.7, 0.7) });
         
-        // Lignes du sommaire
+        // Lignes du sommaire + zones cliquables (liens hypertextes ajoutés en étape 7bis)
         let sumY = titleSomY - 30;
         const lineH = 18;
         const maxY = 60;
+        const tocLinkAreas = []; // { page, x1, y1, x2, y2, sectionIndex }
         
-        toc.forEach((entry) => {
+        toc.forEach((entry, sectionIndex) => {
             if(sumY < maxY) {
                 // Nouvelle page de sommaire
                 sumPage = masterDoc.addPage([A4_W, A4_H]);
@@ -46584,8 +46591,11 @@ const MoteurArchive = {
             const labelStr = cleanStr(entry.label);
             const pageStr = String(entry.startPage);
             
-            // Label à gauche
-            sumPage.drawText(labelStr, { x: marginX, y: sumY, size: 11, font: fontHelv, color: rgb(0.2, 0.2, 0.2) });
+            // Couleur bleu liens hypertextes pour le label (indique cliquable)
+            const linkColor = rgb(0.16, 0.43, 0.96);
+            
+            // Label à gauche (en bleu liens)
+            sumPage.drawText(labelStr, { x: marginX, y: sumY, size: 11, font: fontHelv, color: linkColor });
             
             // Points de remplissage entre label et numéro
             const labelW = fontHelv.widthOfTextAtSize(labelStr, 11);
@@ -46599,8 +46609,19 @@ const MoteurArchive = {
                 sumPage.drawText(dots, { x: dotStart, y: sumY, size: 11, font: fontHelv, color: rgb(0.7, 0.7, 0.7) });
             }
             
-            // Numéro de page à droite
-            sumPage.drawText(pageStr, { x: A4_W - marginX - pageW, y: sumY, size: 11, font: fontHelvBold, color: rgb(0.2, 0.2, 0.2) });
+            // Numéro de page à droite (en bleu liens)
+            sumPage.drawText(pageStr, { x: A4_W - marginX - pageW, y: sumY, size: 11, font: fontHelvBold, color: linkColor });
+            
+            // Mémoriser la zone cliquable de toute la ligne (de marginX à A4_W - marginX)
+            // Coords PDF : x1/y1 = bas-gauche, x2/y2 = haut-droite
+            tocLinkAreas.push({
+                page: sumPage,
+                x1: marginX - 2,
+                y1: sumY - 3,
+                x2: A4_W - marginX + 2,
+                y2: sumY + 13, // hauteur ≈ taille de police 11
+                sectionIndex: sectionIndex
+            });
             
             sumY -= lineH;
         });
@@ -46612,14 +46633,67 @@ const MoteurArchive = {
         }
         
         // ===== 7. FUSIONNER TOUS LES PDFs SOURCES =====
-        for(const s of loadedSections) {
+        // On mémorise la référence de la 1ère page de chaque section pour les liens du sommaire
+        const sectionFirstPageRefs = {}; // { sectionIndex: pageRef }
+        for(let i = 0; i < loadedSections.length; i++) {
+            const s = loadedSections[i];
             try {
                 const pageIndices = s.srcDoc.getPageIndices();
                 const copiedPages = await masterDoc.copyPages(s.srcDoc, pageIndices);
-                copiedPages.forEach(p => masterDoc.addPage(p));
+                copiedPages.forEach((p, idx) => {
+                    const added = masterDoc.addPage(p);
+                    if(idx === 0) {
+                        // Mémoriser la référence à la première page ajoutée pour cette section
+                        sectionFirstPageRefs[i] = added.ref;
+                    }
+                });
             } catch(e) {
                 console.error(`[Dossier Prod] Échec copie pages ${s.label} :`, e);
             }
+        }
+        
+        // ===== 7bis. AJOUTER LES LIENS HYPERTEXTES AU SOMMAIRE =====
+        // Pour chaque ligne enregistrée dans tocLinkAreas, créer une annotation Link
+        // qui pointe vers la première page de la section correspondante.
+        try {
+            tocLinkAreas.forEach(area => {
+                const targetRef = sectionFirstPageRefs[area.sectionIndex];
+                if(!targetRef) return;
+                
+                // Construire la destination : [pageRef, /Fit] (ouvre la page entière)
+                const destArray = masterDoc.context.obj([
+                    targetRef,
+                    PDFName.of('Fit')
+                ]);
+                
+                // Construire l'action GoTo
+                const action = masterDoc.context.obj({
+                    Type: PDFName.of('Action'),
+                    S: PDFName.of('GoTo'),
+                    D: destArray
+                });
+                
+                // Construire l'annotation Link
+                const linkAnnot = masterDoc.context.obj({
+                    Type: PDFName.of('Annot'),
+                    Subtype: PDFName.of('Link'),
+                    Rect: masterDoc.context.obj([area.x1, area.y1, area.x2, area.y2]),
+                    Border: masterDoc.context.obj([0, 0, 0]), // pas de bordure visible
+                    A: action
+                });
+                const linkAnnotRef = masterDoc.context.register(linkAnnot);
+                
+                // Ajouter l'annotation à la page de sommaire concernée
+                const pageNode = area.page.node;
+                let annots = pageNode.lookup(PDFName.of('Annots'), PDFArray);
+                if(!annots) {
+                    annots = masterDoc.context.obj([]);
+                    pageNode.set(PDFName.of('Annots'), annots);
+                }
+                annots.push(linkAnnotRef);
+            });
+        } catch(e) {
+            console.warn('[Dossier Prod] Échec ajout liens hypertextes au sommaire :', e);
         }
         
         // ===== 8. SAUVEGARDER ET TÉLÉCHARGER =====
