@@ -7039,7 +7039,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.1.6</p>
+      <p>vv4.1.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -32551,156 +32551,389 @@ const DrawingEditor = {
         return CONFIG.crewRoles[groupId] || [];
     },
     
-    // ========== EXPORT PDF ÉQUIPE [Phase C.2.1 refondu] ==========
-    exportPDF: () => {
+    // [Phase C.2.1 → refonte multi-modes Phase D] Export PDF de l'équipe technique
+    // 3 modes : detailed | list | card. Sépare proprement équipe technique des comédiens
+    // (les comédiens ont leur propre export FichesPDF.exportActors).
+    openExportModal: () => {
+        const crew = state.data.crew || [];
+        if(crew.length === 0) {
+            Utils.toast('Aucun membre d\'équipe à exporter', 'warning');
+            return;
+        }
+        const modes = [
+            { value: 'detailed', label: 'Détaillé', desc: 'Par département : photo + rôle + contact + véhicule + tarif' },
+            { value: 'list',     label: 'Liste',    desc: 'Tableau dense : nom · rôle · email · tél' },
+            { value: 'card',     label: 'Fiche',    desc: '1 page A4 paysage par technicien (photo + tous les détails)' }
+        ];
+        if(typeof FichesPDF !== 'undefined' && FichesPDF._openOptionsModal) {
+            FichesPDF._openOptionsModal('👥', 'Équipe PDF — Options', modes, (opts) => {
+                Crew.exportPDF(opts);
+            });
+        } else {
+            Crew.exportPDF({ mode: 'detailed', includeCover: true });
+        }
+    },
+    
+    exportPDF: async (opts = {}) => {
         const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('p', 'mm', 'a4');
+        opts.mode = opts.mode || 'detailed';
+        const isCard = opts.mode === 'card';
+        const doc = new jsPDF(isCard ? 'l' : 'p', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
-        const margin = 15;
+        const margin = 20;
+        const usableWidth = pageWidth - margin * 2;
         
         const crew = state.data.crew || [];
-        const actors = state.data.actors || [];
-        
-        if(crew.length === 0 && actors.length === 0) {
+        if(crew.length === 0) {
             Utils.toast('Aucun membre d\'équipe à exporter', 'warning');
             return;
         }
         
-        // ===== PAGE DE GARDE (Phase C.1) =====
-        PdfTheme.coverPage(doc, { sectionName: 'Équipe' });
+        const crewGroups = (state.data.groups || []).filter(g => g.type === 'crew');
         
-        // ===== CONTENU =====
-        doc.addPage();
+        if(opts.mode !== 'list') Utils.toast('Préparation des photos...', 'info');
+        let photoMap = {};
+        if(opts.mode !== 'list' && typeof FichesPDF !== 'undefined' && FichesPDF._preloadImages) {
+            const urls = crew.map(c => c.photo).filter(Boolean);
+            photoMap = await FichesPDF._preloadImages(urls);
+        }
+        
+        if(opts.includeCover !== false) {
+            if(typeof FichesPDF !== 'undefined' && FichesPDF._drawCoverPage) {
+                FichesPDF._drawCoverPage(doc, 'Équipe');
+            } else {
+                PdfTheme.coverPage(doc, { sectionName: 'Équipe' });
+            }
+            doc.addPage();
+        }
         let y = margin;
         
-        // Statistiques en haut
-        doc.setFontSize(10);
-        doc.setTextColor(100, 100, 100);
-        doc.setFont('helvetica', 'normal');
-        doc.text(`${actors.length} comédien(s) · ${crew.length} technicien(s)`, pageWidth / 2, y + 4, { align: 'center' });
-        y += 14;
+        const grouped = {};
+        crew.forEach(m => {
+            const gid = m.group_id || 'orphan';
+            if(!grouped[gid]) grouped[gid] = [];
+            grouped[gid].push(m);
+        });
+        const groupOrder = Object.keys(grouped).sort((a, b) => {
+            if(a === 'orphan') return 1;
+            if(b === 'orphan') return -1;
+            return 0;
+        });
         
-        // Helper : dessiner un en-tête de section
-        const drawSectionHeader = (label, count) => {
-            if(y > pageHeight - 30) { doc.addPage(); y = margin; }
+        const ensureSpace = (space) => {
+            if(y + space > pageHeight - margin - 5) { doc.addPage(); y = margin; }
+        };
+        
+        const drawDeptHeader = (deptName, count) => {
+            ensureSpace(14);
             doc.setFillColor(43, 110, 246);
-            doc.rect(margin, y, pageWidth - margin * 2, 9, 'F');
+            doc.rect(margin, y, usableWidth, 9, 'F');
             doc.setTextColor(255, 255, 255);
             doc.setFontSize(11);
             doc.setFont('helvetica', 'bold');
-            doc.text(`${PdfTheme.cleanText(label)} (${count})`, margin + 4, y + 6.2);
+            const lbl = (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText(deptName) : deptName;
+            doc.text(`${lbl.toUpperCase()} (${count})`, margin + 4, y + 6.2);
             y += 12;
         };
         
-        // Helper : dessiner les en-têtes de tableau
-        const drawTableHeaders = (headers) => {
-            doc.setFillColor(240, 240, 240);
-            doc.rect(margin, y, pageWidth - margin * 2, 7, 'F');
-            doc.setTextColor(80, 80, 80);
-            doc.setFontSize(8);
-            doc.setFont('helvetica', 'bold');
-            headers.forEach(h => doc.text(h.label, margin + h.x, y + 5));
-            y += 8;
-            doc.setFont('helvetica', 'normal');
+        const drawPhoto = (url, x, y, w, h) => {
+            if(typeof FichesPDF !== 'undefined' && FichesPDF._drawPhotoOrPlaceholder) {
+                FichesPDF._drawPhotoOrPlaceholder(doc, url, x, y, w, h);
+            } else {
+                doc.setFillColor(240, 240, 240);
+                doc.rect(x, y, w, h, 'F');
+                if(url) { try { doc.addImage(url, 'JPEG', x, y, w, h); } catch(e){} }
+            }
         };
         
-        // ===== COMÉDIENS (tri alphabétique) =====
-        if(actors.length > 0) {
-            drawSectionHeader('COMÉDIENS', actors.length);
-            
-            drawTableHeaders([
-                { x: 3,   label: 'Comédien' },
-                { x: 55,  label: 'Rôle' },
-                { x: 100, label: 'Téléphone' },
-                { x: 135, label: 'Email' }
-            ]);
-            
-            // Tri alphabétique par nom
-            const sortedActors = [...actors].sort((a, b) => 
-                (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' })
-            );
-            
-            doc.setTextColor(50, 50, 50);
-            sortedActors.forEach((actor, idx) => {
-                if(y > pageHeight - 15) { doc.addPage(); y = margin; }
-                
-                // Alternance de fond pour lisibilité
-                if(idx % 2 === 0) {
-                    doc.setFillColor(250, 250, 250);
-                    doc.rect(margin, y - 4, pageWidth - margin * 2, 7, 'F');
-                }
-                
-                // Trouver le personnage joué (via characterId OU role text)
-                const character = state.data.characters?.find(c => c.id === actor.characterId);
-                const roleLabel = character?.name || actor.role || '-';
-                
+        const cleanT = (t) => (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText(t || '') : (t || '');
+        
+        // ===== MODE DETAILED =====
+        const renderDetailed = (m) => {
+            const cardH = 46;
+            ensureSpace(cardH);
+            const photoW = 28, photoH = 36;
+            const photoUrl = m.photo ? photoMap[m.photo] : null;
+            drawPhoto(photoUrl, margin, y, photoW, photoH);
+            const textX = margin + photoW + 5;
+            const textWidth = usableWidth - photoW - 7;
+            let ty = y + 5;
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(12);
+            doc.setTextColor(30, 30, 30);
+            doc.text(cleanT(m.name) || '(sans nom)', textX, ty);
+            ty += 5;
+            if(m.role) {
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(9.5);
+                doc.setTextColor(80, 80, 120);
+                doc.text(cleanT(m.role), textX, ty);
+                ty += 4.2;
+            }
+            const contactBits = [];
+            if(m.email) contactBits.push('Email : ' + m.email);
+            if(m.phone) contactBits.push('Tél : ' + m.phone);
+            if(contactBits.length > 0) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(100, 100, 100);
+                const cLine = contactBits.join('   ·   ');
+                const cLines = doc.splitTextToSize(cLine, textWidth);
+                cLines.slice(0, 1).forEach(line => { doc.text(line, textX, ty); ty += 3.8; });
+            }
+            if(m.city || m.address) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(100, 100, 100);
+                const addrBits = [];
+                if(m.city) addrBits.push('Ville : ' + cleanT(m.city));
+                if(m.address) addrBits.push(cleanT(m.address));
+                const aLines = doc.splitTextToSize(addrBits.join('  ·  '), textWidth);
+                aLines.slice(0, 1).forEach(line => { doc.text(line, textX, ty); ty += 3.8; });
+            }
+            if(m.hasVehicle) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8.5);
+                doc.setTextColor(60, 120, 80);
+                const vBits = ['Véhicule'];
+                if(m.vehicleType) vBits.push(cleanT(m.vehicleType));
+                if(m.vehicleSeats) vBits.push(m.vehicleSeats + ' places');
+                if(m.vehicleTrunk) vBits.push('coffre OK');
+                doc.text(vBits.join(' · '), textX, ty);
+                ty += 3.6;
+            }
+            if(m.dailyRate) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8.5);
+                doc.setTextColor(120, 100, 60);
+                doc.text(`Tarif : ${m.dailyRate} ${m.rateCurrency || '€'} / ${m.rateType || 'Jour'}`, textX, ty);
+                ty += 3.6;
+            }
+            if(m.notes) {
+                doc.setFont('helvetica', 'italic');
                 doc.setFontSize(8);
-                doc.setTextColor(50, 50, 50);
-                doc.text(PdfTheme.cleanText(actor.name || '-').substring(0, 28), margin + 3, y);
-                doc.text(PdfTheme.cleanText(roleLabel).substring(0, 22), margin + 55, y);
-                doc.text((actor.phone || '-').substring(0, 18), margin + 100, y);
-                doc.setTextColor(43, 110, 246);
-                doc.text((actor.email || '-').substring(0, 28), margin + 135, y);
-                
-                y += 6.5;
+                doc.setTextColor(110, 110, 110);
+                const nLines = doc.splitTextToSize(cleanT(m.notes), textWidth);
+                nLines.slice(0, 2).forEach(line => { doc.text(line, textX, ty); ty += 3.4; });
+            }
+            const actualH = Math.max(photoH + 4, ty - y + 2);
+            doc.setDrawColor(200, 200, 200);
+            doc.setLineWidth(0.2);
+            doc.rect(margin - 2, y - 2, usableWidth + 4, actualH);
+            y += actualH + 3;
+        };
+        
+        // ===== MODE LIST =====
+        const renderList = (members) => {
+            const lineH = 5.5;
+            ensureSpace(lineH);
+            doc.setFillColor(235, 235, 240);
+            doc.rect(margin, y, usableWidth, lineH, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8);
+            doc.setTextColor(70, 70, 70);
+            const colsW = [usableWidth * 0.25, usableWidth * 0.25, usableWidth * 0.30, usableWidth * 0.20];
+            const colsX = [margin];
+            for(let i = 1; i < colsW.length; i++) colsX.push(colsX[i-1] + colsW[i-1]);
+            doc.text('Nom',   colsX[0] + 1, y + 3.8);
+            doc.text('Rôle',  colsX[1] + 1, y + 3.8);
+            doc.text('Email', colsX[2] + 1, y + 3.8);
+            doc.text('Tél',   colsX[3] + 1, y + 3.8);
+            y += lineH + 1;
+            members.forEach(m => {
+                ensureSpace(lineH);
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(8.5);
+                doc.setTextColor(30, 30, 30);
+                let txtName = cleanT(m.name) || '(sans nom)';
+                while(doc.getTextWidth(txtName) > colsW[0] - 2 && txtName.length > 4) txtName = txtName.substring(0, txtName.length - 2) + '…';
+                doc.text(txtName, colsX[0] + 1, y + 3.8);
+                doc.setFont('helvetica', 'italic');
+                doc.setTextColor(80, 80, 120);
+                let txtRole = cleanT(m.role) || '—';
+                while(doc.getTextWidth(txtRole) > colsW[1] - 2 && txtRole.length > 3) txtRole = txtRole.substring(0, txtRole.length - 2) + '…';
+                doc.text(txtRole, colsX[1] + 1, y + 3.8);
+                doc.setFont('helvetica', 'normal');
+                doc.setTextColor(90, 90, 90);
+                let txtEmail = m.email || '—';
+                while(doc.getTextWidth(txtEmail) > colsW[2] - 2 && txtEmail.length > 5) txtEmail = txtEmail.substring(0, txtEmail.length - 2) + '…';
+                doc.text(txtEmail, colsX[2] + 1, y + 3.8);
+                doc.text(m.phone || '—', colsX[3] + 1, y + 3.8);
+                doc.setDrawColor(225, 225, 230);
+                doc.setLineWidth(0.1);
+                doc.setLineDashPattern([0.5, 0.5], 0);
+                doc.line(margin, y + lineH, margin + usableWidth, y + lineH);
+                doc.setLineDashPattern([], 0);
+                y += lineH;
             });
-            
-            y += 10;
+            y += 2;
+        };
+        
+        // ===== MODE CARD (A4 paysage par technicien) =====
+        const renderCard = (m) => {
+            const photoUrl = m.photo ? photoMap[m.photo] : null;
+            doc.setFillColor(40, 60, 100);
+            doc.rect(0, 0, pageWidth, 18, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(14);
+            doc.setTextColor(255, 255, 255);
+            doc.text('TECHNICIEN·NE', margin, 11);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(10);
+            doc.text(state.data.title || '', pageWidth - margin, 11, { align: 'right' });
+            const photoW2 = 75, photoH2 = 100;
+            const photoX = margin, photoY = 28;
+            drawPhoto(photoUrl, photoX, photoY, photoW2, photoH2);
+            const infoX = photoX + photoW2 + 12;
+            const infoW = pageWidth - infoX - margin;
+            let iy = photoY + 6;
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(22);
+            doc.setTextColor(20, 20, 20);
+            const nLines = doc.splitTextToSize(cleanT(m.name) || '(sans nom)', infoW);
+            nLines.forEach(l => { doc.text(l, infoX, iy); iy += 8; });
+            iy += 2;
+            if(m.role) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(100, 100, 100);
+                doc.text('FONCTION', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(12);
+                doc.setTextColor(40, 40, 40);
+                doc.text(cleanT(m.role), infoX, iy);
+                iy += 7;
+            }
+            const hasContact = m.email || m.phone || m.city || m.address;
+            if(hasContact) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(100, 100, 100);
+                doc.text('CONTACT', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9.5);
+                doc.setTextColor(50, 50, 50);
+                if(m.email)   { doc.text('Email : ' + m.email, infoX, iy); iy += 4.2; }
+                if(m.phone)   { doc.text('Tél : '   + m.phone, infoX, iy); iy += 4.2; }
+                if(m.city)    { doc.text('Ville : ' + cleanT(m.city), infoX, iy); iy += 4.2; }
+                if(m.address) {
+                    const aLines = doc.splitTextToSize('Adresse : ' + cleanT(m.address), infoW);
+                    aLines.slice(0, 2).forEach(l => { doc.text(l, infoX, iy); iy += 4.2; });
+                }
+                iy += 3;
+            }
+            if(m.dailyRate) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(100, 100, 100);
+                doc.text('TARIF', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(11);
+                doc.setTextColor(40, 40, 40);
+                doc.text(`${m.dailyRate} ${m.rateCurrency || '€'} / ${m.rateType || 'Jour'}`, infoX, iy);
+                iy += 6;
+            }
+            if(m.availabilityText) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(100, 100, 100);
+                doc.text('DISPONIBILITÉS', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9.5);
+                doc.setTextColor(50, 50, 50);
+                const aLines = doc.splitTextToSize(cleanT(m.availabilityText), infoW);
+                aLines.forEach(l => { if(iy < pageHeight - 50) { doc.text(l, infoX, iy); iy += 4.2; } });
+                iy += 3;
+            }
+            if(m.notes) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(100, 100, 100);
+                doc.text('NOTES', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(9);
+                doc.setTextColor(50, 50, 50);
+                const ntLines = doc.splitTextToSize(cleanT(m.notes), infoW);
+                ntLines.forEach(l => { if(iy < pageHeight - 50) { doc.text(l, infoX, iy); iy += 4.2; } });
+            }
+            const bottomY = pageHeight - 30;
+            doc.setLineWidth(0.3);
+            doc.setDrawColor(180, 180, 180);
+            doc.line(margin, bottomY - 4, pageWidth - margin, bottomY - 4);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(100, 100, 100);
+            doc.text('VÉHICULE', margin, bottomY);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(50, 50, 50);
+            if(m.hasVehicle) {
+                let vy = bottomY + 5;
+                const vBits = [];
+                if(m.vehicleType)  vBits.push('Type : ' + cleanT(m.vehicleType));
+                if(m.vehiclePlate) vBits.push('Imm. : ' + m.vehiclePlate);
+                if(m.vehicleSeats) vBits.push(m.vehicleSeats + ' places');
+                if(m.vehicleTrunk) vBits.push('Coffre OK');
+                if(m.vehicleNotes) vBits.push(cleanT(m.vehicleNotes));
+                vBits.forEach(b => { doc.text(b, margin, vy); vy += 4; });
+                if(vBits.length === 0) doc.text('Oui (détails non renseignés)', margin, vy);
+            } else {
+                doc.setFont('helvetica', 'italic');
+                doc.setTextColor(160, 160, 160);
+                doc.text('—', margin, bottomY + 5);
+            }
+            const rightX = pageWidth / 2 + 5;
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(100, 100, 100);
+            doc.text('DÉPARTEMENT', rightX, bottomY);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(50, 50, 50);
+            const dept = crewGroups.find(g => g.id === m.group_id);
+            const deptName = dept ? cleanT(dept.name) : 'Non classé';
+            doc.text(deptName, rightX, bottomY + 5);
+        };
+        
+        // ===== EXÉCUTION =====
+        if(opts.mode === 'card') {
+            crew.forEach((m, idx) => {
+                if(idx > 0) doc.addPage();
+                renderCard(m);
+            });
+        } else {
+            groupOrder.forEach((gid) => {
+                const dept = crewGroups.find(g => g.id === gid);
+                const deptName = dept ? dept.name : 'Non classé';
+                drawDeptHeader(deptName, grouped[gid].length);
+                if(opts.mode === 'list') renderList(grouped[gid]);
+                else grouped[gid].forEach(m => renderDetailed(m));
+                y += 2;
+            });
         }
         
-        // ===== TECHNICIENS (tri alphabétique global, regroupés par département uniquement pour info) =====
-        if(crew.length > 0) {
-            if(y > pageHeight - 30) { doc.addPage(); y = margin; }
-            
-            drawSectionHeader('TECHNICIENS', crew.length);
-            
-            drawTableHeaders([
-                { x: 3,   label: 'Nom' },
-                { x: 50,  label: 'Fonction' },
-                { x: 95,  label: 'Département' },
-                { x: 135, label: 'Email' }
-            ]);
-            
-            // Tri alphabétique par nom
-            const sortedCrew = [...crew].sort((a, b) => 
-                (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' })
-            );
-            
-            doc.setTextColor(50, 50, 50);
-            sortedCrew.forEach((member, idx) => {
-                if(y > pageHeight - 15) { doc.addPage(); y = margin; }
-                
-                if(idx % 2 === 0) {
-                    doc.setFillColor(250, 250, 250);
-                    doc.rect(margin, y - 4, pageWidth - margin * 2, 7, 'F');
-                }
-                
-                // Convertir group_id (gc3) en label lisible (Réalisation, sans emoji)
-                const deptLabel = PdfTheme.getGroupLabel(member.group_id, true) || '-';
-                
-                doc.setFontSize(8);
-                doc.setTextColor(50, 50, 50);
-                doc.text(PdfTheme.cleanText(member.name || '-').substring(0, 22), margin + 3, y);
-                doc.text(PdfTheme.cleanText(member.role || '-').substring(0, 22), margin + 50, y);
-                doc.text(PdfTheme.cleanText(deptLabel).substring(0, 18), margin + 95, y);
-                doc.setTextColor(43, 110, 246);
-                doc.text((member.email || '-').substring(0, 28), margin + 135, y);
-                
-                y += 6.5;
-            });
+        if(typeof FichesPDF !== 'undefined' && FichesPDF._drawFooters) {
+            FichesPDF._drawFooters(doc, opts.includeCover !== false);
+        } else if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
+            PdfTheme.applyFooters(doc);
         }
         
-        // ===== FOOTERS UNIFIÉS (Phase C.1) =====
-        PdfTheme.applyFooters(doc);
-        
-        // ===== TÉLÉCHARGEMENT (nom unifié) =====
-        doc.save(PdfTheme.filename('Équipe'));
-        
+        if(opts.returnBlob) return doc.output('blob');
+        const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
+            ? PdfTheme.filename('Équipe')
+            : `${state.data.title || 'Projet'} - Équipe - moteur.studio.pdf`;
+        doc.save(filename);
         Utils.toast('Équipe PDF exportée !', 'success');
-        History.log('EXPORT', 'Équipe PDF générée');
+        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', `Équipe PDF générée (${opts.mode})`);
     }
 };
+
 
 const PublicProfile = {
     profiles: [], // Liste des profils de l'utilisateur
