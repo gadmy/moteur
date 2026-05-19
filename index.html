@@ -7090,7 +7090,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.2.6</p>
+      <p>vv4.2.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10292,7 +10292,7 @@ body.presentation-mode .presentation-bar {
         <button class="sb-toggle-btn active" onclick="app.Storyboard.switchView('edit')">📝 Édition</button>
         <button class="sb-toggle-btn" onclick="app.Storyboard.switchView('preview')">👁️ Mini Aperçu</button>
         <button class="sb-toggle-btn" onclick="app.Storyboard.openFullscreen()">🖨️ Aperçu Plein Écran</button>
-        <button class="sb-toggle-btn" onclick="app.Storyboard.printDirect()">📄 Imprimer / PDF</button>
+        <button class="sb-toggle-btn" onclick="app.Storyboard.exportPDF()">📄 Générer PDF</button>
         
         <div class="sb-print-config" style="margin-left: auto;">
             <button class="sb-config-btn" onclick="app.Storyboard.toggleConfig()">⚙️ Configuration Print</button>
@@ -26567,10 +26567,24 @@ const MoodBoard = {
         }
         
         // ===== 10. Téléchargement / blob =====
+        // Pour returnBlob (mode Dossier de Production), la rotation paysage est
+        // déjà gérée par buildDossierProd phase 7quater. On renvoie sans rotation.
         if(opts.returnBlob) return doc.output('blob');
         
+        // En export solo : tourner les pages paysage 270° pour cohérence avec le Dossier
+        let outBlob = doc.output('blob');
+        if(typeof PdfTheme !== 'undefined' && PdfTheme.rotateLandscapePages) {
+            outBlob = await PdfTheme.rotateLandscapePages(outBlob);
+        }
         const filename = (cleanT(projectTitle) || 'Projet').replace(/[^a-zA-Z0-9àâäéèêëïîôùûüç_-]/gi, '_') + ' - Mood Board - moteur.studio.pdf';
-        doc.save(filename);
+        const url = URL.createObjectURL(outBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
         Utils.toast(`Mood Board exporte ! (${allBoards.length} planche(s))`, 'success');
         if(typeof History !== 'undefined' && History.log) History.log('EXPORT', `MoodBoard PDF généré (${allBoards.length} planches)`);
     },
@@ -28571,9 +28585,24 @@ if(hasContent) {
         }
         
         // ===== 6. Téléchargement / blob =====
-        const filename = (cleanT(projectTitle) || 'Projet').replace(/[^a-zA-Z0-9àâäéèêëïîôùûüç_-]/gi, '_') + ' - Storyboard - moteur.studio.pdf';
+        // Pour returnBlob (mode Dossier de Production), la rotation paysage est
+        // déjà gérée par buildDossierProd phase 7quater. On renvoie sans rotation.
         if(opts.returnBlob) return doc.output('blob');
-        doc.save(filename);
+        
+        // En export solo : tourner les pages paysage 270° pour cohérence avec le Dossier
+        let outBlob = doc.output('blob');
+        if(typeof PdfTheme !== 'undefined' && PdfTheme.rotateLandscapePages) {
+            outBlob = await PdfTheme.rotateLandscapePages(outBlob);
+        }
+        const filename = (cleanT(projectTitle) || 'Projet').replace(/[^a-zA-Z0-9àâäéèêëïîôùûüç_-]/gi, '_') + ' - Storyboard - moteur.studio.pdf';
+        const url = URL.createObjectURL(outBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
         
         Utils.toast(`Storyboard exporté ! (${pages.length} page(s))`, 'success');
         if(typeof History !== 'undefined' && History.log) History.log('EXPORT', `Storyboard PDF généré (${pages.length} pages)`);
@@ -45580,11 +45609,7 @@ const Stats = {
             bly += 5;
         });
         
-        // Mention discrète tout en bas
-        doc.setFontSize(8);
-        doc.setTextColor(150, 150, 150);
-        doc.setFont('helvetica', 'italic');
-        doc.text('Document généré par Moteur — moteur.studio', pageWidth / 2, pageHeight - 12, { align: 'center' });
+        // (Mention "moteur.studio" retirée pour uniformiser les pages de garde)
     },
     
     // Footer minimaliste : numéro de page seul, en bas à droite
@@ -45618,6 +45643,41 @@ const Stats = {
             doc.setTextColor(120, 120, 120);
             // Pagination locale "X / N" centrée en bas
             doc.text(`${i} / ${pageCount}`, pageWidth / 2, pageHeight - 6, { align: 'center' });
+        }
+    },
+    
+    /**
+     * Post-traite un blob PDF pour tourner les pages paysage à 270°.
+     * Toutes les pages paysage (largeur > hauteur) sont tournées dans le sens horaire
+     * pour qu'à l'impression, le lecteur garde la feuille en portrait et tourne juste
+     * la tête vers la droite. Idem que phase 7quater de buildDossierProd.
+     * 
+     * @param {Blob} blob - blob PDF d'entrée
+     * @returns {Promise<Blob>} blob PDF avec les paysages tournés (ou blob initial si échec)
+     */
+    rotateLandscapePages: async (blob) => {
+        try {
+            if(typeof PDFLib === 'undefined' && typeof window.PDFLib === 'undefined') {
+                console.warn('[PdfTheme.rotateLandscapePages] pdf-lib non chargé, blob retourné tel quel');
+                return blob;
+            }
+            const lib = typeof PDFLib !== 'undefined' ? PDFLib : window.PDFLib;
+            const { PDFDocument, degrees } = lib;
+            const arrayBuffer = await blob.arrayBuffer();
+            const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+            const pages = pdfDoc.getPages();
+            for(let i = 0; i < pages.length; i++) {
+                const p = pages[i];
+                const { width: w, height: h } = p.getSize();
+                if(w > h) {
+                    p.setRotation(degrees(270));
+                }
+            }
+            const bytes = await pdfDoc.save();
+            return new Blob([bytes], { type: 'application/pdf' });
+        } catch(e) {
+            console.warn('[PdfTheme.rotateLandscapePages] échec :', e);
+            return blob;
         }
     },
     
@@ -46959,10 +47019,7 @@ const MoteurArchive = {
         const recapW = fontHelv.widthOfTextAtSize(recap, 10);
         cover.drawText(recap, { x: (A4_W - recapW) / 2, y: A4_H * 0.18, size: 10, font: fontHelv, color: rgb(0.5, 0.5, 0.5) });
         
-        // Footer cover
-        const footStr = 'Document généré par Moteur — moteur.studio';
-        const footW = fontHelvOblique.widthOfTextAtSize(footStr, 8);
-        cover.drawText(footStr, { x: (A4_W - footW) / 2, y: 22, size: 8, font: fontHelvOblique, color: rgb(0.6, 0.6, 0.6) });
+        // (Mention "moteur.studio" retirée pour uniformiser les pages de garde)
         
         // Bande de couleur en bas
         cover.drawRectangle({ x: 0, y: 0, width: A4_W, height: 6, color: rgb(43/255, 110/255, 246/255) });
