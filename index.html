@@ -7090,7 +7090,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.3.1</p>
+      <p>vv4.3.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -26521,45 +26521,87 @@ const MoodBoard = {
                     doc.addPage(orientation === 'landscape' ? [A4.h, A4.w] : [A4.w, A4.h], orientation);
                 }
                 
-                // ===== 6. En-tête de page (bandeau gris avec marges) =====
-                // Bandeau gris foncé positionné AVEC marges latérales pour ne pas
-                // être tronqué par la bande blanche du footer après rotation 270° (pages paysage).
+                // ===== 6. En-tête de page (bandeau gris) =====
+                // Pages PORTRAIT : bandeau horizontal en haut (y=margin)
+                // Pages PAYSAGE (tournées 270° dans le Dossier) : bandeau vertical sur le bord GAUCHE
+                // logique (= bord HAUT visuel après rotation), texte tourné 270° pour rester lisible.
                 const margin = 8;
-                const headerH = 9; // hauteur du bandeau en mm
-                const headerY = margin; // décalé du bord pour éviter conflit avec bande blanche paysage
+                const headerH = 9; // épaisseur du bandeau en mm
+                const footerZone = (typeof PdfTheme !== 'undefined' && PdfTheme.FOOTER_ZONE_MM) ? PdfTheme.FOOTER_ZONE_MM : 14;
+                const isLandscape = orientation === 'landscape';
+                
                 doc.setFillColor(40, 40, 40);
-                doc.rect(margin, headerY, pageW - margin * 2, headerH, 'F');
-                doc.setTextColor(255, 255, 255);
-                doc.setFontSize(11);
-                doc.setFont('helvetica', 'bold');
-                doc.text(cleanT(board.name || 'MoodBoard'), margin + 4, headerY + 6.2);
-                doc.setFontSize(9);
-                doc.setFont('helvetica', 'normal');
-                doc.text(cleanT(projectTitle), pageW - margin - 4, headerY + 6.2, { align: 'right' });
+                
+                let headerStartLogical; // marge effective côté "haut" logique de l'image
+                
+                if(!isLandscape) {
+                    // PORTRAIT : bandeau horizontal en haut
+                    const headerY = margin;
+                    doc.rect(margin, headerY, pageW - margin * 2, headerH, 'F');
+                    doc.setTextColor(255, 255, 255);
+                    doc.setFontSize(11);
+                    doc.setFont('helvetica', 'bold');
+                    doc.text(cleanT(board.name || 'MoodBoard'), margin + 4, headerY + 6.2);
+                    doc.setFontSize(9);
+                    doc.setFont('helvetica', 'normal');
+                    doc.text(cleanT(projectTitle), pageW - margin - 4, headerY + 6.2, { align: 'right' });
+                    headerStartLogical = headerY + headerH + 3; // bas du bandeau (utilisé pour l'imgY)
+                } else {
+                    // PAYSAGE : bandeau VERTICAL sur le bord GAUCHE logique
+                    // (= bord HAUT visuel après rotation 270° par phase 7quater)
+                    // Le bandeau commence APRÈS la zone du footer-rotationné (40pt = ~14mm depuis x=0)
+                    const headerX = footerZone; // = 14mm depuis x=0
+                    doc.rect(headerX, margin, headerH, pageH - margin * 2, 'F');
+                    doc.setTextColor(255, 255, 255);
+                    
+                    // Texte tourné 270° (= -90°) pour être lisible après rotation 270° de la page
+                    // Avec rotate:270°, le texte s'étire vers le BAS depuis le point d'ancrage (x,y).
+                    // Donc on positionne (x,y) au "haut" du texte = côté haut logique = côté gauche visuel après rotation.
+                    doc.setFontSize(11);
+                    doc.setFont('helvetica', 'bold');
+                    // Texte gauche visuel = haut logique (y proche de ph) : nom de la planche
+                    doc.text(cleanT(board.name || 'MoodBoard'), headerX + 6.2, pageH - margin - 4, { angle: 270 });
+                    doc.setFontSize(9);
+                    doc.setFont('helvetica', 'normal');
+                    // Texte droit visuel = bas logique (y proche de 0) : titre du projet
+                    // On veut que le bas du texte arrive à y = margin + (largeur du texte)
+                    const projW = doc.getTextWidth(cleanT(projectTitle));
+                    doc.text(cleanT(projectTitle), headerX + 6.2, margin + 4 + projW, { angle: 270 });
+                    headerStartLogical = headerX + headerH + 3; // bord X logique où commence l'image
+                }
                 
                 // ===== 7. Insérer l'image rasterisée =====
-                // Calculer la taille maximale de l'image sur la page (avec marges)
-                // Zone réservée au footer unifié en bas = PdfTheme.FOOTER_ZONE_MM (14mm)
-                // Bandeau header démarre à headerY=margin et fait headerH de haut
-                const footerZone = (typeof PdfTheme !== 'undefined' && PdfTheme.FOOTER_ZONE_MM) ? PdfTheme.FOOTER_ZONE_MM : 14;
-                const headerBottom = headerY + headerH + 3; // bas du bandeau + petite marge
-                const availW = pageW - margin * 2;
-                const availH = pageH - headerBottom - footerZone;
-                
-                // Calculer les dimensions en respectant le ratio
-                let imgW = availW;
-                let imgH = imgW / ratio;
-                if(imgH > availH) {
-                    imgH = availH;
-                    imgW = imgH * ratio;
-                }
-                const imgX = (pageW - imgW) / 2;
-                const imgY = headerBottom + ((availH - imgH) / 2);
-                
-                try {
-                    doc.addImage(dataUrl, 'JPEG', imgX, imgY, imgW, imgH);
-                } catch(err) {
-                    console.warn('[MoodBoard PDF] addImage fail:', err);
+                // PORTRAIT : zone utile = entre headerBottom et footerZone (axe vertical)
+                // PAYSAGE  : zone utile = entre headerStartLogical (axe X) et footerZone (axe X)
+                let availW, availH, imgX, imgY;
+                if(!isLandscape) {
+                    availW = pageW - margin * 2;
+                    availH = pageH - headerStartLogical - footerZone;
+                    let imgW = availW;
+                    let imgH = imgW / ratio;
+                    if(imgH > availH) { imgH = availH; imgW = imgH * ratio; }
+                    imgX = (pageW - imgW) / 2;
+                    imgY = headerStartLogical + ((availH - imgH) / 2);
+                    try {
+                        doc.addImage(dataUrl, 'JPEG', imgX, imgY, imgW, imgH);
+                    } catch(err) {
+                        console.warn('[MoodBoard PDF] addImage fail:', err);
+                    }
+                } else {
+                    // Paysage : l'image est entre headerStartLogical (côté gauche logique) et pageW - margin
+                    // sur l'axe X, et entre margin et pageH - margin sur l'axe Y
+                    availW = pageW - headerStartLogical - margin;
+                    availH = pageH - margin * 2;
+                    let imgW = availW;
+                    let imgH = imgW / ratio;
+                    if(imgH > availH) { imgH = availH; imgW = imgH * ratio; }
+                    imgX = headerStartLogical + ((availW - imgW) / 2);
+                    imgY = (pageH - imgH) / 2;
+                    try {
+                        doc.addImage(dataUrl, 'JPEG', imgX, imgY, imgW, imgH);
+                    } catch(err) {
+                        console.warn('[MoodBoard PDF] addImage fail:', err);
+                    }
                 }
                 
                 // Footer ad-hoc supprimé : géré uniformément par PdfTheme.applyFooters en fin d'export
