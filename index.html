@@ -7090,7 +7090,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.2.7</p>
+      <p>vv4.2.8</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -23529,7 +23529,7 @@ const tabToSection = {
           });
           
           // ===== FOOTERS UNIFIÉS (Phase C.1) =====
-          PdfTheme.applyFooters(doc);
+          PdfTheme.applyFooters(doc, { forDossier: !!opts.returnBlob });
           
           // ===== TÉLÉCHARGEMENT (nom unifié) =====
           if(opts.returnBlob) return doc.output('blob');
@@ -26504,11 +26504,23 @@ const MoodBoard = {
                 
                 // Créer le PDF avec la 1ère page (ou ajouter une nouvelle)
                 if(!doc) {
-                    doc = new jsPDF(orientation === 'landscape' ? 'l' : 'p', 'mm', 'a4');
-                    // Page de garde optionnelle
+                    // IMPORTANT : on crée TOUJOURS le doc en portrait pour la page de garde,
+                    // peu importe l'orientation de la 1ère planche. La cover doit rester
+                    // portrait pour ne pas être tournée 270° par la phase 7quater du Dossier.
+                    doc = new jsPDF('p', 'mm', 'a4');
+                    // Page de garde optionnelle (toujours en portrait)
                     if(opts.includeCover !== false && typeof PdfTheme !== 'undefined' && PdfTheme.coverPage) {
                         PdfTheme.coverPage(doc, { sectionName: 'Mood Board' });
+                        // Puis ajouter la 1ère vraie page selon l'orientation de la planche
                         doc.addPage(orientation === 'landscape' ? [A4.h, A4.w] : [A4.w, A4.h], orientation);
+                    } else {
+                        // Pas de cover : il faut quand même créer la 1ère page dans la bonne orientation
+                        // jsPDF a déjà créé une page portrait par défaut. Si la planche est paysage,
+                        // on doit SUPPRIMER cette page portrait et ajouter une page paysage à la place.
+                        if(orientation === 'landscape') {
+                            doc.deletePage(1);
+                            doc.addPage([A4.h, A4.w], 'landscape');
+                        }
                     }
                 } else {
                     doc.addPage(orientation === 'landscape' ? [A4.h, A4.w] : [A4.w, A4.h], orientation);
@@ -26562,8 +26574,13 @@ const MoodBoard = {
         }
         
         // ===== Footer unifié sur toutes les pages =====
+        // En mode Dossier (returnBlob), on ne dessine RIEN ici. La pagination
+        // globale sera ajoutée par buildDossierProd phase 7ter.
         if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
-            PdfTheme.applyFooters(doc, { skipFirstPage: opts.includeCover !== false });
+            PdfTheme.applyFooters(doc, { 
+                skipFirstPage: opts.includeCover !== false,
+                forDossier: !!opts.returnBlob
+            });
         }
         
         // ===== 10. Téléchargement / blob =====
@@ -28581,7 +28598,10 @@ if(hasContent) {
         
         // ===== Footer unifié sur toutes les pages =====
         if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
-            PdfTheme.applyFooters(doc, { skipFirstPage: opts.includeCover !== false });
+            PdfTheme.applyFooters(doc, { 
+                skipFirstPage: opts.includeCover !== false,
+                forDossier: !!opts.returnBlob
+            });
         }
         
         // ===== 6. Téléchargement / blob =====
@@ -33007,9 +33027,9 @@ const DrawingEditor = {
           }
           
           if(typeof FichesPDF !== 'undefined' && FichesPDF._drawFooters) {
-              FichesPDF._drawFooters(doc, opts.includeCover !== false);
+              FichesPDF._drawFooters(doc, opts.includeCover !== false, !!opts.returnBlob);
           } else if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
-              PdfTheme.applyFooters(doc);
+              PdfTheme.applyFooters(doc, { forDossier: !!opts.returnBlob });
           }
           
           if(opts.returnBlob) return doc.output('blob');
@@ -33751,9 +33771,9 @@ const DrawingEditor = {
         }
         
         if(typeof FichesPDF !== 'undefined' && FichesPDF._drawFooters) {
-            FichesPDF._drawFooters(doc, opts.includeCover !== false);
+            FichesPDF._drawFooters(doc, opts.includeCover !== false, !!opts.returnBlob);
         } else if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
-            PdfTheme.applyFooters(doc);
+            PdfTheme.applyFooters(doc, { forDossier: !!opts.returnBlob });
         }
         
         if(opts.returnBlob) return doc.output('blob');
@@ -44177,7 +44197,7 @@ END:VEVENT
         
         // Footer
         if(typeof FichesPDF !== 'undefined' && FichesPDF._drawFooters) {
-            FichesPDF._drawFooters(doc, opts.includeCover);
+            FichesPDF._drawFooters(doc, opts.includeCover, !!opts.returnBlob);
         }
         
         // Sauvegarde
@@ -45422,7 +45442,7 @@ const Stats = {
         
         // ========= Footer =========
         if(typeof FichesPDF !== 'undefined' && FichesPDF._drawFooters) {
-            FichesPDF._drawFooters(doc, opts.includeCover);
+            FichesPDF._drawFooters(doc, opts.includeCover, !!opts.returnBlob);
         }
         
         // ========= Sauvegarde =========
@@ -45622,13 +45642,22 @@ const Stats = {
     /**
      * Footer unifié minimaliste : "X / N" centré en bas, gris discret.
      * À appeler à la fin de chaque export PDF, juste avant le save/blob.
-     * En mode Dossier de Production fusionné, la phase 7ter réécrira ce footer
-     * avec la pagination globale + lien Sommaire (mêmes coordonnées, écrasement propre).
+     * 
+     * En mode Dossier de Production fusionné (forDossier:true), la fonction
+     * NE DESSINE RIEN : la phase 7ter de buildDossierProd écrira la pagination
+     * globale. Évite les superpositions et les masquages incertains via pdf-lib.
      *
      * @param {jsPDF} doc - instance jsPDF
-     * @param {object} opts - { skipFirstPage: true|false (par défaut true) }
+     * @param {object} opts - { 
+     *     skipFirstPage: true|false (par défaut true, saute la cover),
+     *     forDossier: true|false (par défaut false, pas de footer si true)
+     *   }
      */
     applyFooters: (doc, opts = {}) => {
+        // En mode Dossier de Production : ne rien dessiner.
+        // La pagination globale sera dessinée par buildDossierProd phase 7ter.
+        if(opts.forDossier) return;
+        
         const pageCount = doc.internal.pages.length - 1;
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
@@ -46302,7 +46331,10 @@ const MoteurArchive = {
         const drawPageNumbers = () => {
             // Délègue au footer unifié PdfTheme pour cohérence avec les autres exports
             if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
-                PdfTheme.applyFooters(doc, { skipFirstPage: !!opts.includeCover });
+                PdfTheme.applyFooters(doc, { 
+                    skipFirstPage: !!opts.includeCover,
+                    forDossier: !!opts.returnBlob
+                });
                 return;
             }
             // Fallback si PdfTheme indisponible
@@ -46901,7 +46933,7 @@ const MoteurArchive = {
         }
         
         // ===== FOOTERS UNIFIÉS (Phase C.1) =====
-        PdfTheme.applyFooters(doc);
+        PdfTheme.applyFooters(doc, { forDossier: !!opts.returnBlob });
         
         // ===== TÉLÉCHARGEMENT (nom unifié) =====
         if(opts.returnBlob) return doc.output('blob');
@@ -51610,7 +51642,7 @@ const Presentation = {
         }
         
         // Footers + filename
-        PdfTheme.applyFooters(doc);
+        PdfTheme.applyFooters(doc, { forDossier: !!opts.returnBlob });
         if(opts.returnBlob) return doc.output('blob');
         doc.save(PdfTheme.filename('Présentation'));
         Utils.toast('Présentation PDF exportée !', 'success');
@@ -54278,7 +54310,7 @@ const Expenses = {
         }
         
         // ===== FOOTERS UNIFIÉS (Phase C.1) =====
-        PdfTheme.applyFooters(doc);
+        PdfTheme.applyFooters(doc, { forDossier: !!opts.returnBlob });
         
         // ===== TÉLÉCHARGEMENT (nom unifié) =====
         if(opts.returnBlob) return doc.output('blob');
@@ -65209,7 +65241,7 @@ const TitlePage = {
         
         // Footer unifié "X / N" centré (skipFirstPage:false car ici c'est l'unique page)
         if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
-            PdfTheme.applyFooters(doc, { skipFirstPage: false });
+            PdfTheme.applyFooters(doc, { skipFirstPage: false, forDossier: !!opts.returnBlob });
         }
         
         // Téléchargement
@@ -66895,11 +66927,13 @@ const FichesPDF = {
     
     // Dessine le footer sur toutes les pages (sauf la page de garde si présente)
     // "Date — N/Total" à droite, nom projet à gauche
-    _drawFooters: (doc, includeCover) => {
+    _drawFooters: (doc, includeCover, forDossier) => {
         // Délègue au footer unifié de PdfTheme (minimaliste "X / N" centré)
         // pour garantir une présentation cohérente avec les autres exports.
+        // En mode Dossier (forDossier:true), ne dessine RIEN : pagination globale
+        // gérée par buildDossierProd phase 7ter.
         if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
-            PdfTheme.applyFooters(doc, { skipFirstPage: !!includeCover });
+            PdfTheme.applyFooters(doc, { skipFirstPage: !!includeCover, forDossier: !!forDossier });
             return;
         }
         // Fallback si PdfTheme indisponible (ne devrait pas arriver)
@@ -67445,7 +67479,7 @@ const FichesPDF = {
         }
         
         // ========= Footer =========
-        FichesPDF._drawFooters(doc, opts.includeCover);
+        FichesPDF._drawFooters(doc, opts.includeCover, !!opts.returnBlob);
         
         // ========= Sauvegarde =========
         if(opts.returnBlob) return doc.output('blob');
@@ -67924,7 +67958,7 @@ const FichesPDF = {
         }
         
         // ========= Footer =========
-        FichesPDF._drawFooters(doc, opts.includeCover);
+        FichesPDF._drawFooters(doc, opts.includeCover, !!opts.returnBlob);
         
         // ========= Sauvegarde =========
         if(opts.returnBlob) return doc.output('blob');
@@ -68409,7 +68443,7 @@ const FichesPDF = {
         }
         
         // ========= Footer =========
-        FichesPDF._drawFooters(doc, opts.includeCover);
+        FichesPDF._drawFooters(doc, opts.includeCover, !!opts.returnBlob);
         
         // ========= Sauvegarde =========
         if(opts.returnBlob) return doc.output('blob');
@@ -70970,7 +71004,7 @@ const Weather = {
           }
           
           // Footers + filename
-          PdfTheme.applyFooters(doc);
+          PdfTheme.applyFooters(doc, { forDossier: !!opts.returnBlob });
           if(opts.returnBlob) return doc.output('blob');
           doc.save(PdfTheme.filename('Séquencier'));
           Utils.toast('Séquencier PDF exporté !', 'success');
