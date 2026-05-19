@@ -26,6 +26,28 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 HISTORIQUE DES VERSIONS
 ================================================================================
+v4.2.4 — Refonte complète Export PDF + Dossier de Production fusionné (18 Mai 2026)
+- Modale Export PDF unique avec drag & drop 2 niveaux (groupes + sous-sections)
+- Persistance ordre custom en localStorage + bouton "Réinitialiser l'ordre"
+- 3 toggles à 2 états : Tout cocher / Toutes les pages de garde / PDF fusionné
+- Sous-options par section : Synopsis (court/long/principal), Scénario (n° scènes/notes), 
+  Storyboard (image seule/calque), Personnages/Comédiens/Lieux/Crew/Resources (detailed/list/card), 
+  Budget (simple/détaillé), Planning (feuille de service)
+- Mode "PDF fusionné" via pdf-lib : page de garde "Dossier de Production", sommaire 
+  cliquable avec n° de pages, numérotation globale "X/N" sur chaque page, lien "Sommaire" 
+  retour en bas droite
+- Rotation 270° auto des pages paysage pour cohérence à l'impression
+- MoodBoard.exportPDF refondu : rasterisation HTML via html2canvas + canvas hors-écran 
+  (marche depuis n'importe quel onglet, toutes les planches du projet exportées)
+- Storyboard.exportPDF refondu : rasterisation de renderPrintPreview via html2canvas, 
+  4 plans/page max en mode standard
+- Séquencier : résumé des scènes correctement affiché (scene.resume au lieu de scene.synopsis)
+- Fixes emojis corrompus en latin1 (🔗, 🎬, 📝, 🎭, ⚙️, •) → caractères ASCII partout
+- 17 modules supportent maintenant opts.returnBlob et opts.includeCover de façon homogène
+- Page de garde optionnelle par section (toggle individuel dans la modale)
+- pdf-lib et html2canvas ajoutés via CDN
+
+================================================================================
 v3.5.7 — Clic droit dépouillement reportable dans le scénario + raccourci Shift (05 Mai 2026)
 - Bloc 3b : reporter le mécanisme de dépouillement par clic droit (existant dans onglet Dépouillement) sur l'éditeur Scénario
 - Breakdown.handleRightClickFromScript(e, sceneId) : variante de handleRightClick adaptée au contexte scénario
@@ -7068,7 +7090,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.2.4</p>
+      <p>vv4.2.5</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -28041,7 +28063,7 @@ const Storyboard = {
             
             // Découpage selon le mode : 1 (large), 12 (compact), 6 (standard)
             const layout = (Storyboard.printConfig && Storyboard.printConfig.layout) || 'standard';
-            const perPage = layout === 'large' ? 1 : (layout === 'compact' ? 16 : 6);
+            const perPage = layout === 'large' ? 1 : (layout === 'compact' ? 16 : 4);
             for(let i = 0; i < shots.length; i += perPage) {
                 const pageShots = shots.slice(i, i + perPage);
                 const page = Storyboard.createPrintPage(scene, sceneIndex, pageShots, i);
@@ -47080,38 +47102,78 @@ const MoteurArchive = {
                 
                 const pg = allPages[i];
                 const { width: pw, height: ph } = pg.getSize();
+                const isLandscape = pw > ph;
                 
-                // 1. Bande blanche pour masquer l'ancien footer (12mm = ~34pt en bas)
-                pg.drawRectangle({
-                    x: 0,
-                    y: 0,
-                    width: pw,
-                    height: 34,
-                    color: rgb(1, 1, 1),
-                    opacity: 1
-                });
-                
-                // 2. Numéro de page global "X / N" centré en bas
                 const pageStr = `${i + 1} / ${totalPages}`;
                 const pageStrW = fontHelv.widthOfTextAtSize(pageStr, 9);
-                pg.drawText(pageStr, {
-                    x: (pw - pageStrW) / 2,
-                    y: 14,
-                    size: 9,
-                    font: fontHelv,
-                    color: rgb(0.5, 0.5, 0.5)
-                });
                 
-                // 3. Lien "Sommaire" en bas à droite
-                const linkX = pw - 40 - linkSommaireW;
-                const linkY = 14;
-                pg.drawText(linkSommaireText, {
-                    x: linkX,
-                    y: linkY,
-                    size: linkSommaireSize,
-                    font: fontHelv,
-                    color: rgb(0.16, 0.43, 0.96)
-                });
+                let linkX, linkY;
+                
+                if(!isLandscape) {
+                    // ===== PAGE PORTRAIT (cas normal) =====
+                    // Bande blanche en bas pour masquer l'ancien footer
+                    pg.drawRectangle({
+                        x: 0, y: 0, width: pw, height: 34,
+                        color: rgb(1, 1, 1), opacity: 1
+                    });
+                    
+                    // Numéro de page centré en bas
+                    pg.drawText(pageStr, {
+                        x: (pw - pageStrW) / 2,
+                        y: 14,
+                        size: 9,
+                        font: fontHelv,
+                        color: rgb(0.5, 0.5, 0.5)
+                    });
+                    
+                    // Lien "Sommaire" en bas à droite
+                    linkX = pw - 40 - linkSommaireW;
+                    linkY = 14;
+                    pg.drawText(linkSommaireText, {
+                        x: linkX,
+                        y: linkY,
+                        size: linkSommaireSize,
+                        font: fontHelv,
+                        color: rgb(0.16, 0.43, 0.96)
+                    });
+                } else {
+                    // ===== PAGE PAYSAGE (sera tournée 270° à la phase 7quater) =====
+                    // Pour qu'après rotation 270°, le footer apparaisse en bas centré,
+                    // on le dessine sur le BORD GAUCHE, texte tourné 90° (anti-trigo).
+                    // pdf-lib: rotate fait pivoter le texte autour de son point d'ancrage (x,y).
+                    
+                    // Bande blanche sur le bord gauche (= bas après rotation 270°)
+                    pg.drawRectangle({
+                        x: 0, y: 0, width: 34, height: ph,
+                        color: rgb(1, 1, 1), opacity: 1
+                    });
+                    
+                    const rot90 = degrees(90);
+                    
+                    // Numéro de page : centré verticalement sur la page (= centre horizontal après rotation)
+                    // Texte tourné 90° autour de (x=14, y=...) ; on remonte de la moitié de la largeur du texte
+                    pg.drawText(pageStr, {
+                        x: 14,
+                        y: (ph - pageStrW) / 2,
+                        size: 9,
+                        font: fontHelv,
+                        color: rgb(0.5, 0.5, 0.5),
+                        rotate: rot90
+                    });
+                    
+                    // Lien "Sommaire" : positionné vers le haut du bord gauche
+                    // (= bas droit après rotation 270°)
+                    linkX = 14;
+                    linkY = ph - 40 - linkSommaireW;
+                    pg.drawText(linkSommaireText, {
+                        x: linkX,
+                        y: linkY,
+                        size: linkSommaireSize,
+                        font: fontHelv,
+                        color: rgb(0.16, 0.43, 0.96),
+                        rotate: rot90
+                    });
+                }
                 
                 // Annotation Link sur cette zone
                 if(summaryFirstPageRef) {
@@ -47153,8 +47215,9 @@ const MoteurArchive = {
                 const p = rotPages[i];
                 const { width: w, height: h } = p.getSize();
                 if(w > h) {
-                    // Page paysage : appliquer rotation 90° pour impression portrait
-                    p.setRotation(degrees(90));
+                    // Page paysage : rotation 270° (= -90°) pour impression portrait
+                    // L'utilisateur tourne la tête vers la droite pour lire
+                    p.setRotation(degrees(270));
                 }
             }
         } catch(e) {
@@ -70754,13 +70817,13 @@ const Weather = {
               }
               y += 5;
               
-              // Synopsis si présent
-              if(scene.synopsis) {
+              // Résumé si présent
+              if(scene.resume) {
                   doc.setFont('helvetica', 'normal');
                   doc.setFontSize(8);
                   doc.setTextColor(80, 80, 80);
-                  const synopLines = doc.splitTextToSize(PdfTheme.cleanText(scene.synopsis), pageWidth - margin * 2 - 10);
-                  synopLines.slice(0, 3).forEach(line => {
+                  const synopLines = doc.splitTextToSize(PdfTheme.cleanText(scene.resume), pageWidth - margin * 2 - 10);
+                  synopLines.slice(0, 5).forEach(line => {
                       if(y > pageHeight - 15) { doc.addPage(); y = margin; }
                       doc.text(line, margin + 10, y);
                       y += 4;
