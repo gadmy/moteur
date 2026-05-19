@@ -7090,7 +7090,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.3.0</p>
+      <p>vv4.3.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -11439,7 +11439,6 @@ body.presentation-mode .presentation-bar {
         <div style="margin-bottom: 18px; padding: 12px; background: var(--bg); border-radius: 8px; border-left: 4px solid #4a90e2;">
             <h4 style="margin: 0 0 10px 0; color: #4a90e2; font-size: 0.95rem;">✍️ ÉCRITURE</h4>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                <label class="dossier-toggle"><input type="checkbox" id="dos-titlepage" checked><span>Page de titre</span></label>
                 <label class="dossier-toggle"><input type="checkbox" id="dos-presentation" checked><span>Présentation / Synopsis</span></label>
                 <label class="dossier-toggle"><input type="checkbox" id="dos-script" checked><span>Scénario</span></label>
                 <label class="dossier-toggle"><input type="checkbox" id="dos-sequencier" checked><span>Séquencier</span></label>
@@ -11516,11 +11515,7 @@ body.presentation-mode .presentation-bar {
                     <span class="exp-section-header">✍️ ÉCRITURE</span>
                 </div>
                 <div class="exp-group-body">
-                    <div class="exp-section-row" data-section="titlepage" draggable="true">
-                        <span class="exp-drag-handle exp-drag-handle-row" title="Glisser pour réorganiser">⋮⋮</span>
-                        <label class="exp-row-main"><input type="checkbox" class="exp-section-chk" data-section="titlepage"><span>Page de titre</span></label>
-                    </div>
-                    
+                    <!-- 'Page de titre' retiré du Dossier (redondant avec la cover Dossier). Export solo toujours dispo depuis l'onglet Titre. -->
                     <div class="exp-section-row" data-section="synopsis" draggable="true">
                         <span class="exp-drag-handle exp-drag-handle-row" title="Glisser pour réorganiser">⋮⋮</span>
                         <label class="exp-row-main"><input type="checkbox" class="exp-section-chk" data-section="synopsis"><span>Synopsis</span></label>
@@ -22577,7 +22572,7 @@ const tabToSection = {
           // Mapping : chaque section a un build(extra) qui retourne une Promise
           // - extra = { returnBlob: true } en mode fusionné, sinon {}
           const sectionsMap = {
-              titlepage:    { label: 'Page de titre',         build: (extra) => TitlePage.exportPDF({ ...extra }) },
+              // titlepage : retiré du Dossier (redondant avec la cover Dossier). Reste accessible en export solo via l'onglet Titre.
               synopsis:     { label: 'Synopsis',              build: (extra) => Synopsis.synopsisToPDF({ includeCover: getCover('synopsis'), ...opts.synopsis, ...extra }) },
               board:        { label: 'Séquencier',            build: (extra) => BeatBoard.exportSequencerPDF({ includeCover: getCover('board'), ...extra }) },
               script:       { label: 'Scénario',              build: (extra) => Exporter.scenarioToPDF({ includeCover: getCover('script'), ...opts.script, ...extra }) },
@@ -26526,24 +26521,30 @@ const MoodBoard = {
                     doc.addPage(orientation === 'landscape' ? [A4.h, A4.w] : [A4.w, A4.h], orientation);
                 }
                 
-                // ===== 6. En-tête de page =====
+                // ===== 6. En-tête de page (bandeau gris avec marges) =====
+                // Bandeau gris foncé positionné AVEC marges latérales pour ne pas
+                // être tronqué par la bande blanche du footer après rotation 270° (pages paysage).
                 const margin = 8;
-                doc.setFillColor(43, 110, 246);
-                doc.rect(0, 0, pageW, 12, 'F');
+                const headerH = 9; // hauteur du bandeau en mm
+                const headerY = margin; // décalé du bord pour éviter conflit avec bande blanche paysage
+                doc.setFillColor(40, 40, 40);
+                doc.rect(margin, headerY, pageW - margin * 2, headerH, 'F');
                 doc.setTextColor(255, 255, 255);
                 doc.setFontSize(11);
                 doc.setFont('helvetica', 'bold');
-                doc.text(cleanT(board.name || 'MoodBoard'), margin, 8);
+                doc.text(cleanT(board.name || 'MoodBoard'), margin + 4, headerY + 6.2);
                 doc.setFontSize(9);
                 doc.setFont('helvetica', 'normal');
-                doc.text(cleanT(projectTitle), pageW - margin, 8, { align: 'right' });
+                doc.text(cleanT(projectTitle), pageW - margin - 4, headerY + 6.2, { align: 'right' });
                 
                 // ===== 7. Insérer l'image rasterisée =====
                 // Calculer la taille maximale de l'image sur la page (avec marges)
                 // Zone réservée au footer unifié en bas = PdfTheme.FOOTER_ZONE_MM (14mm)
+                // Bandeau header démarre à headerY=margin et fait headerH de haut
                 const footerZone = (typeof PdfTheme !== 'undefined' && PdfTheme.FOOTER_ZONE_MM) ? PdfTheme.FOOTER_ZONE_MM : 14;
+                const headerBottom = headerY + headerH + 3; // bas du bandeau + petite marge
                 const availW = pageW - margin * 2;
-                const availH = pageH - 12 - margin - footerZone; // 12 header + zone footer
+                const availH = pageH - headerBottom - footerZone;
                 
                 // Calculer les dimensions en respectant le ratio
                 let imgW = availW;
@@ -26553,7 +26554,7 @@ const MoodBoard = {
                     imgW = imgH * ratio;
                 }
                 const imgX = (pageW - imgW) / 2;
-                const imgY = 12 + ((availH - imgH) / 2) + margin;
+                const imgY = headerBottom + ((availH - imgH) / 2);
                 
                 try {
                     doc.addImage(dataUrl, 'JPEG', imgX, imgY, imgW, imgH);
@@ -45476,16 +45477,18 @@ const Stats = {
     // Garde les accents français et ponctuation classique
     cleanText: (str) => {
         if(!str) return '';
-        // Convertir en string si pas déjà
         const s = String(str);
         // Retirer les emojis et symboles unicode au-delà de latin1
-        return s.replace(/[\u{1F000}-\u{1FFFF}]/gu, '')
-                .replace(/[\u{2600}-\u{27BF}]/gu, '')
-                .replace(/[\u{2300}-\u{23FF}]/gu, '')
-                .replace(/[\u{2700}-\u{27BF}]/gu, '')
-                .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')
-                .replace(/[\u{1F900}-\u{1F9FF}]/gu, '')
-                .trim();
+        let cleaned = s.replace(/[\u{1F000}-\u{1FFFF}]/gu, '')
+                       .replace(/[\u{2600}-\u{27BF}]/gu, '')
+                       .replace(/[\u{2300}-\u{23FF}]/gu, '')
+                       .replace(/[\u{2700}-\u{27BF}]/gu, '')
+                       .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')
+                       .replace(/[\u{1F900}-\u{1F9FF}]/gu, '');
+        // Filet de sécurité : retirer TOUT caractère hors latin1 (au-delà de U+00FF)
+        // qui produirait un glyphe corrompu type "þ" dans jsPDF (encodage WinAnsi)
+        cleaned = cleaned.split('').filter(c => c.charCodeAt(0) <= 0xFF).join('');
+        return cleaned.trim();
     },
     
     // Récupère l'auteur contextuel selon le type de document
@@ -46286,7 +46289,20 @@ const MoteurArchive = {
         let y = marginTop;
         let pageNum = 0; // sera incrémenté à chaque addPage
         const projectTitle = state.data.title || 'Projet sans titre';
-        const meta = state.data.scriptMeta || {};
+        // Lecture des métadonnées du film : priorité à titlePage (onglet "Titre"),
+        // fallback sur scriptMeta. Mapping : tp.coauthor → meta.coAuthor, tp.date → meta.draftDate
+        const _sm = state.data.scriptMeta || {};
+        const _tp = state.data.titlePage || {};
+        const meta = {
+            author:    _tp.author    || _sm.author    || '',
+            coAuthor:  _tp.coauthor  || _sm.coAuthor  || '',
+            contact:   _tp.contact   || _sm.contact   || '',
+            draft:     _tp.draft     || _sm.draft     || '',
+            draftDate: _tp.date      || _sm.draftDate || '',
+            source:    _tp.source    || _sm.source    || '',
+            copyright: _tp.copyright || _sm.copyright || '',
+            notes:     _tp.notes     || _sm.notes     || ''
+        };
         
         // Ajoute un saut de page et inscrit le numéro en bas à droite
         // (skipFirstPage : la page de garde n'a pas de numéro)
