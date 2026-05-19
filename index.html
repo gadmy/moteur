@@ -7090,7 +7090,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.2.5</p>
+      <p>vv4.2.6</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -26528,8 +26528,10 @@ const MoodBoard = {
                 
                 // ===== 7. Insérer l'image rasterisée =====
                 // Calculer la taille maximale de l'image sur la page (avec marges)
+                // Zone réservée au footer unifié en bas = PdfTheme.FOOTER_ZONE_MM (14mm)
+                const footerZone = (typeof PdfTheme !== 'undefined' && PdfTheme.FOOTER_ZONE_MM) ? PdfTheme.FOOTER_ZONE_MM : 14;
                 const availW = pageW - margin * 2;
-                const availH = pageH - 12 - margin - 8; // 12 header + 8 footer
+                const availH = pageH - 12 - margin - footerZone; // 12 header + zone footer
                 
                 // Calculer les dimensions en respectant le ratio
                 let imgW = availW;
@@ -26547,12 +26549,7 @@ const MoodBoard = {
                     console.warn('[MoodBoard PDF] addImage fail:', err);
                 }
                 
-                // ===== 8. Pied de page =====
-                doc.setTextColor(150, 150, 150);
-                doc.setFontSize(7);
-                doc.setFont('helvetica', 'italic');
-                doc.text(cleanT(`Genere par Moteur - ${new Date().toLocaleDateString('fr-FR')}`), margin, pageH - 3);
-                doc.text(cleanT(`Planche ${bi + 1}/${allBoards.length} - ${(elements.length)} element(s)`), pageW - margin, pageH - 3, { align: 'right' });
+                // Footer ad-hoc supprimé : géré uniformément par PdfTheme.applyFooters en fin d'export
             }
         } finally {
             // ===== 9. Supprimer le canvas hors-écran =====
@@ -26562,6 +26559,11 @@ const MoodBoard = {
         if(!doc) {
             if(!opts.returnBlob) Utils.toast('Echec generation MoodBoard PDF', 'error');
             return;
+        }
+        
+        // ===== Footer unifié sur toutes les pages =====
+        if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
+            PdfTheme.applyFooters(doc, { skipFirstPage: opts.includeCover !== false });
         }
         
         // ===== 10. Téléchargement / blob =====
@@ -28347,9 +28349,11 @@ if(hasContent) {
                 }
                 
                 // Insérer l'image plein page (avec petite marge)
+                // Zone réservée au footer unifié en bas = PdfTheme.FOOTER_ZONE_MM (14mm)
+                const footerZone = (typeof PdfTheme !== 'undefined' && PdfTheme.FOOTER_ZONE_MM) ? PdfTheme.FOOTER_ZONE_MM : 14;
                 const m = 5;
                 const availW = pageW - m * 2;
-                const availH = pageH - m * 2 - 8; // 8 pour footer
+                const availH = pageH - m - footerZone; // marge haute + zone footer
                 const rect = pageEl.getBoundingClientRect();
                 const ratio = rect.width / rect.height;
                 let imgW = availW;
@@ -28367,11 +28371,7 @@ if(hasContent) {
                     console.warn('[Storyboard PDF] addImage fail:', err);
                 }
                 
-                // Footer discret
-                doc.setTextColor(150, 150, 150);
-                doc.setFontSize(7);
-                doc.setFont('helvetica', 'italic');
-                doc.text(cleanT(`${projectTitle} - Page ${i + 1}/${pages.length}`), pageW / 2, pageH - 3, { align: 'center' });
+                // Footer ad-hoc supprimé : géré uniformément par PdfTheme.applyFooters en fin d'export
             }
         } finally {
             // ===== 5. Cleanup =====
@@ -28564,6 +28564,11 @@ if(hasContent) {
         }
         
         } // fin BLOC SUPPRIMÉ
+        
+        // ===== Footer unifié sur toutes les pages =====
+        if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
+            PdfTheme.applyFooters(doc, { skipFirstPage: opts.includeCover !== false });
+        }
         
         // ===== 6. Téléchargement / blob =====
         const filename = (cleanT(projectTitle) || 'Projet').replace(/[^a-zA-Z0-9àâäéèêëïîôùûüç_-]/gi, '_') + ' - Storyboard - moteur.studio.pdf';
@@ -45585,6 +45590,19 @@ const Stats = {
     // Footer minimaliste : numéro de page seul, en bas à droite
     // À appeler en boucle après génération du document
     // doc.internal.pages.length - 1 = nombre total de pages
+    // Hauteur de la zone réservée au footer unifié (en mm)
+    // Tous les modules doivent considérer cette zone comme "interdite au contenu"
+    FOOTER_ZONE_MM: 14,
+    
+    /**
+     * Footer unifié minimaliste : "X / N" centré en bas, gris discret.
+     * À appeler à la fin de chaque export PDF, juste avant le save/blob.
+     * En mode Dossier de Production fusionné, la phase 7ter réécrira ce footer
+     * avec la pagination globale + lien Sommaire (mêmes coordonnées, écrasement propre).
+     *
+     * @param {jsPDF} doc - instance jsPDF
+     * @param {object} opts - { skipFirstPage: true|false (par défaut true) }
+     */
     applyFooters: (doc, opts = {}) => {
         const pageCount = doc.internal.pages.length - 1;
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -45592,15 +45610,14 @@ const Stats = {
         const skipFirstPage = opts.skipFirstPage !== false; // par défaut on saute la page de garde
         
         for(let i = 1; i <= pageCount; i++) {
-            // Skip la page de garde si demandé
             if(skipFirstPage && i === 1) continue;
             
             doc.setPage(i);
             doc.setFont('helvetica', 'normal');
             doc.setFontSize(9);
             doc.setTextColor(120, 120, 120);
-            // Numéro page en bas à droite
-            doc.text(`${i}`, pageWidth - 15, pageHeight - 8, { align: 'right' });
+            // Pagination locale "X / N" centrée en bas
+            doc.text(`${i} / ${pageCount}`, pageWidth / 2, pageHeight - 6, { align: 'center' });
         }
     },
     
@@ -46223,24 +46240,20 @@ const MoteurArchive = {
         // Footer "Date — N/Total" en bas à droite (style production)
         // Pas de footer sur la page de garde (Final Draft)
         const drawPageNumbers = () => {
+            // Délègue au footer unifié PdfTheme pour cohérence avec les autres exports
+            if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
+                PdfTheme.applyFooters(doc, { skipFirstPage: !!opts.includeCover });
+                return;
+            }
+            // Fallback si PdfTheme indisponible
             const totalPages = doc.internal.getNumberOfPages();
-            const offset = opts.includeCover ? 1 : 0;
-            const contentTotal = totalPages - offset; // nombre de pages utiles (hors garde)
-            // Date du jour au format français JJ/MM/AAAA
-            const today = new Date();
-            const dateStr = String(today.getDate()).padStart(2, '0') + '/' 
-                          + String(today.getMonth() + 1).padStart(2, '0') + '/' 
-                          + today.getFullYear();
-            
             for(let i = 1; i <= totalPages; i++) {
-                if(opts.includeCover && i === 1) continue; // pas de footer sur la page de garde
+                if(opts.includeCover && i === 1) continue;
                 doc.setPage(i);
                 doc.setFont(FONT, 'normal');
                 doc.setFontSize(9);
-                doc.setTextColor(85, 85, 85); // gris doux comme en CSS print
-                const pageNum = i - offset;
-                const footerText = `${dateStr} — ${pageNum}/${contentTotal}`;
-                doc.text(footerText, pageWidth - marginRight, pageHeight - 10, { align: 'right' });
+                doc.setTextColor(85, 85, 85);
+                doc.text(`${i} / ${totalPages}`, pageWidth / 2, pageHeight - 6, { align: 'center' });
             }
         };
         
@@ -47111,13 +47124,16 @@ const MoteurArchive = {
                 
                 if(!isLandscape) {
                     // ===== PAGE PORTRAIT (cas normal) =====
-                    // Bande blanche en bas pour masquer l'ancien footer
+                    // Tous les modules réservent désormais 14mm (~40pt) en bas pour le footer
+                    // unifié et y dessinent "X / N" à pageHeight - 6mm (~17pt du bas).
+                    // Une bande blanche de 40pt masque ce footer local pour pouvoir
+                    // réécrire la pagination GLOBALE (par rapport au Dossier de Production).
                     pg.drawRectangle({
-                        x: 0, y: 0, width: pw, height: 34,
+                        x: 0, y: 0, width: pw, height: 40,
                         color: rgb(1, 1, 1), opacity: 1
                     });
                     
-                    // Numéro de page centré en bas
+                    // Numéro de page global centré en bas
                     pg.drawText(pageStr, {
                         x: (pw - pageStrW) / 2,
                         y: 14,
@@ -47140,11 +47156,9 @@ const MoteurArchive = {
                     // ===== PAGE PAYSAGE (sera tournée 270° à la phase 7quater) =====
                     // Pour qu'après rotation 270°, le footer apparaisse en bas centré,
                     // on le dessine sur le BORD GAUCHE, texte tourné 90° (anti-trigo).
-                    // pdf-lib: rotate fait pivoter le texte autour de son point d'ancrage (x,y).
-                    
-                    // Bande blanche sur le bord gauche (= bas après rotation 270°)
+                    // Bande blanche de 40pt sur le bord gauche (= bas après rotation 270°)
                     pg.drawRectangle({
-                        x: 0, y: 0, width: 34, height: ph,
+                        x: 0, y: 0, width: 40, height: ph,
                         color: rgb(1, 1, 1), opacity: 1
                     });
                     
@@ -65136,11 +65150,10 @@ const TitlePage = {
             });
         }
         
-        // Mention discrète tout en bas
-        doc.setFont('helvetica', 'italic');
-        doc.setFontSize(8);
-        doc.setTextColor(150, 150, 150);
-        doc.text('Document généré par Moteur — moteur.studio', pageWidth / 2, pageHeight - 12, { align: 'center' });
+        // Footer unifié "X / N" centré (skipFirstPage:false car ici c'est l'unique page)
+        if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
+            PdfTheme.applyFooters(doc, { skipFirstPage: false });
+        }
         
         // Téléchargement
         if(opts.returnBlob) return doc.output('blob');
@@ -66826,27 +66839,23 @@ const FichesPDF = {
     // Dessine le footer sur toutes les pages (sauf la page de garde si présente)
     // "Date — N/Total" à droite, nom projet à gauche
     _drawFooters: (doc, includeCover) => {
+        // Délègue au footer unifié de PdfTheme (minimaliste "X / N" centré)
+        // pour garantir une présentation cohérente avec les autres exports.
+        if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
+            PdfTheme.applyFooters(doc, { skipFirstPage: !!includeCover });
+            return;
+        }
+        // Fallback si PdfTheme indisponible (ne devrait pas arriver)
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
-        const margin = 25;
         const totalPages = doc.internal.getNumberOfPages();
-        const offset = includeCover ? 1 : 0;
-        const contentTotal = totalPages - offset;
-        const today = new Date();
-        const dateStr = String(today.getDate()).padStart(2, '0') + '/' 
-                      + String(today.getMonth() + 1).padStart(2, '0') + '/' 
-                      + today.getFullYear();
-        const projectName = state.data.title || 'Projet';
-        
         for(let i = 1; i <= totalPages; i++) {
             if(includeCover && i === 1) continue;
             doc.setPage(i);
             doc.setFont('helvetica', 'normal');
             doc.setFontSize(9);
             doc.setTextColor(120, 120, 120);
-            doc.text(projectName, margin, pageHeight - 10);
-            const pageNum = i - offset;
-            doc.text(`${dateStr} — ${pageNum}/${contentTotal}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
+            doc.text(`${i} / ${totalPages}`, pageWidth / 2, pageHeight - 6, { align: 'center' });
         }
     },
     
