@@ -7153,7 +7153,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.3.6</p>
+      <p>vv4.3.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -45690,50 +45690,10 @@ const Stats = {
         'Présentation':   ['Producteur·rice', 'Réalisateur·rice']
     },
     
-    // Retire les emojis et caractères non-latin1 qui plantent en jsPDF
-    // Garde les accents français et ponctuation classique
-    // Idempotente : cleanText(cleanText(x)) === cleanText(x)
-    cleanText: (str) => {
-        if(!str) return '';
-        const s = String(str);
-        // Retirer les emojis et symboles unicode au-delà de latin1
-        let cleaned = s.replace(/[\u{1F000}-\u{1FFFF}]/gu, '')
-                       .replace(/[\u{2600}-\u{27BF}]/gu, '')
-                       .replace(/[\u{2300}-\u{23FF}]/gu, '')
-                       .replace(/[\u{2700}-\u{27BF}]/gu, '')
-                       .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')
-                       .replace(/[\u{1F900}-\u{1F9FF}]/gu, '');
-        // Filet de sécurité : retirer TOUT caractère hors latin1 (au-delà de U+00FF)
-        // qui produirait un glyphe corrompu type "þ" dans jsPDF (encodage WinAnsi)
-        cleaned = cleaned.split('').filter(c => c.charCodeAt(0) <= 0xFF).join('');
-        return cleaned.trim();
-    },
-    
-    /**
-     * Monkey-patch un doc jsPDF pour que TOUS les appels doc.text() passent
-     * automatiquement par cleanText. Élimine le risque "þ" et autres caractères
-     * corrompus latin1 sans avoir à appeler cleanT() partout dans le code.
-     * 
-     * Idempotent : appelé plusieurs fois sur le même doc = no-op (flag _cleanTextGuarded)
-     * Gère les arguments string ET array (splitTextToSize retourne un array)
-     */
-    installCleanTextGuard: (doc) => {
-        if(!doc || doc._cleanTextGuarded) return doc;
-        const originalText = doc.text.bind(doc);
-        const clean = PdfTheme.cleanText;
-        doc.text = function(text, x, y, options) {
-            // Si tableau (multi-lignes via splitTextToSize), nettoyer chaque élément
-            let cleanedText;
-            if(Array.isArray(text)) {
-                cleanedText = text.map(t => clean(t));
-            } else {
-                cleanedText = clean(text);
-            }
-            return originalText(cleanedText, x, y, options);
-        };
-        doc._cleanTextGuarded = true;
-        return doc;
-    },
+    // Alias vers Utils.stripPdfUnsafe (source de vérité unique pour le nettoyage texte PDF).
+    // Conservé pour rétrocompat avec les 20+ appels PdfTheme.cleanText(...) dans le code.
+    // Idempotente : cleanText(cleanText(x)) === cleanText(x). Trim final inclus.
+    cleanText: (str) => Utils.stripPdfUnsafe(str).trim(),
     
     // Récupère l'auteur contextuel selon le type de document
     // Cherche dans state.data.crew le premier technicien avec un rôle qui matche
@@ -45940,16 +45900,13 @@ const Stats = {
 };
 
 // ============================================================================
-// === Monkey-patch global du prototype jsPDF pour appliquer cleanText à TOUS
-// === les appels doc.text() automatiquement (élimination du bug "þ" et autres
-// === caractères corrompus latin1 sans avoir à appeler cleanT() partout)
+// === Patch jsPDF.getTextWidth() pour cohérence avec PdfTheme.cleanText ======
 // ============================================================================
-// Note : le monkey-patch global de jsPDF.prototype.text a été tenté mais cassait
-// le système PubSub interne de jsPDF (événements addText, textOptions, etc.).
-// Pour text(), on protège explicitement via PdfTheme.cleanText(...) là où c'est nécessaire.
-// Pour getTextWidth() en revanche, pas de PubSub : on patche le prototype pour que
-// la largeur calculée corresponde au texte EFFECTIVEMENT rendu (= post-cleanText).
-// Évite le bug du soulignement / cadre qui dépasse quand le texte contient des emojis.
+// Le rendu PDF utilise cleanText sur le texte affiché. Si on mesurait la
+// largeur du texte BRUT (avec emojis), le soulignement / cadre dessiné autour
+// serait trop large par rapport au texte effectivement rendu (vide à droite).
+// On patche donc getTextWidth pour qu'il mesure le texte post-cleanText.
+// (Pas de PubSub interne sur getTextWidth, contrairement à text() — patch safe.)
 (function patchJsPDFGetTextWidth() {
     try {
         const jsPDFLib = (typeof window !== 'undefined' && window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : null;
