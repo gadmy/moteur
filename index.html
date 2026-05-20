@@ -7153,7 +7153,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.3.5</p>
+      <p>vv4.3.6</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10785,7 +10785,7 @@ body.presentation-mode .presentation-bar {
             </div>
             <div id="chat-input-container" style="padding: 15px; border-top: 1px solid var(--border); display: none;">
                 <div class="flex-gap10">
-                    <input type="text" id="chat-message-input" class="chat-input" placeholder="Écrivez votre message..." onkeypress="if(event.key === 'Enter') app.Chat.sendMessage()">
+                    <input type="text" id="chat-message-input" class="chat-input" placeholder="Écrivez votre message..." data-allow-emojis="true" onkeypress="if(event.key === 'Enter') app.Chat.sendMessage()">
                     <button onclick="app.Chat.sendMessage()" class="chat-send-btn">➤</button>
                 </div>
             </div>
@@ -12689,6 +12689,67 @@ crewRoles: {
       sanitizeEmail: (email) => email.replace(/\./g, ','),
       escape: (s) => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'),
       generateUniqueId: () => Date.now() + '_' + Math.random().toString(36).slice(2, 11),
+      
+      /**
+       * Retire les caractères hors latin1 (emojis, pictogrammes, symboles unicode étendus)
+       * qui plantent en jsPDF (encodage WinAnsi) ou créent des "þ" parasites.
+       * Pour les champs destinés à un dossier de production professionnel.
+       */
+      stripPdfUnsafe: (str) => {
+          if(!str) return '';
+          // Retirer emojis et symboles unicode au-delà de latin1
+          let cleaned = String(str)
+              .replace(/[\u{1F000}-\u{1FFFF}]/gu, '')
+              .replace(/[\u{2600}-\u{27BF}]/gu, '')
+              .replace(/[\u{2300}-\u{23FF}]/gu, '')
+              .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')
+              .replace(/[\u{1F900}-\u{1F9FF}]/gu, '');
+          // Filet : tout caractère hors latin1 (au-delà de U+00FF)
+          cleaned = cleaned.split('').filter(c => c.charCodeAt(0) <= 0xFF).join('');
+          return cleaned;
+      },
+      
+      /**
+       * Installe un blocker d'emojis sur un élément input/textarea : tout caractère
+       * non-latin1 saisi ou collé est retiré silencieusement (avec un petit toast
+       * d'avertissement la 1ère fois pour expliquer le comportement).
+       * Idempotent : appeler plusieurs fois sur le même élément = no-op.
+       * 
+       * Usage : Utils.installEmojiBlocker(document.getElementById('film-title'));
+       *        Utils.installEmojiBlocker('input.actor-name'); // sélecteur CSS
+       */
+      installEmojiBlocker: (target) => {
+          // Helper pour traiter un élément
+          const attachTo = (el) => {
+              if(!el || el._emojiBlockerAttached) return;
+              el._emojiBlockerAttached = true;
+              const filterValue = () => {
+                  const before = el.value;
+                  const after = Utils.stripPdfUnsafe(before);
+                  if(after !== before) {
+                      // Conserver position du curseur (approximative)
+                      const pos = Math.min(el.selectionStart || 0, after.length);
+                      el.value = after;
+                      try { el.setSelectionRange(pos, pos); } catch(_) {}
+                      // Toast unique par session
+                      if(!window._emojiBlockerToastShown) {
+                          window._emojiBlockerToastShown = true;
+                          if(typeof Utils !== 'undefined' && Utils.toast) {
+                              Utils.toast('Les emojis sont retirés des champs du dossier de production.', 'info');
+                          }
+                      }
+                  }
+              };
+              el.addEventListener('input', filterValue);
+              el.addEventListener('paste', () => setTimeout(filterValue, 0));
+          };
+          // Si target est un sélecteur string, traiter tous les éléments matchés
+          if(typeof target === 'string') {
+              document.querySelectorAll(target).forEach(attachTo);
+          } else if(target) {
+              attachTo(target);
+          }
+      },
       
       // Formatage relatif du temps (il y a X minutes, etc.)
       timeAgo: (dateString) => {
@@ -32219,6 +32280,37 @@ const DrawingEditor = {
   // Initialiser le drag au chargement
   document.addEventListener('DOMContentLoaded', () => {
       ScriptEditor.initDrag();
+      
+      // === Installation auto du blocker d'emojis sur les champs de saisie ===
+      // Tout input[type=text] / textarea / [contenteditable] de l'app voit ses emojis
+      // retirés à la volée (pour cohérence dossier de production professionnel).
+      // Exception : éléments avec data-allow-emojis="true" (chat, commentaires, forum, etc.)
+      const SAFE_SELECTOR = 'input[type="text"]:not([data-allow-emojis="true"]):not([data-emoji-blocker-skip]), input[type="search"]:not([data-allow-emojis="true"]), textarea:not([data-allow-emojis="true"]):not([data-emoji-blocker-skip])';
+      
+      const installOnAll = (root) => {
+          if(!root) return;
+          if(root.matches && root.matches(SAFE_SELECTOR)) Utils.installEmojiBlocker(root);
+          if(root.querySelectorAll) root.querySelectorAll(SAFE_SELECTOR).forEach(el => Utils.installEmojiBlocker(el));
+      };
+      
+      // Pass 1 : installer sur tous les éléments existants
+      installOnAll(document.body);
+      
+      // Pass 2 : observer les ajouts dynamiques (modales, vues créées au runtime)
+      try {
+          const observer = new MutationObserver((mutations) => {
+              for(const mut of mutations) {
+                  mut.addedNodes.forEach(node => {
+                      if(node.nodeType === 1) installOnAll(node);
+                  });
+              }
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
+      } catch(e) {
+          console.warn('[Utils] MutationObserver KO, blocker emoji limité aux éléments existants:', e);
+      }
+      
+      console.log('[Utils] Blocker emojis installé (input/textarea, exceptions: [data-allow-emojis=true])');
   });
   
   // ==================== MODULE RESOURCES ====================
@@ -45854,10 +45946,36 @@ const Stats = {
 // ============================================================================
 // Note : le monkey-patch global de jsPDF.prototype.text a été tenté mais cassait
 // le système PubSub interne de jsPDF (événements addText, textOptions, etc.).
-// Approche actuelle : appeler explicitement PdfTheme.cleanText(...) là où c'est
-// nécessaire, ou utiliser PdfTheme.safeText(doc, text, x, y, options) en helper.
-// La méthode installCleanTextGuard() reste disponible dans PdfTheme pour les
-// cas où on veut un guard local sur un seul doc.
+// Pour text(), on protège explicitement via PdfTheme.cleanText(...) là où c'est nécessaire.
+// Pour getTextWidth() en revanche, pas de PubSub : on patche le prototype pour que
+// la largeur calculée corresponde au texte EFFECTIVEMENT rendu (= post-cleanText).
+// Évite le bug du soulignement / cadre qui dépasse quand le texte contient des emojis.
+(function patchJsPDFGetTextWidth() {
+    try {
+        const jsPDFLib = (typeof window !== 'undefined' && window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : null;
+        if(!jsPDFLib) {
+            console.warn('[PdfTheme] jsPDF non détecté, patch getTextWidth non installé.');
+            return;
+        }
+        if(jsPDFLib.__getTextWidthPatched) return; // idempotent
+        const probe = new jsPDFLib('p', 'mm', 'a4');
+        const proto = Object.getPrototypeOf(probe);
+        const originalGetTextWidth = proto.getTextWidth;
+        if(typeof originalGetTextWidth !== 'function') {
+            console.warn('[PdfTheme] getTextWidth introuvable, patch annulé.');
+            return;
+        }
+        proto.getTextWidth = function(text) {
+            const clean = (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText : (s => s);
+            const cleaned = Array.isArray(text) ? text.map(t => clean(t)) : clean(text);
+            return originalGetTextWidth.call(this, cleaned);
+        };
+        jsPDFLib.__getTextWidthPatched = true;
+        console.log('[PdfTheme] getTextWidth() patché pour cohérence cleanText ✓');
+    } catch(e) {
+        console.warn('[PdfTheme] Erreur patch getTextWidth:', e);
+    }
+})();
 
 // ============================================================================
 // === MoteurArchive [Phase B] : helper d'export/import ZIP "moteur" complet ===
@@ -64816,7 +64934,7 @@ const Feed = {
                     <div class="feed-post-comments d-none" id="comments-${post.id}">
                         <div id="comments-list-${post.id}"></div>
                         <div class="feed-comment-input">
-                            <input type="text" id="comment-input-${post.id}" placeholder="Écrire un commentaire..." onkeypress="if(event.key==='Enter') app.Feed.postComment('${post.id}')">
+                            <input type="text" id="comment-input-${post.id}" placeholder="Écrire un commentaire..." data-allow-emojis="true" onkeypress="if(event.key==='Enter') app.Feed.postComment('${post.id}')">
                             <button onclick="app.Feed.postComment('${post.id}')">Envoyer</button>
                         </div>
                     </div>
