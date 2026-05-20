@@ -45855,13 +45855,23 @@ const Stats = {
 (function patchJsPDFPrototype() {
     try {
         const jsPDFLib = (typeof window !== 'undefined' && window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : null;
-        if(!jsPDFLib || !jsPDFLib.API) {
+        if(!jsPDFLib) {
             console.warn('[PdfTheme] jsPDF non détecté, monkey-patch text() non installé.');
             return;
         }
-        if(jsPDFLib.API.__cleanTextPatched) return; // idempotent
-        const originalText = jsPDFLib.API.text;
-        jsPDFLib.API.text = function(text, x, y, options, transform) {
+        if(jsPDFLib.__cleanTextPatched) return; // idempotent
+        
+        // Récupérer la méthode `text` via une instance temporaire (le prototype est interne)
+        const probe = new jsPDFLib('p', 'mm', 'a4');
+        const originalText = probe.text;
+        if(typeof originalText !== 'function') {
+            console.warn('[PdfTheme] doc.text introuvable sur instance jsPDF, monkey-patch annulé.');
+            return;
+        }
+        
+        // Patcher le prototype de l'instance (toutes les futures instances en héritent)
+        const proto = Object.getPrototypeOf(probe);
+        proto.text = function(text, x, y, options, transform) {
             const clean = (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText : (s => s);
             let cleanedText;
             if(Array.isArray(text)) {
@@ -45871,7 +45881,8 @@ const Stats = {
             }
             return originalText.call(this, cleanedText, x, y, options, transform);
         };
-        jsPDFLib.API.__cleanTextPatched = true;
+        
+        jsPDFLib.__cleanTextPatched = true;
         console.log('[PdfTheme] doc.text() monkey-patched pour cleanText automatique ✓');
     } catch(e) {
         console.warn('[PdfTheme] Erreur monkey-patch jsPDF:', e);
