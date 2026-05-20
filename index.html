@@ -7153,7 +7153,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.3.7</p>
+      <p>vv4.3.8</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -45915,20 +45915,71 @@ const Stats = {
             return;
         }
         if(jsPDFLib.__getTextWidthPatched) return; // idempotent
+        
+        // Dans jsPDF 2.5.1, getTextWidth peut être une propriété d'instance OU sur le prototype.
+        // On parcourt toute la chaîne de prototypes pour trouver où il vit réellement.
         const probe = new jsPDFLib('p', 'mm', 'a4');
-        const proto = Object.getPrototypeOf(probe);
-        const originalGetTextWidth = proto.getTextWidth;
-        if(typeof originalGetTextWidth !== 'function') {
-            console.warn('[PdfTheme] getTextWidth introuvable, patch annulé.');
+        let targetObj = null;
+        let originalGetTextWidth = null;
+        
+        // 1) Direct sur l'instance ?
+        if(Object.prototype.hasOwnProperty.call(probe, 'getTextWidth') && typeof probe.getTextWidth === 'function') {
+            targetObj = probe;
+            originalGetTextWidth = probe.getTextWidth;
+        } else {
+            // 2) Remonter la chaîne de prototypes
+            let proto = Object.getPrototypeOf(probe);
+            while(proto && proto !== Object.prototype) {
+                if(Object.prototype.hasOwnProperty.call(proto, 'getTextWidth') && typeof proto.getTextWidth === 'function') {
+                    targetObj = proto;
+                    originalGetTextWidth = proto.getTextWidth;
+                    break;
+                }
+                proto = Object.getPrototypeOf(proto);
+            }
+        }
+        
+        if(!originalGetTextWidth) {
+            console.warn('[PdfTheme] getTextWidth introuvable dans la chaîne de prototypes, patch annulé.');
             return;
         }
-        proto.getTextWidth = function(text) {
+        
+        // Patch : appeler cleanText avant la mesure
+        const cleanWrapper = function(text) {
             const clean = (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText : (s => s);
             const cleaned = Array.isArray(text) ? text.map(t => clean(t)) : clean(text);
             return originalGetTextWidth.call(this, cleaned);
         };
+        
+        // Si on a trouvé sur l'instance, on doit patcher le CONSTRUCTEUR pour intercepter
+        // toutes les futures instances. Sinon (prototype), on patche directement.
+        if(targetObj === probe) {
+            // Solution : wrapper le constructeur pour ajouter le patch à chaque nouvelle instance
+            const OriginalCtor = window.jspdf.jsPDF;
+            window.jspdf.jsPDF = function(...args) {
+                const instance = new OriginalCtor(...args);
+                if(typeof instance.getTextWidth === 'function' && !instance.__getTextWidthWrapped) {
+                    const _orig = instance.getTextWidth.bind(instance);
+                    instance.getTextWidth = function(text) {
+                        const clean = (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText : (s => s);
+                        const cleaned = Array.isArray(text) ? text.map(t => clean(t)) : clean(text);
+                        return _orig(cleaned);
+                    };
+                    instance.__getTextWidthWrapped = true;
+                }
+                return instance;
+            };
+            // Préserver le prototype et les propriétés statiques
+            window.jspdf.jsPDF.prototype = OriginalCtor.prototype;
+            Object.setPrototypeOf(window.jspdf.jsPDF, OriginalCtor);
+            console.log('[PdfTheme] getTextWidth() patché via wrapper du constructeur jsPDF ✓');
+        } else {
+            // Patch direct sur le prototype trouvé
+            targetObj.getTextWidth = cleanWrapper;
+            console.log('[PdfTheme] getTextWidth() patché sur le prototype ✓');
+        }
+        
         jsPDFLib.__getTextWidthPatched = true;
-        console.log('[PdfTheme] getTextWidth() patché pour cohérence cleanText ✓');
     } catch(e) {
         console.warn('[PdfTheme] Erreur patch getTextWidth:', e);
     }
