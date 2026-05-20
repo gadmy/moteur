@@ -26,6 +26,69 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 HISTORIQUE DES VERSIONS
 ================================================================================
+v4.3.3 — Uniformisation complète Dossier de Production + refonte page de titre (20 Mai 2026)
+
+PAGES DE GARDE UNIFIÉES (Modèle B "label SECTION")
+- PdfTheme.coverPage réécrit au modèle B : titre film souligné + LABEL SECTION
+  majuscules + "Établi par X" + "Basé sur X" italique + "Document établi le DATE"
+  centré bas + contact/copyright bas-gauche
+- FichesPDF._drawCoverPage délègue à PdfTheme.coverPage avec sélection contextuelle
+  d'auteur (Personnages → Scénariste, Comédiens → Casting, Décors → Repéreur, etc.)
+- Synopsis.synopsisToPDF : page de garde custom remplacée par PdfTheme.coverPage
+- Mention "moteur.studio" retirée des pages de garde
+
+BANDEAUX DE CATÉGORIE UNIFORMISÉS EN GRIS FONCÉ (40,40,40)
+- Resources, Crew (Équipe), productionReport, Presentation
+- Expenses (3 bandeaux : en-tête tableau, catégories CNC, total)
+- Synopsis : titre de section converti en bandeau gris pleine largeur
+- Planning : titre H1 "PLANNING DE TOURNAGE" → bandeau gris
+- Stats : titre H1 "RAPPORT DE STATISTIQUES" → bandeau gris
+- Préservés en bleu identitaire : en-têtes de page MoodBoard, Storyboard, Breakdown
+
+MOODBOARD : ROTATION PAYSAGE PROPREMENT GÉRÉE
+- En-tête bleu remplacé par bandeau gris foncé avec marges latérales
+- En mode paysage (planches tournées 270°) : bandeau VERTICAL sur le bord droit
+  logique = bord HAUT visuel après rotation phase 7quater
+- Texte tourné angle:270 avec ancrages adaptés :
+  * nom de planche à gauche visuel (ancré à y=margin+4)
+  * titre projet à droite visuel (ancré à y=pageH-margin-4-largeurTexte)
+- Offset vertical empirique (textOffset=2.7) pour centrer le glyphe dans le bandeau
+  malgré l'inversion baseline/rotation
+- Cover MoodBoard toujours en portrait (même si planches en paysage)
+
+PAGE DE TITRE — REFONTE (SOURCE DE VÉRITÉ UNIFIÉE)
+- TitlePage retirée du Dossier de Production (redondante avec la cover Dossier)
+- Reste accessible en export solo via l'onglet Titre
+- Exporter.scenarioToPDF lit en priorité state.data.titlePage pour la cover Final
+  Draft (mapping coauthor→coAuthor, date→draftDate), fallback sur scriptMeta
+- L'onglet Titre devient ainsi la source de vérité pour les métadonnées du film
+- Checkbox dos-titlepage et ligne réordonnable "Page de titre" retirées de la
+  modale Export
+
+PHASE 7TER & 7QUATER — NUMÉROTATION GLOBALE & ROTATION PAYSAGE
+- buildDossierProd : import degrees depuis pdf-lib (fix bug qui plantait la
+  pagination après MoodBoard)
+- Phase 7ter : bande blanche 40pt en bas, gère portrait + paysage, footer
+  "X / N — Sommaire" avec lien cliquable retour au sommaire
+- Phase 7quater : setRotation(degrees(270)) sur les pages paysage pour cohérence
+  à l'impression et à la lecture
+- forDossier:true propagé à tous les modules pour skip de la pagination locale
+
+FOOTER UNIFIÉ (X / N — Sommaire)
+- PdfTheme.applyFooters : style minimaliste centré, zone réservée 14mm
+- Skip si forDossier:true (la phase 7ter écrit la pagination globale)
+- 13 modules propagent forDossier: !!opts.returnBlob
+- Synopsis.synopsisToPDF intègre maintenant applyFooters
+
+BUGS CORRIGÉS
+- addKeyValue overflow : "Nombre de plans (storyboard) : 45" ne se chevauche
+  plus (calcul largeur clé adaptatif via Math.max(45, keyW+3))
+- PdfTheme.cleanText durci avec filtre charCodeAt(0) <= 0xFF pour éliminer les
+  caractères "þ" parasites (caractères unicode mal encodés en latin1)
+- Bug page de garde Synopsis qui mélangeait deux modèles (résolu via délégation
+  à PdfTheme.coverPage)
+
+================================================================================
 v4.2.4 — Refonte complète Export PDF + Dossier de Production fusionné (18 Mai 2026)
 - Modale Export PDF unique avec drag & drop 2 niveaux (groupes + sous-sections)
 - Persistance ordre custom en localStorage + bouton "Réinitialiser l'ordre"
@@ -7090,7 +7153,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.3.2</p>
+      <p>vv4.3.4</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -45537,6 +45600,7 @@ const Stats = {
     
     // Retire les emojis et caractères non-latin1 qui plantent en jsPDF
     // Garde les accents français et ponctuation classique
+    // Idempotente : cleanText(cleanText(x)) === cleanText(x)
     cleanText: (str) => {
         if(!str) return '';
         const s = String(str);
@@ -45551,6 +45615,32 @@ const Stats = {
         // qui produirait un glyphe corrompu type "þ" dans jsPDF (encodage WinAnsi)
         cleaned = cleaned.split('').filter(c => c.charCodeAt(0) <= 0xFF).join('');
         return cleaned.trim();
+    },
+    
+    /**
+     * Monkey-patch un doc jsPDF pour que TOUS les appels doc.text() passent
+     * automatiquement par cleanText. Élimine le risque "þ" et autres caractères
+     * corrompus latin1 sans avoir à appeler cleanT() partout dans le code.
+     * 
+     * Idempotent : appelé plusieurs fois sur le même doc = no-op (flag _cleanTextGuarded)
+     * Gère les arguments string ET array (splitTextToSize retourne un array)
+     */
+    installCleanTextGuard: (doc) => {
+        if(!doc || doc._cleanTextGuarded) return doc;
+        const originalText = doc.text.bind(doc);
+        const clean = PdfTheme.cleanText;
+        doc.text = function(text, x, y, options) {
+            // Si tableau (multi-lignes via splitTextToSize), nettoyer chaque élément
+            let cleanedText;
+            if(Array.isArray(text)) {
+                cleanedText = text.map(t => clean(t));
+            } else {
+                cleanedText = clean(text);
+            }
+            return originalText(cleanedText, x, y, options);
+        };
+        doc._cleanTextGuarded = true;
+        return doc;
     },
     
     // Récupère l'auteur contextuel selon le type de document
@@ -45756,6 +45846,37 @@ const Stats = {
         return stripEmoji ? PdfTheme.cleanText(name) : name;
     }
 };
+
+// ============================================================================
+// === Monkey-patch global du prototype jsPDF pour appliquer cleanText à TOUS
+// === les appels doc.text() automatiquement (élimination du bug "þ" et autres
+// === caractères corrompus latin1 sans avoir à appeler cleanT() partout)
+// ============================================================================
+(function patchJsPDFPrototype() {
+    try {
+        const jsPDFLib = (typeof window !== 'undefined' && window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : null;
+        if(!jsPDFLib || !jsPDFLib.API) {
+            console.warn('[PdfTheme] jsPDF non détecté, monkey-patch text() non installé.');
+            return;
+        }
+        if(jsPDFLib.API.__cleanTextPatched) return; // idempotent
+        const originalText = jsPDFLib.API.text;
+        jsPDFLib.API.text = function(text, x, y, options, transform) {
+            const clean = (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText : (s => s);
+            let cleanedText;
+            if(Array.isArray(text)) {
+                cleanedText = text.map(t => clean(t));
+            } else {
+                cleanedText = clean(text);
+            }
+            return originalText.call(this, cleanedText, x, y, options, transform);
+        };
+        jsPDFLib.API.__cleanTextPatched = true;
+        console.log('[PdfTheme] doc.text() monkey-patched pour cleanText automatique ✓');
+    } catch(e) {
+        console.warn('[PdfTheme] Erreur monkey-patch jsPDF:', e);
+    }
+})();
 
 // ============================================================================
 // === MoteurArchive [Phase B] : helper d'export/import ZIP "moteur" complet ===
