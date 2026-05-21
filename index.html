@@ -7234,7 +7234,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.4.5</p>
+      <p>vv4.4.6</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -9050,13 +9050,10 @@ body.presentation-mode .presentation-bar {
         <!-- Justificatifs -->
         <div class="mb-15">
             <label style="font-size: 0.85rem; color: var(--text-sec); display: block; margin-bottom: 5px;">📎 Justificatifs (facture, ticket...)</label>
-            <div class="flex-row-gap10">
-                <input type="text" id="expense-attachment-url" class="profile-input flex-1" placeholder="URL du fichier ou glisser une image">
-                <label style="padding: 8px 15px; background: var(--primary); color: white; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">
-                    📷 Photo
-                    <input type="file" id="expense-attachment-file" accept="image/*" class="d-none" onchange="app.Expenses.handleFileUpload(this)">
-                </label>
-            </div>
+            <label style="padding: 8px 15px; background: var(--primary); color: white; border-radius: 6px; cursor: pointer; font-size: 0.85rem; display: inline-block;">
+                📷 Photo
+                <input type="file" id="expense-attachment-file" accept="image/*" class="d-none" onchange="app.Expenses.handleFileUpload(this)">
+            </label>
             <div id="expense-attachments-list" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
         </div>
         
@@ -9072,21 +9069,7 @@ body.presentation-mode .presentation-bar {
     </div>
 </div>
 
-<!-- Modal validation dépense -->
-<div id="expense-validate-modal" class="modal-overlay d-none">
-    <div class="modal-box" style="max-width: 450px;">
-        <h3>✅ Valider la dépense</h3>
-        <div id="expense-validate-content"></div>
-        <textarea id="expense-validate-comment" class="profile-input" placeholder="Commentaire (optionnel)..." style="height: 60px; margin: 15px 0; resize: vertical;"></textarea>
-        <div class="modal-btns">
-            <button onclick="app.Expenses.rejectExpense()" style="background:var(--danger); color:#fff; border:none; padding:10px 20px; border-radius:6px; cursor:pointer;">❌ Refuser</button>
-            <button onclick="document.getElementById('expense-validate-modal').style.display='none'" class="n8-badge-8">Annuler</button>
-            <button onclick="app.Expenses.approveExpense()" class="n8-btn-1">✅ Valider</button>
-        </div>
-    </div>
-</div>
-  
-  <!-- Modal détail message -->
+<!-- Modal détail message -->
   <div id="message-detail-modal" class="message-detail-modal d-none">
     <div class="message-detail-box">
         <div class="message-detail-header">
@@ -32221,6 +32204,8 @@ const DrawingEditor = {
         const memberId = state.data.crew[idx]?.id;
         const memberName = state.data.crew[idx]?.name || 'Sans nom';
         
+        if(!await ConfirmModal.confirmDelete(`${memberName} sera retiré du projet, ainsi que ses convocations et dépenses de salaire associées.`, `Supprimer ${memberName} ?`)) return;
+        
         // Retirer des feuilles de service (callSheet) de tous les jours de tournage
         if(memberId && state.data.shootingDays) {
             state.data.shootingDays.forEach(day => {
@@ -49598,7 +49583,6 @@ document.addEventListener('click', (e) => {
 });
 
 const Expenses = {
-    currentExpenseId: null,
     expenses: [],
     filterDept: '',
     filterStatus: '',
@@ -51317,7 +51301,6 @@ const Expenses = {
         document.getElementById('expense-description').value = '';
         document.getElementById('expense-status').value = 'pending';
         document.getElementById('expense-date').value = new Date().toISOString().split('T')[0];
-        document.getElementById('expense-attachment-url').value = '';
         Expenses.tempAttachments = [];
         Expenses.renderAttachmentsList();
         Expenses.populatePaidBySelect();
@@ -51777,38 +51760,6 @@ const Expenses = {
         });
         
         Store.save();
-    },
-    
-    // Approuve une dépense
-    approveExpense: () => {
-        const expense = state.data.expenses?.find(e => e.id === Expenses.currentExpenseId);
-        if(!expense) return;
-        
-        expense.status = 'approved';
-        expense.validatedAt = new Date().toISOString();
-        expense.validatedBy = state.currentUser?.email;
-        expense.validatedByName = state.userProfile?.displayName || state.currentUser?.email?.split('@')[0];
-        expense.validationComment = document.getElementById('expense-validate-comment').value.trim();
-        
-        Store.save();
-        document.getElementById('expense-validate-modal').style.display = 'none';
-        Expenses.render();
-    },
-    
-    // Refuse une dépense
-    rejectExpense: () => {
-        const expense = state.data.expenses?.find(e => e.id === Expenses.currentExpenseId);
-        if(!expense) return;
-        
-        expense.status = 'rejected';
-        expense.validatedAt = new Date().toISOString();
-        expense.validatedBy = state.currentUser?.email;
-        expense.validatedByName = state.userProfile?.displayName || state.currentUser?.email?.split('@')[0];
-        expense.validationComment = document.getElementById('expense-validate-comment').value.trim();
-        
-        Store.save();
-        document.getElementById('expense-validate-modal').style.display = 'none';
-        Expenses.render();
     },
     
     // Export PDF du budget [Phase C.2.2 refondu + Phase D : opts.simple / opts.includeCover]
@@ -66035,28 +65986,6 @@ const FichesPDF = {
 
 // ========== MODULE EXPORT SCÉNARIO ==========
 const ScriptExport = {
-    closeTitlePageModal: () => {
-        document.getElementById('title-page-modal').style.display = 'none';
-    },
-    
-    saveTitlePage: () => {
-        if(!state.data.scriptMeta) state.data.scriptMeta = {};
-        
-        state.data.title = document.getElementById('script-meta-title').value;
-        state.data.scriptMeta.author = document.getElementById('script-meta-author').value;
-        state.data.scriptMeta.coAuthor = document.getElementById('script-meta-coauthor').value;
-        state.data.scriptMeta.contact = document.getElementById('script-meta-contact').value;
-        state.data.scriptMeta.draft = document.getElementById('script-meta-draft').value;
-        state.data.scriptMeta.draftDate = document.getElementById('script-meta-date').value;
-        state.data.scriptMeta.source = document.getElementById('script-meta-source').value;
-        state.data.scriptMeta.copyright = document.getElementById('script-meta-copyright').value;
-        state.data.scriptMeta.notes = document.getElementById('script-meta-notes').value;
-        
-        Store.save();
-        ScriptExport.closeTitlePageModal();
-        Utils.toast('Page de titre enregistrée !', 'success');
-    },
-    
     // Convertit le HTML du scénario en texte brut avec type de bloc
     parseScriptContent: (html) => {
         const temp = document.createElement('div');
@@ -68668,79 +68597,6 @@ const Weather = {
         <textarea id="comment-input" class="comment-input" rows="3" placeholder="Ajouter un commentaire..."></textarea>
         <button class="comment-submit" onclick="app.Comments.add()">💬 Envoyer</button>
     </div>
-</div>
-
-<!-- Modal Page de Titre Scénario -->
-<div id="title-page-modal" class="modal-overlay d-none">
-  <div class="modal-content" style="max-width:600px; background: var(--panel-bg);">
-    <div class="modal-header">
-      <h2>📝 Page de titre du scénario</h2>
-      <button onclick="app.ScriptExport.closeTitlePageModal()" class="modal-close">✖</button>
-    </div>
-    <div style="padding: 20px; max-height: 70vh; overflow-y: auto;">
-      <p class="text-sec-mb20">Ces informations apparaîtront sur la page de titre lors de l'export Fountain ou Final Draft.</p>
-      
-      <div style="display: grid; gap: 15px;">
-        <div>
-          <label class="label-bold">Titre du scénario</label>
-          <input type="text" id="script-meta-title" class="form-input" placeholder="Titre du film">
-        </div>
-        
-        <div class="grid-2col">
-          <div>
-            <label class="label-bold">Auteur</label>
-            <input type="text" id="script-meta-author" class="form-input" placeholder="Prénom Nom">
-          </div>
-          <div>
-            <label class="label-bold">Co-auteur (optionnel)</label>
-            <input type="text" id="script-meta-coauthor" class="form-input" placeholder="Prénom Nom">
-          </div>
-        </div>
-        
-        <div>
-          <label class="label-bold">Contact (email ou téléphone)</label>
-          <input type="text" id="script-meta-contact" class="form-input" placeholder="email@exemple.com">
-        </div>
-        
-        <div class="grid-2col">
-          <div>
-            <label class="label-bold">Version / Draft</label>
-            <select id="script-meta-draft" class="form-input">
-              <option value="Premier jet">Premier jet</option>
-              <option value="Deuxième jet">Deuxième jet</option>
-              <option value="Troisième jet">Troisième jet</option>
-              <option value="Version de tournage">Version de tournage</option>
-              <option value="Version finale">Version finale</option>
-            </select>
-          </div>
-          <div>
-            <label class="label-bold">Date</label>
-            <input type="date" id="script-meta-date" class="form-input">
-          </div>
-        </div>
-        
-        <div>
-          <label class="label-bold">Basé sur (optionnel)</label>
-          <input type="text" id="script-meta-source" class="form-input" placeholder="Ex: le roman de Victor Hugo">
-        </div>
-        
-        <div>
-          <label class="label-bold">Copyright (optionnel)</label>
-          <input type="text" id="script-meta-copyright" class="form-input" placeholder="© 2026 Nom ou Société">
-        </div>
-        
-        <div>
-          <label class="label-bold">Notes (optionnel)</label>
-          <textarea id="script-meta-notes" rows="3" class="n8-input-6" placeholder="Notes supplémentaires..."></textarea>
-        </div>
-      </div>
-      
-      <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 25px; padding-top: 15px; border-top: 1px solid var(--border);">
-        <button onclick="app.ScriptExport.closeTitlePageModal()" class="btn-outline-r6">Annuler</button>
-        <button onclick="app.ScriptExport.saveTitlePage()" style="padding: 10px 20px; background: var(--success); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">💾 Enregistrer</button>
-      </div>
-    </div>
-  </div>
 </div>
 
 <!-- Modal édition fiche compacte -->
