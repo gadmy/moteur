@@ -94,17 +94,59 @@ BILAN R3 (PASSE 2 + PASSE 3)
 - ~1740 lignes économisées (70 469 → 68 729)
 - Aucune régression fonctionnelle constatée
 
-BUGS DÉCOUVERTS PENDANT R3 (à corriger plus tard, hors scope)
-- Vue Script → Vue Scènes ne propage pas le contenu écrit en mode continu
-  (setViewMode l.30606 ne rafraîchit pas scriptContainer)
-- SessionManager : session unique multi-navigateur jamais implémentée
-  (showKickedModal et logoutAll mortes, code anticipé pour feature jamais finie)
-- Bouton suppression Crew sans confirmation (l.20124, confirmDeleteMember mort)
-- Modale expense-validate-modal + approveExpense/rejectExpense morts en cascade
-  (openValidateModal supprimé en L5.5)
-- Modale title-page-modal + closeTitlePageModal/saveTitlePage morts en cascade
-  (openTitlePageModal supprimé en L5.9)
-- Expenses.calculateTTC/calculateHT probablement morts (callers utilisent calculateTTCFromHT/HTFromTTC)
+BUGS DÉCOUVERTS PENDANT R3 + TOUS CORRIGÉS DANS LA FOULÉE
+B4 — Cleanup modale expense-validate-modal + cascade (FAIT, -47 lignes)
+  - Suppression approveExpense + rejectExpense (orphelins, callers étaient dans la modale)
+  - Suppression currentExpenseId (propriété cascade)
+  - Suppression de la modale HTML expense-validate-modal (14 lignes)
+  - Note : openValidateModal avait été supprimé en R3.3.L5.5
+
+B5 — Cleanup modale title-page-modal + cascade (FAIT, -95 lignes)
+  - Suppression closeTitlePageModal + saveTitlePage (22 lignes JS)
+  - Suppression de la modale HTML title-page-modal (73 lignes)
+  - L'édition de la page de titre se fait maintenant exclusivement via l'onglet Titre
+
+B6 — Input expense-attachment-url avec placeholder mensonger (FAIT, -4 lignes)
+  - Suppression de l'input HTML (était UI-mort depuis suppression addAttachmentUrl en L5.4)
+  - Layout simplifié (suppression div.flex-row-gap10 inutile)
+  - Suppression de la ligne JS orpheline de réinitialisation
+
+B3 — Bouton suppression Crew sans confirmation (FAIT, +2 lignes)
+  - Ajout d'un ConfirmModal.confirmDelete() en tête de Crew.deleteMember
+  - Message explicite : "X sera retiré du projet, ainsi que ses convocations et dépenses"
+  - Pattern aligné avec les autres modules (Actors, Locations, Planning, etc.)
+
+B1 — Vue Script ↔ Vue Scènes : contenu non propagé (FAIT, +2 lignes)
+  - Bug : écrire en Vue Script → contenu absent en Vue Scènes même après F5
+  - Cause : setViewMode appelait renderContinuous() pour le mode 'continuous'
+    mais ne rafraîchissait pas scriptContainer pour le mode 'scenes'
+  - Fix : ajout d'un else if(mode === 'scenes') UI.renderScript() dans setViewMode
+
+B2 — Session unique multi-navigateur (FAIT, ~+150 lignes utiles)
+  - Architecture : max 2 sessions actives simultanées par utilisateur
+  - Multi-onglets du même navigateur = 1 seule session (token partagé via localStorage)
+  - Au-delà de 2 sessions, la plus ancienne est supprimée → kick au prochain heartbeat
+  - Nettoyage auto des sessions zombies (> 2 min sans heartbeat)
+  - Modale "Session terminée" avec bouton "Reconnecter"
+  - Robuste aux JWT révoqués / timeouts (withTimeout 10s sur toutes les requêtes)
+  - Table Supabase active_sessions avec RLS (user voit/modifie que ses sessions)
+
+Fix C — Guard state.data null dans TitlePage.save (FAIT, +1 ligne)
+  - Bug latent : si state.data est null (kick/déconnexion), TitlePage.save plantait
+  - Fix : if(!state.data) return; en tête de save()
+
+FAUX POSITIFS (rien à faire, vérification effectuée)
+- B7 : Expenses.calculateTTC/calculateHT sont vivants (appelés par calculateTTCFromHT/
+  calculateHTFromTTC qui sont des wrappers UI). Architecture saine en réalité.
+- B8 : Permissions auto-init non câblée mais système robuste via fallback dynamique
+  dans Permissions.getCurrentUserPermissions (cherche dans actors/crew automatiquement).
+
+BILAN B1-B8 (bugs)
+- 6 bugs réellement corrigés (B1, B2, B3, B4, B5, B6) + Fix C
+- 2 faux positifs identifiés (B7, B8)
+- 2 bugs UX critiques résolus (B1 propagation Vue Script, B3 confirmation Crew)
+- 1 feature de sécurité ajoutée (B2 max 2 sessions, +infra Supabase)
+- ~-7 lignes nettes (mais code beaucoup plus propre + plus de fonctionnalités)
 
 ================================================================================
 v4.3.3 — Uniformisation complète Dossier de Production + refonte page de titre (20 Mai 2026)
@@ -7234,7 +7276,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.5.0</p>
+      <p>vv4.5.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -25932,7 +25974,7 @@ const MoodBoard = {
                 const footerZone = (typeof PdfTheme !== 'undefined' && PdfTheme.FOOTER_ZONE_MM) ? PdfTheme.FOOTER_ZONE_MM : 14;
                 const isLandscape = orientation === 'landscape';
                 
-                doc.setFillColor(40, 40, 40);
+                doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
                 
                 let headerStartLogical; // marge effective côté "haut" logique de l'image
                 
@@ -25940,7 +25982,7 @@ const MoodBoard = {
                     // PORTRAIT : bandeau horizontal en haut
                     const headerY = margin;
                     doc.rect(margin, headerY, pageW - margin * 2, headerH, 'F');
-                    doc.setTextColor(255, 255, 255);
+                    doc.setTextColor(...PdfTheme.COLORS.WHITE);
                     doc.setFontSize(11);
                     doc.setFont('helvetica', 'bold');
                     doc.text(cleanT(board.name || 'MoodBoard'), margin + 4, headerY + 6.2);
@@ -25955,7 +25997,7 @@ const MoodBoard = {
                     // qui est à x=0..14mm, donc on positionne le bandeau loin de ça (côté droit).
                     const headerX = pageW - margin - headerH; // côté droit logique
                     doc.rect(headerX, margin, headerH, pageH - margin * 2, 'F');
-                    doc.setTextColor(255, 255, 255);
+                    doc.setTextColor(...PdfTheme.COLORS.WHITE);
                     
                     // Texte tourné 270° pour être lisible après rotation 270° de la page entière
                     // Avec angle:270, le texte s'étire vers le BAS depuis le point d'ancrage (x,y).
@@ -27618,188 +27660,6 @@ if(hasContent) {
             if(!opts.returnBlob) Utils.toast('Échec génération Storyboard PDF', 'error');
             return;
         }
-        
-        // (Ancien code jsPDF natif entièrement supprimé)
-        if(false) {
-        // Mode "image seule" : on masque tout sauf le numéro
-        const imageOnly = !!opts.imageOnly;
-        const showShotNumber = imageOnly ? true : config.shotNumber !== false;
-        const showShotType = imageOnly ? false : config.shotType !== false;
-        const showCameraMove = imageOnly ? false : config.cameraMove !== false;
-        const showCameraMode = imageOnly ? false : config.cameraMode !== false;
-        const showDescription = imageOnly ? false : config.description !== false;
-        const showActorDirection = imageOnly ? false : config.actorDirection !== false;
-        const showTechDirection = imageOnly ? false : config.techDirection !== false;
-        
-        // Acronymes
-        const shotTypes = { 'Plan général': 'PG', 'Plan d\'ensemble': 'PE', 'Plan moyen': 'PM', 'Plan américain': 'PA', 'Plan rapproché': 'PR', 'Gros plan': 'GP', 'Très gros plan': 'TGP', 'Insert': 'INS' };
-        const cameraMoves = { 'Fixe': 'FIX', 'Panoramique': 'PAN', 'Travelling': 'TRAV', 'Zoom': 'ZOOM', 'Steadicam': 'STEAD', 'Drone': 'DRONE', 'Grue': 'GRUE', 'Épaule': 'ÉP' };
-        const cameraModes = { 'Objectif': 'OBJ', 'Subjectif': 'SUBJ', 'Semi-subjectif': 'SEMI', 'Point de vue': 'PDV' };
-        
-        // Grouper les plans par scène
-        const sceneShots = {};
-        shots.forEach(shot => {
-            if(!sceneShots[shot.sceneId]) sceneShots[shot.sceneId] = [];
-            sceneShots[shot.sceneId].push(shot);
-        });
-        
-        // [Phase D fix] Précharger toutes les images (upload + drawing) en dataURL
-        // Cache map : shot.id -> dataURL ou null si échec
-        const shotImageCache = {};
-        const loadImageAsDataURL = (url) => new Promise((resolve) => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => {
-                try {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = img.naturalWidth || 800;
-                    canvas.height = img.naturalHeight || 600;
-                    canvas.getContext('2d').drawImage(img, 0, 0);
-                    resolve(canvas.toDataURL('image/png'));
-                } catch(e) {
-                    console.warn('[Storyboard PDF] Canvas conversion fail:', e.message);
-                    resolve(null);
-                }
-            };
-            img.onerror = () => {
-                console.warn('[Storyboard PDF] Image load fail:', url.substring(0, 80));
-                resolve(null);
-            };
-            img.src = url + (url.includes('?') ? '&' : '?') + 'cb=' + Date.now();
-            setTimeout(() => resolve(null), 8000);
-        });
-        
-        await Promise.all(shots.map(async (shot) => {
-            if(shot.imageType === 'drawing' && shot.drawingData) {
-                // Le dessin est déjà en base64
-                shotImageCache[shot.id] = shot.drawingData;
-            } else if(shot.imageType === 'upload' && shot.imageUrl) {
-                shotImageCache[shot.id] = await loadImageAsDataURL(shot.imageUrl);
-            } else {
-                shotImageCache[shot.id] = null;
-            }
-        }));
-        
-        let pageNum = 0;
-        
-        // Pour chaque scène qui a des plans
-        for(const scene of scenes) {
-            const sceneIdx = scenes.indexOf(scene);
-            const shotsList = sceneShots[scene.id] || [];
-            if(shotsList.length === 0) continue;
-            
-            // 4 plans par page (2x2)
-            const shotsPerPage = 4;
-            const shotWidth = (pageWidth - margin * 3) / 2;
-            const shotHeight = (pageHeight - margin * 3 - 15) / 2;
-            const imageHeight = shotHeight * 0.55; // Réduit pour plus d'espace texte
-            
-            for(let i = 0; i < shotsList.length; i += shotsPerPage) {
-                if(pageNum > 0) doc.addPage();
-                pageNum++;
-                
-                // En-tête de page
-                doc.setFillColor(43, 110, 246);
-                doc.rect(0, 0, pageWidth, 12, 'F');
-                doc.setTextColor(255, 255, 255);
-                doc.setFontSize(10);
-                doc.setFont('helvetica', 'bold');
-                doc.text(PdfTheme.cleanText(`STORYBOARD - ${projectTitle}`), margin, 8);
-                doc.setFontSize(9);
-                doc.setFont('helvetica', 'normal');
-                doc.text(PdfTheme.cleanText(`Scène #${sceneIdx + 1} : ${scene.title || 'Sans titre'}`), pageWidth - margin, 8, { align: 'right' });
-                
-                // Dessiner les plans (grille 2x2)
-                const pageShots = shotsList.slice(i, i + shotsPerPage);
-                
-                pageShots.forEach((shot, idx) => {
-                    const col = idx % 2;
-                    const row = Math.floor(idx / 2);
-                    const x = margin + col * (shotWidth + margin);
-                    const y = 15 + row * (shotHeight + margin);
-                    
-                    // Cadre du plan
-                    doc.setDrawColor(200, 200, 200);
-                    doc.setLineWidth(0.5);
-                    doc.rect(x, y, shotWidth, shotHeight);
-                    
-                    // Zone image
-                    doc.setFillColor(245, 245, 245);
-                    doc.rect(x, y, shotWidth, imageHeight, 'F');
-                    
-                    // Image du plan : lecture depuis le cache préchargé
-                    const _cT = (t) => (typeof PdfTheme !== 'undefined' && PdfTheme.cleanText) ? PdfTheme.cleanText(t || '') : (t || '');
-                    const imgData = shotImageCache[shot.id];
-                    if(imgData) {
-                        try {
-                            doc.addImage(imgData, 'PNG', x + 2, y + 2, shotWidth - 4, imageHeight - 4);
-                        } catch(e) {
-                            doc.setTextColor(180, 180, 180);
-                            doc.setFontSize(11);
-                            doc.text('Image non chargee', x + shotWidth/2, y + imageHeight/2, { align: 'center' });
-                        }
-                    } else {
-                        doc.setTextColor(180, 180, 180);
-                        doc.setFontSize(11);
-                        doc.text('Pas d\'image', x + shotWidth/2, y + imageHeight/2, { align: 'center' });
-                    }
-                    
-                    // Infos du plan
-                    let infoY = y + imageHeight + 4;
-                    const maxInfoY = y + shotHeight - 2;
-                    doc.setTextColor(50, 50, 50);
-                    
-                    // Ligne 1: Numéro, nom et infos techniques
-                    doc.setFontSize(8);
-                    doc.setFont('helvetica', 'bold');
-                    let header = [];
-                    if(showShotNumber) header.push(`Plan ${i + idx + 1}`);
-                    if(shot.name) header.push(`"${shot.name}"`);
-                    if(showShotType && shot.shotType) header.push(shotTypes[shot.shotType] || Storyboard.extractAcronym(shot.shotType));
-                    if(showCameraMove && shot.cameraMove) header.push(cameraMoves[shot.cameraMove] || Storyboard.extractAcronym(shot.cameraMove));
-                    if(showCameraMode && shot.cameraMode) header.push(cameraModes[shot.cameraMode] || Storyboard.extractAcronym(shot.cameraMode));
-                    
-                    if(header.length > 0) {
-                        doc.text(_cT(header.join(' - ')), x + 3, infoY);
-                        infoY += 4;
-                    }
-                    
-                    doc.setFont('helvetica', 'normal');
-                    doc.setFontSize(7);
-                    
-                    // Description
-                    if(showDescription && shot.description && infoY < maxInfoY) {
-                        const lines = doc.splitTextToSize(_cT(`Desc: ${shot.description}`), shotWidth - 6);
-                        lines.slice(0, 2).forEach(line => {
-                            if(infoY < maxInfoY) { doc.text(line, x + 3, infoY); infoY += 3.5; }
-                        });
-                    }
-                    
-                    // Direction acteurs
-                    if(showActorDirection && shot.actorDirection && infoY < maxInfoY) {
-                        const lines = doc.splitTextToSize(_cT(`Acteurs: ${shot.actorDirection}`), shotWidth - 6);
-                        lines.slice(0, 2).forEach(line => {
-                            if(infoY < maxInfoY) { doc.text(line, x + 3, infoY); infoY += 3.5; }
-                        });
-                    }
-                    
-                    // Direction technique
-                    if(showTechDirection && shot.technicalDirection && infoY < maxInfoY) {
-                        const lines = doc.splitTextToSize(_cT(`Technique: ${shot.technicalDirection}`), shotWidth - 6);
-                        lines.slice(0, 2).forEach(line => {
-                            if(infoY < maxInfoY) { doc.text(line, x + 3, infoY); infoY += 3.5; }
-                        });
-                    }
-                });
-                
-                // Pied de page
-                doc.setFontSize(7);
-                doc.setTextColor(150, 150, 150);
-                doc.text(`Page ${pageNum}`, pageWidth / 2, pageHeight - 5, { align: 'center' });
-            }
-        }
-        
-        } // fin BLOC SUPPRIMÉ
         
         // ===== Footer unifié sur toutes les pages =====
         if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
@@ -44212,6 +44072,41 @@ const Stats = {
  //
  // Tous les exports PDF de l'app doivent passer par ces helpers pour uniformité.
  const PdfTheme = {
+    // ============================================================
+    // PALETTE DE COULEURS (R4) - Source de vérité unique pour les PDFs
+    // ============================================================
+    // Format : [r, g, b] - utilisable via doc.setFillColor(...PdfTheme.COLORS.TEXT_DARK)
+    // Ou en destructuring : const [r,g,b] = PdfTheme.COLORS.BANNER_DARK;
+    COLORS: {
+        // Texte (du plus foncé au plus clair)
+        TEXT_DARK:      [30, 30, 30],     // titres principaux, accentué
+        TEXT_PRIMARY:   [50, 50, 50],     // texte normal sombre (le plus utilisé)
+        TEXT_BODY:      [60, 60, 60],     // texte body courant
+        TEXT_MUTED:     [80, 80, 80],     // texte un peu effacé
+        TEXT_SECONDARY: [100, 100, 100],  // texte secondaire (sous-titres, dates)
+        TEXT_LIGHT:     [120, 120, 120],  // texte légèrement effacé
+        TEXT_FAINT:     [150, 150, 150],  // texte très clair (placeholders, mentions)
+        
+        // Fonds (bandeaux et zones colorées)
+        BANNER_DARK:    [40, 40, 40],     // bandeaux gris foncé identitaires (Dossier Prod)
+        BANNER_BLUE:    [43, 110, 246],   // bandeau d'en-tête bleu identitaire
+        BG_LIGHT:       [240, 240, 240],  // fond gris très clair (alternance lignes)
+        BG_LIGHTER:     [245, 245, 245],  // fond gris extra-clair
+        
+        // Bordures
+        BORDER:         [200, 200, 200],  // bordure standard
+        BORDER_LIGHT:   [225, 225, 225],  // bordure très claire
+        BORDER_DARK:    [180, 180, 180],  // bordure plus foncée
+        
+        // Couleurs de base
+        WHITE:          [255, 255, 255],
+        BLACK:          [0, 0, 0],
+        
+        // Statuts (badges, alertes)
+        SUCCESS:        [40, 167, 69],    // vert "Validé"
+        WARNING:        [255, 193, 7]     // jaune "En attente"
+    },
+    
     // Mapping section → rôles à chercher dans state.data.crew (par ordre de priorité)
     AUTHOR_ROLES: {
         'Scénario':       ['Scénariste', 'Co-scénariste', 'Dialoguiste'],
