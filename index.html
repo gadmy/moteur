@@ -7234,7 +7234,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.4.7</p>
+      <p>vv4.4.8</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -14147,9 +14147,13 @@ crewRoles: {
           });
       },
       
-      // Vérifier la session (simplifié pour Supabase)
+      // Vérifier la session unique (1 seule session active par utilisateur)
+      // Multi-onglets du même navigateur OK (token partagé via localStorage)
+      // Multi-navigateurs/appareils → l'ancien est kické
       startSessionCheck: async (userId) => {
-          // Générer un token de session unique pour cet ordinateur/navigateur
+          SessionManager.currentUserId = userId;
+          
+          // Token partagé entre onglets du même navigateur via localStorage
           let browserToken = localStorage.getItem('moteur_browser_token');
           if(!browserToken) {
               browserToken = 'browser_' + Date.now() + '_' + Math.random().toString(36).slice(2, 15);
@@ -14157,8 +14161,26 @@ crewRoles: {
           }
           SessionManager.sessionToken = browserToken;
           
-          // Pour Supabase, on simplifie la gestion de session
-          // La gestion multi-appareils sera gérée par les tokens JWT de Supabase
+          // UPSERT : on enregistre notre token comme session active (écrase toute session précédente)
+          try {
+              const { error } = await supabase.from('active_sessions').upsert({
+                  user_id: userId,
+                  session_token: browserToken,
+                  last_seen: new Date().toISOString(),
+                  user_agent: navigator.userAgent.slice(0, 200)
+              }, { onConflict: 'user_id' });
+              
+              if(error) {
+                  console.warn('[SessionManager] Impossible d\'enregistrer la session:', error.message);
+                  // On laisse continuer (mode dégradé : pas de session unique mais l'app fonctionne)
+              }
+          } catch(e) {
+              console.warn('[SessionManager] Erreur session:', e.message);
+          }
+          
+          // Démarrer le heartbeat (vérifie toutes les 30s si on est toujours la session active)
+          if(SessionManager.heartbeatInterval) clearInterval(SessionManager.heartbeatInterval);
+          SessionManager.heartbeatInterval = setInterval(SessionManager.checkSessionStillValid, 30000);
           
           // Nettoyer à la fermeture
           window.addEventListener('beforeunload', () => {
@@ -14168,6 +14190,68 @@ crewRoles: {
           });
           
           return true;
+      },
+      
+      // Vérifie périodiquement que notre token est toujours la session active
+      // Si non → un autre appareil s'est connecté → on déconnecte cette session
+      checkSessionStillValid: async () => {
+          if(!SessionManager.currentUserId || !SessionManager.sessionToken) return;
+          
+          try {
+              const { data, error } = await supabase.from('active_sessions')
+                  .select('session_token')
+                  .eq('user_id', SessionManager.currentUserId)
+                  .single();
+              
+              if(error) {
+                  // Erreur réseau : on ne déconnecte PAS (faux positifs sur réseau instable)
+                  console.warn('[SessionManager] Heartbeat error (ignoré):', error.message);
+                  return;
+              }
+              
+              if(data && data.session_token !== SessionManager.sessionToken) {
+                  // Notre token n'est plus actif → kick !
+                  SessionManager.showKickedModal();
+              } else {
+                  // Mettre à jour last_seen pour signaler qu'on est encore là
+                  await supabase.from('active_sessions')
+                      .update({ last_seen: new Date().toISOString() })
+                      .eq('user_id', SessionManager.currentUserId);
+              }
+          } catch(e) {
+              console.warn('[SessionManager] Erreur heartbeat:', e.message);
+          }
+      },
+      
+      // Affiche une modale bloquante quand l'utilisateur est kické (un autre appareil s'est connecté)
+      showKickedModal: () => {
+          // Arrêter le heartbeat immédiatement pour éviter de spammer
+          if(SessionManager.heartbeatInterval) {
+              clearInterval(SessionManager.heartbeatInterval);
+              SessionManager.heartbeatInterval = null;
+          }
+          
+          // Ne pas afficher la modale deux fois
+          if(document.getElementById('session-kicked-overlay')) return;
+          
+          const overlay = document.createElement('div');
+          overlay.id = 'session-kicked-overlay';
+          overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+          overlay.innerHTML = `
+              <div style="background:var(--panel-bg, #fff);padding:40px;border-radius:12px;text-align:center;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+                  <div style="font-size:4rem;margin-bottom:20px;">🔐</div>
+                  <h2 style="margin-bottom:15px;color:var(--text-main, #333);">Session terminée</h2>
+                  <p style="color:var(--text-sec, #666);margin-bottom:25px;line-height:1.5;">Votre compte vient de se connecter sur un autre appareil. Cette session a été déconnectée pour des raisons de sécurité.</p>
+                  <button id="session-kicked-reconnect" style="padding:12px 30px;background:var(--primary, #007bff);color:white;border:none;border-radius:6px;cursor:pointer;font-size:1rem;font-weight:bold;">🔄 Reconnecter</button>
+              </div>
+          `;
+          document.body.appendChild(overlay);
+          
+          // Bouton "Reconnecter" → signOut local + reload (l'utilisateur devra se reloguer s'il veut reprendre la main)
+          document.getElementById('session-kicked-reconnect').onclick = async () => {
+              try { await supabase.auth.signOut(); } catch(_) {}
+              location.reload();
+          };
       },
       
       // Notifier les autres onglets d'une modification
