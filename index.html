@@ -14147,9 +14147,20 @@ crewRoles: {
           });
       },
       
-      // Vérifier la session unique (1 seule session active par utilisateur)
-      // Multi-onglets du même navigateur OK (token partagé via localStorage)
-      // Multi-navigateurs/appareils → l'ancien est kické
+      // Configuration sessions
+      MAX_SESSIONS: 2,              // Nombre max de sessions actives simultanées par user
+      ZOMBIE_TIMEOUT_MS: 120000,    // 2 min sans heartbeat = session zombie, peut être écrasée
+      HEARTBEAT_INTERVAL_MS: 30000, // 30s entre chaque heartbeat
+      
+      // Helper : timeout sur une promesse (Supabase peut pendre indéfiniment si JWT révoqué)
+      _withTimeout: (promise, ms = 10000) => Promise.race([
+          promise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms))
+      ]),
+      
+      // Démarrer le suivi de session (MAX_SESSIONS sessions actives max par user)
+      // Multi-onglets du même navigateur = 1 seule session (token partagé via localStorage)
+      // Au-delà de MAX_SESSIONS, la plus ancienne est supprimée → kick au prochain heartbeat
       startSessionCheck: async (userId) => {
           SessionManager.currentUserId = userId;
           
@@ -14161,82 +14172,106 @@ crewRoles: {
           }
           SessionManager.sessionToken = browserToken;
           
-          // UPSERT : on enregistre notre token comme session active (écrase toute session précédente)
           try {
-              const { error } = await supabase.from('active_sessions').upsert({
-                  user_id: userId,
-                  session_token: browserToken,
-                  last_seen: new Date().toISOString(),
-                  user_agent: navigator.userAgent.slice(0, 200)
-              }, { onConflict: 'user_id' });
+              // 1) Récupérer les sessions actives du user (triées par last_seen ASC)
+              const { data: sessions, error: selErr } = await SessionManager._withTimeout(
+                  supabase.from('active_sessions')
+                      .select('id, session_token, last_seen')
+                      .eq('user_id', userId)
+                      .order('last_seen', { ascending: true })
+              );
               
-              if(error) {
-                  console.warn('[SessionManager] Impossible d\'enregistrer la session:', error.message);
-                  // On laisse continuer (mode dégradé : pas de session unique mais l'app fonctionne)
+              if(selErr) {
+                  console.warn('[SessionManager] Erreur lecture sessions:', selErr.message);
+              } else if(sessions) {
+                  const mineAlreadyExists = sessions.some(s => s.session_token === browserToken);
+                  
+                  if(!mineAlreadyExists) {
+                      // 2) Nettoyer les sessions zombies (last_seen > ZOMBIE_TIMEOUT_MS)
+                      const now = Date.now();
+                      const zombies = sessions.filter(s => (now - new Date(s.last_seen).getTime()) > SessionManager.ZOMBIE_TIMEOUT_MS);
+                      const alive = sessions.filter(s => (now - new Date(s.last_seen).getTime()) <= SessionManager.ZOMBIE_TIMEOUT_MS);
+                      
+                      if(zombies.length > 0) {
+                          await SessionManager._withTimeout(
+                              supabase.from('active_sessions').delete().in('id', zombies.map(z => z.id))
+                          ).catch(e => console.warn('[SessionManager] Nettoyage zombies:', e.message));
+                      }
+                      
+                      // 3) Si toujours à la limite après nettoyage, supprimer la plus ancienne vivante
+                      if(alive.length >= SessionManager.MAX_SESSIONS) {
+                          const oldest = alive[0]; // déjà trié par last_seen ASC
+                          await SessionManager._withTimeout(
+                              supabase.from('active_sessions').delete().eq('id', oldest.id)
+                          ).catch(e => console.warn('[SessionManager] Suppression ancienne:', e.message));
+                      }
+                  }
+              }
+              
+              // 4) Enregistrer NOTRE session (UPSERT sur session_token UNIQUE)
+              const { error: upErr } = await SessionManager._withTimeout(
+                  supabase.from('active_sessions').upsert({
+                      user_id: userId,
+                      session_token: browserToken,
+                      last_seen: new Date().toISOString(),
+                      user_agent: navigator.userAgent.slice(0, 200)
+                  }, { onConflict: 'session_token' })
+              );
+              
+              if(upErr) {
+                  console.warn('[SessionManager] Impossible d\'enregistrer la session:', upErr.message);
               }
           } catch(e) {
-              console.warn('[SessionManager] Erreur session:', e.message);
+              console.warn('[SessionManager] Erreur init session:', e.message);
+              // On continue quand même (mode dégradé)
           }
           
-          // Démarrer le heartbeat (vérifie toutes les 30s si on est toujours la session active)
+          // Démarrer le heartbeat
           if(SessionManager.heartbeatInterval) clearInterval(SessionManager.heartbeatInterval);
-          SessionManager.heartbeatInterval = setInterval(SessionManager.checkSessionStillValid, 30000);
+          SessionManager.heartbeatInterval = setInterval(SessionManager.checkSessionStillValid, SessionManager.HEARTBEAT_INTERVAL_MS);
           
           // Nettoyer à la fermeture
           window.addEventListener('beforeunload', () => {
-              if(SessionManager.heartbeatInterval) {
-                  clearInterval(SessionManager.heartbeatInterval);
-              }
+              if(SessionManager.heartbeatInterval) clearInterval(SessionManager.heartbeatInterval);
           });
           
           return true;
       },
       
-      // Vérifie périodiquement que notre token est toujours la session active
-      // Si non → un autre appareil s'est connecté → on déconnecte cette session
+      // Vérifie périodiquement que notre session existe encore en base
+      // Si elle a été supprimée (par un nouveau client qui a pris la place), on est kické
       checkSessionStillValid: async () => {
           if(!SessionManager.currentUserId || !SessionManager.sessionToken) return;
           
-          // Helper : ajoute un timeout sur une promesse (sinon Supabase peut pendre indéfiniment)
-          const withTimeout = (promise, ms = 10000) => Promise.race([
-              promise,
-              new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms))
-          ]);
-          
           try {
-              // Récupérer la liste des sessions actives pour notre user (sans .single() pour gérer le cas 0 lignes)
-              const result = await withTimeout(
+              // Cherche notre ligne par session_token
+              const { data, error } = await SessionManager._withTimeout(
                   supabase.from('active_sessions')
-                      .select('session_token')
-                      .eq('user_id', SessionManager.currentUserId)
+                      .select('id')
+                      .eq('session_token', SessionManager.sessionToken)
               );
               
-              const { data, error } = result;
-              
               if(error) {
-                  // Erreur explicite Supabase : on ne déconnecte pas (faux positif réseau)
                   console.warn('[SessionManager] Heartbeat error (ignoré):', error.message);
                   return;
               }
               
-              // Cas 1 : pas de ligne pour ce user → notre session a été supprimée (kické)
-              // Cas 2 : ligne avec un token différent du nôtre → un autre appareil a pris la place
-              if(!data || data.length === 0 || data[0].session_token !== SessionManager.sessionToken) {
-                  // Notre token n'est plus actif → kick !
+              if(!data || data.length === 0) {
+                  // Notre ligne a été supprimée → kick !
                   SessionManager.showKickedModal();
                   return;
               }
               
               // Tout va bien : on met à jour last_seen
-              await withTimeout(
+              await SessionManager._withTimeout(
                   supabase.from('active_sessions')
                       .update({ last_seen: new Date().toISOString() })
-                      .eq('user_id', SessionManager.currentUserId)
-              ).catch(() => { /* silent : la mise à jour de last_seen n'est pas critique */ });
+                      .eq('session_token', SessionManager.sessionToken)
+              ).catch(() => { /* non critique */ });
               
           } catch(e) {
-              // Timeout ou erreur fetch → JWT probablement révoqué côté Supabase → kick !
-              if(e.message === 'TIMEOUT' || e.name === 'AuthSessionMissingError' || (e.message || '').includes('JWT')) {
+              // Timeout ou JWT révoqué → kick !
+              if(e.message === 'TIMEOUT' || (e.message || '').includes('JWT')) {
                   console.warn('[SessionManager] Session probablement révoquée:', e.message);
                   SessionManager.showKickedModal();
               } else {
@@ -14245,9 +14280,9 @@ crewRoles: {
           }
       },
       
-      // Affiche une modale bloquante quand l'utilisateur est kické (un autre appareil s'est connecté)
+      // Affiche une modale bloquante quand l'utilisateur est kické
       showKickedModal: () => {
-          // Arrêter le heartbeat immédiatement pour éviter de spammer
+          // Arrêter le heartbeat immédiatement
           if(SessionManager.heartbeatInterval) {
               clearInterval(SessionManager.heartbeatInterval);
               SessionManager.heartbeatInterval = null;
@@ -14263,13 +14298,12 @@ crewRoles: {
               <div style="background:var(--panel-bg, #fff);padding:40px;border-radius:12px;text-align:center;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
                   <div style="font-size:4rem;margin-bottom:20px;">🔐</div>
                   <h2 style="margin-bottom:15px;color:var(--text-main, #333);">Session terminée</h2>
-                  <p style="color:var(--text-sec, #666);margin-bottom:25px;line-height:1.5;">Votre compte vient de se connecter sur un autre appareil. Cette session a été déconnectée pour des raisons de sécurité.</p>
+                  <p style="color:var(--text-sec, #666);margin-bottom:25px;line-height:1.5;">Votre compte est connecté sur trop d'appareils. Cette session a été fermée pour libérer la place.</p>
                   <button id="session-kicked-reconnect" style="padding:12px 30px;background:var(--primary, #007bff);color:white;border:none;border-radius:6px;cursor:pointer;font-size:1rem;font-weight:bold;">🔄 Reconnecter</button>
               </div>
           `;
           document.body.appendChild(overlay);
           
-          // Bouton "Reconnecter" → signOut local + reload (l'utilisateur devra se reloguer s'il veut reprendre la main)
           document.getElementById('session-kicked-reconnect').onclick = async () => {
               try { await supabase.auth.signOut(); } catch(_) {}
               location.reload();
