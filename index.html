@@ -7234,7 +7234,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.4.8</p>
+      <p>vv4.4.9</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -14197,29 +14197,51 @@ crewRoles: {
       checkSessionStillValid: async () => {
           if(!SessionManager.currentUserId || !SessionManager.sessionToken) return;
           
+          // Helper : ajoute un timeout sur une promesse (sinon Supabase peut pendre indéfiniment)
+          const withTimeout = (promise, ms = 10000) => Promise.race([
+              promise,
+              new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms))
+          ]);
+          
           try {
-              const { data, error } = await supabase.from('active_sessions')
-                  .select('session_token')
-                  .eq('user_id', SessionManager.currentUserId)
-                  .single();
+              // Récupérer la liste des sessions actives pour notre user (sans .single() pour gérer le cas 0 lignes)
+              const result = await withTimeout(
+                  supabase.from('active_sessions')
+                      .select('session_token')
+                      .eq('user_id', SessionManager.currentUserId)
+              );
+              
+              const { data, error } = result;
               
               if(error) {
-                  // Erreur réseau : on ne déconnecte PAS (faux positifs sur réseau instable)
+                  // Erreur explicite Supabase : on ne déconnecte pas (faux positif réseau)
                   console.warn('[SessionManager] Heartbeat error (ignoré):', error.message);
                   return;
               }
               
-              if(data && data.session_token !== SessionManager.sessionToken) {
+              // Cas 1 : pas de ligne pour ce user → notre session a été supprimée (kické)
+              // Cas 2 : ligne avec un token différent du nôtre → un autre appareil a pris la place
+              if(!data || data.length === 0 || data[0].session_token !== SessionManager.sessionToken) {
                   // Notre token n'est plus actif → kick !
                   SessionManager.showKickedModal();
-              } else {
-                  // Mettre à jour last_seen pour signaler qu'on est encore là
-                  await supabase.from('active_sessions')
-                      .update({ last_seen: new Date().toISOString() })
-                      .eq('user_id', SessionManager.currentUserId);
+                  return;
               }
+              
+              // Tout va bien : on met à jour last_seen
+              await withTimeout(
+                  supabase.from('active_sessions')
+                      .update({ last_seen: new Date().toISOString() })
+                      .eq('user_id', SessionManager.currentUserId)
+              ).catch(() => { /* silent : la mise à jour de last_seen n'est pas critique */ });
+              
           } catch(e) {
-              console.warn('[SessionManager] Erreur heartbeat:', e.message);
+              // Timeout ou erreur fetch → JWT probablement révoqué côté Supabase → kick !
+              if(e.message === 'TIMEOUT' || e.name === 'AuthSessionMissingError' || (e.message || '').includes('JWT')) {
+                  console.warn('[SessionManager] Session probablement révoquée:', e.message);
+                  SessionManager.showKickedModal();
+              } else {
+                  console.warn('[SessionManager] Erreur heartbeat (ignorée):', e.message);
+              }
           }
       },
       
