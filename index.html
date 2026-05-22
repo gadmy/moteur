@@ -6939,7 +6939,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.6.3</p>
+      <p>vv4.6.4</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -29715,6 +29715,194 @@ const DrawingEditor = {
       }
   };
 
+  // ScriptEditorAC — sous-module V7.6 : auto-complétion personnages/décors/ressources
+  // (V7.6.a — squelette + hideAC + _getCaretOffsetInBlock. Cohabite avec les anciennes méthodes de ScriptEditor jusqu'à la bascule V7.6.e)
+  const ScriptEditorAC = {
+      hideAC: () => {
+          state.scriptAC.active = false;
+          els.scriptACList.style.display = 'none';
+      },
+      
+      // Helper : retourne l'offset (en caractères) du curseur dans le bloc texte
+      _getCaretOffsetInBlock: (block, range) => {
+          const preRange = document.createRange();
+          preRange.selectNodeContents(block);
+          preRange.setEnd(range.endContainer, range.endOffset);
+          return preRange.toString().length;
+      },
+      
+      // V7.6.b — helpers de rendu et navigation verticale
+      _setCaretAtOffset: (block, offset) => {
+          const sel = window.getSelection();
+          const range = document.createRange();
+          let charCount = 0; let found = false;
+          const walk = (node) => {
+              if(found) return;
+              if(node.nodeType === 3) {
+                  const len = node.textContent.length;
+                  if(charCount + len >= offset) { range.setStart(node, offset - charCount); range.collapse(true); found = true; return; }
+                  charCount += len;
+              } else { for(const c of node.childNodes) walk(c); }
+          };
+          walk(block);
+          if(found) { sel.removeAllRanges(); sel.addRange(range); }
+      },
+      
+      renderScriptACList: (editor) => {
+          els.scriptACList.innerHTML = '';
+          els.scriptACList.style.width = 'auto';
+          els.scriptACList.style.padding = '0';
+          els.scriptACList.style.display = 'flex';
+          els.scriptACList.style.alignItems = 'flex-start';
+          state.scriptAC.columns.forEach((col, ci) => {
+              const colDiv = document.createElement('div');
+              colDiv.style.cssText = 'display:flex;flex-direction:column;border-right:1px solid var(--border);min-width:180px;max-width:240px;';
+              if(ci === state.scriptAC.columns.length - 1) colDiv.style.borderRight = 'none';
+              const head = document.createElement('div');
+              head.style.cssText = 'padding:6px 12px;font-size:0.75rem;font-weight:bold;color:var(--text-sec);background:var(--bg);border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:0.5px;';
+              head.innerText = `${col.icon} ${col.label}`;
+              colDiv.appendChild(head);
+              col.items.forEach((m, i) => {
+                  const div = document.createElement('div');
+                  div.style.cssText = 'padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:0.88rem;';
+                  if(ci === state.scriptAC.colIndex && i === state.scriptAC.index) {
+                      div.classList.add('active');
+                      div.style.background = 'var(--bg)';
+                      div.style.color = 'var(--primary)';
+                  }
+                  div.innerText = m.name;
+                  div.onmousedown = (e) => {
+                      e.preventDefault();
+                      state.scriptAC.colIndex = ci;
+                      state.scriptAC.index = i;
+                      state.scriptAC.items = col.items;
+                      ScriptEditorAC.selectAC(editor);
+                  };
+                  colDiv.appendChild(div);
+              });
+              els.scriptACList.appendChild(colDiv);
+          });
+      },
+      
+      highlightAC: () => { 
+          const cols = state.scriptAC.columns || [];
+          if(cols.length === 0) return;
+          // Wrap vertical dans la colonne courante
+          const curCol = cols[state.scriptAC.colIndex];
+          if(!curCol) return;
+          if(state.scriptAC.index >= curCol.items.length) state.scriptAC.index = 0;
+          if(state.scriptAC.index < 0) state.scriptAC.index = curCol.items.length - 1;
+          state.scriptAC.items = curCol.items;
+          // Re-render pour mettre à jour la mise en surbrillance (plus simple que de manipuler les classes)
+          const editor = document.activeElement && document.activeElement.classList.contains('script-editor-box') ? document.activeElement : null;
+          ScriptEditorAC.renderScriptACList(editor);
+      },
+      
+      // V7.6.c — navigation horizontale entre colonnes + sélection
+      switchACColumn: (delta) => {
+          const cols = state.scriptAC.columns || [];
+          if(cols.length === 0) return;
+          let newIdx = state.scriptAC.colIndex + delta;
+          if(newIdx >= cols.length) newIdx = 0;
+          if(newIdx < 0) newIdx = cols.length - 1;
+          state.scriptAC.colIndex = newIdx;
+          state.scriptAC.index = 0;
+          state.scriptAC.items = cols[newIdx].items;
+          const editor = document.activeElement && document.activeElement.classList.contains('script-editor-box') ? document.activeElement : null;
+          ScriptEditorAC.renderScriptACList(editor);
+      },
+      
+      selectAC: (editor) => {
+          const cols = state.scriptAC.columns || [];
+          const curCol = cols[state.scriptAC.colIndex];
+          if(!curCol || state.scriptAC.index < 0 || !curCol.items[state.scriptAC.index]) { ScriptEditorAC.hideAC(); return; }
+          const chosen = curCol.items[state.scriptAC.index].name;
+          const sel = window.getSelection();
+          const block = ScriptEditor.getBlockNode(sel.anchorNode);
+          if(block) {
+              if(block.classList.contains('sc-perso')) {
+                  // Bloc perso : remplacer tout le contenu par le nom en majuscules
+                  block.innerText = chosen.toUpperCase();
+                  const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); sel.removeAllRanges(); sel.addRange(range);
+              } else {
+                  // Bloc action/dial : remplacer uniquement le dernier mot par le nom choisi
+                  const range = sel.getRangeAt(0);
+                  const offset = ScriptEditorAC._getCaretOffsetInBlock(block, range);
+                  const fullText = block.innerText;
+                  const before = fullText.substring(0, offset);
+                  const after = fullText.substring(offset);
+                  const lastWordMatch = before.match(/[\wÀ-ÿ]+$/);
+                  if(lastWordMatch) {
+                      const newBefore = before.substring(0, before.length - lastWordMatch[0].length) + chosen + ' ';
+                      block.innerText = newBefore + after;
+                      // Replacer le curseur après le mot inséré
+                      const newRange = document.createRange();
+                      const newOffset = newBefore.length;
+                      ScriptEditorAC._setCaretAtOffset(block, newOffset);
+                  }
+              }
+          }
+          ScriptEditorAC.hideAC();
+      },
+      
+      // V7.6.d — détection contextuelle (entry point) + toggle global
+      checkAC: (editor) => { 
+          if(!state.scriptAC.enabled) { ScriptEditorAC.hideAC(); return; }
+          const sel = window.getSelection(); 
+          const block = ScriptEditor.getBlockNode(sel.anchorNode); 
+          if(!block) { ScriptEditorAC.hideAC(); return; }
+          const blockType = block.className || '';
+          // Déterminer le contexte de recherche selon le bloc
+          const columns = [];
+          if(blockType.includes('sc-perso')) {
+              // Bloc perso : recherche sur le texte entier du bloc, juste personnages
+              const text = block.innerText.trim().toUpperCase();
+              if(text.length < 1) { ScriptEditorAC.hideAC(); return; }
+              const matches = (state.data.characters || []).filter(c => c.name.toUpperCase().startsWith(text) && c.name.toUpperCase() !== text);
+              if(matches.length > 0) columns.push({ type: 'perso', icon: '🎭', label: 'Personnages', items: matches.map(m => ({ name: m.name })) });
+          } else if(blockType.includes('sc-action') || blockType.includes('sc-dial')) {
+              // Bloc action ou dialogue : recherche sur le dernier mot, multi-catégories, min 3 chars
+              const range = sel.getRangeAt(0);
+              const textBefore = block.innerText.substring(0, ScriptEditorAC._getCaretOffsetInBlock(block, range));
+              const lastWordMatch = textBefore.match(/[\wÀ-ÿ]+$/);
+              if(!lastWordMatch) { ScriptEditorAC.hideAC(); return; }
+              const lastWord = lastWordMatch[0];
+              if(lastWord.length < 3) { ScriptEditorAC.hideAC(); return; }
+              const lwLower = lastWord.toLowerCase();
+              // Personnages
+              const persoMatches = (state.data.characters || []).filter(c => c.name.toLowerCase().startsWith(lwLower) && c.name.toLowerCase() !== lwLower);
+              if(persoMatches.length > 0) columns.push({ type: 'perso', icon: '🎭', label: 'Personnages', items: persoMatches.map(m => ({ name: m.name })) });
+              // Décors
+              const lieuMatches = (state.data.locations || []).filter(l => l.name.toLowerCase().startsWith(lwLower) && l.name.toLowerCase() !== lwLower);
+              if(lieuMatches.length > 0) columns.push({ type: 'lieu', icon: '🏠', label: 'Décors', items: lieuMatches.map(m => ({ name: m.name })) });
+              // Ressources
+              const resMatches = (state.data.resources || []).filter(r => r.name && r.name.toLowerCase().startsWith(lwLower) && r.name.toLowerCase() !== lwLower);
+              if(resMatches.length > 0) columns.push({ type: 'res', icon: '📦', label: 'Ressources', items: resMatches.map(m => ({ name: m.name })) });
+          } else { ScriptEditorAC.hideAC(); return; }
+          if(columns.length === 0) { ScriptEditorAC.hideAC(); return; }
+          state.scriptAC.columns = columns;
+          state.scriptAC.colIndex = 0;
+          state.scriptAC.index = 0;
+          state.scriptAC.items = columns[0].items;
+          state.scriptAC.active = true;
+          const range = sel.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+          els.scriptACList.style.display = 'block';
+          els.scriptACList.style.top = (rect.bottom + 5) + 'px';
+          els.scriptACList.style.left = rect.left + 'px';
+          ScriptEditorAC.renderScriptACList(editor);
+      },
+      
+      toggleAC: () => {
+          state.scriptAC.enabled = !state.scriptAC.enabled;
+          localStorage.setItem('moteur_scriptAC_enabled', state.scriptAC.enabled ? 'true' : 'false');
+          if(!state.scriptAC.enabled) ScriptEditorAC.hideAC();
+          Utils.toast(`Autocomplétion ${state.scriptAC.enabled ? 'activée' : 'désactivée'}`, 'success');
+          UI.renderScript();
+          if(ScriptEditor.viewMode === 'continuous' && ScriptEditor.activeSceneId) ScriptEditor.updateContinuousSidebar(ScriptEditor.activeSceneId);
+      }
+  };
+
   // ScriptEditorPrefs — sous-module V7.1 : préférences éditeur scénario (Tab/Enter customisables)
   const ScriptEditorPrefs = {
       // Ouvre la modale de paramètres éditeur scénario (Tab/Enter customisables)
@@ -29777,183 +29965,16 @@ const DrawingEditor = {
       placeCursorInside: (block, openChar, closeChar) => { const text = block.innerText; const startPos = text.indexOf(openChar) + 2; const endPos = text.lastIndexOf(closeChar) - 1; if(block.firstChild) { const range = document.createRange(); const sel = window.getSelection(); try { const textNode = block.firstChild; const safeStart = Math.min(startPos, textNode.length); range.setStart(textNode, safeStart); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); } catch(e) { console.log('Cursor placement error', e); } } },
       getBlockNode: (node) => { if(!node) return null; if (node.nodeType === 1 && node.classList.contains('script-editor-box')) return node.firstElementChild || null; while (node && node.nodeName !== 'DIV' && !node.classList?.contains('script-editor-box')) node = node.parentNode; return (node && node.classList && !node.classList.contains('script-editor-box')) ? node : null; },
       updateToolbar: (editor, toolbar) => { const sel = window.getSelection(); if(!sel.rangeCount) return; let block = ScriptEditor.getBlockNode(sel.anchorNode); if(!block && editor.children.length > 0) block = editor.firstElementChild; toolbar.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active')); const topToolbar = document.getElementById('continuous-toolbar'); if(topToolbar) topToolbar.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active')); if(!block) return; const type = block.className || 'sc-action'; const btn = toolbar.querySelector(`[data-type="${type}"]`); if(btn) btn.classList.add('active'); if(topToolbar) { const topBtn = topToolbar.querySelector(`[data-type="${type}"]`); if(topBtn) topBtn.classList.add('active'); } },
-      checkAC: (editor) => { 
-          if(!state.scriptAC.enabled) { ScriptEditor.hideAC(); return; }
-          const sel = window.getSelection(); 
-          const block = ScriptEditor.getBlockNode(sel.anchorNode); 
-          if(!block) { ScriptEditor.hideAC(); return; }
-          const blockType = block.className || '';
-          // Déterminer le contexte de recherche selon le bloc
-          const columns = [];
-          if(blockType.includes('sc-perso')) {
-              // Bloc perso : recherche sur le texte entier du bloc, juste personnages
-              const text = block.innerText.trim().toUpperCase();
-              if(text.length < 1) { ScriptEditor.hideAC(); return; }
-              const matches = (state.data.characters || []).filter(c => c.name.toUpperCase().startsWith(text) && c.name.toUpperCase() !== text);
-              if(matches.length > 0) columns.push({ type: 'perso', icon: '🎭', label: 'Personnages', items: matches.map(m => ({ name: m.name })) });
-          } else if(blockType.includes('sc-action') || blockType.includes('sc-dial')) {
-              // Bloc action ou dialogue : recherche sur le dernier mot, multi-catégories, min 3 chars
-              const range = sel.getRangeAt(0);
-              const textBefore = block.innerText.substring(0, ScriptEditor._getCaretOffsetInBlock(block, range));
-              const lastWordMatch = textBefore.match(/[\wÀ-ÿ]+$/);
-              if(!lastWordMatch) { ScriptEditor.hideAC(); return; }
-              const lastWord = lastWordMatch[0];
-              if(lastWord.length < 3) { ScriptEditor.hideAC(); return; }
-              const lwLower = lastWord.toLowerCase();
-              // Personnages
-              const persoMatches = (state.data.characters || []).filter(c => c.name.toLowerCase().startsWith(lwLower) && c.name.toLowerCase() !== lwLower);
-              if(persoMatches.length > 0) columns.push({ type: 'perso', icon: '🎭', label: 'Personnages', items: persoMatches.map(m => ({ name: m.name })) });
-              // Décors
-              const lieuMatches = (state.data.locations || []).filter(l => l.name.toLowerCase().startsWith(lwLower) && l.name.toLowerCase() !== lwLower);
-              if(lieuMatches.length > 0) columns.push({ type: 'lieu', icon: '🏠', label: 'Décors', items: lieuMatches.map(m => ({ name: m.name })) });
-              // Ressources
-              const resMatches = (state.data.resources || []).filter(r => r.name && r.name.toLowerCase().startsWith(lwLower) && r.name.toLowerCase() !== lwLower);
-              if(resMatches.length > 0) columns.push({ type: 'res', icon: '📦', label: 'Ressources', items: resMatches.map(m => ({ name: m.name })) });
-          } else { ScriptEditor.hideAC(); return; }
-          if(columns.length === 0) { ScriptEditor.hideAC(); return; }
-          state.scriptAC.columns = columns;
-          state.scriptAC.colIndex = 0;
-          state.scriptAC.index = 0;
-          state.scriptAC.items = columns[0].items;
-          state.scriptAC.active = true;
-          const range = sel.getRangeAt(0);
-          const rect = range.getBoundingClientRect();
-          els.scriptACList.style.display = 'block';
-          els.scriptACList.style.top = (rect.bottom + 5) + 'px';
-          els.scriptACList.style.left = rect.left + 'px';
-          ScriptEditor.renderScriptACList(editor);
-      },
-      
-      // Helper : retourne l'offset (en caractères) du curseur dans le bloc texte
-      _getCaretOffsetInBlock: (block, range) => {
-          const preRange = document.createRange();
-          preRange.selectNodeContents(block);
-          preRange.setEnd(range.endContainer, range.endOffset);
-          return preRange.toString().length;
-      },
-      renderScriptACList: (editor) => {
-          els.scriptACList.innerHTML = '';
-          els.scriptACList.style.width = 'auto';
-          els.scriptACList.style.padding = '0';
-          els.scriptACList.style.display = 'flex';
-          els.scriptACList.style.alignItems = 'flex-start';
-          state.scriptAC.columns.forEach((col, ci) => {
-              const colDiv = document.createElement('div');
-              colDiv.style.cssText = 'display:flex;flex-direction:column;border-right:1px solid var(--border);min-width:180px;max-width:240px;';
-              if(ci === state.scriptAC.columns.length - 1) colDiv.style.borderRight = 'none';
-              const head = document.createElement('div');
-              head.style.cssText = 'padding:6px 12px;font-size:0.75rem;font-weight:bold;color:var(--text-sec);background:var(--bg);border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:0.5px;';
-              head.innerText = `${col.icon} ${col.label}`;
-              colDiv.appendChild(head);
-              col.items.forEach((m, i) => {
-                  const div = document.createElement('div');
-                  div.style.cssText = 'padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:0.88rem;';
-                  if(ci === state.scriptAC.colIndex && i === state.scriptAC.index) {
-                      div.classList.add('active');
-                      div.style.background = 'var(--bg)';
-                      div.style.color = 'var(--primary)';
-                  }
-                  div.innerText = m.name;
-                  div.onmousedown = (e) => {
-                      e.preventDefault();
-                      state.scriptAC.colIndex = ci;
-                      state.scriptAC.index = i;
-                      state.scriptAC.items = col.items;
-                      ScriptEditor.selectAC(editor);
-                  };
-                  colDiv.appendChild(div);
-              });
-              els.scriptACList.appendChild(colDiv);
-          });
-      },
-      highlightAC: () => { 
-          const cols = state.scriptAC.columns || [];
-          if(cols.length === 0) return;
-          // Wrap vertical dans la colonne courante
-          const curCol = cols[state.scriptAC.colIndex];
-          if(!curCol) return;
-          if(state.scriptAC.index >= curCol.items.length) state.scriptAC.index = 0;
-          if(state.scriptAC.index < 0) state.scriptAC.index = curCol.items.length - 1;
-          state.scriptAC.items = curCol.items;
-          // Re-render pour mettre à jour la mise en surbrillance (plus simple que de manipuler les classes)
-          const editor = document.activeElement && document.activeElement.classList.contains('script-editor-box') ? document.activeElement : null;
-          ScriptEditor.renderScriptACList(editor);
-      },
-      switchACColumn: (delta) => {
-          const cols = state.scriptAC.columns || [];
-          if(cols.length === 0) return;
-          let newIdx = state.scriptAC.colIndex + delta;
-          if(newIdx >= cols.length) newIdx = 0;
-          if(newIdx < 0) newIdx = cols.length - 1;
-          state.scriptAC.colIndex = newIdx;
-          state.scriptAC.index = 0;
-          state.scriptAC.items = cols[newIdx].items;
-          const editor = document.activeElement && document.activeElement.classList.contains('script-editor-box') ? document.activeElement : null;
-          ScriptEditor.renderScriptACList(editor);
-      },
-      selectAC: (editor) => {
-          const cols = state.scriptAC.columns || [];
-          const curCol = cols[state.scriptAC.colIndex];
-          if(!curCol || state.scriptAC.index < 0 || !curCol.items[state.scriptAC.index]) { ScriptEditor.hideAC(); return; }
-          const chosen = curCol.items[state.scriptAC.index].name;
-          const sel = window.getSelection();
-          const block = ScriptEditor.getBlockNode(sel.anchorNode);
-          if(block) {
-              if(block.classList.contains('sc-perso')) {
-                  // Bloc perso : remplacer tout le contenu par le nom en majuscules
-                  block.innerText = chosen.toUpperCase();
-                  const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); sel.removeAllRanges(); sel.addRange(range);
-              } else {
-                  // Bloc action/dial : remplacer uniquement le dernier mot par le nom choisi
-                  const range = sel.getRangeAt(0);
-                  const offset = ScriptEditor._getCaretOffsetInBlock(block, range);
-                  const fullText = block.innerText;
-                  const before = fullText.substring(0, offset);
-                  const after = fullText.substring(offset);
-                  const lastWordMatch = before.match(/[\wÀ-ÿ]+$/);
-                  if(lastWordMatch) {
-                      const newBefore = before.substring(0, before.length - lastWordMatch[0].length) + chosen + ' ';
-                      block.innerText = newBefore + after;
-                      // Replacer le curseur après le mot inséré
-                      const newRange = document.createRange();
-                      const newOffset = newBefore.length;
-                      ScriptEditor._setCaretAtOffset(block, newOffset);
-                  }
-              }
-          }
-          ScriptEditor.hideAC();
-      },
-      _setCaretAtOffset: (block, offset) => {
-          const sel = window.getSelection();
-          const range = document.createRange();
-          let charCount = 0; let found = false;
-          const walk = (node) => {
-              if(found) return;
-              if(node.nodeType === 3) {
-                  const len = node.textContent.length;
-                  if(charCount + len >= offset) { range.setStart(node, offset - charCount); range.collapse(true); found = true; return; }
-                  charCount += len;
-              } else { for(const c of node.childNodes) walk(c); }
-          };
-          walk(block);
-          if(found) { sel.removeAllRanges(); sel.addRange(range); }
-      },
-      hideAC: () => { state.scriptAC.active = false; els.scriptACList.style.display = 'none'; },
-      toggleAC: () => {
-          state.scriptAC.enabled = !state.scriptAC.enabled;
-          localStorage.setItem('moteur_scriptAC_enabled', state.scriptAC.enabled ? 'true' : 'false');
-          if(!state.scriptAC.enabled) ScriptEditor.hideAC();
-          Utils.toast(`Autocomplétion ${state.scriptAC.enabled ? 'activée' : 'désactivée'}`, 'success');
-          UI.renderScript();
-          if(ScriptEditor.viewMode === 'continuous' && ScriptEditor.activeSceneId) ScriptEditor.updateContinuousSidebar(ScriptEditor.activeSceneId);
-      },
-      toggleScriptBd: () => {
-          state.scriptBdEnabled = !state.scriptBdEnabled;
-          localStorage.setItem('moteur_scriptBd_enabled', state.scriptBdEnabled ? 'true' : 'false');
-          Utils.toast(`Dépouillement clic droit ${state.scriptBdEnabled ? 'activé' : 'désactivé'}`, 'success');
-          UI.renderScript();
-          if(ScriptEditor.viewMode === 'continuous' && ScriptEditor.activeSceneId) ScriptEditor.updateContinuousSidebar(ScriptEditor.activeSceneId);
-      },
+      // ========== AUTO-COMPLÉTION (V7.6 → ScriptEditorAC) ==========
+      // V7.6.e — délégations rétrocompatibles vers ScriptEditorAC.
+      // Les 3 méthodes privées (_getCaretOffsetInBlock, _setCaretAtOffset, renderScriptACList)
+      // ont migré intégralement dans ScriptEditorAC (zéro appel externe).
+      checkAC: (editor) => ScriptEditorAC.checkAC(editor),
+      highlightAC: () => ScriptEditorAC.highlightAC(),
+      switchACColumn: (delta) => ScriptEditorAC.switchACColumn(delta),
+      selectAC: (editor) => ScriptEditorAC.selectAC(editor),
+      hideAC: () => ScriptEditorAC.hideAC(),
+      toggleAC: () => ScriptEditorAC.toggleAC(),
       syncCharMeta: (name, sceneId) => { 
           const existsInDb = state.data.characters.find(c => c.name.toLowerCase() === name.toLowerCase()); 
           if (!existsInDb) return; 
@@ -68403,7 +68424,7 @@ const Weather = {
       }
   };
 
-  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
