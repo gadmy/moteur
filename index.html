@@ -6939,7 +6939,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.6.1</p>
+      <p>vv4.6.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -29334,6 +29334,90 @@ const DrawingEditor = {
       }
   };
 
+  // ScriptEditorEpisodes — sous-module V7.4 : sélecteurs saison/épisode (séries) + bascule d'épisode
+  const ScriptEditorEpisodes = {
+      // S4 + S7 : gestion des sélecteurs globaux de saison et d'épisode dans le header (séries uniquement)
+      initSelector: () => {
+          const selEp = document.getElementById('header-episode-selector');
+          const selSeason = document.getElementById('header-season-selector');
+          const wrapper = document.getElementById('header-episode-wrapper');
+          
+          // Pour les films : masquer le wrapper, pas d'épisode actif
+          if(state.currentProjectType !== 'series') {
+              if(wrapper) wrapper.style.display = 'none';
+              state.currentEpisodeId = null;
+              state.currentSeasonId = null;
+              return;
+          }
+          
+          const seasons = state.data.seasons || [];
+          const episodes = state.data.episodes || [];
+          
+          if(seasons.length === 0 || episodes.length === 0) {
+              if(wrapper) wrapper.style.display = 'none';
+              return;
+          }
+          
+          // Peupler le dropdown des saisons
+          if(selSeason) {
+              selSeason.innerHTML = seasons.map(s => {
+                  const num = String(s.number).padStart(2,'0');
+                  const title = s.title ? ' — ' + Utils.escape(s.title) : '';
+                  return `<option value="${s.id}">S${num}${title}</option>`;
+              }).join('');
+              
+              // Sélectionner la saison courante (active, ou déduite de l'épisode actif, ou première)
+              let seasonId = state.currentSeasonId;
+              if(!seasonId || !seasons.find(s => s.id === seasonId)) {
+                  // Essayer de déduire depuis l'épisode actif
+                  if(state.currentEpisodeId) {
+                      const currentEp = episodes.find(e => e.id === state.currentEpisodeId);
+                      seasonId = currentEp?.seasonId || seasons[0].id;
+                  } else {
+                      seasonId = seasons[0].id;
+                  }
+              }
+              state.currentSeasonId = seasonId;
+              selSeason.value = seasonId;
+          }
+          
+          // Peupler le dropdown des épisodes en filtrant par saison active
+          if(selEp) {
+              const episodesOfSeason = episodes.filter(ep => ep.seasonId === state.currentSeasonId);
+              selEp.innerHTML = episodesOfSeason.map(ep => {
+                  const num = String(ep.number).padStart(2,'0');
+                  const title = ep.title ? ' — ' + Utils.escape(ep.title) : '';
+                  return `<option value="${ep.id}">E${num}${title}</option>`;
+              }).join('');
+              
+              // Sélectionner l'épisode courant (s'il est dans cette saison) ou le premier de la saison
+              if(!state.currentEpisodeId || !episodesOfSeason.find(e => e.id === state.currentEpisodeId)) {
+                  state.currentEpisodeId = episodesOfSeason[0]?.id || null;
+              }
+              if(state.currentEpisodeId) selEp.value = state.currentEpisodeId;
+          }
+          
+          if(wrapper) wrapper.style.display = 'inline-flex';
+      },
+      
+      // Bascule sur un autre épisode : change l'épisode actif et re-rend les vues
+      switch: (episodeId) => {
+          if(!episodeId) return;
+          state.currentEpisodeId = episodeId;
+          
+          // Re-render de la vue courante
+          if(ScriptEditor.viewMode === 'continuous') {
+              ScriptEditor.renderContinuous();
+          } else {
+              UI.renderScript();
+          }
+          // Re-render aussi le séquencier, le storyboard et le beatboard
+          if(typeof UI.renderBoard === 'function') UI.renderBoard();
+          if(typeof Storyboard !== 'undefined' && typeof Storyboard.renderScenesList === 'function') Storyboard.renderScenesList();
+          if(typeof BeatBoard !== 'undefined' && typeof BeatBoard.render === 'function') BeatBoard.render();
+      }
+  };
+
   // ScriptEditorPrefs — sous-module V7.1 : préférences éditeur scénario (Tab/Enter customisables)
   const ScriptEditorPrefs = {
       // Ouvre la modale de paramètres éditeur scénario (Tab/Enter customisables)
@@ -29942,86 +30026,11 @@ const DrawingEditor = {
       // V7.3 → délégué à ScriptEditorViewMode.set()
       setViewMode: (mode) => ScriptEditorViewMode.set(mode),
       
-      // S4 + S7 : gestion des sélecteurs globaux de saison et d'épisode dans le header (séries uniquement)
-      initEpisodeSelector: () => {
-          const selEp = document.getElementById('header-episode-selector');
-          const selSeason = document.getElementById('header-season-selector');
-          const wrapper = document.getElementById('header-episode-wrapper');
-          
-          // Pour les films : masquer le wrapper, pas d'épisode actif
-          if(state.currentProjectType !== 'series') {
-              if(wrapper) wrapper.style.display = 'none';
-              state.currentEpisodeId = null;
-              state.currentSeasonId = null;
-              return;
-          }
-          
-          const seasons = state.data.seasons || [];
-          const episodes = state.data.episodes || [];
-          
-          if(seasons.length === 0 || episodes.length === 0) {
-              if(wrapper) wrapper.style.display = 'none';
-              return;
-          }
-          
-          // Peupler le dropdown des saisons
-          if(selSeason) {
-              selSeason.innerHTML = seasons.map(s => {
-                  const num = String(s.number).padStart(2,'0');
-                  const title = s.title ? ' — ' + Utils.escape(s.title) : '';
-                  return `<option value="${s.id}">S${num}${title}</option>`;
-              }).join('');
-              
-              // Sélectionner la saison courante (active, ou déduite de l'épisode actif, ou première)
-              let seasonId = state.currentSeasonId;
-              if(!seasonId || !seasons.find(s => s.id === seasonId)) {
-                  // Essayer de déduire depuis l'épisode actif
-                  if(state.currentEpisodeId) {
-                      const currentEp = episodes.find(e => e.id === state.currentEpisodeId);
-                      seasonId = currentEp?.seasonId || seasons[0].id;
-                  } else {
-                      seasonId = seasons[0].id;
-                  }
-              }
-              state.currentSeasonId = seasonId;
-              selSeason.value = seasonId;
-          }
-          
-          // Peupler le dropdown des épisodes en filtrant par saison active
-          if(selEp) {
-              const episodesOfSeason = episodes.filter(ep => ep.seasonId === state.currentSeasonId);
-              selEp.innerHTML = episodesOfSeason.map(ep => {
-                  const num = String(ep.number).padStart(2,'0');
-                  const title = ep.title ? ' — ' + Utils.escape(ep.title) : '';
-                  return `<option value="${ep.id}">E${num}${title}</option>`;
-              }).join('');
-              
-              // Sélectionner l'épisode courant (s'il est dans cette saison) ou le premier de la saison
-              if(!state.currentEpisodeId || !episodesOfSeason.find(e => e.id === state.currentEpisodeId)) {
-                  state.currentEpisodeId = episodesOfSeason[0]?.id || null;
-              }
-              if(state.currentEpisodeId) selEp.value = state.currentEpisodeId;
-          }
-          
-          if(wrapper) wrapper.style.display = 'inline-flex';
-      },
+      // V7.4 → délégué à ScriptEditorEpisodes.initSelector()
+      initEpisodeSelector: () => ScriptEditorEpisodes.initSelector(),
       
-      // Bascule sur un autre épisode : change l'épisode actif et re-rend les vues
-      switchEpisode: (episodeId) => {
-          if(!episodeId) return;
-          state.currentEpisodeId = episodeId;
-          
-          // Re-render de la vue courante
-          if(ScriptEditor.viewMode === 'continuous') {
-              ScriptEditor.renderContinuous();
-          } else {
-              UI.renderScript();
-          }
-          // Re-render aussi le séquencier, le storyboard et le beatboard
-          if(typeof UI.renderBoard === 'function') UI.renderBoard();
-          if(typeof Storyboard !== 'undefined' && typeof Storyboard.renderScenesList === 'function') Storyboard.renderScenesList();
-          if(typeof BeatBoard !== 'undefined' && typeof BeatBoard.render === 'function') BeatBoard.render();
-      },
+      // V7.4 → délégué à ScriptEditorEpisodes.switch()
+      switchEpisode: (episodeId) => ScriptEditorEpisodes.switch(episodeId),
       
       renderContinuous: () => {
           const editor = document.getElementById('scriptContinuousEditor');
@@ -68374,7 +68383,7 @@ const Weather = {
       }
   };
 
-  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
