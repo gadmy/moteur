@@ -6939,7 +6939,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.6.2</p>
+      <p>vv4.6.3</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -29418,6 +29418,303 @@ const DrawingEditor = {
       }
   };
 
+  // ScriptEditorSearch — sous-module V7.5 : recherche/remplacement dans le scénario
+  // (V7.5.a — squelette + clearHighlights + saveBackup. Cohabite avec les anciennes méthodes de ScriptEditor jusqu'à la bascule V7.5.e)
+  const ScriptEditorSearch = {
+      // État interne du module (sera retiré de ScriptEditor à V7.5.e)
+      searchResults: [],
+      currentResultIndex: -1,
+      backupScripts: null,
+      
+      clearHighlights: () => {
+          document.querySelectorAll('.search-highlight').forEach(el => {
+              const parent = el.parentNode;
+              while(el.firstChild) {
+                  parent.insertBefore(el.firstChild, el);
+              }
+              parent.removeChild(el);
+              parent.normalize();
+          });
+      },
+      
+      saveBackup: () => {
+          ScriptEditorSearch.backupScripts = state.data.scenes.map(s => ({
+              id: s.id,
+              scriptContent: s.scriptContent
+          }));
+      },
+      
+      // V7.5.b — helpers navigation et highlight
+      findInElement: (element, query, caseSensitive, wholeWord, sceneId) => {
+          const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+          let node;
+          
+          while(node = walker.nextNode()) {
+              let text = node.textContent;
+              let searchText = caseSensitive ? text : text.toLowerCase();
+              let searchQuery = caseSensitive ? query : query.toLowerCase();
+              
+              let index = 0;
+              while((index = searchText.indexOf(searchQuery, index)) !== -1) {
+                  // Vérifier mot entier si nécessaire
+                  if(wholeWord) {
+                      const before = index > 0 ? searchText[index - 1] : ' ';
+                      const after = index + searchQuery.length < searchText.length ? searchText[index + searchQuery.length] : ' ';
+                      if(/\w/.test(before) || /\w/.test(after)) {
+                          index++;
+                          continue;
+                      }
+                  }
+                  
+                  ScriptEditorSearch.searchResults.push({
+                      node: node,
+                      index: index,
+                      length: query.length,
+                      sceneId: sceneId
+                  });
+                  index++;
+              }
+          }
+      },
+      
+      highlightCurrentResult: () => {
+          ScriptEditorSearch.clearHighlights();
+          
+          if(ScriptEditorSearch.searchResults.length === 0) return;
+          
+          const result = ScriptEditorSearch.searchResults[ScriptEditorSearch.currentResultIndex];
+          if(!result) return;
+          
+          // Créer le highlight
+          const range = document.createRange();
+          range.setStart(result.node, result.index);
+          range.setEnd(result.node, result.index + result.length);
+          
+          const highlight = document.createElement('span');
+          highlight.className = 'search-highlight current';
+          highlight.style.cssText = 'background: #fbbf24; color: #000; padding: 1px 2px; border-radius: 2px;';
+          
+          try {
+              range.surroundContents(highlight);
+              highlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } catch(e) {
+              console.error('Erreur highlight:', e);
+          }
+          
+          // Mettre à jour l'info
+          document.getElementById('search-results-info').textContent = 
+              `Résultat ${ScriptEditorSearch.currentResultIndex + 1} / ${ScriptEditorSearch.searchResults.length}`;
+      },
+      
+      searchNext: () => {
+          if(ScriptEditorSearch.searchResults.length === 0) {
+              ScriptEditorSearch.searchInScript();
+              if(ScriptEditorSearch.searchResults.length === 0) return;
+          }
+          ScriptEditorSearch.clearHighlights();
+          const savedIndex = ScriptEditorSearch.currentResultIndex;
+          ScriptEditorSearch.searchInScript();
+          ScriptEditorSearch.currentResultIndex = (savedIndex + 1) % ScriptEditorSearch.searchResults.length;
+          ScriptEditorSearch.highlightCurrentResult();
+      },
+      
+      searchPrev: () => {
+          if(ScriptEditorSearch.searchResults.length === 0) {
+              ScriptEditorSearch.searchInScript();
+              if(ScriptEditorSearch.searchResults.length === 0) return;
+          }
+          ScriptEditorSearch.clearHighlights();
+          const savedIndex = ScriptEditorSearch.currentResultIndex;
+          ScriptEditorSearch.searchInScript();
+          ScriptEditorSearch.currentResultIndex = savedIndex - 1;
+          if(ScriptEditorSearch.currentResultIndex < 0) ScriptEditorSearch.currentResultIndex = ScriptEditorSearch.searchResults.length - 1;
+          ScriptEditorSearch.highlightCurrentResult();
+      },
+      
+      // V7.5.c — actions de recherche et remplacement
+      searchInScript: () => {
+          const query = document.getElementById('search-input').value;
+          const caseSensitive = document.getElementById('search-case-sensitive').checked;
+          const wholeWord = document.getElementById('search-whole-word').checked;
+          
+          ScriptEditorSearch.clearHighlights();
+          ScriptEditorSearch.searchResults = [];
+          ScriptEditorSearch.currentResultIndex = -1;
+          
+          if(query.length < 1) {
+              document.getElementById('search-results-info').textContent = 'Tapez pour rechercher...';
+              return;
+          }
+          
+          // Chercher dans tous les éditeurs de scène
+          const editors = document.querySelectorAll('.script-editor-box');
+          
+          editors.forEach(editor => {
+              const sceneId = editor.id.replace('editor-', '');
+              ScriptEditorSearch.findInElement(editor, query, caseSensitive, wholeWord, sceneId);
+          });
+          
+          const count = ScriptEditorSearch.searchResults.length;
+          document.getElementById('search-results-info').textContent = count > 0 
+              ? `${count} résultat(s) trouvé(s)` 
+              : 'Aucun résultat';
+          
+          if(count > 0) {
+              ScriptEditorSearch.currentResultIndex = 0;
+              ScriptEditorSearch.highlightCurrentResult();
+          }
+      },
+      
+      replaceOne: () => {
+          if(ScriptEditorSearch.searchResults.length === 0) return;
+          
+          const replaceText = document.getElementById('replace-input').value;
+          const highlight = document.querySelector('.search-highlight.current');
+          
+          if(highlight) {
+              const sceneId = highlight.closest('.script-editor-box')?.id.replace('editor-', '');
+              highlight.replaceWith(document.createTextNode(replaceText));
+              
+              // Sauvegarder la scène
+              if(sceneId) {
+                  const editor = document.getElementById('editor-' + sceneId);
+                  const scene = state.data.scenes.find(s => String(s.id) === String(sceneId));
+                  if(scene && editor) {
+                      scene.scriptContent = editor.innerHTML;
+                      Store.save();
+                  }
+              }
+              
+              // Passer au suivant
+              ScriptEditorSearch.searchInScript();
+              if(ScriptEditorSearch.searchResults.length > 0) {
+                  ScriptEditorSearch.highlightCurrentResult();
+              }
+          }
+      },
+      
+      replaceAll: () => {
+          const query = document.getElementById('search-input').value;
+          const replaceText = document.getElementById('replace-input').value;
+          const caseSensitive = document.getElementById('search-case-sensitive').checked;
+          const wholeWord = document.getElementById('search-whole-word').checked;
+          
+          if(query.length < 1) return;
+          
+          // Sauvegarder avant remplacement
+          ScriptEditorSearch.saveBackup();
+          
+          let totalReplaced = 0;
+          
+          // Remplacer dans chaque scène
+          state.data.scenes.forEach(scene => {
+              if(!scene.scriptContent) return;
+              
+              let content = scene.scriptContent;
+              let flags = caseSensitive ? 'g' : 'gi';
+              let pattern = wholeWord ? `\\b${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b` : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              
+              const regex = new RegExp(pattern, flags);
+              const matches = content.match(regex);
+              
+              if(matches) {
+                  totalReplaced += matches.length;
+                  scene.scriptContent = content.replace(regex, replaceText);
+              }
+          });
+          
+          Store.save();
+          UI.renderScript();
+          
+          document.getElementById('search-results-info').textContent = `✅ ${totalReplaced} remplacement(s) effectué(s)`;
+          ScriptEditorSearch.searchResults = [];
+          ScriptEditorSearch.currentResultIndex = -1;
+          
+          // Afficher le bouton annuler
+          if(totalReplaced > 0) {
+              document.getElementById('undo-replace-btn').style.display = 'block';
+          }
+          
+          Utils.toast(`${totalReplaced} remplacement(s) effectué(s)`, 'success');
+      },
+      
+      undoReplace: () => {
+          if(!ScriptEditorSearch.backupScripts) {
+              Utils.toast('Aucun remplacement à annuler', 'error');
+              return;
+          }
+          
+          // Restaurer le contenu
+          ScriptEditorSearch.backupScripts.forEach(backup => {
+              const scene = state.data.scenes.find(s => String(s.id) === String(backup.id));
+              if(scene) {
+                  scene.scriptContent = backup.scriptContent;
+              }
+          });
+          
+          Store.save();
+          UI.renderScript();
+          
+          ScriptEditorSearch.backupScripts = null;
+          document.getElementById('undo-replace-btn').style.display = 'none';
+          document.getElementById('search-results-info').textContent = '↩️ Remplacement annulé';
+          
+          Utils.toast('Remplacement annulé', 'success');
+      },
+      
+      // V7.5.d — ouverture/fermeture modale + drag de la fenêtre
+      openSearchReplace: () => {
+          document.getElementById('search-replace-modal').style.display = 'block';
+          document.getElementById('search-input').value = '';
+          document.getElementById('replace-input').value = '';
+          document.getElementById('search-results-info').textContent = 'Tapez pour rechercher...';
+          ScriptEditorSearch.searchResults = [];
+          ScriptEditorSearch.currentResultIndex = -1;
+          ScriptEditorSearch.clearHighlights();
+          document.getElementById('search-input').focus();
+      },
+      
+      closeSearchReplace: () => {
+          document.getElementById('search-replace-modal').style.display = 'none';
+          ScriptEditorSearch.clearHighlights();
+      },
+      
+      // Drag de la fenêtre Recherche/Remplacement
+      initDrag: () => {
+          const modal = document.getElementById('search-replace-modal');
+          const header = document.getElementById('search-replace-header');
+          let isDragging = false;
+          let offsetX, offsetY;
+          
+          header.addEventListener('mousedown', (e) => {
+              if(e.target.tagName === 'BUTTON') return;
+              isDragging = true;
+              offsetX = e.clientX - modal.offsetLeft;
+              offsetY = e.clientY - modal.offsetTop;
+              modal.style.transition = 'none';
+          });
+          
+          document.addEventListener('mousemove', (e) => {
+              if(!isDragging) return;
+              let newX = e.clientX - offsetX;
+              let newY = e.clientY - offsetY;
+              
+              // Limites de l'écran
+              newX = Math.max(0, Math.min(newX, window.innerWidth - modal.offsetWidth));
+              newY = Math.max(0, Math.min(newY, window.innerHeight - modal.offsetHeight));
+              
+              modal.style.left = newX + 'px';
+              modal.style.top = newY + 'px';
+              modal.style.right = 'auto';
+          });
+          
+          document.addEventListener('mouseup', () => {
+              isDragging = false;
+              modal.style.transition = '';
+          });
+      }
+  };
+
   // ScriptEditorPrefs — sous-module V7.1 : préférences éditeur scénario (Tab/Enter customisables)
   const ScriptEditorPrefs = {
       // Ouvre la modale de paramètres éditeur scénario (Tab/Enter customisables)
@@ -29724,297 +30021,20 @@ const DrawingEditor = {
           }, 100);
       },
       
-      // ========== RECHERCHER / REMPLACER ==========
-      searchResults: [],
-      currentResultIndex: -1,
-      
-      openSearchReplace: () => {
-          document.getElementById('search-replace-modal').style.display = 'block';
-          document.getElementById('search-input').value = '';
-          document.getElementById('replace-input').value = '';
-          document.getElementById('search-results-info').textContent = 'Tapez pour rechercher...';
-          ScriptEditor.searchResults = [];
-          ScriptEditor.currentResultIndex = -1;
-          ScriptEditor.clearHighlights();
-          document.getElementById('search-input').focus();
-      },
-      
-      closeSearchReplace: () => {
-          document.getElementById('search-replace-modal').style.display = 'none';
-          ScriptEditor.clearHighlights();
-      },
-      
-      searchInScript: () => {
-          const query = document.getElementById('search-input').value;
-          const caseSensitive = document.getElementById('search-case-sensitive').checked;
-          const wholeWord = document.getElementById('search-whole-word').checked;
-          
-          ScriptEditor.clearHighlights();
-          ScriptEditor.searchResults = [];
-          ScriptEditor.currentResultIndex = -1;
-          
-          if(query.length < 1) {
-              document.getElementById('search-results-info').textContent = 'Tapez pour rechercher...';
-              return;
-          }
-          
-          // Chercher dans tous les éditeurs de scène
-          const editors = document.querySelectorAll('.script-editor-box');
-          
-          editors.forEach(editor => {
-              const sceneId = editor.id.replace('editor-', '');
-              ScriptEditor.findInElement(editor, query, caseSensitive, wholeWord, sceneId);
-          });
-          
-          const count = ScriptEditor.searchResults.length;
-          document.getElementById('search-results-info').textContent = count > 0 
-              ? `${count} résultat(s) trouvé(s)` 
-              : 'Aucun résultat';
-          
-          if(count > 0) {
-              ScriptEditor.currentResultIndex = 0;
-              ScriptEditor.highlightCurrentResult();
-          }
-      },
-      
-      findInElement: (element, query, caseSensitive, wholeWord, sceneId) => {
-          const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
-          let node;
-          
-          while(node = walker.nextNode()) {
-              let text = node.textContent;
-              let searchText = caseSensitive ? text : text.toLowerCase();
-              let searchQuery = caseSensitive ? query : query.toLowerCase();
-              
-              let index = 0;
-              while((index = searchText.indexOf(searchQuery, index)) !== -1) {
-                  // Vérifier mot entier si nécessaire
-                  if(wholeWord) {
-                      const before = index > 0 ? searchText[index - 1] : ' ';
-                      const after = index + searchQuery.length < searchText.length ? searchText[index + searchQuery.length] : ' ';
-                      if(/\w/.test(before) || /\w/.test(after)) {
-                          index++;
-                          continue;
-                      }
-                  }
-                  
-                  ScriptEditor.searchResults.push({
-                      node: node,
-                      index: index,
-                      length: query.length,
-                      sceneId: sceneId
-                  });
-                  index++;
-              }
-          }
-      },
-      
-      highlightCurrentResult: () => {
-          ScriptEditor.clearHighlights();
-          
-          if(ScriptEditor.searchResults.length === 0) return;
-          
-          const result = ScriptEditor.searchResults[ScriptEditor.currentResultIndex];
-          if(!result) return;
-          
-          // Créer le highlight
-          const range = document.createRange();
-          range.setStart(result.node, result.index);
-          range.setEnd(result.node, result.index + result.length);
-          
-          const highlight = document.createElement('span');
-          highlight.className = 'search-highlight current';
-          highlight.style.cssText = 'background: #fbbf24; color: #000; padding: 1px 2px; border-radius: 2px;';
-          
-          try {
-              range.surroundContents(highlight);
-              highlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          } catch(e) {
-              console.error('Erreur highlight:', e);
-          }
-          
-          // Mettre à jour l'info
-          document.getElementById('search-results-info').textContent = 
-              `Résultat ${ScriptEditor.currentResultIndex + 1} / ${ScriptEditor.searchResults.length}`;
-      },
-      
-      clearHighlights: () => {
-          document.querySelectorAll('.search-highlight').forEach(el => {
-              const parent = el.parentNode;
-              while(el.firstChild) {
-                  parent.insertBefore(el.firstChild, el);
-              }
-              parent.removeChild(el);
-              parent.normalize();
-          });
-      },
-      
-      searchNext: () => {
-          if(ScriptEditor.searchResults.length === 0) {
-              ScriptEditor.searchInScript();
-              if(ScriptEditor.searchResults.length === 0) return;
-          }
-          ScriptEditor.clearHighlights();
-          const savedIndex = ScriptEditor.currentResultIndex;
-          ScriptEditor.searchInScript();
-          ScriptEditor.currentResultIndex = (savedIndex + 1) % ScriptEditor.searchResults.length;
-          ScriptEditor.highlightCurrentResult();
-      },
-      
-      searchPrev: () => {
-          if(ScriptEditor.searchResults.length === 0) {
-              ScriptEditor.searchInScript();
-              if(ScriptEditor.searchResults.length === 0) return;
-          }
-          ScriptEditor.clearHighlights();
-          const savedIndex = ScriptEditor.currentResultIndex;
-          ScriptEditor.searchInScript();
-          ScriptEditor.currentResultIndex = savedIndex - 1;
-          if(ScriptEditor.currentResultIndex < 0) ScriptEditor.currentResultIndex = ScriptEditor.searchResults.length - 1;
-          ScriptEditor.highlightCurrentResult();
-      },
-      
-      replaceOne: () => {
-          if(ScriptEditor.searchResults.length === 0) return;
-          
-          const replaceText = document.getElementById('replace-input').value;
-          const highlight = document.querySelector('.search-highlight.current');
-          
-          if(highlight) {
-              const sceneId = highlight.closest('.script-editor-box')?.id.replace('editor-', '');
-              highlight.replaceWith(document.createTextNode(replaceText));
-              
-              // Sauvegarder la scène
-              if(sceneId) {
-                  const editor = document.getElementById('editor-' + sceneId);
-                  const scene = state.data.scenes.find(s => String(s.id) === String(sceneId));
-                  if(scene && editor) {
-                      scene.scriptContent = editor.innerHTML;
-                      Store.save();
-                  }
-              }
-              
-              // Passer au suivant
-              ScriptEditor.searchInScript();
-              if(ScriptEditor.searchResults.length > 0) {
-                  ScriptEditor.highlightCurrentResult();
-              }
-          }
-      },
-      
-      replaceAll: () => {
-          const query = document.getElementById('search-input').value;
-          const replaceText = document.getElementById('replace-input').value;
-          const caseSensitive = document.getElementById('search-case-sensitive').checked;
-          const wholeWord = document.getElementById('search-whole-word').checked;
-          
-          if(query.length < 1) return;
-          
-          // Sauvegarder avant remplacement
-          ScriptEditor.saveBackup();
-          
-          let totalReplaced = 0;
-          
-          // Remplacer dans chaque scène
-          state.data.scenes.forEach(scene => {
-              if(!scene.scriptContent) return;
-              
-              let content = scene.scriptContent;
-              let flags = caseSensitive ? 'g' : 'gi';
-              let pattern = wholeWord ? `\\b${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b` : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-              
-              const regex = new RegExp(pattern, flags);
-              const matches = content.match(regex);
-              
-              if(matches) {
-                  totalReplaced += matches.length;
-                  scene.scriptContent = content.replace(regex, replaceText);
-              }
-          });
-          
-          Store.save();
-          UI.renderScript();
-          
-          document.getElementById('search-results-info').textContent = `✅ ${totalReplaced} remplacement(s) effectué(s)`;
-          ScriptEditor.searchResults = [];
-          ScriptEditor.currentResultIndex = -1;
-          
-          // Afficher le bouton annuler
-          if(totalReplaced > 0) {
-              document.getElementById('undo-replace-btn').style.display = 'block';
-          }
-          
-          Utils.toast(`${totalReplaced} remplacement(s) effectué(s)`, 'success');
-      },
-      
-      // Sauvegarde pour annulation
-      backupScripts: null,
-      
-      saveBackup: () => {
-          ScriptEditor.backupScripts = state.data.scenes.map(s => ({
-              id: s.id,
-              scriptContent: s.scriptContent
-          }));
-      },
-      
-      undoReplace: () => {
-          if(!ScriptEditor.backupScripts) {
-              Utils.toast('Aucun remplacement à annuler', 'error');
-              return;
-          }
-          
-          // Restaurer le contenu
-          ScriptEditor.backupScripts.forEach(backup => {
-              const scene = state.data.scenes.find(s => String(s.id) === String(backup.id));
-              if(scene) {
-                  scene.scriptContent = backup.scriptContent;
-              }
-          });
-          
-          Store.save();
-          UI.renderScript();
-          
-          ScriptEditor.backupScripts = null;
-          document.getElementById('undo-replace-btn').style.display = 'none';
-          document.getElementById('search-results-info').textContent = '↩️ Remplacement annulé';
-          
-          Utils.toast('Remplacement annulé', 'success');
-      },
-      
-      // Drag de la fenêtre
-      initDrag: () => {
-          const modal = document.getElementById('search-replace-modal');
-          const header = document.getElementById('search-replace-header');
-          let isDragging = false;
-          let offsetX, offsetY;
-          
-          header.addEventListener('mousedown', (e) => {
-              if(e.target.tagName === 'BUTTON') return;
-              isDragging = true;
-              offsetX = e.clientX - modal.offsetLeft;
-              offsetY = e.clientY - modal.offsetTop;
-              modal.style.transition = 'none';
-          });
-          
-          document.addEventListener('mousemove', (e) => {
-              if(!isDragging) return;
-              let newX = e.clientX - offsetX;
-              let newY = e.clientY - offsetY;
-              
-              // Limites de l'écran
-              newX = Math.max(0, Math.min(newX, window.innerWidth - modal.offsetWidth));
-              newY = Math.max(0, Math.min(newY, window.innerHeight - modal.offsetHeight));
-              
-              modal.style.left = newX + 'px';
-              modal.style.top = newY + 'px';
-              modal.style.right = 'auto';
-          });
-          
-          document.addEventListener('mouseup', () => {
-              isDragging = false;
-              modal.style.transition = '';
-          });
-      },
+      // ========== RECHERCHER / REMPLACER (V7.5 → ScriptEditorSearch) ==========
+      // V7.5.e — délégations rétrocompatibles vers ScriptEditorSearch.
+      // L'état (searchResults, currentResultIndex, backupScripts) et les méthodes internes
+      // (clearHighlights, findInElement, highlightCurrentResult, saveBackup) ont migré
+      // intégralement dans ScriptEditorSearch.
+      openSearchReplace: () => ScriptEditorSearch.openSearchReplace(),
+      closeSearchReplace: () => ScriptEditorSearch.closeSearchReplace(),
+      searchInScript: () => ScriptEditorSearch.searchInScript(),
+      searchNext: () => ScriptEditorSearch.searchNext(),
+      searchPrev: () => ScriptEditorSearch.searchPrev(),
+      replaceOne: () => ScriptEditorSearch.replaceOne(),
+      replaceAll: () => ScriptEditorSearch.replaceAll(),
+      undoReplace: () => ScriptEditorSearch.undoReplace(),
+      initDrag: () => ScriptEditorSearch.initDrag(),
       
       // ========== VUE SCRIPT CONTINU ==========
       viewMode: 'continuous', // 'scenes' ou 'continuous' - Vue Script par défaut
@@ -30800,7 +30820,7 @@ const DrawingEditor = {
   
   // Initialiser le drag au chargement
   document.addEventListener('DOMContentLoaded', () => {
-      ScriptEditor.initDrag();
+      ScriptEditorSearch.initDrag();
       
       // === Installation auto du blocker d'emojis sur les champs de saisie ===
       // Tout input[type=text] / textarea / [contenteditable] de l'app voit ses emojis
@@ -68383,7 +68403,7 @@ const Weather = {
       }
   };
 
-  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
