@@ -6939,7 +6939,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.6.4</p>
+      <p>vv4.6.5</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -15278,6 +15278,33 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                               needsMigrationSave = true;
                           }
                       });
+                  });
+              }
+              
+              // V7.6-bis (R7) : auto-réparation des scriptContent mal formés (HTML legacy corrompu).
+              // Cause possible : ancien bug ayant produit "<br class='sc-action'>" au lieu de "<div class='sc-action'><br></div>".
+              // Symptôme : Tab/Enter ne fonctionnent plus une fois qu'on tape du texte (getBlockNode renvoie null).
+              if(Array.isArray(safeData.scenes)) {
+                  safeData.scenes.forEach(sc => {
+                      if(typeof sc.scriptContent !== 'string') return;
+                      const raw = sc.scriptContent.trim();
+                      // Cas 1 : vide → wrap par défaut
+                      if(!raw) {
+                          sc.scriptContent = "<div class='sc-action'><br></div>";
+                          needsMigrationSave = true;
+                          return;
+                      }
+                      // Cas 2 : commence par <br class="sc-XXX"> → bloc orphelin sans wrapper DIV
+                      // Cas 3 : commence par du texte brut (pas de balise DIV)
+                      if(!raw.startsWith('<div')) {
+                          // Tenter de récupérer la classe sc-XXX d'un éventuel <br class="sc-XXX">
+                          const m = raw.match(/^<br\s+class=["']([^"']+)["']\s*\/?>/i);
+                          let cls = (m && m[1]) || 'sc-action';
+                          // Retirer le <br class="..."> initial s'il y est, et tout autre <br class="..."> orphelin
+                          let body = raw.replace(/<br\s+class=["'][^"']*["']\s*\/?>/gi, '<br>').trim();
+                          sc.scriptContent = `<div class="${cls}">${body || '<br>'}</div>`;
+                          needsMigrationSave = true;
+                      }
                   });
               }
               
