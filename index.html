@@ -6939,7 +6939,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.6.6</p>
+      <p>vv4.6.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -29930,7 +29930,155 @@ const DrawingEditor = {
       }
   };
 
-  // ScriptEditorPrefs — sous-module V7.1 : préférences éditeur scénario (Tab/Enter customisables)
+  // ScriptEditorNav — sous-module V7.7 : navigation entre scènes (vue scènes + vue continue)
+  // (V7.7.a — squelette + goToScene + scrollToSceneInContinuous. Cohabite avec les anciennes méthodes de ScriptEditor jusqu'à la bascule V7.7.d)
+  const ScriptEditorNav = {
+      // Vue scènes : scroll vers une scène + focus son éditeur
+      goToScene: (index) => {
+          if(index < 0 || index >= state.data.scenes.length) return;
+          const scene = state.data.scenes[index];
+          if(!scene) return;
+          const row = document.querySelector(`.script-row[data-id="${scene.id}"]`);
+          if(row) {
+              row.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              // Focus sur l'éditeur de cette scène
+              setTimeout(() => {
+                  const editor = document.getElementById(`editor-${scene.id}`);
+                  if(editor) editor.focus();
+              }, 300);
+          }
+      },
+      
+      // Vue continue : scroll vers une scène + focus son contenu
+      scrollToSceneInContinuous: (sceneId) => {
+          const sceneDiv = document.querySelector(`.script-continuous-scene[data-scene-id="${sceneId}"]`);
+          if(sceneDiv) {
+              sceneDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              const content = sceneDiv.querySelector('.script-continuous-content');
+              if(content) {
+                  setTimeout(() => content.focus(), 300);
+              }
+          }
+      },
+      
+      // V7.7.b — navigation entre scènes en vue continue + tracking scène active
+      goToSceneContinuous: (index) => {
+          if(index < 0 || index >= state.data.scenes.length) {
+              Utils.toast(index < 0 ? 'Première scène atteinte' : 'Dernière scène atteinte', 'info');
+              return;
+          }
+          const scene = state.data.scenes[index];
+          ScriptEditorNav.scrollToSceneInContinuous(scene.id);
+          // Mettre à jour la sidebar avec la nouvelle scène
+          ScriptEditorNav.setActiveScene(scene.id, index);
+      },
+      
+      setActiveScene: (sceneId, index) => {
+          if(ScriptEditor.activeSceneId === sceneId) return;
+          ScriptEditor.activeSceneId = sceneId;
+          
+          // Highlight la scène active
+          document.querySelectorAll('.script-continuous-scene').forEach(s => {
+              s.classList.toggle('active', s.dataset.sceneId === sceneId);
+          });
+          
+          // Mettre à jour la sidebar
+          ScriptEditorNav.updateContinuousSidebar(sceneId, index);
+      },
+      
+      // V7.7.c — sidebar de la vue continue + insertion de scène
+      updateContinuousSidebar: (sceneId, index) => {
+          const sidebar = document.getElementById('scriptContinuousSidebar');
+          if(!sidebar) return;
+          
+          const scene = state.data.scenes.find(s => s.id === sceneId);
+          if(!scene) return;
+          
+          const idx = index !== undefined ? index : state.data.scenes.findIndex(s => s.id === sceneId);
+          const tag = state.data.tags.find(t => t.id === scene.tag_id) || {name:'', color: 'transparent'};
+          const infoStyle = tag.color !== 'transparent' ? `border-left-color:${tag.color}` : '';
+          const badge = tag.color !== 'transparent' ? `<span class="tag-badge" style="background:${tag.color}" title="${Utils.escape(tag.name)}"></span>` : '';
+          
+          const shotCount = state.data.shots ? state.data.shots.filter(s => s.sceneId === scene.id).length : 0;
+          const versionCount = scene.versions ? scene.versions.length : 0;
+          const sceneStatus = scene.status || 'not-verified';
+          const statusBadge = `<span class="scene-status-badge ${sceneStatus}" onclick="app.UI.toggleSceneStatus('${scene.id}', event)">${SCENE_STATUS_LABELS[sceneStatus]}</span>`;
+          const isView = state.currentRole === 'viewer';
+          const isFinal = scene.isFinal === true;
+          const finalBadge = isFinal ? `<span class="scene-status-badge final">✅ Finale</span>` : `<span class="scene-status-badge draft">📝 Brouillon</span>`;
+          const finalizeBtn = isView ? '' : (isFinal 
+              ? `<button class="unfinalize-btn w-full" onclick="app.Actions.unfinalizeScene('${scene.id}')">📝 Repasser en brouillon</button>`
+              : `<button class="finalize-btn w-full" onclick="app.Actions.finalizeScene('${scene.id}')">✅ Finaliser cette scène</button>`);
+          
+          sidebar.innerHTML = `
+              <div class="script-info-col" style="${infoStyle}" draggable="true" 
+                   ondragstart="app.ScriptEditor.handleSidebarDragStart(event, '${scene.id}')"
+                   ondragend="app.ScriptEditor.handleSidebarDragEnd(event)">
+                  <h3 style="cursor:move; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+                      ${badge}${Utils.escape(scene.title)}
+                      <div style="margin-left:auto;">${statusBadge}</div>
+                  </h3>
+                  <div style="margin-bottom:10px;font-size:0.8em">#${idx+1} / ${state.data.scenes.length} • ${Utils.escape(scene.time)} min</div>
+                  <div style="margin-bottom:10px; font-size:0.85rem; color:var(--text-main);">${Utils.escape(scene.perso) || '-'}</div>
+                  <strong>Résumé:</strong>
+                  <p class="mt-5">${Utils.escape(scene.resume) || '-'}</p>
+                  
+                  <div class="script-sidebar-btns">
+                      <button onclick="app.StoryboardPreview.open('${scene.id}')">📷 Storyboard (${shotCount})</button>
+                      <button onclick="app.Comments.open('${scene.id}')">💬 Commentaires</button>
+                      <hr class="hr-subtle">
+                      <button onclick="app.SceneVersions.save('${scene.id}')">📸 Sauvegarder version</button>
+                      <button onclick="app.SceneVersions.openModal('${scene.id}')">📜 Historique${versionCount > 0 ? ' (' + versionCount + ')' : ''}</button>
+                      <hr class="hr-subtle">
+                      <button onclick="app.ScriptEditor.toggleAC()" title="Active ou désactive les suggestions automatiques pendant l'écriture (personnages, décors, ressources)">${state.scriptAC.enabled ? '🟢' : '⚪'} Autocomplétion</button>
+                      <button onclick="app.ScriptEditor.toggleScriptBd()" title="Active le clic droit pour dépouiller du texte sélectionné dans le scénario. Si désactivé, le clic droit reste celui du navigateur (copier/coller, correction orthographique).">${state.scriptBdEnabled ? '🟢' : '⚪'} Dépouillement</button>
+                      <div style="font-size:0.7rem;color:var(--text-sec);font-style:italic;text-align:center;padding:4px 6px;line-height:1.3;">💡 <strong>Shift + clic droit</strong> = menu navigateur (correction orthographique, copier/coller)</div>
+                      <hr class="hr-subtle">
+                      <div style="text-align:center; margin-bottom:5px;">${finalBadge}</div>
+                      ${finalizeBtn}
+                      <hr class="hr-subtle">
+                      <button onclick="app.ScriptEditor.goToSceneContinuous(${idx - 1})">⬅️ Scène précédente</button>
+                      <button onclick="app.ScriptEditor.goToSceneContinuous(${idx + 1})">➡️ Scène suivante</button>
+                  </div>
+              </div>
+          `;
+      },
+      
+      // Insère une nouvelle scène après l'index spécifié (vue scènes)
+      insertSceneAfter: (index) => {
+          if(state.currentRole === 'viewer') return;
+          
+          // Créer une nouvelle scène
+          const newScene = {
+              id: Date.now(),
+              title: 'INT. LIEU - JOUR',
+              time: '1',
+              resume: '',
+              perso: '',
+              color: '#808080',
+              scriptContent: '<div class="sc-action">Description de l\'action...</div>'
+          };
+          
+          // Insérer après l'index spécifié
+          state.data.scenes.splice(index + 1, 0, newScene);
+          
+          // Log historique
+          History.log('ADD', `Nouvelle scène insérée après Sc.${index + 1}`, { target: { kind: 'scene', id: newScene.id, label: newScene.title || 'Nouvelle scène' }, link: { kind: 'scene', id: newScene.id } });
+          
+          // Sauvegarder et rafraîchir
+          Store.save();
+          UI.renderScript();
+          UI.renderBoard();
+          
+          // Scroll vers la nouvelle scène
+          setTimeout(() => {
+              ScriptEditorNav.goToScene(index + 1);
+              Utils.toast(`Nouvelle scène insérée (Sc.${index + 2})`, 'success');
+          }, 100);
+      }
+  };
+
+  // ScriptEditorPrefs — sous-module V7.1 : préférences éditeur scénario (Tab/Enter customisables)Òƒ
   const ScriptEditorPrefs = {
       // Ouvre la modale de paramètres éditeur scénario (Tab/Enter customisables)
       openModal: () => {
@@ -30002,6 +30150,13 @@ const DrawingEditor = {
       selectAC: (editor) => ScriptEditorAC.selectAC(editor),
       hideAC: () => ScriptEditorAC.hideAC(),
       toggleAC: () => ScriptEditorAC.toggleAC(),
+      toggleScriptBd: () => {
+          state.scriptBdEnabled = !state.scriptBdEnabled;
+          localStorage.setItem('moteur_scriptBd_enabled', state.scriptBdEnabled ? 'true' : 'false');
+          Utils.toast(`Dépouillement clic droit ${state.scriptBdEnabled ? 'activé' : 'désactivé'}`, 'success');
+          UI.renderScript();
+          if(ScriptEditor.viewMode === 'continuous' && ScriptEditor.activeSceneId) ScriptEditor.updateContinuousSidebar(ScriptEditor.activeSceneId);
+      },
       syncCharMeta: (name, sceneId) => { 
           const existsInDb = state.data.characters.find(c => c.name.toLowerCase() === name.toLowerCase()); 
           if (!existsInDb) return; 
@@ -30021,53 +30176,10 @@ const DrawingEditor = {
           Store.save(); 
       },
       
-      // ========== NAVIGATION SCÈNES ==========
-      goToScene: (index) => {
-          if(index < 0 || index >= state.data.scenes.length) return;
-          const scene = state.data.scenes[index];
-          if(!scene) return;
-          const row = document.querySelector(`.script-row[data-id="${scene.id}"]`);
-          if(row) {
-              row.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              // Focus sur l'éditeur de cette scène
-              setTimeout(() => {
-                  const editor = document.getElementById(`editor-${scene.id}`);
-                  if(editor) editor.focus();
-              }, 300);
-          }
-      },
-      
-      insertSceneAfter: (index) => {
-          if(state.currentRole === 'viewer') return;
-          
-          // Créer une nouvelle scène
-          const newScene = {
-              id: Date.now(),
-              title: 'INT. LIEU - JOUR',
-              time: '1',
-              resume: '',
-              perso: '',
-              color: '#808080',
-              scriptContent: '<div class="sc-action">Description de l\'action...</div>'
-          };
-          
-          // Insérer après l'index spécifié
-          state.data.scenes.splice(index + 1, 0, newScene);
-          
-          // Log historique
-          History.log('ADD', `Nouvelle scène insérée après Sc.${index + 1}`, { target: { kind: 'scene', id: newScene.id, label: newScene.title || 'Nouvelle scène' }, link: { kind: 'scene', id: newScene.id } });
-          
-          // Sauvegarder et rafraîchir
-          Store.save();
-          UI.renderScript();
-          UI.renderBoard();
-          
-          // Scroll vers la nouvelle scène
-          setTimeout(() => {
-              ScriptEditor.goToScene(index + 1);
-              Utils.toast(`Nouvelle scène insérée (Sc.${index + 2})`, 'success');
-          }, 100);
-      },
+      // ========== NAVIGATION SCÈNES (V7.7 → ScriptEditorNav) ==========
+      // V7.7.d — délégations rétrocompatibles vers ScriptEditorNav.
+      goToScene: (index) => ScriptEditorNav.goToScene(index),
+      insertSceneAfter: (index) => ScriptEditorNav.insertSceneAfter(index),
       
       // ========== RECHERCHER / REMPLACER (V7.5 → ScriptEditorSearch) ==========
       // V7.5.e — délégations rétrocompatibles vers ScriptEditorSearch.
@@ -30245,97 +30357,10 @@ const DrawingEditor = {
           }
       },
       
-      setActiveScene: (sceneId, index) => {
-          if(ScriptEditor.activeSceneId === sceneId) return;
-          ScriptEditor.activeSceneId = sceneId;
-          
-          // Highlight la scène active
-          document.querySelectorAll('.script-continuous-scene').forEach(s => {
-              s.classList.toggle('active', s.dataset.sceneId === sceneId);
-          });
-          
-          // Mettre à jour la sidebar
-          ScriptEditor.updateContinuousSidebar(sceneId, index);
-      },
-      
-      updateContinuousSidebar: (sceneId, index) => {
-          const sidebar = document.getElementById('scriptContinuousSidebar');
-          if(!sidebar) return;
-          
-          const scene = state.data.scenes.find(s => s.id === sceneId);
-          if(!scene) return;
-          
-          const idx = index !== undefined ? index : state.data.scenes.findIndex(s => s.id === sceneId);
-          const tag = state.data.tags.find(t => t.id === scene.tag_id) || {name:'', color: 'transparent'};
-          const infoStyle = tag.color !== 'transparent' ? `border-left-color:${tag.color}` : '';
-          const badge = tag.color !== 'transparent' ? `<span class="tag-badge" style="background:${tag.color}" title="${Utils.escape(tag.name)}"></span>` : '';
-          
-          const shotCount = state.data.shots ? state.data.shots.filter(s => s.sceneId === scene.id).length : 0;
-          const versionCount = scene.versions ? scene.versions.length : 0;
-          const sceneStatus = scene.status || 'not-verified';
-          const statusBadge = `<span class="scene-status-badge ${sceneStatus}" onclick="app.UI.toggleSceneStatus('${scene.id}', event)">${SCENE_STATUS_LABELS[sceneStatus]}</span>`;
-          const isView = state.currentRole === 'viewer';
-          const isFinal = scene.isFinal === true;
-          const finalBadge = isFinal ? `<span class="scene-status-badge final">✅ Finale</span>` : `<span class="scene-status-badge draft">📝 Brouillon</span>`;
-          const finalizeBtn = isView ? '' : (isFinal 
-              ? `<button class="unfinalize-btn w-full" onclick="app.Actions.unfinalizeScene('${scene.id}')">📝 Repasser en brouillon</button>`
-              : `<button class="finalize-btn w-full" onclick="app.Actions.finalizeScene('${scene.id}')">✅ Finaliser cette scène</button>`);
-          
-          sidebar.innerHTML = `
-              <div class="script-info-col" style="${infoStyle}" draggable="true" 
-                   ondragstart="app.ScriptEditor.handleSidebarDragStart(event, '${scene.id}')"
-                   ondragend="app.ScriptEditor.handleSidebarDragEnd(event)">
-                  <h3 style="cursor:move; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
-                      ${badge}${Utils.escape(scene.title)}
-                      <div style="margin-left:auto;">${statusBadge}</div>
-                  </h3>
-                  <div style="margin-bottom:10px;font-size:0.8em">#${idx+1} / ${state.data.scenes.length} • ${Utils.escape(scene.time)} min</div>
-                  <div style="margin-bottom:10px; font-size:0.85rem; color:var(--text-main);">${Utils.escape(scene.perso) || '-'}</div>
-                  <strong>Résumé:</strong>
-                  <p class="mt-5">${Utils.escape(scene.resume) || '-'}</p>
-                  
-                  <div class="script-sidebar-btns">
-                      <button onclick="app.StoryboardPreview.open('${scene.id}')">📷 Storyboard (${shotCount})</button>
-                      <button onclick="app.Comments.open('${scene.id}')">💬 Commentaires</button>
-                      <hr class="hr-subtle">
-                      <button onclick="app.SceneVersions.save('${scene.id}')">📸 Sauvegarder version</button>
-                      <button onclick="app.SceneVersions.openModal('${scene.id}')">📜 Historique${versionCount > 0 ? ' (' + versionCount + ')' : ''}</button>
-                      <hr class="hr-subtle">
-                      <button onclick="app.ScriptEditor.toggleAC()" title="Active ou désactive les suggestions automatiques pendant l'écriture (personnages, décors, ressources)">${state.scriptAC.enabled ? '🟢' : '⚪'} Autocomplétion</button>
-                      <button onclick="app.ScriptEditor.toggleScriptBd()" title="Active le clic droit pour dépouiller du texte sélectionné dans le scénario. Si désactivé, le clic droit reste celui du navigateur (copier/coller, correction orthographique).">${state.scriptBdEnabled ? '🟢' : '⚪'} Dépouillement</button>
-                      <div style="font-size:0.7rem;color:var(--text-sec);font-style:italic;text-align:center;padding:4px 6px;line-height:1.3;">💡 <strong>Shift + clic droit</strong> = menu navigateur (correction orthographique, copier/coller)</div>
-                      <hr class="hr-subtle">
-                      <div style="text-align:center; margin-bottom:5px;">${finalBadge}</div>
-                      ${finalizeBtn}
-                      <hr class="hr-subtle">
-                      <button onclick="app.ScriptEditor.goToSceneContinuous(${idx - 1})">⬅️ Scène précédente</button>
-                      <button onclick="app.ScriptEditor.goToSceneContinuous(${idx + 1})">➡️ Scène suivante</button>
-                  </div>
-              </div>
-          `;
-      },
-      
-      goToSceneContinuous: (index) => {
-          if(index < 0 || index >= state.data.scenes.length) {
-              Utils.toast(index < 0 ? 'Première scène atteinte' : 'Dernière scène atteinte', 'info');
-              return;
-          }
-          const scene = state.data.scenes[index];
-          ScriptEditor.scrollToSceneInContinuous(scene.id);
-          // Mettre à jour la sidebar avec la nouvelle scène
-          ScriptEditor.setActiveScene(scene.id, index);
-      },
-      
-      scrollToSceneInContinuous: (sceneId) => {
-          const sceneDiv = document.querySelector(`.script-continuous-scene[data-scene-id="${sceneId}"]`);
-          if(sceneDiv) {
-              sceneDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              const content = sceneDiv.querySelector('.script-continuous-content');
-              if(content) {
-                  setTimeout(() => content.focus(), 300);
-              }
-          }
-      },
+      setActiveScene: (sceneId, index) => ScriptEditorNav.setActiveScene(sceneId, index),
+      updateContinuousSidebar: (sceneId, index) => ScriptEditorNav.updateContinuousSidebar(sceneId, index),
+      goToSceneContinuous: (index) => ScriptEditorNav.goToSceneContinuous(index),
+      scrollToSceneInContinuous: (sceneId) => ScriptEditorNav.scrollToSceneInContinuous(sceneId),
       
       // Timestamps pour détecter double-tap
       lastEnterTime: 0,
@@ -68451,7 +68476,7 @@ const Weather = {
       }
   };
 
-  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
