@@ -17677,7 +17677,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               a.className = 'qn-link';
               a.innerText = (i + 1);
               a.title = s.title;
-              // UX-2 : drag-and-drop des scènes depuis la quick-nav (vers .script-row ou .script-continuous-scene)
+              // UX-2 : drag-and-drop des scènes entièrement dans la quick-nav (chaque .qn-link est draggable + target de drop)
               if(state.currentRole !== 'viewer') {
                   a.draggable = true;
                   a.addEventListener('dragstart', (e) => {
@@ -17690,7 +17690,22 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                       a.classList.remove('dragging');
                       ScriptEditor.draggedSceneId = null;
                       ScriptEditorContinuous.stopAutoScroll();
-                      document.querySelectorAll('.script-continuous-scene.drag-over, .script-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+                      document.querySelectorAll('.qn-link.drag-over').forEach(el => el.classList.remove('drag-over'));
+                  });
+                  // Cible de drop : drop sur ce numéro = la scène draguée prend cette place
+                  a.addEventListener('dragover', (e) => {
+                      e.preventDefault();
+                      if(ScriptEditor.draggedSceneId && ScriptEditor.draggedSceneId !== s.id) {
+                          a.classList.add('drag-over');
+                      }
+                  });
+                  a.addEventListener('dragleave', () => a.classList.remove('drag-over'));
+                  a.addEventListener('drop', (e) => {
+                      e.preventDefault();
+                      a.classList.remove('drag-over');
+                      if(ScriptEditor.draggedSceneId && ScriptEditor.draggedSceneId !== s.id) {
+                          ScriptEditorContinuous.reorderSceneContinuous(ScriptEditor.draggedSceneId, s.id);
+                      }
                   });
               }
               a.onclick = () => {
@@ -19084,21 +19099,6 @@ openBoardPrintEpisodeChooser: () => {
               if(!isView) { 
                   const handle = row.querySelector('.script-info-col'); 
                   handle.addEventListener('contextmenu', (e) => Actions.openTagMenu(e, scene.id)); 
-                  // UX-2 : drag-and-drop scènes uniquement via la quick-nav. Le drop est géré sur .script-row.
-                  row.addEventListener('dragover', (e) => {
-                      e.preventDefault();
-                      if(ScriptEditor.draggedSceneId && ScriptEditor.draggedSceneId !== scene.id) {
-                          row.classList.add('drag-over');
-                      }
-                  });
-                  row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
-                  row.addEventListener('drop', (e) => {
-                      e.preventDefault();
-                      row.classList.remove('drag-over');
-                      if(ScriptEditor.draggedSceneId && ScriptEditor.draggedSceneId !== scene.id) {
-                          ScriptEditorContinuous.reorderSceneContinuous(ScriptEditor.draggedSceneId, scene.id);
-                      }
-                  }); 
                   const editor = document.getElementById(`editor-${scene.id}`); const toolbar = document.getElementById('continuous-toolbar'); 
                   editor.addEventListener('input', () => { const s = state.data.scenes.find(x => x.id === scene.id); if(s) s.scriptContent = editor.innerHTML; ScriptEditor.checkAC(editor); Store.updateScene(scene.id, editor.innerHTML); }); 
                   ['keyup', 'mouseup', 'click'].forEach(evt => editor.addEventListener(evt, () => ScriptEditor.updateToolbar(editor, toolbar))); 
@@ -30529,26 +30529,6 @@ const DrawingEditor = {
                   });
               }
               
-              // Événements drag & drop pour réordonner
-              sceneDiv.addEventListener('dragover', (e) => {
-                  e.preventDefault();
-                  if(ScriptEditor.draggedSceneId && ScriptEditor.draggedSceneId !== scene.id) {
-                      sceneDiv.classList.add('drag-over');
-                  }
-              });
-              
-              sceneDiv.addEventListener('dragleave', () => {
-                  sceneDiv.classList.remove('drag-over');
-              });
-              
-              sceneDiv.addEventListener('drop', (e) => {
-                  e.preventDefault();
-                  sceneDiv.classList.remove('drag-over');
-                  if(ScriptEditor.draggedSceneId && ScriptEditor.draggedSceneId !== scene.id) {
-                      ScriptEditorContinuous.reorderSceneContinuous(ScriptEditor.draggedSceneId, scene.id);
-                  }
-              });
-              
               sceneDiv.appendChild(content);
               editor.appendChild(sceneDiv);
           });
@@ -30565,22 +30545,26 @@ const DrawingEditor = {
       
       startAutoScroll: () => {
           if(ScriptEditorContinuous._autoScrollState) return;
-          // body { overflow:hidden } : c'est <main> qui scrolle (overflow-y:auto L.4598)
-          const scrollEl = document.querySelector('main') || document.scrollingElement || document.documentElement;
+          // Auto-scroll dans #quick-nav (la mini-barre des numéros, qui a overflow-y:auto)
+          const scrollEl = document.getElementById('quick-nav');
+          if(!scrollEl) return;
           const stateObj = { rafId: null, mouseY: 0, listener: null, scrollEl };
           stateObj.listener = (e) => { stateObj.mouseY = e.clientY; };
           document.addEventListener('dragover', stateObj.listener);
           const tick = () => {
-              const viewportH = window.innerHeight;
-              const threshold = 80;        // distance du bord où l'auto-scroll s'active
-              const maxSpeed = 18;         // pixels par frame
+              const rect = stateObj.scrollEl.getBoundingClientRect();
+              const threshold = 50;        // distance du bord (de la quick-nav) où l'auto-scroll s'active
+              const maxSpeed = 12;         // pixels par frame
               let delta = 0;
-              if(stateObj.mouseY < threshold) {
-                  // Près du haut : scroll vers le haut (négatif), plus vite si plus près du bord
-                  delta = -maxSpeed * (1 - stateObj.mouseY / threshold);
-              } else if(stateObj.mouseY > viewportH - threshold) {
-                  // Près du bas : scroll vers le bas
-                  delta = maxSpeed * (1 - (viewportH - stateObj.mouseY) / threshold);
+              // Mesurer la distance verticale entre mouseY et les bords de la quick-nav
+              const fromTop = stateObj.mouseY - rect.top;
+              const fromBottom = rect.bottom - stateObj.mouseY;
+              if(fromTop < threshold && fromTop > -threshold) {
+                  // Près du haut de la quick-nav (ou juste au-dessus)
+                  delta = -maxSpeed * Math.max(0, 1 - fromTop / threshold);
+              } else if(fromBottom < threshold && fromBottom > -threshold) {
+                  // Près du bas de la quick-nav (ou juste en-dessous)
+                  delta = maxSpeed * Math.max(0, 1 - fromBottom / threshold);
               }
               if(delta !== 0) stateObj.scrollEl.scrollTop += delta;
               stateObj.rafId = requestAnimationFrame(tick);
