@@ -6943,7 +6943,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.6.9Ò</p>
+      <p>vv4.7.2/p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -30086,140 +30086,322 @@ const DrawingEditor = {
       }
   };
 
-  // ScriptEditorPrefs — sous-module V7.1 : préférences éditeur scénario (Tab/Enter customisables)Òƒ
-  const ScriptEditorPrefs = {
-      // Ouvre la modale de paramètres éditeur scénario (Tab/Enter customisables)
-      openModal: () => {
-          const p = state.scriptPrefs;
-          UI.showModal({
-              title: '⚙️ Paramètres éditeur scénario',
-              html: `
-                  <div style="display:flex; flex-direction:column; gap:14px;">
-                      <div>
-                          <label class="form-label-block" style="font-weight:600; margin-bottom:6px;">Après <strong>Dialogue</strong> (ligne remplie) + Entrée :</label>
-                          <select id="pref-enterAfterDialog" class="actor-input">
-                              <option value="sc-perso" ${p.enterAfterDialog === 'sc-perso' ? 'selected' : ''}>Nouvelle ligne Personnage (défaut moteur)</option>
-                              <option value="sc-action" ${p.enterAfterDialog === 'sc-action' ? 'selected' : ''}>Nouvelle ligne Action (standard Final Draft)</option>
-                          </select>
-                      </div>
-                      <div>
-                          <label class="form-label-block" style="font-weight:600; margin-bottom:6px;">Après <strong>Action</strong> (ligne remplie) + Entrée :</label>
-                          <select id="pref-enterAfterAction" class="actor-input">
-                              <option value="sc-action" ${p.enterAfterAction === 'sc-action' ? 'selected' : ''}>Nouvelle ligne Action (défaut)</option>
-                              <option value="sc-perso" ${p.enterAfterAction === 'sc-perso' ? 'selected' : ''}>Nouvelle ligne Personnage (style ping-pong dialogue)</option>
-                          </select>
-                      </div>
-                      <div>
-                          <label class="form-label-block" style="font-weight:600; margin-bottom:6px;">Tab depuis un bloc <strong>Dialogue</strong> :</label>
-                          <select id="pref-tabFromDialog" class="actor-input">
-                              <option value="sc-perso" ${p.tabFromDialog === 'sc-perso' ? 'selected' : ''}>→ Personnage (défaut moteur)</option>
-                              <option value="sc-action" ${p.tabFromDialog === 'sc-action' ? 'selected' : ''}>→ Action (standard Final Draft)</option>
-                          </select>
-                      </div>
-                      <hr style="border:none; border-top:1px solid var(--border); margin:0;">
-                      <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
-                          <input type="checkbox" id="pref-doubleTapTabToNote" ${p.doubleTapTabToNote ? 'checked' : ''} style="width:auto;">
-                          <span><strong>Double Tab rapide → Note</strong> <span style="color:var(--text-sec); font-size:0.85rem;">(raccourci moteur)</span></span>
-                      </label>
-                      <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
-                          <input type="checkbox" id="pref-doubleEnterToTransition" ${p.doubleEnterToTransition ? 'checked' : ''} style="width:auto;">
-                          <span><strong>Double Entrée rapide depuis Action → Transition</strong> <span style="color:var(--text-sec); font-size:0.85rem;">(raccourci moteur)</span></span>
-                      </label>
-                  </div>
-              `,
-              confirmText: 'Enregistrer',
-              onConfirm: () => {
-                  state.scriptPrefs.enterAfterDialog = document.getElementById('pref-enterAfterDialog').value;
-                  state.scriptPrefs.enterAfterAction = document.getElementById('pref-enterAfterAction').value;
-                  state.scriptPrefs.tabFromDialog = document.getElementById('pref-tabFromDialog').value;
-                  state.scriptPrefs.doubleTapTabToNote = document.getElementById('pref-doubleTapTabToNote').checked;
-                  state.scriptPrefs.doubleEnterToTransition = document.getElementById('pref-doubleEnterToTransition').checked;
-                  PreferencesSync.save('moteur_script_prefs', JSON.stringify(state.scriptPrefs));
-                  Utils.toast('Paramètres enregistrés', 'success');
-                  return true;
+  // ScriptEditorToolbar — sous-module V7.8 : barre d'outils + formatage des blocs scénario
+  // (V7.8.a — squelette + wrapNote + wrapParen + placeCursorInside. Cohabite avec les anciennes méthodes de ScriptEditor jusqu'à la bascule V7.8.e)
+  const ScriptEditorToolbar = {
+      wrapNote: (block) => { let txt = block.innerText.trim(); if(!txt.startsWith('{')) { block.innerText = '{ ' + txt + ' }'; ScriptEditorToolbar.placeCursorInside(block, '{', '}'); } },
+      wrapParen: (block) => { let txt = block.innerText.trim(); if(!txt.startsWith('(')) { block.innerText = '( ' + txt + ' )'; ScriptEditorToolbar.placeCursorInside(block, '(', ')'); } },
+      placeCursorInside: (block, openChar, closeChar) => { const text = block.innerText; const startPos = text.indexOf(openChar) + 2; const endPos = text.lastIndexOf(closeChar) - 1; if(block.firstChild) { const range = document.createRange(); const sel = window.getSelection(); try { const textNode = block.firstChild; const safeStart = Math.min(startPos, textNode.length); range.setStart(textNode, safeStart); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); } catch(e) { console.log('Cursor placement error', e); } } },
+      
+      // V7.8.b — Mise à jour visuelle des toolbars + sauvegarde/restauration de la sélection
+      // État local (sera retiré de ScriptEditor à V7.8.e)
+      savedSelection: null,
+      
+      updateToolbar: (editor, toolbar) => { const sel = window.getSelection(); if(!sel.rangeCount) return; let block = ScriptEditor.getBlockNode(sel.anchorNode); if(!block && editor.children.length > 0) block = editor.firstElementChild; toolbar.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active')); const topToolbar = document.getElementById('continuous-toolbar'); if(topToolbar) topToolbar.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active')); if(!block) return; const type = block.className || 'sc-action'; const btn = toolbar.querySelector(`[data-type="${type}"]`); if(btn) btn.classList.add('active'); if(topToolbar) { const topBtn = topToolbar.querySelector(`[data-type="${type}"]`); if(topBtn) topBtn.classList.add('active'); } },
+      
+      saveSelection: () => {
+          const sel = window.getSelection();
+          if(sel.rangeCount > 0) {
+              ScriptEditorToolbar.savedSelection = sel.getRangeAt(0).cloneRange();
+          }
+      },
+      
+      restoreSelection: () => {
+          if(ScriptEditorToolbar.savedSelection) {
+              const sel = window.getSelection();
+              sel.removeAllRanges();
+              sel.addRange(ScriptEditorToolbar.savedSelection);
+          }
+      },
+      
+      updateToolbarContinuous: () => {
+          const toolbar = document.getElementById('continuous-toolbar');
+          if(!toolbar) return;
+          
+          const sel = window.getSelection();
+          if(!sel.rangeCount) return;
+          
+          const block = ScriptEditor.getBlockNode(sel.anchorNode);
+          toolbar.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active'));
+          
+          if(!block) return;
+          const type = block.className || 'sc-action';
+          const btn = toolbar.querySelector(`[data-type="${type}"]`);
+          if(btn) btn.classList.add('active');
+      },
+      
+      // V7.8.c — changement de type de bloc + format direct via raccourci clavier
+      changeBlockType: (block, newType) => {
+          if(!block) return;
+          // Nettoyer les caractères spéciaux des notes/parenthèses
+          if(block.classList.contains('sc-note')) block.innerText = block.innerText.replace(/^\{\s*/, '').replace(/\s*\}$/, '').trim();
+          if(block.classList.contains('sc-paren')) block.innerText = block.innerText.replace(/^\(\s*/, '').replace(/\s*\)$/, '').trim();
+          block.className = newType;
+          if(newType === 'sc-note') ScriptEditorToolbar.wrapNote(block);
+          if(newType === 'sc-paren') ScriptEditorToolbar.wrapParen(block);
+      },
+      
+      setFormatDirectContinuous: (content, className) => {
+          const sel = window.getSelection();
+          let block = ScriptEditor.getBlockNode(sel.anchorNode);
+          if(!block && content.children.length > 0) block = content.firstElementChild;
+          if(!block) return;
+          if(block.classList.contains('sc-note')) block.innerText = block.innerText.replace(/^\{\s*/, '').replace(/\s*\}$/, '');
+          if(block.classList.contains('sc-paren')) block.innerText = block.innerText.replace(/^\(\s*/, '').replace(/\s*\)$/, '');
+          block.className = className;
+          if(className === 'sc-note') ScriptEditorToolbar.wrapNote(block);
+          if(className === 'sc-paren') ScriptEditorToolbar.wrapParen(block);
+          ScriptEditorToolbar.updateToolbarContinuous();
+      },
+      
+      // V7.8.d — formatage du bloc actif via les boutons toolbar (vue scènes et vue continue)
+      formatContinuous: (className, e) => {
+          if(e) e.preventDefault();
+          
+          // Restaurer la sélection si elle a été perdue
+          if(ScriptEditorToolbar.savedSelection) {
+              ScriptEditorToolbar.restoreSelection();
+          }
+          
+          const sel = window.getSelection();
+          
+          // Détecter si on est en Vue Scènes ou Vue Script
+          const isContinuousView = document.getElementById('scriptContinuousContainer')?.style.display !== 'none';
+          
+          if(isContinuousView) {
+              // === VUE SCRIPT ===
+              const activeScene = document.querySelector('.script-continuous-scene.active');
+              if(!activeScene) {
+                  Utils.toast('Cliquez d\'abord dans une scène', 'warning');
+                  return;
               }
-          });
+              
+              const content = activeScene.querySelector('.script-continuous-content');
+              if(!content) return;
+              
+              if(!sel.anchorNode || !content.contains(sel.anchorNode)) {
+                  if(content.firstElementChild) {
+                      const range = document.createRange();
+                      range.selectNodeContents(content.firstElementChild);
+                      range.collapse(true);
+                      sel.removeAllRanges();
+                      sel.addRange(range);
+                  } else {
+                      return;
+                  }
+              }
+              
+              const block = ScriptEditor.getBlockNode(sel.anchorNode);
+              if(block) {
+                  ScriptEditorToolbar.changeBlockType(block, className);
+                  
+                  const sceneId = activeScene.dataset.sceneId;
+                  const scene = state.data.scenes.find(x => x.id === sceneId);
+                  if(scene) {
+                      scene.scriptContent = content.innerHTML;
+                      Store.updateScene(sceneId, content.innerHTML);
+                  }
+                  
+                  ScriptEditorToolbar.updateToolbarContinuous();
+                  content.focus();
+              }
+          } else {
+              // === VUE SCÈNES ===
+              // Trouver l'éditeur actif (celui qui a le focus ou la sélection)
+              const editors = document.querySelectorAll('.script-editor-box');
+              let activeEditor = null;
+              let activeSceneId = null;
+              
+              for(const editor of editors) {
+                  if(sel.anchorNode && editor.contains(sel.anchorNode)) {
+                      activeEditor = editor;
+                      activeSceneId = editor.id.replace('editor-', '');
+                      break;
+                  }
+              }
+              
+              if(!activeEditor) {
+                  Utils.toast('Cliquez d\'abord dans une scène', 'warning');
+                  return;
+              }
+              
+              const block = ScriptEditor.getBlockNode(sel.anchorNode);
+              if(block) {
+                  ScriptEditorToolbar.changeBlockType(block, className);
+                  
+                  const scene = state.data.scenes.find(x => x.id == activeSceneId);
+                  if(scene) {
+                      scene.scriptContent = activeEditor.innerHTML;
+                      Store.updateScene(activeSceneId, activeEditor.innerHTML);
+                  }
+                  
+                  ScriptEditorToolbar.updateToolbarContinuous();
+                  activeEditor.focus();
+              }
+          }
       }
   };
 
-  const ScriptEditor = {
-      wrapNote: (block) => { let txt = block.innerText.trim(); if(!txt.startsWith('{')) { block.innerText = '{ ' + txt + ' }'; ScriptEditor.placeCursorInside(block, '{', '}'); } },
-      wrapParen: (block) => { let txt = block.innerText.trim(); if(!txt.startsWith('(')) { block.innerText = '( ' + txt + ' )'; ScriptEditor.placeCursorInside(block, '(', ')'); } },
-      placeCursorInside: (block, openChar, closeChar) => { const text = block.innerText; const startPos = text.indexOf(openChar) + 2; const endPos = text.lastIndexOf(closeChar) - 1; if(block.firstChild) { const range = document.createRange(); const sel = window.getSelection(); try { const textNode = block.firstChild; const safeStart = Math.min(startPos, textNode.length); range.setStart(textNode, safeStart); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); } catch(e) { console.log('Cursor placement error', e); } } },
-      getBlockNode: (node) => { if(!node) return null; if (node.nodeType === 1 && node.classList.contains('script-editor-box')) return node.firstElementChild || null; while (node && node.nodeName !== 'DIV' && !node.classList?.contains('script-editor-box')) node = node.parentNode; return (node && node.classList && !node.classList.contains('script-editor-box')) ? node : null; },
-      updateToolbar: (editor, toolbar) => { const sel = window.getSelection(); if(!sel.rangeCount) return; let block = ScriptEditor.getBlockNode(sel.anchorNode); if(!block && editor.children.length > 0) block = editor.firstElementChild; toolbar.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active')); const topToolbar = document.getElementById('continuous-toolbar'); if(topToolbar) topToolbar.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active')); if(!block) return; const type = block.className || 'sc-action'; const btn = toolbar.querySelector(`[data-type="${type}"]`); if(btn) btn.classList.add('active'); if(topToolbar) { const topBtn = topToolbar.querySelector(`[data-type="${type}"]`); if(topBtn) topBtn.classList.add('active'); } },
-      // ========== AUTO-COMPLÉTION (V7.6 → ScriptEditorAC) ==========
-      // V7.6.e — délégations rétrocompatibles vers ScriptEditorAC.
-      // Les 3 méthodes privées (_getCaretOffsetInBlock, _setCaretAtOffset, renderScriptACList)
-      // ont migré intégralement dans ScriptEditorAC (zéro appel externe).
-      checkAC: (editor) => ScriptEditorAC.checkAC(editor),
-      highlightAC: () => ScriptEditorAC.highlightAC(),
-      switchACColumn: (delta) => ScriptEditorAC.switchACColumn(delta),
-      selectAC: (editor) => ScriptEditorAC.selectAC(editor),
-      hideAC: () => ScriptEditorAC.hideAC(),
-      toggleAC: () => ScriptEditorAC.toggleAC(),
-      toggleScriptBd: () => {
-          state.scriptBdEnabled = !state.scriptBdEnabled;
-          localStorage.setItem('moteur_scriptBd_enabled', state.scriptBdEnabled ? 'true' : 'false');
-          Utils.toast(`Dépouillement clic droit ${state.scriptBdEnabled ? 'activé' : 'désactivé'}`, 'success');
-          UI.renderScript();
-          if(ScriptEditor.viewMode === 'continuous' && ScriptEditor.activeSceneId) ScriptEditor.updateContinuousSidebar(ScriptEditor.activeSceneId);
-      },
-      syncCharMeta: (name, sceneId) => { 
-          const existsInDb = state.data.characters.find(c => c.name.toLowerCase() === name.toLowerCase()); 
-          if (!existsInDb) return; 
-          const scene = state.data.scenes.find(s => s.id === sceneId); 
-          if(scene) { 
-              const currentList = scene.perso ? scene.perso.split(';').map(s=>s.trim()) : []; 
-              if(!currentList.find(n => n.toLowerCase() === name.toLowerCase())) { 
-                  scene.perso = scene.perso && scene.perso.length > 0 ? scene.perso + "; " + name : name; 
-                  // UPDATE VISUEL GAUCHE (Noir / Pas Gras)
-                  const row = document.querySelector(`.script-row[data-id="${sceneId}"]`); 
-                  if(row) { 
-                      const infoCol = row.querySelector('.script-info-col');
-                      if(infoCol && infoCol.children[2]) infoCol.children[2].innerText = scene.perso; 
-                  } 
-              } 
-          } 
-          Store.save(); 
+  // ScriptEditorContinuous — sous-module V7.9 : vue script continu (rendu + saisie + drag + édition titre)
+  // (V7.9.a — squelette + drag sidebar : handleSidebarDragStart, handleSidebarDragEnd, reorderSceneContinuous.
+  //  Cohabite avec les anciennes méthodes de ScriptEditor jusqu'à la bascule V7.9.e)
+  const ScriptEditorContinuous = {
+      handleSidebarDragStart: (e, sceneId) => {
+          ScriptEditor.draggedSceneId = sceneId;
+          e.dataTransfer.effectAllowed = 'move';
+          e.target.style.opacity = '0.5';
       },
       
-      // ========== NAVIGATION SCÈNES (V7.7 → ScriptEditorNav) ==========
-      // V7.7.d — délégations rétrocompatibles vers ScriptEditorNav.
-      goToScene: (index) => ScriptEditorNav.goToScene(index),
-      insertSceneAfter: (index) => ScriptEditorNav.insertSceneAfter(index),
+      handleSidebarDragEnd: (e) => {
+          e.target.style.opacity = '1';
+          ScriptEditor.draggedSceneId = null;
+          // Retirer tous les indicateurs de drop
+          document.querySelectorAll('.script-continuous-scene.drag-over').forEach(el => {
+              el.classList.remove('drag-over');
+          });
+      },
       
-      // ========== RECHERCHER / REMPLACER (V7.5 → ScriptEditorSearch) ==========
-      // V7.5.e — délégations rétrocompatibles vers ScriptEditorSearch.
-      // L'état (searchResults, currentResultIndex, backupScripts) et les méthodes internes
-      // (clearHighlights, findInElement, highlightCurrentResult, saveBackup) ont migré
-      // intégralement dans ScriptEditorSearch.
-      openSearchReplace: () => ScriptEditorSearch.openSearchReplace(),
-      closeSearchReplace: () => ScriptEditorSearch.closeSearchReplace(),
-      searchInScript: () => ScriptEditorSearch.searchInScript(),
-      searchNext: () => ScriptEditorSearch.searchNext(),
-      searchPrev: () => ScriptEditorSearch.searchPrev(),
-      replaceOne: () => ScriptEditorSearch.replaceOne(),
-      replaceAll: () => ScriptEditorSearch.replaceAll(),
-      undoReplace: () => ScriptEditorSearch.undoReplace(),
-      initDrag: () => ScriptEditorSearch.initDrag(),
+      // Réordonner les scènes en vue continue
+      reorderSceneContinuous: (draggedId, targetId) => {
+          const scenes = state.data.scenes;
+          const draggedIndex = scenes.findIndex(s => s.id === draggedId);
+          const targetIndex = scenes.findIndex(s => s.id === targetId);
+          
+          if(draggedIndex === -1 || targetIndex === -1) return;
+          
+          // Retirer la scène de sa position actuelle
+          const [draggedScene] = scenes.splice(draggedIndex, 1);
+          
+          // Calculer la nouvelle position
+          const newIndex = draggedIndex < targetIndex ? targetIndex : targetIndex;
+          
+          // Insérer à la nouvelle position
+          scenes.splice(newIndex, 0, draggedScene);
+          
+          // Sauvegarder et rafraîchir
+          Store.save();
+          History.log('REORDER', `Scène "${draggedScene.title}" déplacée`);
+          
+          // Notification de propagation
+          Utils.notifyImpact('sequencer', ['scenario', 'breakdown'], 'réordonné');
+          
+          // Rafraîchir les vues
+          UI.renderBoard();
+          ScriptEditor.renderContinuous();
+          
+          // Remettre le focus sur la scène déplacée
+          setTimeout(() => {
+              ScriptEditor.setActiveScene(draggedId, newIndex);
+              ScriptEditor.scrollToSceneInContinuous(draggedId);
+          }, 100);
+      },
       
-      // ========== VUE SCRIPT CONTINU ==========
-      viewMode: 'continuous', // 'scenes' ou 'continuous' - Vue Script par défaut
-      activeSceneId: null,
+      // V7.9.b — Édition inline du titre d'une scène (3 champs : INT/EXT, lieu, moment)
+      editSceneTitle: (sceneId, element) => {
+          const scene = state.data.scenes.find(s => s.id === sceneId);
+          if(!scene) return;
+          
+          const currentTitle = scene.title || 'INT. LIEU - JOUR';
+          
+          // Parser le titre existant : "INT. LIEU - JOUR" ou "EXT. LIEU - NUIT"
+          const match = currentTitle.match(/^(INT\.|EXT\.)\s*(.+?)\s*-\s*(JOUR|NUIT|AUBE|CRÉPUSCULE|MATIN|SOIR)$/i);
+          let intExt = 'INT.';
+          let lieu = 'LIEU';
+          let moment = 'JOUR';
+          
+          if(match) {
+              intExt = match[1].toUpperCase();
+              lieu = match[2].toUpperCase();
+              moment = match[3].toUpperCase();
+          } else {
+              // Essayer de parser autrement
+              const parts = currentTitle.split(/[-–]/);
+              if(parts.length >= 2) {
+                  const firstPart = parts[0].trim();
+                  moment = parts[parts.length - 1].trim().toUpperCase();
+                  if(firstPart.toUpperCase().startsWith('INT')) {
+                      intExt = 'INT.';
+                      lieu = firstPart.replace(/^INT\.?\s*/i, '').toUpperCase();
+                  } else if(firstPart.toUpperCase().startsWith('EXT')) {
+                      intExt = 'EXT.';
+                      lieu = firstPart.replace(/^EXT\.?\s*/i, '').toUpperCase();
+                  } else {
+                      lieu = firstPart.toUpperCase();
+                  }
+              }
+          }
+          
+          // Créer le formulaire d'édition
+          const form = document.createElement('div');
+          form.style.cssText = 'display: flex; gap: 5px; align-items: center; flex-wrap: nowrap;';
+          form.innerHTML = `
+              <select id="edit-intext" class="n8-badge-1">
+                  <option value="INT." ${intExt === 'INT.' ? 'selected' : ''}>INT.</option>
+                  <option value="EXT." ${intExt === 'EXT.' ? 'selected' : ''}>EXT.</option>
+              </select>
+              <input type="text" id="edit-lieu" value="${lieu}" style="flex: 1; min-width: 80px; padding: 3px 5px; border: 1px solid var(--primary); border-radius: 3px; font-family: inherit; font-size: inherit; font-weight: bold; background: var(--panel-bg); color: var(--text-main); text-transform: uppercase;" />
+              <span class="fw-bold">-</span>
+              <select id="edit-moment" class="n8-badge-1">
+                  <option value="JOUR" ${moment === 'JOUR' ? 'selected' : ''}>JOUR</option>
+                  <option value="NUIT" ${moment === 'NUIT' ? 'selected' : ''}>NUIT</option>
+                  <option value="AUBE" ${moment === 'AUBE' ? 'selected' : ''}>AUBE</option>
+                  <option value="MATIN" ${moment === 'MATIN' ? 'selected' : ''}>MATIN</option>
+                  <option value="SOIR" ${moment === 'SOIR' ? 'selected' : ''}>SOIR</option>
+                  <option value="CRÉPUSCULE" ${moment === 'CRÉPUSCULE' ? 'selected' : ''}>CRÉPUSCULE</option>
+              </select>
+              <button id="edit-save-btn" style="padding: 3px 8px; background: var(--primary); color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.85rem;">✓</button>
+          `;
+          
+          const saveTitle = () => {
+              const newIntExt = form.querySelector('#edit-intext').value;
+              const newLieu = form.querySelector('#edit-lieu').value.trim().toUpperCase() || 'LIEU';
+              const newMoment = form.querySelector('#edit-moment').value;
+              const newTitle = `${newIntExt} ${newLieu} - ${newMoment}`;
+              
+              scene.title = newTitle;
+              element.textContent = newTitle;
+              Store.save();
+              
+              // Mettre à jour partout
+              UI.renderBoard();
+              if(ScriptEditor.viewMode === 'continuous') {
+                  ScriptEditor.updateContinuousSidebar(sceneId);
+              }
+              
+              // Mettre à jour le heading dans la vue continue
+              const headingSpan = document.querySelector(`.scene-title-text[data-scene-id="${sceneId}"]`);
+              if(headingSpan) headingSpan.textContent = newTitle;
+              
+              Utils.toast('Titre mis à jour', 'success');
+          };
+          
+          element.textContent = '';
+          element.appendChild(form);
+          
+          // Events
+          form.querySelector('#edit-save-btn').addEventListener('click', (e) => {
+              e.stopPropagation();
+              saveTitle();
+          });
+          
+          form.querySelector('#edit-lieu').addEventListener('keydown', (e) => {
+              if(e.key === 'Enter') {
+                  e.preventDefault();
+                  saveTitle();
+              }
+              if(e.key === 'Escape') {
+                  element.textContent = currentTitle;
+              }
+          });
+          
+          // Focus sur le champ lieu
+          setTimeout(() => {
+              form.querySelector('#edit-lieu').focus();
+              form.querySelector('#edit-lieu').select();
+          }, 10);
+      },
       
-      // V7.3 → délégué à ScriptEditorViewMode.init()
-      initViewMode: () => ScriptEditorViewMode.init(),
-      
-      // V7.3 → délégué à ScriptEditorViewMode.set()
-      setViewMode: (mode) => ScriptEditorViewMode.set(mode),
-      
-      // V7.4 → délégué à ScriptEditorEpisodes.initSelector()
-      initEpisodeSelector: () => ScriptEditorEpisodes.initSelector(),
-      
-      // V7.4 → délégué à ScriptEditorEpisodes.switch()
-      switchEpisode: (episodeId) => ScriptEditorEpisodes.switch(episodeId),
-      
+      // V7.9.c — Rendu de la vue script continu (toutes les scènes filtrées + DOM + events)
       renderContinuous: () => {
           const editor = document.getElementById('scriptContinuousEditor');
           const sidebar = document.getElementById('scriptContinuousSidebar');
@@ -30270,7 +30452,7 @@ const DrawingEditor = {
               const titleSpan = heading.querySelector('.scene-title-text');
               titleSpan.addEventListener('click', (e) => {
                   e.stopPropagation();
-                  ScriptEditor.editSceneTitle(scene.id, titleSpan);
+                  ScriptEditorContinuous.editSceneTitle(scene.id, titleSpan);
               });
               
               sceneDiv.appendChild(heading);
@@ -30351,7 +30533,7 @@ const DrawingEditor = {
                   e.preventDefault();
                   sceneDiv.classList.remove('drag-over');
                   if(ScriptEditor.draggedSceneId && ScriptEditor.draggedSceneId !== scene.id) {
-                      ScriptEditor.reorderSceneContinuous(ScriptEditor.draggedSceneId, scene.id);
+                      ScriptEditorContinuous.reorderSceneContinuous(ScriptEditor.draggedSceneId, scene.id);
                   }
               });
               
@@ -30365,34 +30547,7 @@ const DrawingEditor = {
           }
       },
       
-      setActiveScene: (sceneId, index) => ScriptEditorNav.setActiveScene(sceneId, index),
-      updateContinuousSidebar: (sceneId, index) => ScriptEditorNav.updateContinuousSidebar(sceneId, index),
-      goToSceneContinuous: (index) => ScriptEditorNav.goToSceneContinuous(index),
-      scrollToSceneInContinuous: (sceneId) => ScriptEditorNav.scrollToSceneInContinuous(sceneId),
-      
-      // Timestamps pour détecter double-tap
-      lastEnterTime: 0,
-      lastTabTime: 0,
-      doubleTapDelay: 300,
-      
-      // Vérifie si le bloc est vide (juste des espaces, <br>, ou rien)
-      isBlockEmpty: (block) => {
-          if(!block) return true;
-          const text = block.innerText.replace(/[\s\u00A0]/g, '').replace(/[{}()]/g, '');
-          return text.length === 0;
-      },
-      
-      // Change le type du bloc actuel sans créer de nouvelle ligne
-      changeBlockType: (block, newType) => {
-          if(!block) return;
-          // Nettoyer les caractères spéciaux des notes/parenthèses
-          if(block.classList.contains('sc-note')) block.innerText = block.innerText.replace(/^\{\s*/, '').replace(/\s*\}$/, '').trim();
-          if(block.classList.contains('sc-paren')) block.innerText = block.innerText.replace(/^\(\s*/, '').replace(/\s*\)$/, '').trim();
-          block.className = newType;
-          if(newType === 'sc-note') ScriptEditor.wrapNote(block);
-          if(newType === 'sc-paren') ScriptEditor.wrapParen(block);
-      },
-      
+      // V7.9.d — Cœur de la saisie clavier dans l'éditeur (Tab/Enter/Shift+Tab/raccourcis Ctrl)
       handleKeyContinuous: (e, content, sceneId, isSceneView) => {
           const toolbar = document.getElementById('continuous-toolbar');
           const sel = window.getSelection();
@@ -30602,301 +30757,189 @@ const DrawingEditor = {
               
               ScriptEditor.updateToolbarContinuous();
           }
+      }
+  };
+
+  // ScriptEditorPrefs — sous-module V7.1 : préférences éditeur scénario (Tab/Enter customisables)
+  const ScriptEditorPrefs = {
+      // Ouvre la modale de paramètres éditeur scénario (Tab/Enter customisables)
+      openModal: () => {
+          const p = state.scriptPrefs;
+          UI.showModal({
+              title: '⚙️ Paramètres éditeur scénario',
+              html: `
+                  <div style="display:flex; flex-direction:column; gap:14px;">
+                      <div>
+                          <label class="form-label-block" style="font-weight:600; margin-bottom:6px;">Après <strong>Dialogue</strong> (ligne remplie) + Entrée :</label>
+                          <select id="pref-enterAfterDialog" class="actor-input">
+                              <option value="sc-perso" ${p.enterAfterDialog === 'sc-perso' ? 'selected' : ''}>Nouvelle ligne Personnage (défaut moteur)</option>
+                              <option value="sc-action" ${p.enterAfterDialog === 'sc-action' ? 'selected' : ''}>Nouvelle ligne Action (standard Final Draft)</option>
+                          </select>
+                      </div>
+                      <div>
+                          <label class="form-label-block" style="font-weight:600; margin-bottom:6px;">Après <strong>Action</strong> (ligne remplie) + Entrée :</label>
+                          <select id="pref-enterAfterAction" class="actor-input">
+                              <option value="sc-action" ${p.enterAfterAction === 'sc-action' ? 'selected' : ''}>Nouvelle ligne Action (défaut)</option>
+                              <option value="sc-perso" ${p.enterAfterAction === 'sc-perso' ? 'selected' : ''}>Nouvelle ligne Personnage (style ping-pong dialogue)</option>
+                          </select>
+                      </div>
+                      <div>
+                          <label class="form-label-block" style="font-weight:600; margin-bottom:6px;">Tab depuis un bloc <strong>Dialogue</strong> :</label>
+                          <select id="pref-tabFromDialog" class="actor-input">
+                              <option value="sc-perso" ${p.tabFromDialog === 'sc-perso' ? 'selected' : ''}>→ Personnage (défaut moteur)</option>
+                              <option value="sc-action" ${p.tabFromDialog === 'sc-action' ? 'selected' : ''}>→ Action (standard Final Draft)</option>
+                          </select>
+                      </div>
+                      <hr style="border:none; border-top:1px solid var(--border); margin:0;">
+                      <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+                          <input type="checkbox" id="pref-doubleTapTabToNote" ${p.doubleTapTabToNote ? 'checked' : ''} style="width:auto;">
+                          <span><strong>Double Tab rapide → Note</strong> <span style="color:var(--text-sec); font-size:0.85rem;">(raccourci moteur)</span></span>
+                      </label>
+                      <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+                          <input type="checkbox" id="pref-doubleEnterToTransition" ${p.doubleEnterToTransition ? 'checked' : ''} style="width:auto;">
+                          <span><strong>Double Entrée rapide depuis Action → Transition</strong> <span style="color:var(--text-sec); font-size:0.85rem;">(raccourci moteur)</span></span>
+                      </label>
+                  </div>
+              `,
+              confirmText: 'Enregistrer',
+              onConfirm: () => {
+                  state.scriptPrefs.enterAfterDialog = document.getElementById('pref-enterAfterDialog').value;
+                  state.scriptPrefs.enterAfterAction = document.getElementById('pref-enterAfterAction').value;
+                  state.scriptPrefs.tabFromDialog = document.getElementById('pref-tabFromDialog').value;
+                  state.scriptPrefs.doubleTapTabToNote = document.getElementById('pref-doubleTapTabToNote').checked;
+                  state.scriptPrefs.doubleEnterToTransition = document.getElementById('pref-doubleEnterToTransition').checked;
+                  PreferencesSync.save('moteur_script_prefs', JSON.stringify(state.scriptPrefs));
+                  Utils.toast('Paramètres enregistrés', 'success');
+                  return true;
+              }
+          });
+      }
+  };
+
+  const ScriptEditor = {
+      // ========== TOOLBAR & FORMATAGE (V7.8 → ScriptEditorToolbar) ==========
+      // V7.8.e — délégations rétrocompatibles vers ScriptEditorToolbar.
+      // La méthode privée placeCursorInside a migré intégralement dans ScriptEditorToolbar (zéro appel externe).
+      wrapNote: (block) => ScriptEditorToolbar.wrapNote(block),
+      wrapParen: (block) => ScriptEditorToolbar.wrapParen(block),
+      getBlockNode: (node) => { if(!node) return null; if (node.nodeType === 1 && node.classList.contains('script-editor-box')) return node.firstElementChild || null; while (node && node.nodeName !== 'DIV' && !node.classList?.contains('script-editor-box')) node = node.parentNode; return (node && node.classList && !node.classList.contains('script-editor-box')) ? node : null; },
+      updateToolbar: (editor, toolbar) => ScriptEditorToolbar.updateToolbar(editor, toolbar),
+      // ========== AUTO-COMPLÉTION (V7.6 → ScriptEditorAC) ==========
+      // V7.6.e — délégations rétrocompatibles vers ScriptEditorAC.
+      // Les 3 méthodes privées (_getCaretOffsetInBlock, _setCaretAtOffset, renderScriptACList)
+      // ont migré intégralement dans ScriptEditorAC (zéro appel externe).
+      checkAC: (editor) => ScriptEditorAC.checkAC(editor),
+      highlightAC: () => ScriptEditorAC.highlightAC(),
+      switchACColumn: (delta) => ScriptEditorAC.switchACColumn(delta),
+      selectAC: (editor) => ScriptEditorAC.selectAC(editor),
+      hideAC: () => ScriptEditorAC.hideAC(),
+      toggleAC: () => ScriptEditorAC.toggleAC(),
+      toggleScriptBd: () => {
+          state.scriptBdEnabled = !state.scriptBdEnabled;
+          localStorage.setItem('moteur_scriptBd_enabled', state.scriptBdEnabled ? 'true' : 'false');
+          Utils.toast(`Dépouillement clic droit ${state.scriptBdEnabled ? 'activé' : 'désactivé'}`, 'success');
+          UI.renderScript();
+          if(ScriptEditor.viewMode === 'continuous' && ScriptEditor.activeSceneId) ScriptEditor.updateContinuousSidebar(ScriptEditor.activeSceneId);
+      },
+      syncCharMeta: (name, sceneId) => { 
+          const existsInDb = state.data.characters.find(c => c.name.toLowerCase() === name.toLowerCase()); 
+          if (!existsInDb) return; 
+          const scene = state.data.scenes.find(s => s.id === sceneId); 
+          if(scene) { 
+              const currentList = scene.perso ? scene.perso.split(';').map(s=>s.trim()) : []; 
+              if(!currentList.find(n => n.toLowerCase() === name.toLowerCase())) { 
+                  scene.perso = scene.perso && scene.perso.length > 0 ? scene.perso + "; " + name : name; 
+                  // UPDATE VISUEL GAUCHE (Noir / Pas Gras)
+                  const row = document.querySelector(`.script-row[data-id="${sceneId}"]`); 
+                  if(row) { 
+                      const infoCol = row.querySelector('.script-info-col');
+                      if(infoCol && infoCol.children[2]) infoCol.children[2].innerText = scene.perso; 
+                  } 
+              } 
+          } 
+          Store.save(); 
       },
       
-      setFormatDirectContinuous: (content, className) => {
-          const sel = window.getSelection();
-          let block = ScriptEditor.getBlockNode(sel.anchorNode);
-          if(!block && content.children.length > 0) block = content.firstElementChild;
-          if(!block) return;
-          if(block.classList.contains('sc-note')) block.innerText = block.innerText.replace(/^\{\s*/, '').replace(/\s*\}$/, '');
-          if(block.classList.contains('sc-paren')) block.innerText = block.innerText.replace(/^\(\s*/, '').replace(/\s*\)$/, '');
-          block.className = className;
-          if(className === 'sc-note') ScriptEditor.wrapNote(block);
-          if(className === 'sc-paren') ScriptEditor.wrapParen(block);
-          ScriptEditor.updateToolbarContinuous();
+      // ========== NAVIGATION SCÈNES (V7.7 → ScriptEditorNav) ==========
+      // V7.7.d — délégations rétrocompatibles vers ScriptEditorNav.
+      goToScene: (index) => ScriptEditorNav.goToScene(index),
+      insertSceneAfter: (index) => ScriptEditorNav.insertSceneAfter(index),
+      
+      // ========== RECHERCHER / REMPLACER (V7.5 → ScriptEditorSearch) ==========
+      // V7.5.e — délégations rétrocompatibles vers ScriptEditorSearch.
+      // L'état (searchResults, currentResultIndex, backupScripts) et les méthodes internes
+      // (clearHighlights, findInElement, highlightCurrentResult, saveBackup) ont migré
+      // intégralement dans ScriptEditorSearch.
+      openSearchReplace: () => ScriptEditorSearch.openSearchReplace(),
+      closeSearchReplace: () => ScriptEditorSearch.closeSearchReplace(),
+      searchInScript: () => ScriptEditorSearch.searchInScript(),
+      searchNext: () => ScriptEditorSearch.searchNext(),
+      searchPrev: () => ScriptEditorSearch.searchPrev(),
+      replaceOne: () => ScriptEditorSearch.replaceOne(),
+      replaceAll: () => ScriptEditorSearch.replaceAll(),
+      undoReplace: () => ScriptEditorSearch.undoReplace(),
+      initDrag: () => ScriptEditorSearch.initDrag(),
+      
+      // ========== VUE SCRIPT CONTINU ==========
+      viewMode: 'continuous', // 'scenes' ou 'continuous' - Vue Script par défaut
+      activeSceneId: null,
+      
+      // V7.3 → délégué à ScriptEditorViewMode.init()
+      initViewMode: () => ScriptEditorViewMode.init(),
+      
+      // V7.3 → délégué à ScriptEditorViewMode.set()
+      setViewMode: (mode) => ScriptEditorViewMode.set(mode),
+      
+      // V7.4 → délégué à ScriptEditorEpisodes.initSelector()
+      initEpisodeSelector: () => ScriptEditorEpisodes.initSelector(),
+      
+      // V7.4 → délégué à ScriptEditorEpisodes.switch()
+      switchEpisode: (episodeId) => ScriptEditorEpisodes.switch(episodeId),
+      
+      renderContinuous: () => ScriptEditorContinuous.renderContinuous(),
+      
+      setActiveScene: (sceneId, index) => ScriptEditorNav.setActiveScene(sceneId, index),
+      updateContinuousSidebar: (sceneId, index) => ScriptEditorNav.updateContinuousSidebar(sceneId, index),
+      goToSceneContinuous: (index) => ScriptEditorNav.goToSceneContinuous(index),
+      scrollToSceneInContinuous: (sceneId) => ScriptEditorNav.scrollToSceneInContinuous(sceneId),
+      
+      // Timestamps pour détecter double-tap
+      lastEnterTime: 0,
+      lastTabTime: 0,
+      doubleTapDelay: 300,
+      
+      // Vérifie si le bloc est vide (juste des espaces, <br>, ou rien)
+      isBlockEmpty: (block) => {
+          if(!block) return true;
+          const text = block.innerText.replace(/[\s\u00A0]/g, '').replace(/[{}()]/g, '');
+          return text.length === 0;
       },
+      
+      // Change le type du bloc actuel sans créer de nouvelle ligne
+      changeBlockType: (block, newType) => ScriptEditorToolbar.changeBlockType(block, newType),
+      
+      handleKeyContinuous: (e, content, sceneId, isSceneView) => ScriptEditorContinuous.handleKeyContinuous(e, content, sceneId, isSceneView),
+      
+      setFormatDirectContinuous: (content, className) => ScriptEditorToolbar.setFormatDirectContinuous(content, className),
       
       // V7.1 → délégué à ScriptEditorPrefs.openModal()
       openPrefsModal: () => ScriptEditorPrefs.openModal(),
       
-      // Sauvegarder la sélection pour les boutons
-      savedSelection: null,
+      saveSelection: () => ScriptEditorToolbar.saveSelection(),
+      restoreSelection: () => ScriptEditorToolbar.restoreSelection(),
       
-      saveSelection: () => {
-          const sel = window.getSelection();
-          if(sel.rangeCount > 0) {
-              ScriptEditor.savedSelection = sel.getRangeAt(0).cloneRange();
-          }
-      },
+      formatContinuous: (className, e) => ScriptEditorToolbar.formatContinuous(className, e),
+      updateToolbarContinuous: () => ScriptEditorToolbar.updateToolbarContinuous(),
       
-      restoreSelection: () => {
-          if(ScriptEditor.savedSelection) {
-              const sel = window.getSelection();
-              sel.removeAllRanges();
-              sel.addRange(ScriptEditor.savedSelection);
-          }
-      },
+      editSceneTitle: (sceneId, element) => ScriptEditorContinuous.editSceneTitle(sceneId, element),
       
-      formatContinuous: (className, e) => {
-          if(e) e.preventDefault();
-          
-          // Restaurer la sélection si elle a été perdue
-          if(ScriptEditor.savedSelection) {
-              ScriptEditor.restoreSelection();
-          }
-          
-          const sel = window.getSelection();
-          
-          // Détecter si on est en Vue Scènes ou Vue Script
-          const isContinuousView = document.getElementById('scriptContinuousContainer')?.style.display !== 'none';
-          
-          if(isContinuousView) {
-              // === VUE SCRIPT ===
-              const activeScene = document.querySelector('.script-continuous-scene.active');
-              if(!activeScene) {
-                  Utils.toast('Cliquez d\'abord dans une scène', 'warning');
-                  return;
-              }
-              
-              const content = activeScene.querySelector('.script-continuous-content');
-              if(!content) return;
-              
-              if(!sel.anchorNode || !content.contains(sel.anchorNode)) {
-                  if(content.firstElementChild) {
-                      const range = document.createRange();
-                      range.selectNodeContents(content.firstElementChild);
-                      range.collapse(true);
-                      sel.removeAllRanges();
-                      sel.addRange(range);
-                  } else {
-                      return;
-                  }
-              }
-              
-              const block = ScriptEditor.getBlockNode(sel.anchorNode);
-              if(block) {
-                  ScriptEditor.changeBlockType(block, className);
-                  
-                  const sceneId = activeScene.dataset.sceneId;
-                  const scene = state.data.scenes.find(x => x.id === sceneId);
-                  if(scene) {
-                      scene.scriptContent = content.innerHTML;
-                      Store.updateScene(sceneId, content.innerHTML);
-                  }
-                  
-                  ScriptEditor.updateToolbarContinuous();
-                  content.focus();
-              }
-          } else {
-              // === VUE SCÈNES ===
-              // Trouver l'éditeur actif (celui qui a le focus ou la sélection)
-              const editors = document.querySelectorAll('.script-editor-box');
-              let activeEditor = null;
-              let activeSceneId = null;
-              
-              for(const editor of editors) {
-                  if(sel.anchorNode && editor.contains(sel.anchorNode)) {
-                      activeEditor = editor;
-                      activeSceneId = editor.id.replace('editor-', '');
-                      break;
-                  }
-              }
-              
-              if(!activeEditor) {
-                  Utils.toast('Cliquez d\'abord dans une scène', 'warning');
-                  return;
-              }
-              
-              const block = ScriptEditor.getBlockNode(sel.anchorNode);
-              if(block) {
-                  ScriptEditor.changeBlockType(block, className);
-                  
-                  const scene = state.data.scenes.find(x => x.id == activeSceneId);
-                  if(scene) {
-                      scene.scriptContent = activeEditor.innerHTML;
-                      Store.updateScene(activeSceneId, activeEditor.innerHTML);
-                  }
-                  
-                  ScriptEditor.updateToolbarContinuous();
-                  activeEditor.focus();
-              }
-          }
-      },
-      
-      updateToolbarContinuous: () => {
-          const toolbar = document.getElementById('continuous-toolbar');
-          if(!toolbar) return;
-          
-          const sel = window.getSelection();
-          if(!sel.rangeCount) return;
-          
-          const block = ScriptEditor.getBlockNode(sel.anchorNode);
-          toolbar.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active'));
-          
-          if(!block) return;
-          const type = block.className || 'sc-action';
-          const btn = toolbar.querySelector(`[data-type="${type}"]`);
-          if(btn) btn.classList.add('active');
-      },
-      
-      // Éditer le titre d'une scène avec 3 champs séparés
-      editSceneTitle: (sceneId, element) => {
-          const scene = state.data.scenes.find(s => s.id === sceneId);
-          if(!scene) return;
-          
-          const currentTitle = scene.title || 'INT. LIEU - JOUR';
-          
-          // Parser le titre existant : "INT. LIEU - JOUR" ou "EXT. LIEU - NUIT"
-          const match = currentTitle.match(/^(INT\.|EXT\.)\s*(.+?)\s*-\s*(JOUR|NUIT|AUBE|CRÉPUSCULE|MATIN|SOIR)$/i);
-          let intExt = 'INT.';
-          let lieu = 'LIEU';
-          let moment = 'JOUR';
-          
-          if(match) {
-              intExt = match[1].toUpperCase();
-              lieu = match[2].toUpperCase();
-              moment = match[3].toUpperCase();
-          } else {
-              // Essayer de parser autrement
-              const parts = currentTitle.split(/[-–]/);
-              if(parts.length >= 2) {
-                  const firstPart = parts[0].trim();
-                  moment = parts[parts.length - 1].trim().toUpperCase();
-                  if(firstPart.toUpperCase().startsWith('INT')) {
-                      intExt = 'INT.';
-                      lieu = firstPart.replace(/^INT\.?\s*/i, '').toUpperCase();
-                  } else if(firstPart.toUpperCase().startsWith('EXT')) {
-                      intExt = 'EXT.';
-                      lieu = firstPart.replace(/^EXT\.?\s*/i, '').toUpperCase();
-                  } else {
-                      lieu = firstPart.toUpperCase();
-                  }
-              }
-          }
-          
-          // Créer le formulaire d'édition
-          const form = document.createElement('div');
-          form.style.cssText = 'display: flex; gap: 5px; align-items: center; flex-wrap: nowrap;';
-          form.innerHTML = `
-              <select id="edit-intext" class="n8-badge-1">
-                  <option value="INT." ${intExt === 'INT.' ? 'selected' : ''}>INT.</option>
-                  <option value="EXT." ${intExt === 'EXT.' ? 'selected' : ''}>EXT.</option>
-              </select>
-              <input type="text" id="edit-lieu" value="${lieu}" style="flex: 1; min-width: 80px; padding: 3px 5px; border: 1px solid var(--primary); border-radius: 3px; font-family: inherit; font-size: inherit; font-weight: bold; background: var(--panel-bg); color: var(--text-main); text-transform: uppercase;" />
-              <span class="fw-bold">-</span>
-              <select id="edit-moment" class="n8-badge-1">
-                  <option value="JOUR" ${moment === 'JOUR' ? 'selected' : ''}>JOUR</option>
-                  <option value="NUIT" ${moment === 'NUIT' ? 'selected' : ''}>NUIT</option>
-                  <option value="AUBE" ${moment === 'AUBE' ? 'selected' : ''}>AUBE</option>
-                  <option value="MATIN" ${moment === 'MATIN' ? 'selected' : ''}>MATIN</option>
-                  <option value="SOIR" ${moment === 'SOIR' ? 'selected' : ''}>SOIR</option>
-                  <option value="CRÉPUSCULE" ${moment === 'CRÉPUSCULE' ? 'selected' : ''}>CRÉPUSCULE</option>
-              </select>
-              <button id="edit-save-btn" style="padding: 3px 8px; background: var(--primary); color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.85rem;">✓</button>
-          `;
-          
-          const saveTitle = () => {
-              const newIntExt = form.querySelector('#edit-intext').value;
-              const newLieu = form.querySelector('#edit-lieu').value.trim().toUpperCase() || 'LIEU';
-              const newMoment = form.querySelector('#edit-moment').value;
-              const newTitle = `${newIntExt} ${newLieu} - ${newMoment}`;
-              
-              scene.title = newTitle;
-              element.textContent = newTitle;
-              Store.save();
-              
-              // Mettre à jour partout
-              UI.renderBoard();
-              if(ScriptEditor.viewMode === 'continuous') {
-                  ScriptEditor.updateContinuousSidebar(sceneId);
-              }
-              
-              // Mettre à jour le heading dans la vue continue
-              const headingSpan = document.querySelector(`.scene-title-text[data-scene-id="${sceneId}"]`);
-              if(headingSpan) headingSpan.textContent = newTitle;
-              
-              Utils.toast('Titre mis à jour', 'success');
-          };
-          
-          element.textContent = '';
-          element.appendChild(form);
-          
-          // Events
-          form.querySelector('#edit-save-btn').addEventListener('click', (e) => {
-              e.stopPropagation();
-              saveTitle();
-          });
-          
-          form.querySelector('#edit-lieu').addEventListener('keydown', (e) => {
-              if(e.key === 'Enter') {
-                  e.preventDefault();
-                  saveTitle();
-              }
-              if(e.key === 'Escape') {
-                  element.textContent = currentTitle;
-              }
-          });
-          
-          // Focus sur le champ lieu
-          setTimeout(() => {
-              form.querySelector('#edit-lieu').focus();
-              form.querySelector('#edit-lieu').select();
-          }, 10);
-      },
-      
-      // Drag & Drop pour réorganiser depuis la sidebar
+      // ========== VUE CONTINUE (V7.9 → ScriptEditorContinuous) ==========
+      // V7.9.e — délégations rétrocompatibles vers ScriptEditorContinuous.
+      // L'état draggedSceneId reste dans ScriptEditor (partagé avec renderContinuous interne au sous-module).
       draggedSceneId: null,
-      
-      handleSidebarDragStart: (e, sceneId) => {
-          ScriptEditor.draggedSceneId = sceneId;
-          e.dataTransfer.effectAllowed = 'move';
-          e.target.style.opacity = '0.5';
-      },
-      
-      handleSidebarDragEnd: (e) => {
-          e.target.style.opacity = '1';
-          ScriptEditor.draggedSceneId = null;
-          // Retirer tous les indicateurs de drop
-          document.querySelectorAll('.script-continuous-scene.drag-over').forEach(el => {
-              el.classList.remove('drag-over');
-          });
-      },
-      
-      // Réordonner les scènes en vue continue
-      reorderSceneContinuous: (draggedId, targetId) => {
-          const scenes = state.data.scenes;
-          const draggedIndex = scenes.findIndex(s => s.id === draggedId);
-          const targetIndex = scenes.findIndex(s => s.id === targetId);
-          
-          if(draggedIndex === -1 || targetIndex === -1) return;
-          
-          // Retirer la scène de sa position actuelle
-          const [draggedScene] = scenes.splice(draggedIndex, 1);
-          
-          // Calculer la nouvelle position
-          const newIndex = draggedIndex < targetIndex ? targetIndex : targetIndex;
-          
-          // Insérer à la nouvelle position
-          scenes.splice(newIndex, 0, draggedScene);
-          
-          // Sauvegarder et rafraîchir
-          Store.save();
-          History.log('REORDER', `Scène "${draggedScene.title}" déplacée`);
-          
-          // Notification de propagation
-          Utils.notifyImpact('sequencer', ['scenario', 'breakdown'], 'réordonné');
-          
-          // Rafraîchir les vues
-          UI.renderBoard();
-          ScriptEditor.renderContinuous();
-          
-          // Remettre le focus sur la scène déplacée
-          setTimeout(() => {
-              ScriptEditor.setActiveScene(draggedId, newIndex);
-              ScriptEditor.scrollToSceneInContinuous(draggedId);
-          }, 100);
-      }
+      handleSidebarDragStart: (e, sceneId) => ScriptEditorContinuous.handleSidebarDragStart(e, sceneId),
+      handleSidebarDragEnd: (e) => ScriptEditorContinuous.handleSidebarDragEnd(e),
+      reorderSceneContinuous: (draggedId, targetId) => ScriptEditorContinuous.reorderSceneContinuous(draggedId, targetId)
   };
   
   // Initialiser le drag au chargement
@@ -68484,7 +68527,7 @@ const Weather = {
       }
   };
 
-  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
