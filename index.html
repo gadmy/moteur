@@ -6943,7 +6943,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.7.4</p>
+      <p>vv4.7.5</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -14779,6 +14779,37 @@ showDashboard: async () => {
       }
   };
 
+  // StoreUpdates — sous-module B.1.2 : updates ciblés et debounced sur projects (scene, title, textField)
+  const StoreUpdates = {
+      updateScene: Utils.debounce(async (sceneId, content) => { 
+          if(!state.currentProjectId || state.currentRole === 'viewer') return; 
+          const idx = state.data.scenes.findIndex(s => s.id === sceneId); 
+          if(idx > -1) { 
+              const newTime = Utils.estimateTime(content);
+              state.data.scenes[idx].scriptContent = content;
+              state.data.scenes[idx].time = newTime;
+              const {error: saveErr} = await supabase.from('projects').update({ data: state.data }).eq('id', state.currentProjectId);
+              if(saveErr) Utils.toast('Erreur de sauvegarde', 'error');
+          } 
+      }, 500),
+      
+      updateTitle: Utils.debounce(async (val) => { 
+          if(!state.currentProjectId || state.currentRole === 'viewer') return; 
+          state.data.title = val;
+          const {error: e1} = await supabase.from('projects').update({ title: val, data: state.data }).eq('id', state.currentProjectId);
+          if(e1) Utils.toast('Erreur sauvegarde titre', 'error');
+      }, 1000),
+      
+      // Note B.1.2 : updateTextField semble être du code mort (0 appels externes détectés).
+      // À nettoyer en Phase D (R3) si confirmé.
+      updateTextField: Utils.debounce(async (field, val) => { 
+          if(!state.currentProjectId || state.currentRole === 'viewer') return; 
+          state.data[field] = val;
+          const {error: e2} = await supabase.from('projects').update({ data: state.data }).eq('id', state.currentProjectId);
+          if(e2) Utils.toast('Erreur sauvegarde champ', 'error');
+      }, 1000)
+  };
+
   const Store = {
       // V62: Initialisation du tableau snapshots
       getEmpty: () => ({ title: "Nouveau Film", filmId: 'film_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11), synopsis: "", synopsisShort: "", synopsisLong: "", scriptMeta: { author: "", coAuthor: "", contact: "", copyright: "", draft: "Premier jet", draftDate: "", source: "", notes: "" }, snapshots: [], scenes: [], characters: [], actors: [], locations: [], resources: [], crew: [], shootingDays: [], tags: CONFIG.defaultTags, groups: [...CONFIG.defaultGroups, ...CONFIG.crewGroups], shots: [], counter: 1, uiConfig: { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [] }, budget: { total: 0, currency: '€', manager: '', managerEmailNotif: true, envelopes: {}, deptManagers: {} }, expenses: [], presentation: { title: '', genre: '', format: '', duration: '', productionType: '', description: '', team: [], associations: [], enterprises: [], needsCrew: {}, needsActors: [], image: '' }, memberPermissions: {}, chatChannels: [], chatExtraMembers: [], workplanOverrides: {}, scriptReports: {}, episodes: [], seasons: [] }),
@@ -15676,29 +15707,10 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           state.activeLocks = {};
       },
 	  
-      updateScene: Utils.debounce(async (sceneId, content) => { 
-          if(!state.currentProjectId || state.currentRole === 'viewer') return; 
-          const idx = state.data.scenes.findIndex(s => s.id === sceneId); 
-          if(idx > -1) { 
-              const newTime = Utils.estimateTime(content);
-              state.data.scenes[idx].scriptContent = content;
-              state.data.scenes[idx].time = newTime;
-              const {error: saveErr} = await supabase.from('projects').update({ data: state.data }).eq('id', state.currentProjectId);
-              if(saveErr) Utils.toast('Erreur de sauvegarde', 'error');
-          } 
-      }, 500),
-      updateTitle: Utils.debounce(async (val) => { 
-          if(!state.currentProjectId || state.currentRole === 'viewer') return; 
-          state.data.title = val;
-          const {error: e1} = await supabase.from('projects').update({ title: val, data: state.data }).eq('id', state.currentProjectId);
-          if(e1) Utils.toast('Erreur sauvegarde titre', 'error');
-      }, 1000),
-      updateTextField: Utils.debounce(async (field, val) => { 
-          if(!state.currentProjectId || state.currentRole === 'viewer') return; 
-          state.data[field] = val;
-          const {error: e2} = await supabase.from('projects').update({ data: state.data }).eq('id', state.currentProjectId);
-          if(e2) Utils.toast('Erreur sauvegarde champ', 'error');
-      }, 1000),
+      // ========== UPDATES CIBLÉS DEBOUNCED (B.1.2 → StoreUpdates) ==========
+      updateScene: (sceneId, content) => StoreUpdates.updateScene(sceneId, content),
+      updateTitle: (val) => StoreUpdates.updateTitle(val),
+      updateTextField: (field, val) => StoreUpdates.updateTextField(field, val),
       // ========== MIGRATIONS DE DONNÉES (B.1.1 → StoreMigrations) ==========
       migrateShootingDays: () => StoreMigrations.migrateShootingDays(),
       migrateBreakdownKeys: () => StoreMigrations.migrateBreakdownKeys(),
@@ -68585,7 +68597,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
