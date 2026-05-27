@@ -4648,7 +4648,7 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .script-continuous-sidebar::-webkit-scrollbar-track { background: transparent; }
   .script-continuous-sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
   .script-continuous-sidebar::-webkit-scrollbar-thumb:hover { background: var(--text-sec); }
-  .script-continuous-sidebar .script-info-col { margin-bottom: 0; cursor: move; }
+  .script-continuous-sidebar .script-info-col { margin-bottom: 0; }
   .script-continuous-sidebar .script-info-col.dragging { opacity: 0.5; }
   .script-continuous-main { flex: 1; min-width: 0; overflow: visible; position: relative; }
   .script-continuous-editor { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 0 0 4px 4px; padding: 40px 60px; font-family: 'Courier Prime', 'Courier New', Courier, monospace; font-size: 12pt; line-height: 1.0; max-width: 650px; margin: 0 auto; box-shadow: 0 2px 8px rgba(0,0,0,0.1); min-height: 80vh; overflow-x: hidden; overflow-wrap: break-word; word-wrap: break-word; }
@@ -4661,7 +4661,7 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .script-continuous-heading:active { cursor: grabbing; }
   .script-continuous-heading .scene-title-text { flex: 1; }
   .script-continuous-heading .scene-title-text:hover { text-decoration: underline; cursor: text; }
-  .script-continuous-scene-number { color: var(--text-sec); font-size: 0.9em; margin-right: 10px; cursor: grab; }
+  .script-continuous-scene-number { color: var(--text-sec); font-size: 0.9em; margin-right: 10px; }
 
   /* --- VISUAL WIZARD STYLES --- */
   .wizard-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 10000; flex-direction: column; align-items: center; justify-content: center; }
@@ -17677,6 +17677,22 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               a.className = 'qn-link';
               a.innerText = (i + 1);
               a.title = s.title;
+              // UX-2 : drag-and-drop des scènes depuis la quick-nav (vers .script-row ou .script-continuous-scene)
+              if(state.currentRole !== 'viewer') {
+                  a.draggable = true;
+                  a.addEventListener('dragstart', (e) => {
+                      ScriptEditor.draggedSceneId = s.id;
+                      e.dataTransfer.effectAllowed = 'move';
+                      a.classList.add('dragging');
+                      ScriptEditorContinuous.startAutoScroll();
+                  });
+                  a.addEventListener('dragend', () => {
+                      a.classList.remove('dragging');
+                      ScriptEditor.draggedSceneId = null;
+                      ScriptEditorContinuous.stopAutoScroll();
+                      document.querySelectorAll('.script-continuous-scene.drag-over, .script-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+                  });
+              }
               a.onclick = () => {
                   const activeTab = document.querySelector('.tab-content.active').id;
                   if(activeTab === 'tab-script') {
@@ -19068,10 +19084,21 @@ openBoardPrintEpisodeChooser: () => {
               if(!isView) { 
                   const handle = row.querySelector('.script-info-col'); 
                   handle.addEventListener('contextmenu', (e) => Actions.openTagMenu(e, scene.id)); 
-                  handle.addEventListener('mousedown', (e) => { if(e.button===0) row.setAttribute('draggable', 'true'); }); 
-                  handle.addEventListener('mouseup', () => row.setAttribute('draggable', 'false')); 
-                  row.addEventListener('dragstart', () => row.classList.add('dragging')); 
-                  row.addEventListener('dragend', () => { row.classList.remove('dragging'); row.setAttribute('draggable', 'false'); Actions.updateOrder('script'); }); 
+                  // UX-2 : drag-and-drop scènes uniquement via la quick-nav. Le drop est géré sur .script-row.
+                  row.addEventListener('dragover', (e) => {
+                      e.preventDefault();
+                      if(ScriptEditor.draggedSceneId && ScriptEditor.draggedSceneId !== scene.id) {
+                          row.classList.add('drag-over');
+                      }
+                  });
+                  row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+                  row.addEventListener('drop', (e) => {
+                      e.preventDefault();
+                      row.classList.remove('drag-over');
+                      if(ScriptEditor.draggedSceneId && ScriptEditor.draggedSceneId !== scene.id) {
+                          ScriptEditorContinuous.reorderSceneContinuous(ScriptEditor.draggedSceneId, scene.id);
+                      }
+                  }); 
                   const editor = document.getElementById(`editor-${scene.id}`); const toolbar = document.getElementById('continuous-toolbar'); 
                   editor.addEventListener('input', () => { const s = state.data.scenes.find(x => x.id === scene.id); if(s) s.scriptContent = editor.innerHTML; ScriptEditor.checkAC(editor); Store.updateScene(scene.id, editor.innerHTML); }); 
                   ['keyup', 'mouseup', 'click'].forEach(evt => editor.addEventListener(evt, () => ScriptEditor.updateToolbar(editor, toolbar))); 
@@ -30015,10 +30042,8 @@ const DrawingEditor = {
               : `<button class="finalize-btn w-full" onclick="app.Actions.finalizeScene('${scene.id}')">✅ Finaliser cette scène</button>`);
           
           sidebar.innerHTML = `
-              <div class="script-info-col" style="${infoStyle}" draggable="true" 
-                   ondragstart="app.ScriptEditor.handleSidebarDragStart(event, '${scene.id}')"
-                   ondragend="app.ScriptEditor.handleSidebarDragEnd(event)">
-                  <h3 style="cursor:move; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+              <div class="script-info-col" style="${infoStyle}">
+                  <h3 style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
                       ${badge}${Utils.escape(scene.title)}
                       <div style="margin-left:auto;">${statusBadge}</div>
                   </h3>
@@ -30430,23 +30455,10 @@ const DrawingEditor = {
               sceneDiv.dataset.sceneId = scene.id;
               sceneDiv.dataset.sceneIndex = idx;
               
-              // Heading de la scène (draggable + titre éditable)
+              // Heading de la scène (titre éditable). Drag-and-drop UX-2 : depuis la quick-nav uniquement.
               const heading = document.createElement('div');
               heading.className = 'script-continuous-heading';
-              heading.draggable = true;
               heading.innerHTML = `<span class="script-continuous-scene-number">${UI.formatSceneNumber(scene, idx)}</span><span class="scene-title-text" data-scene-id="${scene.id}">${Utils.escape(scene.title)}</span>`;
-              
-              // Drag depuis le heading
-              heading.addEventListener('dragstart', (e) => {
-                  ScriptEditor.draggedSceneId = scene.id;
-                  e.dataTransfer.effectAllowed = 'move';
-                  heading.style.opacity = '0.5';
-              });
-              heading.addEventListener('dragend', () => {
-                  heading.style.opacity = '1';
-                  ScriptEditor.draggedSceneId = null;
-                  document.querySelectorAll('.script-continuous-scene.drag-over').forEach(el => el.classList.remove('drag-over'));
-              });
               
               // Clic sur le titre pour l'éditer
               const titleSpan = heading.querySelector('.scene-title-text');
@@ -30545,6 +30557,42 @@ const DrawingEditor = {
           if(scenesToRender.length > 0) {
               ScriptEditor.setActiveScene(scenesToRender[0].id, 0);
           }
+      },
+      
+      // UX-2 — Auto-scroll pendant un drag d'une scène depuis la quick-nav.
+      // Surveille la position du curseur sur la fenêtre et scrolle la page quand on approche du haut/bas.
+      _autoScrollState: null,
+      
+      startAutoScroll: () => {
+          if(ScriptEditorContinuous._autoScrollState) return;
+          const state = { rafId: null, mouseY: 0, listener: null };
+          state.listener = (e) => { state.mouseY = e.clientY; };
+          document.addEventListener('dragover', state.listener);
+          const tick = () => {
+              const viewportH = window.innerHeight;
+              const threshold = 80;        // distance du bord où l'auto-scroll s'active
+              const maxSpeed = 18;         // pixels par frame
+              let delta = 0;
+              if(state.mouseY < threshold) {
+                  // Près du haut : scroll vers le haut (négatif), plus vite si plus près du bord
+                  delta = -maxSpeed * (1 - state.mouseY / threshold);
+              } else if(state.mouseY > viewportH - threshold) {
+                  // Près du bas : scroll vers le bas
+                  delta = maxSpeed * (1 - (viewportH - state.mouseY) / threshold);
+              }
+              if(delta !== 0) window.scrollBy(0, delta);
+              state.rafId = requestAnimationFrame(tick);
+          };
+          state.rafId = requestAnimationFrame(tick);
+          ScriptEditorContinuous._autoScrollState = state;
+      },
+      
+      stopAutoScroll: () => {
+          const s = ScriptEditorContinuous._autoScrollState;
+          if(!s) return;
+          if(s.rafId) cancelAnimationFrame(s.rafId);
+          if(s.listener) document.removeEventListener('dragover', s.listener);
+          ScriptEditorContinuous._autoScrollState = null;
       },
       
       // V7.9.d — Cœur de la saisie clavier dans l'éditeur (Tab/Enter/Shift+Tab/raccourcis Ctrl)
