@@ -6943,7 +6943,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.7.3</p>
+      <p>vv4.7.4</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -14659,6 +14659,126 @@ showDashboard: async () => {
       }
   };
   
+  // StoreMigrations — sous-module B.1.1 : migrations de schéma de données + helpers d'identité
+  // Cohabite avec les anciennes méthodes de Store jusqu'à la bascule B.1.1.b
+  const StoreMigrations = {
+      migrateShootingDays: () => {
+        // Migrer les jours de tournage vers le nouveau format (startDate/endDate)
+        if(!state.data.shootingDays) return;
+        
+        state.data.shootingDays.forEach(day => {
+            // Si ancien format (date), convertir vers nouveau format
+            if(day.date && !day.startDate) {
+                day.startDate = day.date;
+                day.endDate = day.date;
+                delete day.date;
+            }
+            
+            // Générer un nom basé sur les scènes si pas de nom
+            if(!day.name) {
+                if(day.scenes && day.scenes.length > 0 && state.data.scenes) {
+                    const sceneInfos = day.scenes.map(sc => {
+                        const sceneId = typeof sc === 'string' ? sc : sc.sceneId;
+                        const sceneIndex = state.data.scenes.findIndex(s => s.id === sceneId);
+                        const selectedShots = sc.selectedShots || [];
+                        const shotCount = selectedShots.length;
+                        return sceneIndex >= 0 ? { num: sceneIndex + 1, shots: shotCount } : null;
+                    }).filter(Boolean);
+                    
+                    if(sceneInfos.length === 1) {
+                        // Une seule scène : Sc.3 (5 pl.)
+                        const info = sceneInfos[0];
+                        day.name = `Sc.${info.num}` + (info.shots > 0 ? ` (${info.shots} pl.)` : '');
+                    } else if(sceneInfos.length > 1) {
+                        // Plusieurs scènes : Sc.3(3pl);5(5pl)
+                        day.name = 'Sc.' + sceneInfos.map(info => 
+                            info.shots > 0 ? `${info.num}(${info.shots}pl)` : `${info.num}`
+                        ).join(';');
+                    } else {
+                        day.name = `Tournage ${day.startDate || ''}`;
+                    }
+                } else {
+                    day.name = `Tournage ${day.startDate || ''}`;
+                }
+            }
+        });
+      },
+      
+      migrateBreakdownKeys: () => {
+          // Migrer les anciennes clés DÉCORS/LIEUX vers DECORS-LIEUX
+          if(state.data.scenes) {
+              state.data.scenes.forEach(scene => {
+                  if(scene.breakdown && scene.breakdown["DÉCORS/LIEUX"]) {
+                      scene.breakdown["DECORS-LIEUX"] = scene.breakdown["DECORS-LIEUX"] || [];
+                      scene.breakdown["DECORS-LIEUX"] = [...new Set([...scene.breakdown["DECORS-LIEUX"], ...scene.breakdown["DÉCORS/LIEUX"]])];
+                      delete scene.breakdown["DÉCORS/LIEUX"];
+                  }
+              });
+          }
+      },
+      
+      getPersonInfo: (email) => {
+          let ownerRoles = [];
+          // Chercher dans l'équipe technique
+          if(state.data?.crew) {
+              const member = state.data.crew.find(c => c.email === email);
+              if(member) {
+                  if(member.ownerRoles) ownerRoles = member.ownerRoles;
+                  return { name: member.name, role: member.role, ownerRoles: ownerRoles, type: 'crew', isOwner: member.isOwner };
+              }
+          }
+          // Chercher dans les comédiens
+          if(state.data?.actors) {
+              const actor = state.data.actors.find(a => a.email === email);
+              if(actor) return { name: actor.name, role: 'Comédien(ne)', ownerRoles: [], type: 'actor', isOwner: actor.isOwner };
+          }
+          // Retourner l'email par défaut
+          return { name: email.split('@')[0], role: '', ownerRoles: [], type: '' };
+      },
+      
+      getUserRoleInfo: (email) => {
+          let text = '', icon = '', roleClass = '', extraRoles = [];
+          
+          // Chercher les infos de la personne
+          const personInfo = StoreMigrations.getPersonInfo(email);
+          
+          // Propriétaire
+          const isOwner = personInfo.isOwner || (state.currentRole === 'owner' && email === state.currentUser?.email);
+          if(isOwner) {
+              text = 'Propriétaire';
+              icon = '👑';
+              roleClass = 'owner';
+              // Ajouter les rôles supplémentaires depuis ownerRoles
+              if(personInfo.ownerRoles && personInfo.ownerRoles.length > 0) {
+                  extraRoles = personInfo.ownerRoles.map(r => ({ icon: r.icon, name: r.name }));
+              }
+              return { text, icon, class: roleClass, extraRoles };
+          }
+          // Responsable budget global
+          if(state.data?.budget?.manager === email) {
+              return { text: 'Resp. Budget', icon: '💰', class: 'budget-manager', extraRoles: [] };
+          }
+          // Responsable département
+          const deptManagers = state.data?.budget?.deptManagers || {};
+          const depts = [{id:'image',name:'Image',icon:'📹'},{id:'lumiere',name:'Lumière',icon:'💡'},{id:'son',name:'Son',icon:'🎤'},{id:'realisation',name:'Réalisation',icon:'🎬'},{id:'decoration',name:'Décoration',icon:'🎨'},{id:'costumes',name:'Costumes',icon:'👗'},{id:'maquillage',name:'Maquillage',icon:'💄'},{id:'regie',name:'Régie',icon:'🎭'},{id:'production',name:'Production',icon:'💼'},{id:'transport',name:'Transport',icon:'🚗'},{id:'catering',name:'Catering',icon:'🍴'},{id:'postprod',name:'Post-prod',icon:'🎞️'},{id:'location',name:'Locations',icon:'🏠'},{id:'assurance',name:'Assurance',icon:'📋'}];
+          for(const [deptId, manager] of Object.entries(deptManagers)) {
+              if(manager.email === email) {
+                  const dept = depts.find(d => d.id === deptId);
+                  return { text: 'Resp. ' + (dept?.name || deptId), icon: dept?.icon || '📋', class: 'dept-manager', extraRoles: [] };
+              }
+          }
+          // Rôle équipe (avec rôles multiples)
+          if(state.data?.crew) {
+              const member = state.data.crew.find(c => c.email === email);
+              if(member) {
+                  const extraRoles = member.roles ? member.roles.map(r => ({ icon: r.icon, name: r.name })) : [];
+                  return { text: member.role || '', icon: '🎬', class: '', extraRoles };
+              }
+          }
+          return { text: '', icon: '', class: '', extraRoles: [] };
+      }
+  };
+
   const Store = {
       // V62: Initialisation du tableau snapshots
       getEmpty: () => ({ title: "Nouveau Film", filmId: 'film_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11), synopsis: "", synopsisShort: "", synopsisLong: "", scriptMeta: { author: "", coAuthor: "", contact: "", copyright: "", draft: "Premier jet", draftDate: "", source: "", notes: "" }, snapshots: [], scenes: [], characters: [], actors: [], locations: [], resources: [], crew: [], shootingDays: [], tags: CONFIG.defaultTags, groups: [...CONFIG.defaultGroups, ...CONFIG.crewGroups], shots: [], counter: 1, uiConfig: { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [] }, budget: { total: 0, currency: '€', manager: '', managerEmailNotif: true, envelopes: {}, deptManagers: {} }, expenses: [], presentation: { title: '', genre: '', format: '', duration: '', productionType: '', description: '', team: [], associations: [], enterprises: [], needsCrew: {}, needsActors: [], image: '' }, memberPermissions: {}, chatChannels: [], chatExtraMembers: [], workplanOverrides: {}, scriptReports: {}, episodes: [], seasons: [] }),
@@ -15447,65 +15567,9 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                   }
               });
       },
-      getPersonInfo: (email) => {
-          let ownerRoles = [];
-          // Chercher dans l'équipe technique
-          if(state.data?.crew) {
-              const member = state.data.crew.find(c => c.email === email);
-              if(member) {
-                  if(member.ownerRoles) ownerRoles = member.ownerRoles;
-                  return { name: member.name, role: member.role, ownerRoles: ownerRoles, type: 'crew', isOwner: member.isOwner };
-              }
-          }
-          // Chercher dans les comédiens
-          if(state.data?.actors) {
-              const actor = state.data.actors.find(a => a.email === email);
-              if(actor) return { name: actor.name, role: 'Comédien(ne)', ownerRoles: [], type: 'actor', isOwner: actor.isOwner };
-          }
-          // Retourner l'email par défaut
-          return { name: email.split('@')[0], role: '', ownerRoles: [], type: '' };
-      },
-      getUserRoleInfo: (email) => {
-          let text = '', icon = '', roleClass = '', extraRoles = [];
-          
-          // Chercher les infos de la personne
-          const personInfo = Store.getPersonInfo(email);
-          
-          // Propriétaire
-          const isOwner = personInfo.isOwner || (state.currentRole === 'owner' && email === state.currentUser?.email);
-          if(isOwner) {
-              text = 'Propriétaire';
-              icon = '👑';
-              roleClass = 'owner';
-              // Ajouter les rôles supplémentaires depuis ownerRoles
-              if(personInfo.ownerRoles && personInfo.ownerRoles.length > 0) {
-                  extraRoles = personInfo.ownerRoles.map(r => ({ icon: r.icon, name: r.name }));
-              }
-              return { text, icon, class: roleClass, extraRoles };
-          }
-          // Responsable budget global
-          if(state.data?.budget?.manager === email) {
-              return { text: 'Resp. Budget', icon: '💰', class: 'budget-manager', extraRoles: [] };
-          }
-          // Responsable département
-          const deptManagers = state.data?.budget?.deptManagers || {};
-          const depts = [{id:'image',name:'Image',icon:'📹'},{id:'lumiere',name:'Lumière',icon:'💡'},{id:'son',name:'Son',icon:'🎤'},{id:'realisation',name:'Réalisation',icon:'🎬'},{id:'decoration',name:'Décoration',icon:'🎨'},{id:'costumes',name:'Costumes',icon:'👗'},{id:'maquillage',name:'Maquillage',icon:'💄'},{id:'regie',name:'Régie',icon:'🎭'},{id:'production',name:'Production',icon:'💼'},{id:'transport',name:'Transport',icon:'🚗'},{id:'catering',name:'Catering',icon:'🍴'},{id:'postprod',name:'Post-prod',icon:'🎞️'},{id:'location',name:'Locations',icon:'🏠'},{id:'assurance',name:'Assurance',icon:'📋'}];
-          for(const [deptId, manager] of Object.entries(deptManagers)) {
-              if(manager.email === email) {
-                  const dept = depts.find(d => d.id === deptId);
-                  return { text: 'Resp. ' + (dept?.name || deptId), icon: dept?.icon || '📋', class: 'dept-manager', extraRoles: [] };
-              }
-          }
-          // Rôle équipe (avec rôles multiples)
-          if(state.data?.crew) {
-              const member = state.data.crew.find(c => c.email === email);
-              if(member) {
-                  const extraRoles = member.roles ? member.roles.map(r => ({ icon: r.icon, name: r.name })) : [];
-                  return { text: member.role || '', icon: '🎬', class: '', extraRoles };
-              }
-          }
-          return { text: '', icon: '', class: '', extraRoles: [] };
-      },
+      // ========== HELPERS IDENTITÉ (B.1.1 → StoreMigrations) ==========
+      getPersonInfo: (email) => StoreMigrations.getPersonInfo(email),
+      getUserRoleInfo: (email) => StoreMigrations.getUserRoleInfo(email),
       initLocks: (id) => { 
           // Pas de locks en mode fichier local
           if(window.location.protocol === 'file:') return;
@@ -15635,60 +15699,9 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           const {error: e2} = await supabase.from('projects').update({ data: state.data }).eq('id', state.currentProjectId);
           if(e2) Utils.toast('Erreur sauvegarde champ', 'error');
       }, 1000),
-      migrateShootingDays: () => {
-        // Migrer les jours de tournage vers le nouveau format (startDate/endDate)
-        if(!state.data.shootingDays) return;
-        
-        state.data.shootingDays.forEach(day => {
-            // Si ancien format (date), convertir vers nouveau format
-            if(day.date && !day.startDate) {
-                day.startDate = day.date;
-                day.endDate = day.date;
-                delete day.date;
-            }
-            
-            // Générer un nom basé sur les scènes si pas de nom
-            if(!day.name) {
-                if(day.scenes && day.scenes.length > 0 && state.data.scenes) {
-                    const sceneInfos = day.scenes.map(sc => {
-                        const sceneId = typeof sc === 'string' ? sc : sc.sceneId;
-                        const sceneIndex = state.data.scenes.findIndex(s => s.id === sceneId);
-                        const selectedShots = sc.selectedShots || [];
-                        const shotCount = selectedShots.length;
-                        return sceneIndex >= 0 ? { num: sceneIndex + 1, shots: shotCount } : null;
-                    }).filter(Boolean);
-                    
-                    if(sceneInfos.length === 1) {
-                        // Une seule scène : Sc.3 (5 pl.)
-                        const info = sceneInfos[0];
-                        day.name = `Sc.${info.num}` + (info.shots > 0 ? ` (${info.shots} pl.)` : '');
-                    } else if(sceneInfos.length > 1) {
-                        // Plusieurs scènes : Sc.3(3pl);5(5pl)
-                        day.name = 'Sc.' + sceneInfos.map(info => 
-                            info.shots > 0 ? `${info.num}(${info.shots}pl)` : `${info.num}`
-                        ).join(';');
-                    } else {
-                        day.name = `Tournage ${day.startDate || ''}`;
-                    }
-                } else {
-                    day.name = `Tournage ${day.startDate || ''}`;
-                }
-            }
-        });
-    },
-    
-    migrateBreakdownKeys: () => {
-          // Migrer les anciennes clés DÉCORS/LIEUX vers DECORS-LIEUX
-          if(state.data.scenes) {
-              state.data.scenes.forEach(scene => {
-                  if(scene.breakdown && scene.breakdown["DÉCORS/LIEUX"]) {
-                      scene.breakdown["DECORS-LIEUX"] = scene.breakdown["DECORS-LIEUX"] || [];
-                      scene.breakdown["DECORS-LIEUX"] = [...new Set([...scene.breakdown["DECORS-LIEUX"], ...scene.breakdown["DÉCORS/LIEUX"]])];
-                      delete scene.breakdown["DÉCORS/LIEUX"];
-                  }
-              });
-          }
-      },
+      // ========== MIGRATIONS DE DONNÉES (B.1.1 → StoreMigrations) ==========
+      migrateShootingDays: () => StoreMigrations.migrateShootingDays(),
+      migrateBreakdownKeys: () => StoreMigrations.migrateBreakdownKeys(),
       save: async () => { 
           if(!state.currentProjectId || !state.currentUser || state.currentRole === 'viewer') return;
           
@@ -68572,7 +68585,7 @@ const Weather = {
       }
   };
 
-  return { Store, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
