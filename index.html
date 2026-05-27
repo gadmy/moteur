@@ -6943,7 +6943,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.7.2</p>
+      <p>vv4.7.3</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -20572,43 +20572,52 @@ const tabToSection = {
           
           // Vérifier si la scène a un dépouillement
           const hasBreakdown = scene.breakdown && Object.values(scene.breakdown).some(arr => arr && arr.length > 0);
+          const breakdownCount = hasBreakdown ? Object.values(scene.breakdown).flat().length : 0;
           
-          let message = `"${scene.title}" repassera en mode brouillon.`;
-          if(hasBreakdown) {
-              message += `\n\n⚠️ ATTENTION : Le dépouillement de cette scène (${Object.values(scene.breakdown).flat().length} éléments) sera SUPPRIMÉ car le texte pourrait changer.`;
-          }
-          
+          // UX-3 — Étape 1 : confirmation simple "repasser en brouillon ?"
           const confirmed = await ConfirmModal.show({
               title: '📝 Repasser en brouillon ?',
-              message: message,
+              message: `"${scene.title}" repassera en mode brouillon. Vous pourrez à nouveau modifier le texte.`,
               icon: '📝',
-              dangerous: hasBreakdown,
-              confirmText: hasBreakdown ? 'Supprimer le dépouillement et continuer' : 'Repasser en brouillon'
+              confirmText: 'Repasser en brouillon'
           });
           
-          if(confirmed) {
-              scene.isFinal = false;
-              
-              // [Phase D - Bug 3] Refresh storyboard si on est dessus
-              if(typeof Storyboard !== 'undefined' && Storyboard.currentSceneId === id) {
-                  Storyboard.renderShots();
-              }
-              if(typeof Storyboard !== 'undefined' && Storyboard.renderScenesList) {
-                  Storyboard.renderScenesList();
-              }
-              
-              // Supprimer le dépouillement si présent
-              if(hasBreakdown) {
-                  scene.breakdown = {};
-                  Utils.toast('Dépouillement réinitialisé', 'info');
-              }
-              
-              Store.save();
-              UI.renderBoard();
-              UI.renderScript();
-              Breakdown.init();
-              Utils.toast(`"${scene.title}" est maintenant en brouillon`, 'success');
+          if(!confirmed) return;
+          
+          // UX-3 — Étape 2 : si dépouillement existe, demander s'il faut le supprimer
+          let resetBreakdown = false;
+          if(hasBreakdown) {
+              resetBreakdown = await ConfirmModal.show({
+                  title: '🗂️ Annuler le dépouillement ?',
+                  message: `Cette scène a un dépouillement (${breakdownCount} éléments). Voulez-vous le supprimer ?\n\nGarder le dépouillement permet de conserver le travail déjà fait, mais il peut devenir incohérent si vous modifiez beaucoup le texte.`,
+                  icon: '🗂️',
+                  dangerous: true,
+                  confirmText: 'Supprimer le dépouillement',
+                  cancelText: 'Garder le dépouillement'
+              });
           }
+          
+          // Application des changements
+          scene.isFinal = false;
+          
+          if(resetBreakdown) {
+              scene.breakdown = {};
+              Utils.toast('Dépouillement supprimé', 'info');
+          }
+          
+          // [Phase D - Bug 3] Refresh storyboard si on est dessus
+          if(typeof Storyboard !== 'undefined' && Storyboard.currentSceneId === id) {
+              Storyboard.renderShots();
+          }
+          if(typeof Storyboard !== 'undefined' && Storyboard.renderScenesList) {
+              Storyboard.renderScenesList();
+          }
+          
+          Store.save();
+          UI.renderBoard();
+          UI.renderScript();
+          Breakdown.init();
+          Utils.toast(`"${scene.title}" est maintenant en brouillon`, 'success');
       },
       
       deleteScene: async (id) => { 
