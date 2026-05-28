@@ -6996,7 +6996,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.8.9</p>
+      <p>vv4.9.0</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -20108,6 +20108,10 @@ const tabToSection = {
       saveSubnavOrder: (...a) => UICategories.saveSubnavOrder(...a),
       moveTabToCategory: (...a) => UICategories.moveTabToCategory(...a),
       resetTabsOrder: (...a) => UICategories.resetTabsOrder(...a),
+
+      // ============================================================
+      // ===== VUES : bascule d'affichage & lancement éditeur =====
+      // ============================================================
       hideAllViews: () => {
           document.getElementById('landing-view').style.display = 'none';
           document.getElementById('dashboard-view').style.display = 'none';
@@ -20248,6 +20252,7 @@ const tabToSection = {
           Notifications.updateRoleBadge();
       },
       
+      // ===== RENDU GLOBAL =====
       renderAll: () => { 
           if(!state.data.titlePage) state.data.titlePage = state.data.scriptMeta;
           els.title.value = state.data.title || ""; 
@@ -20269,6 +20274,7 @@ const tabToSection = {
       set hiddenTabs(v) { UIHidden.hiddenTabs = v; },
       get hiddenCategories() { return UIHidden.hiddenCategories; },
       set hiddenCategories(v) { UIHidden.hiddenCategories = v; },
+      // ===== ONGLETS/CATÉGORIES MASQUÉS — délégué à UIHidden =====
       getUIStorageKey: (...a) => UIHidden.getUIStorageKey(...a),
       initHiddenTabs: (...a) => UIHidden.initHiddenTabs(...a),
       saveHiddenTabs: (...a) => UIHidden.saveHiddenTabs(...a),
@@ -20287,6 +20293,9 @@ const tabToSection = {
       toggleHiddenTabsMenu: (...a) => UIHidden.toggleHiddenTabsMenu(...a),
       closeHiddenTabsMenu: (...a) => UIHidden.closeHiddenTabsMenu(...a),
 
+      // ============================================================
+      // ===== NAVIGATION ONGLETS (cœur) =====
+      // ============================================================
       switchTab: (tabName) => { 
     // Persister pour F5
     try { NavMemory.setTab(UI.currentCategory || null, tabName); } catch(e) {}
@@ -20365,6 +20374,9 @@ const tabToSection = {
           if(tabName === 'presentation') Presentation.init();
       },
       
+      // ============================================================
+      // ===== SÉQUENCIER : statut scènes, quick-nav, rendu board =====
+      // ============================================================
       // Ouvre le menu déroulant pour changer le statut d'une scène
       toggleSceneStatus: (sceneId, event) => {
           if(state.currentRole === 'viewer') return;
@@ -20564,6 +20576,9 @@ const tabToSection = {
           return overlay;
       },
       
+      // ============================================================
+      // ===== SCÉNARIO : scope scènes, numérotation, rendu script =====
+      // ============================================================
       // S4 : retourne les scènes à afficher selon l'épisode actif (ou toutes si projet film)
       getScenesForCurrentView: () => {
           const allScenes = state.data.scenes || [];
@@ -20677,6 +20692,7 @@ const tabToSection = {
       handleDragOver: (...a) => UIData.handleDragOver(...a),
       goToStoryboard: (...a) => UIData.goToStoryboard(...a),
       
+      // ===== PERMISSIONS / VISIBILITÉ SECTIONS =====
       // Vérifie si une section est visible pour un profil dans le contexte projet
       isSectionVisibleForProject: (item, section) => {
           if(!item || !item.hiddenProject) return true;
@@ -32254,6 +32270,390 @@ const DrawingEditor = {
   };
 
   
+  const CrewExport = {
+    // [Phase C.2.1 → refonte multi-modes Phase D] Export PDF de l'équipe technique
+    // 3 modes : detailed | list | card. Sépare proprement équipe technique des comédiens
+    // (les comédiens ont leur propre export FichesPDF.exportActors).
+    openExportModal: () => {
+        const crew = state.data.crew || [];
+        if(crew.length === 0) {
+            Utils.toast('Aucun membre d\'équipe à exporter', 'warning');
+            return;
+        }
+        const modes = [
+            { value: 'detailed', label: 'Détaillé', desc: 'Par département : photo + rôle + contact + véhicule + tarif' },
+            { value: 'list',     label: 'Liste',    desc: 'Tableau dense : nom · rôle · email · tél' },
+            { value: 'card',     label: 'Fiche',    desc: '1 page A4 paysage par technicien (photo + tous les détails)' }
+        ];
+        if(typeof FichesPDF !== 'undefined' && FichesPDF._openOptionsModal) {
+            FichesPDF._openOptionsModal('👥', 'Équipe PDF — Options', modes, (opts) => {
+                CrewExport.exportPDF(opts);
+            });
+        } else {
+            CrewExport.exportPDF({ mode: 'detailed', includeCover: true });
+        }
+    },
+    
+    exportPDF: async (opts = {}) => {
+        const { jsPDF } = window.jspdf;
+        opts.mode = opts.mode || 'detailed';
+        const isCard = opts.mode === 'card';
+        const doc = new jsPDF(isCard ? 'l' : 'p', 'mm', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 20;
+        const usableWidth = pageWidth - margin * 2;
+        
+        const crew = state.data.crew || [];
+        if(crew.length === 0) {
+            Utils.toast('Aucun membre d\'équipe à exporter', 'warning');
+            return;
+        }
+        
+        const crewGroups = (state.data.groups || []).filter(g => g.type === 'crew');
+        
+        if(opts.mode !== 'list') Utils.toast('Préparation des photos...', 'info');
+        let photoMap = {};
+        if(opts.mode !== 'list' && typeof FichesPDF !== 'undefined' && FichesPDF._preloadImages) {
+            const urls = crew.map(c => c.photo).filter(Boolean);
+            photoMap = await FichesPDF._preloadImages(urls);
+        }
+        
+        if(opts.includeCover !== false) {
+            if(typeof FichesPDF !== 'undefined' && FichesPDF._drawCoverPage) {
+                FichesPDF._drawCoverPage(doc, 'Équipe');
+            } else {
+                PdfTheme.coverPage(doc, { sectionName: 'Équipe' });
+            }
+            doc.addPage();
+        }
+        let y = margin;
+        
+        const grouped = {};
+        crew.forEach(m => {
+            const gid = m.group_id || 'orphan';
+            if(!grouped[gid]) grouped[gid] = [];
+            grouped[gid].push(m);
+        });
+        const groupOrder = Object.keys(grouped).sort((a, b) => {
+            if(a === 'orphan') return 1;
+            if(b === 'orphan') return -1;
+            return 0;
+        });
+        
+        const ensureSpace = (space) => {
+            if(y + space > pageHeight - margin - 5) { doc.addPage(); y = margin; }
+        };
+        
+        const drawDeptHeader = (deptName, count) => {
+            ensureSpace(14);
+            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
+            doc.rect(margin, y, usableWidth, 9, 'F');
+            doc.setTextColor(...PdfTheme.COLORS.WHITE);
+            doc.setFontSize(11);
+            doc.setFont('helvetica', 'bold');
+            const lbl = (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText(deptName) : deptName;
+            doc.text(`${lbl.toUpperCase()} (${count})`, margin + 4, y + 6.2);
+            y += 12;
+        };
+        
+        const drawPhoto = (url, x, y, w, h) => {
+            if(typeof FichesPDF !== 'undefined' && FichesPDF._drawPhotoOrPlaceholder) {
+                FichesPDF._drawPhotoOrPlaceholder(doc, url, x, y, w, h);
+            } else {
+                doc.setFillColor(...PdfTheme.COLORS.BG_LIGHT);
+                doc.rect(x, y, w, h, 'F');
+                if(url) { try { doc.addImage(url, 'JPEG', x, y, w, h); } catch(e){} }
+            }
+        };
+        
+        const cleanT = (t) => (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText(t || '') : (t || '');
+        
+        // ===== MODE DETAILED =====
+        const renderDetailed = (m) => {
+            const cardH = 46;
+            ensureSpace(cardH);
+            const photoW = 28, photoH = 36;
+            const photoUrl = m.photo ? photoMap[m.photo] : null;
+            drawPhoto(photoUrl, margin, y, photoW, photoH);
+            const textX = margin + photoW + 5;
+            const textWidth = usableWidth - photoW - 7;
+            let ty = y + 5;
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(12);
+            doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
+            doc.text(cleanT(m.name) || '(sans nom)', textX, ty);
+            ty += 5;
+            if(m.role) {
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(9.5);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
+                doc.text(cleanT(m.role), textX, ty);
+                ty += 4.2;
+            }
+            const contactBits = [];
+            if(m.email) contactBits.push('Email : ' + m.email);
+            if(m.phone) contactBits.push('Tél : ' + m.phone);
+            if(contactBits.length > 0) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
+                const cLine = contactBits.join('   ·   ');
+                const cLines = doc.splitTextToSize(cLine, textWidth);
+                cLines.slice(0, 1).forEach(line => { doc.text(line, textX, ty); ty += 3.8; });
+            }
+            if(m.city || m.address) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
+                const addrBits = [];
+                if(m.city) addrBits.push('Ville : ' + cleanT(m.city));
+                if(m.address) addrBits.push(cleanT(m.address));
+                const aLines = doc.splitTextToSize(addrBits.join('  ·  '), textWidth);
+                aLines.slice(0, 1).forEach(line => { doc.text(line, textX, ty); ty += 3.8; });
+            }
+            if(m.hasVehicle) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8.5);
+                doc.setTextColor(...PdfTheme.COLORS.STAT_GREEN);
+                const vBits = ['Véhicule'];
+                if(m.vehicleType) vBits.push(cleanT(m.vehicleType));
+                if(m.vehicleSeats) vBits.push(m.vehicleSeats + ' places');
+                if(m.vehicleTrunk) vBits.push('coffre OK');
+                doc.text(vBits.join(' · '), textX, ty);
+                ty += 3.6;
+            }
+            if(m.dailyRate) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8.5);
+                doc.setTextColor(...PdfTheme.COLORS.WARNING);
+                doc.text(`Tarif : ${m.dailyRate} ${m.rateCurrency || '€'} / ${m.rateType || 'Jour'}`, textX, ty);
+                ty += 3.6;
+            }
+            if(m.notes) {
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(8);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
+                const nLines = doc.splitTextToSize(cleanT(m.notes), textWidth);
+                nLines.slice(0, 2).forEach(line => { doc.text(line, textX, ty); ty += 3.4; });
+            }
+            const actualH = Math.max(photoH + 4, ty - y + 2);
+            doc.setDrawColor(...PdfTheme.COLORS.BORDER);
+            doc.setLineWidth(0.2);
+            doc.rect(margin - 2, y - 2, usableWidth + 4, actualH);
+            y += actualH + 3;
+        };
+        
+        // ===== MODE LIST =====
+        const renderList = (members) => {
+            const lineH = 5.5;
+            ensureSpace(lineH);
+            doc.setFillColor(...PdfTheme.COLORS.BORDER_LIGHT);
+            doc.rect(margin, y, usableWidth, lineH, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8);
+            doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
+            const colsW = [usableWidth * 0.25, usableWidth * 0.25, usableWidth * 0.30, usableWidth * 0.20];
+            const colsX = [margin];
+            for(let i = 1; i < colsW.length; i++) colsX.push(colsX[i-1] + colsW[i-1]);
+            doc.text('Nom',   colsX[0] + 1, y + 3.8);
+            doc.text('Rôle',  colsX[1] + 1, y + 3.8);
+            doc.text('Email', colsX[2] + 1, y + 3.8);
+            doc.text('Tél',   colsX[3] + 1, y + 3.8);
+            y += lineH + 1;
+            members.forEach(m => {
+                ensureSpace(lineH);
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(8.5);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
+                let txtName = cleanT(m.name) || '(sans nom)';
+                while(doc.getTextWidth(txtName) > colsW[0] - 2 && txtName.length > 4) txtName = txtName.substring(0, txtName.length - 2) + '…';
+                doc.text(txtName, colsX[0] + 1, y + 3.8);
+                doc.setFont('helvetica', 'italic');
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
+                let txtRole = cleanT(m.role) || '—';
+                while(doc.getTextWidth(txtRole) > colsW[1] - 2 && txtRole.length > 3) txtRole = txtRole.substring(0, txtRole.length - 2) + '…';
+                doc.text(txtRole, colsX[1] + 1, y + 3.8);
+                doc.setFont('helvetica', 'normal');
+ doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
+                let txtEmail = m.email || '—';
+                while(doc.getTextWidth(txtEmail) > colsW[2] - 2 && txtEmail.length > 5) txtEmail = txtEmail.substring(0, txtEmail.length - 2) + '…';
+                doc.text(txtEmail, colsX[2] + 1, y + 3.8);
+                doc.text(m.phone || '—', colsX[3] + 1, y + 3.8);
+                doc.setDrawColor(...PdfTheme.COLORS.BORDER_LIGHT);
+                doc.setLineWidth(0.1);
+                doc.setLineDashPattern([0.5, 0.5], 0);
+                doc.line(margin, y + lineH, margin + usableWidth, y + lineH);
+                doc.setLineDashPattern([], 0);
+                y += lineH;
+            });
+            y += 2;
+        };
+        
+        // ===== MODE CARD (A4 paysage par technicien) =====
+        const renderCard = (m) => {
+            const photoUrl = m.photo ? photoMap[m.photo] : null;
+            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
+            doc.rect(0, 0, pageWidth, 18, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(14);
+            doc.setTextColor(...PdfTheme.COLORS.WHITE);
+            doc.text('TECHNICIEN·NE', margin, 11);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(10);
+            doc.text(PdfTheme.cleanText(state.data.title || ''), pageWidth - margin, 11, { align: 'right' });
+            const photoW2 = 75, photoH2 = 100;
+            const photoX = margin, photoY = 28;
+            drawPhoto(photoUrl, photoX, photoY, photoW2, photoH2);
+            const infoX = photoX + photoW2 + 12;
+            const infoW = pageWidth - infoX - margin;
+            let iy = photoY + 6;
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(22);
+            doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
+            const nLines = doc.splitTextToSize(cleanT(m.name) || '(sans nom)', infoW);
+            nLines.forEach(l => { doc.text(l, infoX, iy); iy += 8; });
+            iy += 2;
+            if(m.role) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
+                doc.text('FONCTION', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(12);
+                doc.setTextColor(...PdfTheme.COLORS.BANNER_DARK);
+                doc.text(cleanT(m.role), infoX, iy);
+                iy += 7;
+            }
+            const hasContact = m.email || m.phone || m.city || m.address;
+            if(hasContact) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
+                doc.text('CONTACT', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9.5);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+                if(m.email)   { doc.text('Email : ' + m.email, infoX, iy); iy += 4.2; }
+                if(m.phone)   { doc.text('Tél : '   + m.phone, infoX, iy); iy += 4.2; }
+                if(m.city)    { doc.text('Ville : ' + cleanT(m.city), infoX, iy); iy += 4.2; }
+                if(m.address) {
+                    const aLines = doc.splitTextToSize('Adresse : ' + cleanT(m.address), infoW);
+                    aLines.slice(0, 2).forEach(l => { doc.text(l, infoX, iy); iy += 4.2; });
+                }
+                iy += 3;
+            }
+            if(m.dailyRate) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
+                doc.text('TARIF', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(11);
+                doc.setTextColor(...PdfTheme.COLORS.BANNER_DARK);
+                doc.text(`${m.dailyRate} ${m.rateCurrency || '€'} / ${m.rateType || 'Jour'}`, infoX, iy);
+                iy += 6;
+            }
+            if(m.availabilityText) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
+                doc.text('DISPONIBILITÉS', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9.5);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+                const aLines = doc.splitTextToSize(cleanT(m.availabilityText), infoW);
+                aLines.forEach(l => { if(iy < pageHeight - 50) { doc.text(l, infoX, iy); iy += 4.2; } });
+                iy += 3;
+            }
+            if(m.notes) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
+                doc.text('NOTES', infoX, iy);
+                iy += 4;
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(9);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+                const ntLines = doc.splitTextToSize(cleanT(m.notes), infoW);
+                ntLines.forEach(l => { if(iy < pageHeight - 50) { doc.text(l, infoX, iy); iy += 4.2; } });
+            }
+            const bottomY = pageHeight - 30;
+            doc.setLineWidth(0.3);
+            doc.setDrawColor(...PdfTheme.COLORS.BORDER_DARK);
+            doc.line(margin, bottomY - 4, pageWidth - margin, bottomY - 4);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
+            doc.text('VÉHICULE', margin, bottomY);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+            if(m.hasVehicle) {
+                let vy = bottomY + 5;
+                const vBits = [];
+                if(m.vehicleType)  vBits.push('Type : ' + cleanT(m.vehicleType));
+                if(m.vehiclePlate) vBits.push('Imm. : ' + m.vehiclePlate);
+                if(m.vehicleSeats) vBits.push(m.vehicleSeats + ' places');
+                if(m.vehicleTrunk) vBits.push('Coffre OK');
+                if(m.vehicleNotes) vBits.push(cleanT(m.vehicleNotes));
+                vBits.forEach(b => { doc.text(b, margin, vy); vy += 4; });
+                if(vBits.length === 0) doc.text('Oui (détails non renseignés)', margin, vy);
+            } else {
+                doc.setFont('helvetica', 'italic');
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_FAINT);
+                doc.text('—', margin, bottomY + 5);
+            }
+            const rightX = pageWidth / 2 + 5;
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
+            doc.text('DÉPARTEMENT', rightX, bottomY);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+            const dept = crewGroups.find(g => g.id === m.group_id);
+            const deptName = dept ? cleanT(dept.name) : 'Non classé';
+            doc.text(deptName, rightX, bottomY + 5);
+        };
+        
+        // ===== EXÉCUTION =====
+        if(opts.mode === 'card') {
+            crew.forEach((m, idx) => {
+                if(idx > 0) doc.addPage();
+                renderCard(m);
+            });
+        } else {
+            groupOrder.forEach((gid) => {
+                const dept = crewGroups.find(g => g.id === gid);
+                const deptName = dept ? dept.name : 'Non classé';
+                drawDeptHeader(deptName, grouped[gid].length);
+                if(opts.mode === 'list') renderList(grouped[gid]);
+                else grouped[gid].forEach(m => renderDetailed(m));
+                y += 2;
+            });
+        }
+        
+        if(typeof FichesPDF !== 'undefined' && FichesPDF._drawFooters) {
+            FichesPDF._drawFooters(doc, opts.includeCover !== false, !!opts.returnBlob);
+        } else if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
+            PdfTheme.applyFooters(doc, { forDossier: !!opts.returnBlob });
+        }
+        
+        if(opts.returnBlob) return doc.output('blob');
+        const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
+            ? PdfTheme.filename('Équipe')
+            : `${state.data.title || 'Projet'} - Équipe - moteur.studio.pdf`;
+        doc.save(filename);
+        Utils.toast('Équipe PDF exportée !', 'success');
+        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', `Équipe PDF générée (${opts.mode})`);
+    }
+};
+
   const Crew = {
     addMember: async () => {
         if(state.currentRole === 'viewer') return;
@@ -32566,390 +32966,212 @@ const DrawingEditor = {
     getRolesForGroup: (groupId) => {
         return CONFIG.crewRoles[groupId] || [];
     },
+	// ===== EXPORT PDF — délégué à CrewExport =====
+    openExportModal: (...a) => CrewExport.openExportModal(...a),
+    exportPDF: (...a) => CrewExport.exportPDF(...a),
+};
+
+
+const ProfileCalendar = {
+    // ========== CALENDRIER DISPONIBILITÉS PROFIL ==========
+    _profileCalMonth: new Date().getMonth(),
+    _profileCalYear: new Date().getFullYear(),
+    _profileCalDrag: { active: false, dates: [], isRightClick: false },
     
-    // [Phase C.2.1 → refonte multi-modes Phase D] Export PDF de l'équipe technique
-    // 3 modes : detailed | list | card. Sépare proprement équipe technique des comédiens
-    // (les comédiens ont leur propre export FichesPDF.exportActors).
-    openExportModal: () => {
-        const crew = state.data.crew || [];
-        if(crew.length === 0) {
-            Utils.toast('Aucun membre d\'équipe à exporter', 'warning');
-            return;
-        }
-        const modes = [
-            { value: 'detailed', label: 'Détaillé', desc: 'Par département : photo + rôle + contact + véhicule + tarif' },
-            { value: 'list',     label: 'Liste',    desc: 'Tableau dense : nom · rôle · email · tél' },
-            { value: 'card',     label: 'Fiche',    desc: '1 page A4 paysage par technicien (photo + tous les détails)' }
-        ];
-        if(typeof FichesPDF !== 'undefined' && FichesPDF._openOptionsModal) {
-            FichesPDF._openOptionsModal('👥', 'Équipe PDF — Options', modes, (opts) => {
-                Crew.exportPDF(opts);
+    renderProfileCalendar: () => {
+        const container = document.getElementById('profile-availability-calendar');
+        if(!container) return;
+        
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile) return;
+        
+        const year = ProfileCalendar._profileCalYear;
+        const month = ProfileCalendar._profileCalMonth;
+        
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+        const startDay = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
+        
+        const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+        const dayNames = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+        
+        const availDates = profile.availabilityDates || [];
+        const unavailDates = profile.unavailabilityDates || [];
+        
+        const isDateInRange = (dateStr, ranges) => {
+            return ranges.some(range => {
+                if(!range.from || !range.to) return false;
+                return dateStr >= range.from && dateStr <= range.to;
             });
-        } else {
-            Crew.exportPDF({ mode: 'detailed', includeCover: true });
+        };
+        
+        let html = `<div class="availability-calendar">
+            <div class="availability-calendar-header">
+                <button onclick="app.ProfileCalendar.changeProfileCalMonth(-1)">◀</button>
+                <strong>${monthNames[month]} ${year}</strong>
+                <button onclick="app.ProfileCalendar.changeProfileCalMonth(1)">▶</button>
+            </div>
+            <div class="availability-calendar-grid">`;
+        
+        dayNames.forEach(d => {
+            html += `<div class="availability-calendar-day-header">${d}</div>`;
+        });
+        
+        for(let i = 0; i < startDay; i++) {
+            html += `<div class="availability-calendar-day empty"></div>`;
+        }
+        
+        const today = new Date();
+        for(let day = 1; day <= lastDay.getDate(); day++) {
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
+            const isAvail = isDateInRange(dateStr, availDates);
+            const isUnavail = isDateInRange(dateStr, unavailDates);
+            
+            let dayClass = 'availability-calendar-day';
+            if(isToday) dayClass += ' today';
+            if(isAvail) dayClass += ' available';
+            if(isUnavail) dayClass += ' unavailable';
+            
+            html += `<div class="${dayClass}" 
+                data-date="${dateStr}"
+                onmousedown="app.ProfileCalendar.startProfileCalDrag('${dateStr}', event)"
+                onmouseenter="app.ProfileCalendar.continueProfileCalDrag('${dateStr}')"
+                onmouseup="app.ProfileCalendar.endProfileCalDrag()"
+                oncontextmenu="return false;">${day}</div>`;
+        }
+        
+        html += `</div></div>`;
+        container.innerHTML = html;
+    },
+    
+    changeProfileCalMonth: (delta) => {
+        ProfileCalendar._profileCalMonth += delta;
+        if(ProfileCalendar._profileCalMonth > 11) {
+            ProfileCalendar._profileCalMonth = 0;
+            ProfileCalendar._profileCalYear++;
+        }
+        if(ProfileCalendar._profileCalMonth < 0) {
+            ProfileCalendar._profileCalMonth = 11;
+            ProfileCalendar._profileCalYear--;
+        }
+        ProfileCalendar.renderProfileCalendar();
+    },
+    
+    startProfileCalDrag: (dateStr, event) => {
+        event.preventDefault();
+        const isRightClick = event.button === 2;
+        ProfileCalendar._profileCalDrag = { active: true, dates: [dateStr], isRightClick };
+        document.addEventListener('mouseup', ProfileCalendar.endProfileCalDrag);
+    },
+    
+    continueProfileCalDrag: (dateStr) => {
+        if(!ProfileCalendar._profileCalDrag.active) return;
+        if(!ProfileCalendar._profileCalDrag.dates.includes(dateStr)) {
+            ProfileCalendar._profileCalDrag.dates.push(dateStr);
+        }
+        const container = document.getElementById('profile-availability-calendar');
+        if(container) {
+            const color = ProfileCalendar._profileCalDrag.isRightClick ? '#f44336' : '#4CAF50';
+            container.querySelectorAll('.availability-calendar-day').forEach(el => {
+                if(ProfileCalendar._profileCalDrag.dates.includes(el.dataset.date)) {
+                    el.style.background = color;
+                    el.style.color = 'white';
+                }
+            });
         }
     },
     
-    exportPDF: async (opts = {}) => {
-        const { jsPDF } = window.jspdf;
-        opts.mode = opts.mode || 'detailed';
-        const isCard = opts.mode === 'card';
-        const doc = new jsPDF(isCard ? 'l' : 'p', 'mm', 'a4');
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-        const margin = 20;
-        const usableWidth = pageWidth - margin * 2;
+    endProfileCalDrag: () => {
+        if(!ProfileCalendar._profileCalDrag.active) return;
         
-        const crew = state.data.crew || [];
-        if(crew.length === 0) {
-            Utils.toast('Aucun membre d\'équipe à exporter', 'warning');
-            return;
-        }
+        const { dates, isRightClick } = ProfileCalendar._profileCalDrag;
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
         
-        const crewGroups = (state.data.groups || []).filter(g => g.type === 'crew');
-        
-        if(opts.mode !== 'list') Utils.toast('Préparation des photos...', 'info');
-        let photoMap = {};
-        if(opts.mode !== 'list' && typeof FichesPDF !== 'undefined' && FichesPDF._preloadImages) {
-            const urls = crew.map(c => c.photo).filter(Boolean);
-            photoMap = await FichesPDF._preloadImages(urls);
-        }
-        
-        if(opts.includeCover !== false) {
-            if(typeof FichesPDF !== 'undefined' && FichesPDF._drawCoverPage) {
-                FichesPDF._drawCoverPage(doc, 'Équipe');
-            } else {
-                PdfTheme.coverPage(doc, { sectionName: 'Équipe' });
-            }
-            doc.addPage();
-        }
-        let y = margin;
-        
-        const grouped = {};
-        crew.forEach(m => {
-            const gid = m.group_id || 'orphan';
-            if(!grouped[gid]) grouped[gid] = [];
-            grouped[gid].push(m);
-        });
-        const groupOrder = Object.keys(grouped).sort((a, b) => {
-            if(a === 'orphan') return 1;
-            if(b === 'orphan') return -1;
-            return 0;
-        });
-        
-        const ensureSpace = (space) => {
-            if(y + space > pageHeight - margin - 5) { doc.addPage(); y = margin; }
-        };
-        
-        const drawDeptHeader = (deptName, count) => {
-            ensureSpace(14);
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(margin, y, usableWidth, 9, 'F');
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.setFontSize(11);
-            doc.setFont('helvetica', 'bold');
-            const lbl = (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText(deptName) : deptName;
-            doc.text(`${lbl.toUpperCase()} (${count})`, margin + 4, y + 6.2);
-            y += 12;
-        };
-        
-        const drawPhoto = (url, x, y, w, h) => {
-            if(typeof FichesPDF !== 'undefined' && FichesPDF._drawPhotoOrPlaceholder) {
-                FichesPDF._drawPhotoOrPlaceholder(doc, url, x, y, w, h);
-            } else {
-                doc.setFillColor(...PdfTheme.COLORS.BG_LIGHT);
-                doc.rect(x, y, w, h, 'F');
-                if(url) { try { doc.addImage(url, 'JPEG', x, y, w, h); } catch(e){} }
-            }
-        };
-        
-        const cleanT = (t) => (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText(t || '') : (t || '');
-        
-        // ===== MODE DETAILED =====
-        const renderDetailed = (m) => {
-            const cardH = 46;
-            ensureSpace(cardH);
-            const photoW = 28, photoH = 36;
-            const photoUrl = m.photo ? photoMap[m.photo] : null;
-            drawPhoto(photoUrl, margin, y, photoW, photoH);
-            const textX = margin + photoW + 5;
-            const textWidth = usableWidth - photoW - 7;
-            let ty = y + 5;
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(12);
-            doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
-            doc.text(cleanT(m.name) || '(sans nom)', textX, ty);
-            ty += 5;
-            if(m.role) {
-                doc.setFont('helvetica', 'italic');
-                doc.setFontSize(9.5);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
-                doc.text(cleanT(m.role), textX, ty);
-                ty += 4.2;
-            }
-            const contactBits = [];
-            if(m.email) contactBits.push('Email : ' + m.email);
-            if(m.phone) contactBits.push('Tél : ' + m.phone);
-            if(contactBits.length > 0) {
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(9);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
-                const cLine = contactBits.join('   ·   ');
-                const cLines = doc.splitTextToSize(cLine, textWidth);
-                cLines.slice(0, 1).forEach(line => { doc.text(line, textX, ty); ty += 3.8; });
-            }
-            if(m.city || m.address) {
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(9);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
-                const addrBits = [];
-                if(m.city) addrBits.push('Ville : ' + cleanT(m.city));
-                if(m.address) addrBits.push(cleanT(m.address));
-                const aLines = doc.splitTextToSize(addrBits.join('  ·  '), textWidth);
-                aLines.slice(0, 1).forEach(line => { doc.text(line, textX, ty); ty += 3.8; });
-            }
-            if(m.hasVehicle) {
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(8.5);
-                doc.setTextColor(...PdfTheme.COLORS.STAT_GREEN);
-                const vBits = ['Véhicule'];
-                if(m.vehicleType) vBits.push(cleanT(m.vehicleType));
-                if(m.vehicleSeats) vBits.push(m.vehicleSeats + ' places');
-                if(m.vehicleTrunk) vBits.push('coffre OK');
-                doc.text(vBits.join(' · '), textX, ty);
-                ty += 3.6;
-            }
-            if(m.dailyRate) {
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(8.5);
-                doc.setTextColor(...PdfTheme.COLORS.WARNING);
-                doc.text(`Tarif : ${m.dailyRate} ${m.rateCurrency || '€'} / ${m.rateType || 'Jour'}`, textX, ty);
-                ty += 3.6;
-            }
-            if(m.notes) {
-                doc.setFont('helvetica', 'italic');
-                doc.setFontSize(8);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
-                const nLines = doc.splitTextToSize(cleanT(m.notes), textWidth);
-                nLines.slice(0, 2).forEach(line => { doc.text(line, textX, ty); ty += 3.4; });
-            }
-            const actualH = Math.max(photoH + 4, ty - y + 2);
-            doc.setDrawColor(...PdfTheme.COLORS.BORDER);
-            doc.setLineWidth(0.2);
-            doc.rect(margin - 2, y - 2, usableWidth + 4, actualH);
-            y += actualH + 3;
-        };
-        
-        // ===== MODE LIST =====
-        const renderList = (members) => {
-            const lineH = 5.5;
-            ensureSpace(lineH);
-            doc.setFillColor(...PdfTheme.COLORS.BORDER_LIGHT);
-            doc.rect(margin, y, usableWidth, lineH, 'F');
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(8);
-            doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
-            const colsW = [usableWidth * 0.25, usableWidth * 0.25, usableWidth * 0.30, usableWidth * 0.20];
-            const colsX = [margin];
-            for(let i = 1; i < colsW.length; i++) colsX.push(colsX[i-1] + colsW[i-1]);
-            doc.text('Nom',   colsX[0] + 1, y + 3.8);
-            doc.text('Rôle',  colsX[1] + 1, y + 3.8);
-            doc.text('Email', colsX[2] + 1, y + 3.8);
-            doc.text('Tél',   colsX[3] + 1, y + 3.8);
-            y += lineH + 1;
-            members.forEach(m => {
-                ensureSpace(lineH);
-                doc.setFont('helvetica', 'bold');
-                doc.setFontSize(8.5);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
-                let txtName = cleanT(m.name) || '(sans nom)';
-                while(doc.getTextWidth(txtName) > colsW[0] - 2 && txtName.length > 4) txtName = txtName.substring(0, txtName.length - 2) + '…';
-                doc.text(txtName, colsX[0] + 1, y + 3.8);
-                doc.setFont('helvetica', 'italic');
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
-                let txtRole = cleanT(m.role) || '—';
-                while(doc.getTextWidth(txtRole) > colsW[1] - 2 && txtRole.length > 3) txtRole = txtRole.substring(0, txtRole.length - 2) + '…';
-                doc.text(txtRole, colsX[1] + 1, y + 3.8);
-                doc.setFont('helvetica', 'normal');
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
-                let txtEmail = m.email || '—';
-                while(doc.getTextWidth(txtEmail) > colsW[2] - 2 && txtEmail.length > 5) txtEmail = txtEmail.substring(0, txtEmail.length - 2) + '…';
-                doc.text(txtEmail, colsX[2] + 1, y + 3.8);
-                doc.text(m.phone || '—', colsX[3] + 1, y + 3.8);
-                doc.setDrawColor(...PdfTheme.COLORS.BORDER_LIGHT);
-                doc.setLineWidth(0.1);
-                doc.setLineDashPattern([0.5, 0.5], 0);
-                doc.line(margin, y + lineH, margin + usableWidth, y + lineH);
-                doc.setLineDashPattern([], 0);
-                y += lineH;
-            });
-            y += 2;
-        };
-        
-        // ===== MODE CARD (A4 paysage par technicien) =====
-        const renderCard = (m) => {
-            const photoUrl = m.photo ? photoMap[m.photo] : null;
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(0, 0, pageWidth, 18, 'F');
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(14);
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.text('TECHNICIEN·NE', margin, 11);
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(10);
-            doc.text(PdfTheme.cleanText(state.data.title || ''), pageWidth - margin, 11, { align: 'right' });
-            const photoW2 = 75, photoH2 = 100;
-            const photoX = margin, photoY = 28;
-            drawPhoto(photoUrl, photoX, photoY, photoW2, photoH2);
-            const infoX = photoX + photoW2 + 12;
-            const infoW = pageWidth - infoX - margin;
-            let iy = photoY + 6;
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(22);
-            doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
-            const nLines = doc.splitTextToSize(cleanT(m.name) || '(sans nom)', infoW);
-            nLines.forEach(l => { doc.text(l, infoX, iy); iy += 8; });
-            iy += 2;
-            if(m.role) {
-                doc.setFont('helvetica', 'bold');
-                doc.setFontSize(10);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
-                doc.text('FONCTION', infoX, iy);
-                iy += 4;
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(12);
-                doc.setTextColor(...PdfTheme.COLORS.BANNER_DARK);
-                doc.text(cleanT(m.role), infoX, iy);
-                iy += 7;
-            }
-            const hasContact = m.email || m.phone || m.city || m.address;
-            if(hasContact) {
-                doc.setFont('helvetica', 'bold');
-                doc.setFontSize(10);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
-                doc.text('CONTACT', infoX, iy);
-                iy += 4;
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(9.5);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-                if(m.email)   { doc.text('Email : ' + m.email, infoX, iy); iy += 4.2; }
-                if(m.phone)   { doc.text('Tél : '   + m.phone, infoX, iy); iy += 4.2; }
-                if(m.city)    { doc.text('Ville : ' + cleanT(m.city), infoX, iy); iy += 4.2; }
-                if(m.address) {
-                    const aLines = doc.splitTextToSize('Adresse : ' + cleanT(m.address), infoW);
-                    aLines.slice(0, 2).forEach(l => { doc.text(l, infoX, iy); iy += 4.2; });
+        if(dates.length > 0 && profile) {
+            dates.sort();
+            const from = dates[0];
+            const to = dates[dates.length - 1];
+            
+            if(!profile.availabilityDates) profile.availabilityDates = [];
+            if(!profile.unavailabilityDates) profile.unavailabilityDates = [];
+            
+            const targetArray = isRightClick ? profile.unavailabilityDates : profile.availabilityDates;
+            const otherArray = isRightClick ? profile.availabilityDates : profile.unavailabilityDates;
+            
+            if(dates.length === 1) {
+                const existingIdx = targetArray.findIndex(range => {
+                    const checkDate = new Date(dates[0]);
+                    return checkDate >= new Date(range.from) && checkDate <= new Date(range.to);
+                });
+                if(existingIdx > -1) {
+                    targetArray.splice(existingIdx, 1);
+                } else {
+                    const otherIdx = otherArray.findIndex(range => {
+                        const checkDate = new Date(dates[0]);
+                        return checkDate >= new Date(range.from) && checkDate <= new Date(range.to);
+                    });
+                    if(otherIdx > -1) {
+                        otherArray.splice(otherIdx, 1);
+                    }
+                    targetArray.push({ from, to });
                 }
-                iy += 3;
-            }
-            if(m.dailyRate) {
-                doc.setFont('helvetica', 'bold');
-                doc.setFontSize(10);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
-                doc.text('TARIF', infoX, iy);
-                iy += 4;
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(11);
-                doc.setTextColor(...PdfTheme.COLORS.BANNER_DARK);
-                doc.text(`${m.dailyRate} ${m.rateCurrency || '€'} / ${m.rateType || 'Jour'}`, infoX, iy);
-                iy += 6;
-            }
-            if(m.availabilityText) {
-                doc.setFont('helvetica', 'bold');
-                doc.setFontSize(10);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
-                doc.text('DISPONIBILITÉS', infoX, iy);
-                iy += 4;
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(9.5);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-                const aLines = doc.splitTextToSize(cleanT(m.availabilityText), infoW);
-                aLines.forEach(l => { if(iy < pageHeight - 50) { doc.text(l, infoX, iy); iy += 4.2; } });
-                iy += 3;
-            }
-            if(m.notes) {
-                doc.setFont('helvetica', 'bold');
-                doc.setFontSize(10);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
-                doc.text('NOTES', infoX, iy);
-                iy += 4;
-                doc.setFont('helvetica', 'italic');
-                doc.setFontSize(9);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-                const ntLines = doc.splitTextToSize(cleanT(m.notes), infoW);
-                ntLines.forEach(l => { if(iy < pageHeight - 50) { doc.text(l, infoX, iy); iy += 4.2; } });
-            }
-            const bottomY = pageHeight - 30;
-            doc.setLineWidth(0.3);
-            doc.setDrawColor(...PdfTheme.COLORS.BORDER_DARK);
-            doc.line(margin, bottomY - 4, pageWidth - margin, bottomY - 4);
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(9);
-            doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
-            doc.text('VÉHICULE', margin, bottomY);
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(9);
-            doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-            if(m.hasVehicle) {
-                let vy = bottomY + 5;
-                const vBits = [];
-                if(m.vehicleType)  vBits.push('Type : ' + cleanT(m.vehicleType));
-                if(m.vehiclePlate) vBits.push('Imm. : ' + m.vehiclePlate);
-                if(m.vehicleSeats) vBits.push(m.vehicleSeats + ' places');
-                if(m.vehicleTrunk) vBits.push('Coffre OK');
-                if(m.vehicleNotes) vBits.push(cleanT(m.vehicleNotes));
-                vBits.forEach(b => { doc.text(b, margin, vy); vy += 4; });
-                if(vBits.length === 0) doc.text('Oui (détails non renseignés)', margin, vy);
             } else {
-                doc.setFont('helvetica', 'italic');
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_FAINT);
-                doc.text('—', margin, bottomY + 5);
+                targetArray.push({ from, to });
             }
-            const rightX = pageWidth / 2 + 5;
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(9);
-            doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
-            doc.text('DÉPARTEMENT', rightX, bottomY);
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(9);
-            doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-            const dept = crewGroups.find(g => g.id === m.group_id);
-            const deptName = dept ? cleanT(dept.name) : 'Non classé';
-            doc.text(deptName, rightX, bottomY + 5);
-        };
-        
-        // ===== EXÉCUTION =====
-        if(opts.mode === 'card') {
-            crew.forEach((m, idx) => {
-                if(idx > 0) doc.addPage();
-                renderCard(m);
-            });
-        } else {
-            groupOrder.forEach((gid) => {
-                const dept = crewGroups.find(g => g.id === gid);
-                const deptName = dept ? dept.name : 'Non classé';
-                drawDeptHeader(deptName, grouped[gid].length);
-                if(opts.mode === 'list') renderList(grouped[gid]);
-                else grouped[gid].forEach(m => renderDetailed(m));
-                y += 2;
-            });
+            
+            ProfileCalendar.renderProfileCalendar();
+            ProfileCalendar.renderProfileDatesList();
         }
         
-        if(typeof FichesPDF !== 'undefined' && FichesPDF._drawFooters) {
-            FichesPDF._drawFooters(doc, opts.includeCover !== false, !!opts.returnBlob);
-        } else if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
-            PdfTheme.applyFooters(doc, { forDossier: !!opts.returnBlob });
+        ProfileCalendar._profileCalDrag = { active: false, dates: [], isRightClick: false };
+        document.removeEventListener('mouseup', ProfileCalendar.endProfileCalDrag);
+    },
+    
+    renderProfileDatesList: () => {
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile) return;
+        
+        const availList = document.getElementById('profile-avail-dates-list');
+        const unavailList = document.getElementById('profile-unavail-dates-list');
+        
+        if(availList) {
+            const availDates = profile.availabilityDates || [];
+            if(availDates.length > 0) {
+                availList.innerHTML = availDates.map((d, i) => 
+                    `<span style="display:inline-flex; align-items:center; background:#E8F5E9; border:1px solid #4CAF50; color:#2E7D32; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✓ ${d.from} → ${d.to} <span onclick="app.ProfileCalendar.removeProfileDate('avail', ${i})" class="delete-link">✖</span></span>`
+                ).join('');
+            } else {
+                availList.innerHTML = '<span class="text-sec-xs">Aucune période renseignée</span>';
+            }
         }
         
-        if(opts.returnBlob) return doc.output('blob');
-        const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
-            ? PdfTheme.filename('Équipe')
-            : `${state.data.title || 'Projet'} - Équipe - moteur.studio.pdf`;
-        doc.save(filename);
-        Utils.toast('Équipe PDF exportée !', 'success');
-        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', `Équipe PDF générée (${opts.mode})`);
-    }
-};
-
+        if(unavailList) {
+            const unavailDates = profile.unavailabilityDates || [];
+            if(unavailDates.length > 0) {
+                unavailList.innerHTML = unavailDates.map((d, i) => 
+                    `<span style="display:inline-flex; align-items:center; background:#FFEBEE; border:1px solid #f44336; color:#C62828; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✗ ${d.from} → ${d.to} <span onclick="app.ProfileCalendar.removeProfileDate('unavail', ${i})" class="delete-link">✖</span></span>`
+                ).join('');
+            } else {
+                unavailList.innerHTML = '<span class="text-sec-xs">Aucune période renseignée</span>';
+            }
+        }
+    },
+    
+    removeProfileDate: (type, idx) => {
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile) return;
+        
+        if(type === 'avail' && profile.availabilityDates) {
+            profile.availabilityDates.splice(idx, 1);
+        } else if(type === 'unavail' && profile.unavailabilityDates) {
+            profile.unavailabilityDates.splice(idx, 1);
+        }
+        
+        ProfileCalendar.renderProfileCalendar();
+        ProfileCalendar.renderProfileDatesList();
+    },
+  };
 
 const PublicProfile = {
     profiles: [], // Liste des profils de l'utilisateur
@@ -35165,204 +35387,33 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         }
     },
     
-    // ========== CALENDRIER DISPONIBILITÉS PROFIL ==========
-    _profileCalMonth: new Date().getMonth(),
-    _profileCalYear: new Date().getFullYear(),
-    _profileCalDrag: { active: false, dates: [], isRightClick: false },
-    
-    renderProfileCalendar: () => {
-        const container = document.getElementById('profile-availability-calendar');
-        if(!container) return;
-        
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!profile) return;
-        
-        const year = PublicProfile._profileCalYear;
-        const month = PublicProfile._profileCalMonth;
-        
-        const firstDay = new Date(year, month, 1);
-        const lastDay = new Date(year, month + 1, 0);
-        const startDay = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
-        
-        const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
-        const dayNames = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-        
-        const availDates = profile.availabilityDates || [];
-        const unavailDates = profile.unavailabilityDates || [];
-        
-        const isDateInRange = (dateStr, ranges) => {
-            return ranges.some(range => {
-                if(!range.from || !range.to) return false;
-                return dateStr >= range.from && dateStr <= range.to;
-            });
-        };
-        
-        let html = `<div class="availability-calendar">
-            <div class="availability-calendar-header">
-                <button onclick="app.PublicProfile.changeProfileCalMonth(-1)">◀</button>
-                <strong>${monthNames[month]} ${year}</strong>
-                <button onclick="app.PublicProfile.changeProfileCalMonth(1)">▶</button>
-            </div>
-            <div class="availability-calendar-grid">`;
-        
-        dayNames.forEach(d => {
-            html += `<div class="availability-calendar-day-header">${d}</div>`;
-        });
-        
-        for(let i = 0; i < startDay; i++) {
-            html += `<div class="availability-calendar-day empty"></div>`;
-        }
-        
-        const today = new Date();
-        for(let day = 1; day <= lastDay.getDate(); day++) {
-            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
-            const isAvail = isDateInRange(dateStr, availDates);
-            const isUnavail = isDateInRange(dateStr, unavailDates);
-            
-            let dayClass = 'availability-calendar-day';
-            if(isToday) dayClass += ' today';
-            if(isAvail) dayClass += ' available';
-            if(isUnavail) dayClass += ' unavailable';
-            
-            html += `<div class="${dayClass}" 
-                data-date="${dateStr}"
-                onmousedown="app.PublicProfile.startProfileCalDrag('${dateStr}', event)"
-                onmouseenter="app.PublicProfile.continueProfileCalDrag('${dateStr}')"
-                onmouseup="app.PublicProfile.endProfileCalDrag()"
-                oncontextmenu="return false;">${day}</div>`;
-        }
-        
-        html += `</div></div>`;
-        container.innerHTML = html;
-    },
-    
-    changeProfileCalMonth: (delta) => {
-        PublicProfile._profileCalMonth += delta;
-        if(PublicProfile._profileCalMonth > 11) {
-            PublicProfile._profileCalMonth = 0;
-            PublicProfile._profileCalYear++;
-        }
-        if(PublicProfile._profileCalMonth < 0) {
-            PublicProfile._profileCalMonth = 11;
-            PublicProfile._profileCalYear--;
-        }
-        PublicProfile.renderProfileCalendar();
-    },
-    
-    startProfileCalDrag: (dateStr, event) => {
-        event.preventDefault();
-        const isRightClick = event.button === 2;
-        PublicProfile._profileCalDrag = { active: true, dates: [dateStr], isRightClick };
-        document.addEventListener('mouseup', PublicProfile.endProfileCalDrag);
-    },
-    
-    continueProfileCalDrag: (dateStr) => {
-        if(!PublicProfile._profileCalDrag.active) return;
-        if(!PublicProfile._profileCalDrag.dates.includes(dateStr)) {
-            PublicProfile._profileCalDrag.dates.push(dateStr);
-        }
-        const container = document.getElementById('profile-availability-calendar');
-        if(container) {
-            const color = PublicProfile._profileCalDrag.isRightClick ? '#f44336' : '#4CAF50';
-            container.querySelectorAll('.availability-calendar-day').forEach(el => {
-                if(PublicProfile._profileCalDrag.dates.includes(el.dataset.date)) {
-                    el.style.background = color;
-                    el.style.color = 'white';
-                }
-            });
-        }
-    },
-    
-    endProfileCalDrag: () => {
-        if(!PublicProfile._profileCalDrag.active) return;
-        
-        const { dates, isRightClick } = PublicProfile._profileCalDrag;
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        
-        if(dates.length > 0 && profile) {
-            dates.sort();
-            const from = dates[0];
-            const to = dates[dates.length - 1];
-            
-            if(!profile.availabilityDates) profile.availabilityDates = [];
-            if(!profile.unavailabilityDates) profile.unavailabilityDates = [];
-            
-            const targetArray = isRightClick ? profile.unavailabilityDates : profile.availabilityDates;
-            const otherArray = isRightClick ? profile.availabilityDates : profile.unavailabilityDates;
-            
-            if(dates.length === 1) {
-                const existingIdx = targetArray.findIndex(range => {
-                    const checkDate = new Date(dates[0]);
-                    return checkDate >= new Date(range.from) && checkDate <= new Date(range.to);
-                });
-                if(existingIdx > -1) {
-                    targetArray.splice(existingIdx, 1);
-                } else {
-                    const otherIdx = otherArray.findIndex(range => {
-                        const checkDate = new Date(dates[0]);
-                        return checkDate >= new Date(range.from) && checkDate <= new Date(range.to);
-                    });
-                    if(otherIdx > -1) {
-                        otherArray.splice(otherIdx, 1);
-                    }
-                    targetArray.push({ from, to });
-                }
-            } else {
-                targetArray.push({ from, to });
-            }
-            
-            PublicProfile.renderProfileCalendar();
-            PublicProfile.renderProfileDatesList();
-        }
-        
-        PublicProfile._profileCalDrag = { active: false, dates: [], isRightClick: false };
-        document.removeEventListener('mouseup', PublicProfile.endProfileCalDrag);
-    },
-    
-    renderProfileDatesList: () => {
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!profile) return;
-        
-        const availList = document.getElementById('profile-avail-dates-list');
-        const unavailList = document.getElementById('profile-unavail-dates-list');
-        
-        if(availList) {
-            const availDates = profile.availabilityDates || [];
-            if(availDates.length > 0) {
-                availList.innerHTML = availDates.map((d, i) => 
-                    `<span style="display:inline-flex; align-items:center; background:#E8F5E9; border:1px solid #4CAF50; color:#2E7D32; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✓ ${d.from} → ${d.to} <span onclick="app.PublicProfile.removeProfileDate('avail', ${i})" class="delete-link">✖</span></span>`
-                ).join('');
-            } else {
-                availList.innerHTML = '<span class="text-sec-xs">Aucune période renseignée</span>';
-            }
-        }
-        
-        if(unavailList) {
-            const unavailDates = profile.unavailabilityDates || [];
-            if(unavailDates.length > 0) {
-                unavailList.innerHTML = unavailDates.map((d, i) => 
-                    `<span style="display:inline-flex; align-items:center; background:#FFEBEE; border:1px solid #f44336; color:#C62828; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✗ ${d.from} → ${d.to} <span onclick="app.PublicProfile.removeProfileDate('unavail', ${i})" class="delete-link">✖</span></span>`
-                ).join('');
-            } else {
-                unavailList.innerHTML = '<span class="text-sec-xs">Aucune période renseignée</span>';
-            }
-        }
-    },
-    
-    removeProfileDate: (type, idx) => {
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!profile) return;
-        
-        if(type === 'avail' && profile.availabilityDates) {
-            profile.availabilityDates.splice(idx, 1);
-        } else if(type === 'unavail' && profile.unavailabilityDates) {
-            profile.unavailabilityDates.splice(idx, 1);
-        }
-        
-        PublicProfile.renderProfileCalendar();
-        PublicProfile.renderProfileDatesList();
-    },
+// ===== CATÉGORIES / NAVIGATION / COULEURS ONGLETS — délégué à UICategories =====
+      get currentCategory() { return UICategories.currentCategory; },
+      set currentCategory(v) { UICategories.currentCategory = v; },
+      get categoryTabs() { return UICategories.categoryTabs; },
+      set categoryTabs(v) { UICategories.categoryTabs = v; },
+      get categoryLabels() { return UICategories.categoryLabels; },
+      set categoryLabels(v) { UICategories.categoryLabels = v; },
+      get currentTabTarget() { return UICategories.currentTabTarget; },
+      set currentTabTarget(v) { UICategories.currentTabTarget = v; },
+      get subnavDraggedTab() { return UICategories.subnavDraggedTab; },
+      set subnavDraggedTab(v) { UICategories.subnavDraggedTab = v; },
+      get subnavDraggedCategory() { return UICategories.subnavDraggedCategory; },
+      set subnavDraggedCategory(v) { UICategories.subnavDraggedCategory = v; },
+      setNavMode: (...a) => UICategories.setNavMode(...a),
+      switchCategory: (...a) => UICategories.switchCategory(...a),
+      getCategoryForTab: (...a) => UICategories.getCategoryForTab(...a),
+      openTabColorMenu: (...a) => UICategories.openTabColorMenu(...a),
+      closeTabColorMenu: (...a) => UICategories.closeTabColorMenu(...a),
+      setTabColor: (...a) => UICategories.setTabColor(...a),
+      openTabHelp: (...a) => UICategories.openTabHelp(...a),
+      loadTabColors: (...a) => UICategories.loadTabColors(...a),
+      initTabsContextMenu: (...a) => UICategories.initTabsContextMenu(...a),
+      initSubnavContextMenu: (...a) => UICategories.initSubnavContextMenu(...a),
+      initSubnavDragDrop: (...a) => UICategories.initSubnavDragDrop(...a),
+      saveSubnavOrder: (...a) => UICategories.saveSubnavOrder(...a),
+      moveTabToCategory: (...a) => UICategories.moveTabToCategory(...a),
+      resetTabsOrder: (...a) => UICategories.resetTabsOrder(...a),
     
     // Met à jour le style des labels de collaboration
     updateCollabLabel: (type) => {
@@ -68886,7 +68937,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, CrewExport, Planning, Contacts, ActorSearch, PublicProfile, ProfileCalendar, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
