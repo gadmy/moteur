@@ -6943,7 +6943,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.7.8</p>
+      <p>vv4.7.9</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -58490,35 +58490,45 @@ const Invitations = {
         const inviterName = state.currentUser.email.split('@')[0];
         
         try {
-            // Vérifier si l'utilisateur existe dans Supabase
-            const { data: existingProfile } = await supabase
+            // T10 fix : un user peut avoir plusieurs profils publics, chacun avec owner_email = son email.
+            // On vérifie l'existence du compte via owner_email (et non la colonne email, devenue ambiguë).
+            const { data: existingProfiles } = await supabase
                 .from('user_profiles')
-                .select('id, email')
-                .eq('email', email.toLowerCase())
+                .select('id, owner_email')
+                .eq('owner_email', email.toLowerCase());
+            
+            const userExists = !!(existingProfiles && existingProfiles.length > 0);
+            
+            // Ajouter le membre par email + profil cible (même clé de lecture que getProjectsList).
+            // On ne dépend pas d'une contrainte unique DB : on regarde d'abord si le membership existe,
+            // puis on insère ou on met à jour.
+            const { data: existingMember } = await supabase
+                .from('project_members')
+                .select('id')
+                .eq('project_id', pid)
+                .eq('email', email)
                 .maybeSingle();
             
-            const userExists = !!existingProfile;
-            
-            // Ajouter le membre au projet dans Supabase
-            let invitedUserId = existingProfile?.id || null;
-            
-            if(invitedUserId) {
-                // L'utilisateur existe, on l'ajoute directement comme membre
-                // I5f: on lie au profil cible choisi
+            if(existingMember) {
                 await supabase
                     .from('project_members')
-                    .upsert({
+                    .update({ role: role, profile_id: targetProfileId })
+                    .eq('id', existingMember.id);
+            } else {
+                await supabase
+                    .from('project_members')
+                    .insert({
                         project_id: pid,
-                        user_id: invitedUserId,
+                        email: email, // clé de filtrage utilisée par getProjectsList
+                        profile_id: targetProfileId, // I5f : profil cible (peut être null)
                         role: role,
-                        profile_id: targetProfileId, // I5f
-                        email: email, // pour le filtrage futur
                         invited_by: state.currentUser.id,
                         invited_at: new Date().toISOString()
-                    }, { onConflict: 'project_id,user_id' });
+                    });
             }
             
-            // Stocker l'invitation en attente pour les utilisateurs qui n'existent pas encore
+            // Stocker une invitation en attente (notification au prochain login) pour les comptes
+            // sans profil public — informatif, le membership est déjà créé ci-dessus.
             if(!userExists) {
                 // I5f: id auto-généré par Postgres (gen_random_uuid)
                 await supabase
