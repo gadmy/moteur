@@ -6992,7 +6992,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.8.2</p>
+      <p>vv4.8.3</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -17281,6 +17281,373 @@ openBoardPrintEpisodeChooser: () => {
     },
   };
 
+  const UIHidden = {
+    // Onglets masqués (par utilisateur en localStorage, pas partagé entre membres)
+    hiddenTabs: [],
+    hiddenCategories: [],
+    
+    getUIStorageKey: (suffix) => {
+        // Clé unique par projet et par utilisateur
+        const projectId = state.currentProjectId || 'default';
+        return `fmp_ui_${projectId}_${suffix}`;
+    },
+    
+    initHiddenTabs: () => {
+        // Charger depuis localStorage (préférence utilisateur, pas projet)
+        try {
+            const saved = localStorage.getItem(UIHidden.getUIStorageKey('hiddenTabs'));
+            UIHidden.hiddenTabs = saved ? JSON.parse(saved) : [];
+        } catch(e) {
+            UIHidden.hiddenTabs = [];
+        }
+        UIHidden.applyHiddenTabs();
+    },
+    
+    saveHiddenTabs: () => {
+        // Sauvegarder en localStorage (par utilisateur)
+        try {
+            localStorage.setItem(UIHidden.getUIStorageKey('hiddenTabs'), JSON.stringify(UIHidden.hiddenTabs));
+        } catch(e) {}
+    },
+    
+    saveHiddenCategories: () => {
+        // Sauvegarder en localStorage (par utilisateur)
+        try {
+            localStorage.setItem(UIHidden.getUIStorageKey('hiddenCategories'), JSON.stringify(UIHidden.hiddenCategories));
+        } catch(e) {}
+    },
+    
+    loadHiddenCategories: () => {
+        // Charger depuis localStorage (préférence utilisateur)
+        try {
+            const saved = localStorage.getItem(UIHidden.getUIStorageKey('hiddenCategories'));
+            UIHidden.hiddenCategories = saved ? JSON.parse(saved) : [];
+        } catch(e) {
+            UIHidden.hiddenCategories = [];
+        }
+    },
+    
+    hideTab: (tabName) => {
+        if(UIHidden.hiddenTabs.includes(tabName)) return;
+        
+        // Empêcher de masquer le dernier onglet visible
+        const allTabs = ['presentation', 'synopsis', 'board', 'titlepage', 'script', 'storyboard', 'chars', 'actors', 'locs', 'resources', 'crew', 'breakdown', 'stats', 'planning', 'expenses', 'chat'];
+        const visibleTabs = allTabs.filter(t => !UIHidden.hiddenTabs.includes(t) && t !== tabName);
+        if(visibleTabs.length === 0) {
+            Utils.toast('Impossible de masquer tous les onglets !', 'warning');
+            return;
+        }
+        
+        UIHidden.hiddenTabs.push(tabName);
+        
+        // Vérifier si tous les onglets d'une catégorie sont maintenant cachés
+        for(const [cat, tabs] of Object.entries(UI.categoryTabs)) {
+            const allTabsHidden = tabs.every(t => UIHidden.hiddenTabs.includes(t));
+            if(allTabsHidden && !UIHidden.hiddenCategories.includes(cat)) {
+                UIHidden.hiddenCategories.push(cat);
+            }
+        }
+        
+        UIHidden.saveHiddenTabs();
+        UIHidden.saveHiddenCategories();
+        UIHidden.applyHiddenTabs();
+        UIHidden.applyHiddenCategories();
+        
+        // Rafraîchir la sous-navigation en mode catégories
+        const navMode = (() => { try { return localStorage.getItem('fmp_nav_mode') || 'classic'; } catch(e) { return 'classic'; } })();
+        if(navMode === 'categories') {
+            if(UI.currentCategory) UI.switchCategory(UI.currentCategory);
+        }
+        
+        // Si l'onglet masqué était actif, basculer vers le premier visible
+        const activeTab = document.querySelector('.tab-btn.active');
+        if(activeTab && activeTab.getAttribute('data-tab') === tabName) {
+            UI.switchTab(visibleTabs[0]);
+        }
+        
+        Utils.toast('Onglet masqué', 'info');
+    },
+    
+    // === GESTION DES CATÉGORIES MASQUÉES ===
+    hideCategory: (category) => {
+        if(UIHidden.hiddenCategories.includes(category)) return;
+        
+        // Empêcher de masquer la dernière catégorie
+        const allCategories = ['ecriture', 'casting', 'production', 'admin'];
+        const visibleCategories = allCategories.filter(c => !UIHidden.hiddenCategories.includes(c) && c !== category);
+        if(visibleCategories.length === 0) {
+            Utils.toast('Impossible de masquer toutes les catégories !', 'warning');
+            return;
+        }
+        
+        UIHidden.hiddenCategories.push(category);
+        
+        // Cacher aussi tous les onglets de cette catégorie (pour synchroniser avec vue classique)
+        const tabsInCategory = UI.categoryTabs[category] || [];
+        tabsInCategory.forEach(tab => {
+            if(!UIHidden.hiddenTabs.includes(tab)) {
+                UIHidden.hiddenTabs.push(tab);
+            }
+        });
+        
+        UIHidden.saveHiddenCategories();
+        UIHidden.saveHiddenTabs();
+        UIHidden.applyHiddenCategories();
+        UIHidden.applyHiddenTabs();
+        
+        // Si la catégorie masquée était active, basculer vers la première visible
+        if(UI.currentCategory === category) {
+            UI.switchCategory(visibleCategories[0]);
+        }
+        
+        Utils.toast('Catégorie masquée', 'info');
+    },
+    
+    showCategory: (category) => {
+        UIHidden.hiddenCategories = UIHidden.hiddenCategories.filter(c => c !== category);
+        
+        // Restaurer aussi tous les onglets de cette catégorie
+        const tabsInCategory = UI.categoryTabs[category] || [];
+        UIHidden.hiddenTabs = UIHidden.hiddenTabs.filter(t => !tabsInCategory.includes(t));
+        
+        UIHidden.saveHiddenCategories();
+        UIHidden.saveHiddenTabs();
+        UIHidden.applyHiddenCategories();
+        UIHidden.applyHiddenTabs();
+        UI.switchCategory(category);
+        UIHidden.closeHiddenCategoriesMenu();
+        Utils.toast('Catégorie restaurée', 'success');
+    },
+    
+    showAllHidden: () => {
+        UIHidden.hiddenCategories = [];
+        UIHidden.hiddenTabs = [];
+        UIHidden.saveHiddenCategories();
+        UIHidden.saveHiddenTabs();
+        UIHidden.applyHiddenCategories();
+        UIHidden.applyHiddenTabs();
+        if(UI.currentCategory) UI.switchCategory(UI.currentCategory);
+        UIHidden.closeHiddenCategoriesMenu();
+        Utils.toast('Tous les éléments sont visibles', 'success');
+    },
+    
+    applyHiddenCategories: () => {
+        // Masquer/afficher les catégories
+        document.querySelectorAll('.tab-category[data-category]').forEach(cat => {
+            const catName = cat.getAttribute('data-category');
+            cat.style.display = UIHidden.hiddenCategories.includes(catName) ? 'none' : '';
+        });
+        
+        // Mettre à jour le bouton des éléments masqués (catégories + onglets)
+        const toggle = document.getElementById('hiddenCategoriesToggle');
+        const countBadge = document.getElementById('hiddenCategoriesCount');
+        
+        if(toggle && countBadge) {
+            const totalHidden = UIHidden.hiddenCategories.length + UIHidden.hiddenTabs.length;
+            if(totalHidden > 0) {
+                toggle.style.display = 'flex';
+                countBadge.textContent = totalHidden;
+            } else {
+                toggle.style.display = 'none';
+            }
+        }
+    },
+    
+    toggleHiddenCategoriesMenu: (event) => {
+        event.stopPropagation();
+        
+        const categoryLabels = {
+            'ecriture': '📝 Écriture',
+            'casting': '🎭 Casting & Décors',
+            'production': '🎬 Production',
+            'admin': '📊 Admin'
+        };
+        
+        const tabLabels = {
+            'presentation': 'Présentation', 'synopsis': 'Synopsis', 'board': 'Séquencier',
+            'titlepage': 'Titre', 'script': 'Scénario', 'storyboard': 'Storyboard', 'chars': 'Personnages',
+            'actors': 'Comédien.nes', 'locs': 'Décors', 'resources': 'Ressources', 'crew': 'Équipes',
+            'breakdown': 'Dépouillement', 'stats': 'Statistiques', 'planning': 'Planning',
+            'scriptreport': 'Rapport', 'expenses': 'Dépenses', 'chat': 'Chat'
+        };
+        
+        const hasHiddenCategories = UIHidden.hiddenCategories.length > 0;
+        const hasHiddenTabs = UIHidden.hiddenTabs.length > 0;
+        
+        if(!hasHiddenCategories && !hasHiddenTabs) return;
+        
+        // Créer ou récupérer le menu
+        let menu = document.getElementById('hiddenCategoriesMenu');
+        if(!menu) {
+            menu = document.createElement('div');
+            menu.id = 'hiddenCategoriesMenu';
+            menu.className = 'hidden-tabs-menu';
+            document.body.appendChild(menu);
+        }
+        
+        // Positionner le menu
+        const rect = event.target.getBoundingClientRect();
+        menu.style.left = Math.min(rect.left, window.innerWidth - 250) + 'px';
+        menu.style.top = (rect.bottom + 5) + 'px';
+        
+        // Générer le contenu
+        let menuHtml = `
+            <div class="hidden-tabs-menu-header">
+                <span>Éléments masqués</span>
+                <button onclick="app.UIHidden.showAllHidden()">Tout afficher</button>
+            </div>
+            <div class="hidden-tabs-menu-list">
+        `;
+        
+        // Catégories masquées
+        if(hasHiddenCategories) {
+            menuHtml += `<div style="font-size:0.75rem; color:var(--text-sec); padding:8px 12px; border-bottom:1px solid var(--border);">📁 Catégories</div>`;
+            UIHidden.hiddenCategories.forEach(catName => {
+                menuHtml += `<div class="hidden-tabs-menu-item" onclick="app.UIHidden.showCategory('${catName}')">
+                    <span>${categoryLabels[catName] || catName}</span>
+                    <span class="text-primary">+ Afficher</span>
+                </div>`;
+            });
+        }
+        
+        // Onglets masqués
+        if(hasHiddenTabs) {
+            menuHtml += `<div style="font-size:0.75rem; color:var(--text-sec); padding:8px 12px; border-bottom:1px solid var(--border); ${hasHiddenCategories ? 'margin-top:5px;' : ''}">📑 Onglets</div>`;
+            UIHidden.hiddenTabs.forEach(tabName => {
+                menuHtml += `<div class="hidden-tabs-menu-item" onclick="app.UIHidden.showTab('${tabName}')">
+                    <span>${tabLabels[tabName] || tabName}</span>
+                    <span class="text-primary">+ Afficher</span>
+                </div>`;
+            });
+        }
+        
+        menuHtml += '</div>';
+        menu.innerHTML = menuHtml;
+        menu.classList.add('visible');
+        
+        // Fermer au clic ailleurs
+        setTimeout(() => {
+            document.addEventListener('click', UIHidden.closeHiddenCategoriesMenu, { once: true });
+        }, 10);
+    },
+    
+    closeHiddenCategoriesMenu: () => {
+        const menu = document.getElementById('hiddenCategoriesMenu');
+        if(menu) menu.classList.remove('visible');
+    },
+    
+    showTab: (tabName) => {
+        UIHidden.hiddenTabs = UIHidden.hiddenTabs.filter(t => t !== tabName);
+        
+        // Restaurer la catégorie correspondante si elle était cachée
+        for(const [cat, tabs] of Object.entries(UI.categoryTabs)) {
+            if(tabs.includes(tabName) && UIHidden.hiddenCategories.includes(cat)) {
+                UIHidden.hiddenCategories = UIHidden.hiddenCategories.filter(c => c !== cat);
+            }
+        }
+        
+        UIHidden.saveHiddenTabs();
+        UIHidden.saveHiddenCategories();
+        UIHidden.applyHiddenTabs();
+        UIHidden.applyHiddenCategories();
+        UI.switchTab(tabName);
+        Utils.toast('Onglet restauré', 'success');
+    },
+    
+    showAllTabs: () => {
+        UIHidden.hiddenTabs = [];
+        UIHidden.hiddenCategories = [];
+        UIHidden.saveHiddenTabs();
+        UIHidden.saveHiddenCategories();
+        UIHidden.applyHiddenTabs();
+        UIHidden.applyHiddenCategories();
+        Utils.toast('Tous les onglets sont visibles', 'success');
+    },
+    
+    applyHiddenTabs: () => {
+        const tabLabels = {
+            'presentation': '1. PRÉSENTATION', 'synopsis': '2. SYNOPSIS', 'board': '3. SÉQUENCIER',
+            'titlepage': '4. TITRE', 'script': '5. SCÉNARIO', 'moodboard': '6. MOOD BOARD', 'storyboard': '7. STORYBOARD', 'chars': '8. PERSONNAGES',
+            'actors': '9. COMÉDIEN.NES', 'locs': '10. DÉCORS', 'resources': '11. RESSOURCES', 'crew': '12. ÉQUIPES',
+            'breakdown': '13. DÉPOUILLEMENT', 'stats': '14. STATISTIQUES', 'planning': '15. PLANNING',
+            'expenses': '16. DÉPENSES', 'chat': '17. CHAT'
+        };
+        
+        // Masquer/afficher les onglets
+        document.querySelectorAll('.tab-btn[data-tab]').forEach(tab => {
+            const tabName = tab.getAttribute('data-tab');
+            tab.style.display = UIHidden.hiddenTabs.includes(tabName) ? 'none' : '';
+        });
+        
+        // Mettre à jour le bouton et le menu des onglets masqués
+        const toggle = document.getElementById('hiddenTabsToggle');
+        const countBadge = document.getElementById('hiddenTabsCount');
+        const menu = document.getElementById('hiddenTabsMenu');
+        
+        if(UIHidden.hiddenTabs.length > 0) {
+            toggle.style.display = '';
+            countBadge.textContent = UIHidden.hiddenTabs.length;
+            
+            // Générer le menu
+            let menuHtml = `
+                <div class="hidden-tabs-menu-header">
+                    <span>Onglets masqués</span>
+                    <button onclick="app.UIHidden.showAllTabs()">Tout afficher</button>
+                </div>
+                <div class="hidden-tabs-menu-list">
+            `;
+            UIHidden.hiddenTabs.forEach(tabName => {
+                menuHtml += `<div class="hidden-tabs-menu-item" onclick="app.UIHidden.showTab('${tabName}')">
+                    <span>${tabLabels[tabName] || tabName}</span>
+                    <span style="color:var(--success);">↩</span>
+                </div>`;
+            });
+            menuHtml += '</div>';
+            menu.innerHTML = menuHtml;
+        } else {
+            toggle.style.display = 'none';
+            menu.classList.remove('visible');
+        }
+        
+        // Synchroniser avec la vue catégories
+        const navMode = (() => { try { return localStorage.getItem('fmp_nav_mode') || 'classic'; } catch(e) { return 'classic'; } })();
+        if(navMode === 'categories' && UI.currentCategory) {
+            UI.switchCategory(UI.currentCategory);
+        }
+    },
+    
+    toggleHiddenTabsMenu: (event) => {
+        const menu = document.getElementById('hiddenTabsMenu');
+        
+        // Si déjà visible, fermer
+        if(menu.classList.contains('visible')) {
+            menu.classList.remove('visible');
+            return;
+        }
+        
+        // Positionner près du bouton cliqué
+        const rect = event.target.closest('.tab-btn-hidden-toggle').getBoundingClientRect();
+        menu.style.top = (rect.bottom + 5) + 'px';
+        menu.style.left = Math.min(rect.left, window.innerWidth - 240) + 'px';
+        
+        menu.classList.add('visible');
+        
+        // Fermer au clic extérieur
+        setTimeout(() => {
+            document.addEventListener('click', UIHidden.closeHiddenTabsMenu);
+        }, 10);
+    },
+    
+    closeHiddenTabsMenu: (e) => {
+        const menu = document.getElementById('hiddenTabsMenu');
+        const toggle = document.getElementById('hiddenTabsToggle');
+        if(!menu.contains(e?.target) && !toggle.contains(e?.target)) {
+            menu.classList.remove('visible');
+            document.removeEventListener('click', UIHidden.closeHiddenTabsMenu);
+        }
+    },
+  };
+
   const UI = {
       toggleTheme: () => { document.body.classList.toggle('dark-mode'); PreferencesSync.save(CONFIG.themeKey, document.body.classList.contains('dark-mode') ? 'dark' : 'light'); if(Universe.map) Universe.updateMapTheme(); },
       
@@ -18485,370 +18852,28 @@ openBoardPrintEpisodeChooser: () => {
       // V62: Affichage de la liste des snapshots dans la modale
       // [Phase D] renderVersionList supprimé : remplacé par le journal d'actions enrichi
 
-      // Onglets masqués (par utilisateur en localStorage, pas partagé entre membres)
-      hiddenTabs: [],
-      hiddenCategories: [],
-      
-      getUIStorageKey: (suffix) => {
-          // Clé unique par projet et par utilisateur
-          const projectId = state.currentProjectId || 'default';
-          return `fmp_ui_${projectId}_${suffix}`;
-      },
-      
-      initHiddenTabs: () => {
-          // Charger depuis localStorage (préférence utilisateur, pas projet)
-          try {
-              const saved = localStorage.getItem(UI.getUIStorageKey('hiddenTabs'));
-              UI.hiddenTabs = saved ? JSON.parse(saved) : [];
-          } catch(e) {
-              UI.hiddenTabs = [];
-          }
-          UI.applyHiddenTabs();
-      },
-      
-      saveHiddenTabs: () => {
-          // Sauvegarder en localStorage (par utilisateur)
-          try {
-              localStorage.setItem(UI.getUIStorageKey('hiddenTabs'), JSON.stringify(UI.hiddenTabs));
-          } catch(e) {}
-      },
-      
-      saveHiddenCategories: () => {
-          // Sauvegarder en localStorage (par utilisateur)
-          try {
-              localStorage.setItem(UI.getUIStorageKey('hiddenCategories'), JSON.stringify(UI.hiddenCategories));
-          } catch(e) {}
-      },
-      
-      loadHiddenCategories: () => {
-          // Charger depuis localStorage (préférence utilisateur)
-          try {
-              const saved = localStorage.getItem(UI.getUIStorageKey('hiddenCategories'));
-              UI.hiddenCategories = saved ? JSON.parse(saved) : [];
-          } catch(e) {
-              UI.hiddenCategories = [];
-          }
-      },
-      
-      hideTab: (tabName) => {
-          if(UI.hiddenTabs.includes(tabName)) return;
-          
-          // Empêcher de masquer le dernier onglet visible
-          const allTabs = ['presentation', 'synopsis', 'board', 'titlepage', 'script', 'storyboard', 'chars', 'actors', 'locs', 'resources', 'crew', 'breakdown', 'stats', 'planning', 'expenses', 'chat'];
-          const visibleTabs = allTabs.filter(t => !UI.hiddenTabs.includes(t) && t !== tabName);
-          if(visibleTabs.length === 0) {
-              Utils.toast('Impossible de masquer tous les onglets !', 'warning');
-              return;
-          }
-          
-          UI.hiddenTabs.push(tabName);
-          
-          // Vérifier si tous les onglets d'une catégorie sont maintenant cachés
-          for(const [cat, tabs] of Object.entries(UI.categoryTabs)) {
-              const allTabsHidden = tabs.every(t => UI.hiddenTabs.includes(t));
-              if(allTabsHidden && !UI.hiddenCategories.includes(cat)) {
-                  UI.hiddenCategories.push(cat);
-              }
-          }
-          
-          UI.saveHiddenTabs();
-          UI.saveHiddenCategories();
-          UI.applyHiddenTabs();
-          UI.applyHiddenCategories();
-          
-          // Rafraîchir la sous-navigation en mode catégories
-          const navMode = (() => { try { return localStorage.getItem('fmp_nav_mode') || 'classic'; } catch(e) { return 'classic'; } })();
-          if(navMode === 'categories') {
-              if(UI.currentCategory) UI.switchCategory(UI.currentCategory);
-          }
-          
-          // Si l'onglet masqué était actif, basculer vers le premier visible
-          const activeTab = document.querySelector('.tab-btn.active');
-          if(activeTab && activeTab.getAttribute('data-tab') === tabName) {
-              UI.switchTab(visibleTabs[0]);
-          }
-          
-          Utils.toast('Onglet masqué', 'info');
-      },
-      
-      // === GESTION DES CATÉGORIES MASQUÉES ===
-      hideCategory: (category) => {
-          if(UI.hiddenCategories.includes(category)) return;
-          
-          // Empêcher de masquer la dernière catégorie
-          const allCategories = ['ecriture', 'casting', 'production', 'admin'];
-          const visibleCategories = allCategories.filter(c => !UI.hiddenCategories.includes(c) && c !== category);
-          if(visibleCategories.length === 0) {
-              Utils.toast('Impossible de masquer toutes les catégories !', 'warning');
-              return;
-          }
-          
-          UI.hiddenCategories.push(category);
-          
-          // Cacher aussi tous les onglets de cette catégorie (pour synchroniser avec vue classique)
-          const tabsInCategory = UI.categoryTabs[category] || [];
-          tabsInCategory.forEach(tab => {
-              if(!UI.hiddenTabs.includes(tab)) {
-                  UI.hiddenTabs.push(tab);
-              }
-          });
-          
-          UI.saveHiddenCategories();
-          UI.saveHiddenTabs();
-          UI.applyHiddenCategories();
-          UI.applyHiddenTabs();
-          
-          // Si la catégorie masquée était active, basculer vers la première visible
-          if(UI.currentCategory === category) {
-              UI.switchCategory(visibleCategories[0]);
-          }
-          
-          Utils.toast('Catégorie masquée', 'info');
-      },
-      
-      showCategory: (category) => {
-          UI.hiddenCategories = UI.hiddenCategories.filter(c => c !== category);
-          
-          // Restaurer aussi tous les onglets de cette catégorie
-          const tabsInCategory = UI.categoryTabs[category] || [];
-          UI.hiddenTabs = UI.hiddenTabs.filter(t => !tabsInCategory.includes(t));
-          
-          UI.saveHiddenCategories();
-          UI.saveHiddenTabs();
-          UI.applyHiddenCategories();
-          UI.applyHiddenTabs();
-          UI.switchCategory(category);
-          UI.closeHiddenCategoriesMenu();
-          Utils.toast('Catégorie restaurée', 'success');
-      },
-      
-      showAllHidden: () => {
-          UI.hiddenCategories = [];
-          UI.hiddenTabs = [];
-          UI.saveHiddenCategories();
-          UI.saveHiddenTabs();
-          UI.applyHiddenCategories();
-          UI.applyHiddenTabs();
-          if(UI.currentCategory) UI.switchCategory(UI.currentCategory);
-          UI.closeHiddenCategoriesMenu();
-          Utils.toast('Tous les éléments sont visibles', 'success');
-      },
-      
-      applyHiddenCategories: () => {
-          // Masquer/afficher les catégories
-          document.querySelectorAll('.tab-category[data-category]').forEach(cat => {
-              const catName = cat.getAttribute('data-category');
-              cat.style.display = UI.hiddenCategories.includes(catName) ? 'none' : '';
-          });
-          
-          // Mettre à jour le bouton des éléments masqués (catégories + onglets)
-          const toggle = document.getElementById('hiddenCategoriesToggle');
-          const countBadge = document.getElementById('hiddenCategoriesCount');
-          
-          if(toggle && countBadge) {
-              const totalHidden = UI.hiddenCategories.length + UI.hiddenTabs.length;
-              if(totalHidden > 0) {
-                  toggle.style.display = 'flex';
-                  countBadge.textContent = totalHidden;
-              } else {
-                  toggle.style.display = 'none';
-              }
-          }
-      },
-      
-      toggleHiddenCategoriesMenu: (event) => {
-          event.stopPropagation();
-          
-          const categoryLabels = {
-              'ecriture': '📝 Écriture',
-              'casting': '🎭 Casting & Décors',
-              'production': '🎬 Production',
-              'admin': '📊 Admin'
-          };
-          
-          const tabLabels = {
-              'presentation': 'Présentation', 'synopsis': 'Synopsis', 'board': 'Séquencier',
-              'titlepage': 'Titre', 'script': 'Scénario', 'storyboard': 'Storyboard', 'chars': 'Personnages',
-              'actors': 'Comédien.nes', 'locs': 'Décors', 'resources': 'Ressources', 'crew': 'Équipes',
-              'breakdown': 'Dépouillement', 'stats': 'Statistiques', 'planning': 'Planning',
-              'scriptreport': 'Rapport', 'expenses': 'Dépenses', 'chat': 'Chat'
-          };
-          
-          const hasHiddenCategories = UI.hiddenCategories.length > 0;
-          const hasHiddenTabs = UI.hiddenTabs.length > 0;
-          
-          if(!hasHiddenCategories && !hasHiddenTabs) return;
-          
-          // Créer ou récupérer le menu
-          let menu = document.getElementById('hiddenCategoriesMenu');
-          if(!menu) {
-              menu = document.createElement('div');
-              menu.id = 'hiddenCategoriesMenu';
-              menu.className = 'hidden-tabs-menu';
-              document.body.appendChild(menu);
-          }
-          
-          // Positionner le menu
-          const rect = event.target.getBoundingClientRect();
-          menu.style.left = Math.min(rect.left, window.innerWidth - 250) + 'px';
-          menu.style.top = (rect.bottom + 5) + 'px';
-          
-          // Générer le contenu
-          let menuHtml = `
-              <div class="hidden-tabs-menu-header">
-                  <span>Éléments masqués</span>
-                  <button onclick="app.UI.showAllHidden()">Tout afficher</button>
-              </div>
-              <div class="hidden-tabs-menu-list">
-          `;
-          
-          // Catégories masquées
-          if(hasHiddenCategories) {
-              menuHtml += `<div style="font-size:0.75rem; color:var(--text-sec); padding:8px 12px; border-bottom:1px solid var(--border);">📁 Catégories</div>`;
-              UI.hiddenCategories.forEach(catName => {
-                  menuHtml += `<div class="hidden-tabs-menu-item" onclick="app.UI.showCategory('${catName}')">
-                      <span>${categoryLabels[catName] || catName}</span>
-                      <span class="text-primary">+ Afficher</span>
-                  </div>`;
-              });
-          }
-          
-          // Onglets masqués
-          if(hasHiddenTabs) {
-              menuHtml += `<div style="font-size:0.75rem; color:var(--text-sec); padding:8px 12px; border-bottom:1px solid var(--border); ${hasHiddenCategories ? 'margin-top:5px;' : ''}">📑 Onglets</div>`;
-              UI.hiddenTabs.forEach(tabName => {
-                  menuHtml += `<div class="hidden-tabs-menu-item" onclick="app.UI.showTab('${tabName}')">
-                      <span>${tabLabels[tabName] || tabName}</span>
-                      <span class="text-primary">+ Afficher</span>
-                  </div>`;
-              });
-          }
-          
-          menuHtml += '</div>';
-          menu.innerHTML = menuHtml;
-          menu.classList.add('visible');
-          
-          // Fermer au clic ailleurs
-          setTimeout(() => {
-              document.addEventListener('click', UI.closeHiddenCategoriesMenu, { once: true });
-          }, 10);
-      },
-      
-      closeHiddenCategoriesMenu: () => {
-          const menu = document.getElementById('hiddenCategoriesMenu');
-          if(menu) menu.classList.remove('visible');
-      },
-      
-      showTab: (tabName) => {
-          UI.hiddenTabs = UI.hiddenTabs.filter(t => t !== tabName);
-          
-          // Restaurer la catégorie correspondante si elle était cachée
-          for(const [cat, tabs] of Object.entries(UI.categoryTabs)) {
-              if(tabs.includes(tabName) && UI.hiddenCategories.includes(cat)) {
-                  UI.hiddenCategories = UI.hiddenCategories.filter(c => c !== cat);
-              }
-          }
-          
-          UI.saveHiddenTabs();
-          UI.saveHiddenCategories();
-          UI.applyHiddenTabs();
-          UI.applyHiddenCategories();
-          UI.switchTab(tabName);
-          Utils.toast('Onglet restauré', 'success');
-      },
-      
-      showAllTabs: () => {
-          UI.hiddenTabs = [];
-          UI.hiddenCategories = [];
-          UI.saveHiddenTabs();
-          UI.saveHiddenCategories();
-          UI.applyHiddenTabs();
-          UI.applyHiddenCategories();
-          Utils.toast('Tous les onglets sont visibles', 'success');
-      },
-      
-      applyHiddenTabs: () => {
-          const tabLabels = {
-              'presentation': '1. PRÉSENTATION', 'synopsis': '2. SYNOPSIS', 'board': '3. SÉQUENCIER',
-              'titlepage': '4. TITRE', 'script': '5. SCÉNARIO', 'moodboard': '6. MOOD BOARD', 'storyboard': '7. STORYBOARD', 'chars': '8. PERSONNAGES',
-              'actors': '9. COMÉDIEN.NES', 'locs': '10. DÉCORS', 'resources': '11. RESSOURCES', 'crew': '12. ÉQUIPES',
-              'breakdown': '13. DÉPOUILLEMENT', 'stats': '14. STATISTIQUES', 'planning': '15. PLANNING',
-              'expenses': '16. DÉPENSES', 'chat': '17. CHAT'
-          };
-          
-          // Masquer/afficher les onglets
-          document.querySelectorAll('.tab-btn[data-tab]').forEach(tab => {
-              const tabName = tab.getAttribute('data-tab');
-              tab.style.display = UI.hiddenTabs.includes(tabName) ? 'none' : '';
-          });
-          
-          // Mettre à jour le bouton et le menu des onglets masqués
-          const toggle = document.getElementById('hiddenTabsToggle');
-          const countBadge = document.getElementById('hiddenTabsCount');
-          const menu = document.getElementById('hiddenTabsMenu');
-          
-          if(UI.hiddenTabs.length > 0) {
-              toggle.style.display = '';
-              countBadge.textContent = UI.hiddenTabs.length;
-              
-              // Générer le menu
-              let menuHtml = `
-                  <div class="hidden-tabs-menu-header">
-                      <span>Onglets masqués</span>
-                      <button onclick="app.UI.showAllTabs()">Tout afficher</button>
-                  </div>
-                  <div class="hidden-tabs-menu-list">
-              `;
-              UI.hiddenTabs.forEach(tabName => {
-                  menuHtml += `<div class="hidden-tabs-menu-item" onclick="app.UI.showTab('${tabName}')">
-                      <span>${tabLabels[tabName] || tabName}</span>
-                      <span style="color:var(--success);">↩</span>
-                  </div>`;
-              });
-              menuHtml += '</div>';
-              menu.innerHTML = menuHtml;
-          } else {
-              toggle.style.display = 'none';
-              menu.classList.remove('visible');
-          }
-          
-          // Synchroniser avec la vue catégories
-          const navMode = (() => { try { return localStorage.getItem('fmp_nav_mode') || 'classic'; } catch(e) { return 'classic'; } })();
-          if(navMode === 'categories' && UI.currentCategory) {
-              UI.switchCategory(UI.currentCategory);
-          }
-      },
-      
-      toggleHiddenTabsMenu: (event) => {
-          const menu = document.getElementById('hiddenTabsMenu');
-          
-          // Si déjà visible, fermer
-          if(menu.classList.contains('visible')) {
-              menu.classList.remove('visible');
-              return;
-          }
-          
-          // Positionner près du bouton cliqué
-          const rect = event.target.closest('.tab-btn-hidden-toggle').getBoundingClientRect();
-          menu.style.top = (rect.bottom + 5) + 'px';
-          menu.style.left = Math.min(rect.left, window.innerWidth - 240) + 'px';
-          
-          menu.classList.add('visible');
-          
-          // Fermer au clic extérieur
-          setTimeout(() => {
-              document.addEventListener('click', UI.closeHiddenTabsMenu);
-          }, 10);
-      },
-      
-      closeHiddenTabsMenu: (e) => {
-          const menu = document.getElementById('hiddenTabsMenu');
-          const toggle = document.getElementById('hiddenTabsToggle');
-          if(!menu.contains(e?.target) && !toggle.contains(e?.target)) {
-              menu.classList.remove('visible');
-              document.removeEventListener('click', UI.closeHiddenTabsMenu);
-          }
-      },
+// ===== ONGLETS/CATÉGORIES MASQUÉS — délégué à UIHidden =====
+      get hiddenTabs() { return UIHidden.hiddenTabs; },
+      set hiddenTabs(v) { UIHidden.hiddenTabs = v; },
+      get hiddenCategories() { return UIHidden.hiddenCategories; },
+      set hiddenCategories(v) { UIHidden.hiddenCategories = v; },
+      getUIStorageKey: (...a) => UIHidden.getUIStorageKey(...a),
+      initHiddenTabs: (...a) => UIHidden.initHiddenTabs(...a),
+      saveHiddenTabs: (...a) => UIHidden.saveHiddenTabs(...a),
+      saveHiddenCategories: (...a) => UIHidden.saveHiddenCategories(...a),
+      loadHiddenCategories: (...a) => UIHidden.loadHiddenCategories(...a),
+      hideTab: (...a) => UIHidden.hideTab(...a),
+      hideCategory: (...a) => UIHidden.hideCategory(...a),
+      showCategory: (...a) => UIHidden.showCategory(...a),
+      showAllHidden: (...a) => UIHidden.showAllHidden(...a),
+      applyHiddenCategories: (...a) => UIHidden.applyHiddenCategories(...a),
+      toggleHiddenCategoriesMenu: (...a) => UIHidden.toggleHiddenCategoriesMenu(...a),
+      closeHiddenCategoriesMenu: (...a) => UIHidden.closeHiddenCategoriesMenu(...a),
+      showTab: (...a) => UIHidden.showTab(...a),
+      showAllTabs: (...a) => UIHidden.showAllTabs(...a),
+      applyHiddenTabs: (...a) => UIHidden.applyHiddenTabs(...a),
+      toggleHiddenTabsMenu: (...a) => UIHidden.toggleHiddenTabsMenu(...a),
+      closeHiddenTabsMenu: (...a) => UIHidden.closeHiddenTabsMenu(...a),
 
       switchTab: (tabName) => { 
     // Persister pour F5
@@ -68733,7 +68758,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
