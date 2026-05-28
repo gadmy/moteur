@@ -6943,7 +6943,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.7.6</p>
+      <p>vv4.7.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -14922,6 +14922,290 @@ showDashboard: async () => {
       }
   };
 
+  // StoreRealtime — sous-module B.1.4 : écoute temps réel Supabase (DB changes, presence) + chargement
+  const StoreRealtime = {
+      startRealtimeListener: (id) => {
+          // Pas de realtime en mode fichier local
+          if(window.location.protocol === 'file:') return;
+          // Supabase Realtime - écouter les changements sur le projet
+          if(state.dbListener) {
+              supabase.removeChannel(state.dbListener);
+          }
+          
+          state.dbListener = supabase
+              .channel('project_' + id)
+              .on('postgres_changes', 
+                  { event: 'UPDATE', schema: 'public', table: 'projects', filter: 'id=eq.' + id },
+                  (payload) => {
+                      const val = payload.new.data;
+                      if(!val) return;
+                      state.data = { ...state.data, ...val };
+                      if(document.activeElement !== els.title) els.title.value = state.data.title;
+                      Synopsis.renderTree('synopsis');
+                      Synopsis.renderTree('short');
+                      Synopsis.renderTree('long');
+                      if(els.boardSynopsis) els.boardSynopsis.innerText = state.data.synopsis || "(Vide)";
+                      if(els.boardShort) els.boardShort.innerText = state.data.synopsisShort || "(Vide)";
+                      if(els.boardLong) els.boardLong.innerText = state.data.synopsisLong || "(Vide)";
+                      const activeId = document.activeElement && document.activeElement.closest('.script-row') ? parseInt(document.activeElement.closest('.script-row').dataset.id) : null;
+                      const activeContinuous = document.activeElement && document.activeElement.closest('.script-continuous-content');
+                      if(state.currentRole !== 'viewer') { 
+                          const activeTab = document.querySelector('.tab-content.active').id; 
+                          if(activeTab === 'tab-board') UI.renderBoard(); 
+                          if(activeTab === 'tab-script' && !activeId && !activeContinuous) UI.renderScript();
+                          if(activeTab === 'tab-stats') Stats.render();
+                          if(activeTab === 'tab-actors') UI.renderDataTab('actors', els.actorContainer);
+                      } else { UI.renderAll(); }
+                  }
+              )
+              .subscribe();
+      },
+      
+      loadFromSupabase: async (projectId) => {
+          const { data: project } = await supabase
+              .from('projects')
+              .select('data')
+              .eq('id', projectId)
+              .maybeSingle();
+          if(project && project.data) {
+              state.data = { ...state.data, ...project.data };
+              UI.renderAll();
+          }
+      },
+      initPresence: (id) => { 
+          // Pas de presence en mode fichier local
+          if(window.location.protocol === 'file:') return;
+          // Supabase Realtime Presence
+          const email = state.currentUser.email;
+          
+          if(state.presenceChannel) {
+              supabase.removeChannel(state.presenceChannel);
+          }
+          
+          state.presenceChannel = supabase.channel('presence_' + id, {
+              config: { presence: { key: email } }
+          });
+          
+          state.presenceChannel
+              .on('presence', { event: 'sync' }, () => {
+                  const presenceState = state.presenceChannel.presenceState();
+                  els.presenceList.innerHTML = '';
+                  
+                  Object.keys(presenceState).forEach(key => {
+                      const users = presenceState[key];
+                      users.forEach(u => {
+                          const userEmail = u.email || key;
+                          const initials = Utils.getInitials(userEmail);
+                          const bg = Utils.getColor(userEmail);
+                          const wrapper = document.createElement('div');
+                          wrapper.className = 'presence-avatar-wrapper';
+                          const roleInfo = StoreMigrations.getUserRoleInfo(userEmail);
+                          const personInfo = StoreMigrations.getPersonInfo(userEmail);
+                          if(roleInfo.class) wrapper.classList.add(roleInfo.class);
+                          const div = document.createElement('div');
+                          div.className = 'presence-avatar';
+                          div.style.backgroundColor = bg;
+                          div.innerText = initials;
+                          wrapper.appendChild(div);
+                          if(roleInfo.icon) {
+                              const badge = document.createElement('span');
+                              badge.className = 'role-icon';
+                              badge.innerText = roleInfo.icon;
+                              wrapper.appendChild(badge);
+                          }
+                          if(roleInfo.extraRoles && roleInfo.extraRoles.length > 0) {
+                              roleInfo.extraRoles.forEach((r, idx) => {
+                                  const extraBadge = document.createElement('span');
+                                  extraBadge.className = 'role-icon extra-role';
+                                  extraBadge.style.right = (-2 + (idx + 1) * 12) + 'px';
+                                  extraBadge.innerText = r.icon;
+                                  wrapper.appendChild(extraBadge);
+                              });
+                          }
+                          const tooltip = document.createElement('div');
+                          tooltip.className = 'avatar-tooltip';
+                          let tooltipHtml = '<div class="avatar-tooltip-name">' + Utils.escape(personInfo.name || userEmail.split('@')[0]) + '</div>';
+                          if(roleInfo.text) tooltipHtml += '<div class="avatar-tooltip-role">' + Utils.escape(roleInfo.text) + '</div>';
+                          if(roleInfo.extraRoles && roleInfo.extraRoles.length > 0) {
+                              roleInfo.extraRoles.forEach(r => {
+                                  tooltipHtml += '<div class="avatar-tooltip-role">' + r.icon + ' ' + Utils.escape(r.name) + '</div>';
+                              });
+                          }
+                          tooltip.innerHTML = tooltipHtml;
+                          wrapper.appendChild(tooltip);
+                          els.presenceList.innerHTML = '';
+                          els.presenceList.appendChild(wrapper);
+                      });
+                  });
+              })
+              .subscribe(async (status) => {
+                  if (status === 'SUBSCRIBED') {
+                      await state.presenceChannel.track({ email: email, time: Date.now() });
+                  }
+              });
+      }
+  };
+
+  // StoreSave — sous-module B.1.5 : sauvegarde Supabase avec retry exponentiel + debounce + flush
+  const StoreSave = {
+      save: async () => { 
+          if(!state.currentProjectId || !state.currentUser || state.currentRole === 'viewer') return;
+          
+          // Verrou anti-concurrence : si un save est déjà en cours, on note la demande et on sortira
+          // Quand le save courant se termine, on relance automatiquement (cf. fin de la fonction)
+          if(state.savingInProgress) {
+              state.pendingSave = true;
+              return;
+          }
+          
+          // Marquer qu'une sauvegarde est en cours
+          state.savingInProgress = true; 
+          
+          // [Phase D] Snapshots auto désactivés : remplacés par le journal d'actions enrichi
+          
+          const syncIndicator = document.getElementById('sync-indicator');
+          
+          StoreMigrations.migrateBreakdownKeys();
+          StoreMigrations.migrateShootingDays(); 
+          
+          // Nettoyer les valeurs undefined (Postgres n'accepte pas undefined)
+          const cleanData = JSON.parse(JSON.stringify(state.data, (key, value) => value === undefined ? null : value));
+          
+          const id = state.currentProjectId; 
+          
+          // Tentatives avec retry exponentiel : 1ère immédiate, puis attente 1s, puis 3s
+          // Une erreur réseau / 5xx / timeout déclenche un retry. Une erreur métier (RLS, schéma) ne retry pas.
+          const maxAttempts = 3;
+          let lastError = null;
+          let attempt = 0;
+          let success = false;
+          
+          while(attempt < maxAttempts && !success) {
+              attempt++;
+              
+              // Afficher l'indicateur de tentative
+              if(syncIndicator) {
+                  syncIndicator.textContent = attempt === 1 ? '🔄' : `🔄${attempt}`;
+                  syncIndicator.style.opacity = '1';
+                  syncIndicator.title = attempt === 1 ? 'Sauvegarde…' : `Nouvelle tentative (${attempt}/${maxAttempts})…`;
+              }
+              
+              try {
+                  const { error } = await supabase
+                      .from('projects')
+                      .update({ 
+                          data: cleanData,
+                          title: state.data.title,
+                          updated_at: new Date().toISOString()
+                      })
+                      .eq('id', id);
+                  
+                  if(!error) { success = true; break; }
+                  
+                  // Erreur Supabase : on regarde si c'est récupérable (réseau/timeout/5xx) ou pas (auth/RLS)
+                  lastError = error;
+                  const isTransient = !error.code || /^5\d\d$/.test(String(error.code)) || /network|fetch|timeout/i.test(error.message || '');
+                  if(!isTransient) break; // erreur métier : pas la peine de retenter
+              } catch(e) {
+                  // Exception réseau (TypeError: NetworkError) : retry
+                  lastError = { message: e.message || 'Erreur réseau' };
+              }
+              
+              // Attendre avant retry (sauf si dernière tentative)
+              if(attempt < maxAttempts) {
+                  const delayMs = attempt === 1 ? 1000 : 3000;
+                  await new Promise(resolve => setTimeout(resolve, delayMs));
+              }
+          }
+          
+          if(!success) {
+              console.error('Erreur sauvegarde après', attempt, 'tentatives:', lastError);
+              Utils.toast(`Erreur de sauvegarde après ${attempt} tentatives. Vérifiez votre connexion.`, 'error');
+              if(syncIndicator) {
+                  syncIndicator.textContent = '❌';
+                  syncIndicator.title = 'Échec de la sauvegarde';
+                  setTimeout(() => {
+                      syncIndicator.textContent = '☁️';
+                      syncIndicator.style.opacity = '0.4';
+                      syncIndicator.title = '';
+                  }, 4000);
+              }
+              state.savingInProgress = false;
+              // Si une nouvelle demande arrive après l'échec, on tentera quand même
+              if(state.pendingSave) {
+                  state.pendingSave = false;
+                  setTimeout(() => StoreSave.save(), 5000); // retry après 5s
+              }
+              return;
+          }
+          
+          // Indicateur de sync : terminé (avec mention du retry si applicable)
+          if(syncIndicator) {
+              syncIndicator.textContent = '✅';
+              syncIndicator.title = attempt > 1 ? `Sauvegardé (après ${attempt} tentatives)` : 'Sauvegardé';
+              setTimeout(() => {
+                  syncIndicator.textContent = '☁️';
+                  syncIndicator.style.opacity = '0.4';
+                  syncIndicator.title = '';
+              }, 2000);
+          }
+          
+          // Marquer que la sauvegarde est terminée
+          state.savingInProgress = false;
+          
+          // Notifier les autres onglets de la modification
+          if(typeof SessionManager !== 'undefined') {
+              SessionManager.notifyDataUpdate();
+          }
+          
+          // Verrou anti-concurrence : si une demande de save a eu lieu pendant qu'on sauvegardait,
+          // on relance maintenant pour ne pas perdre la modif
+          if(state.pendingSave) {
+              state.pendingSave = false;
+              StoreSave.save();
+          }
+      },
+      
+      // Debounce timer pour saveDebounced
+      _saveDebounceTimer: null,
+      _saveDebounceWait: 800, // ms
+      
+      // saveDebounced : à utiliser pour les modifs en rafales (saisies texte, cases à cocher, drag…)
+      // Au lieu d'envoyer une requête à chaque modif, on attend 800ms d'inactivité avant d'envoyer la dernière version.
+      // Pour les actions "définitives" (suppression, validation modale, fin d'édition), continuer à utiliser Store.save().
+      saveDebounced: () => {
+          if(StoreSave._saveDebounceTimer) clearTimeout(StoreSave._saveDebounceTimer);
+          // Indicateur visuel "en attente" : opacity réduite
+          const syncIndicator = document.getElementById('sync-indicator');
+          if(syncIndicator) {
+              syncIndicator.textContent = '⏱️';
+              syncIndicator.style.opacity = '0.6';
+              syncIndicator.title = 'Sauvegarde différée…';
+          }
+          StoreSave._saveDebounceTimer = setTimeout(() => {
+              StoreSave._saveDebounceTimer = null;
+              StoreSave.save();
+          }, StoreSave._saveDebounceWait);
+      },
+      
+      // saveFlush : force un flush immédiat des modifs debouncées en attente
+      // À appeler avant des actions critiques (changement de projet, déconnexion, fermeture page).
+      saveFlush: () => {
+          if(StoreSave._saveDebounceTimer) {
+              clearTimeout(StoreSave._saveDebounceTimer);
+              StoreSave._saveDebounceTimer = null;
+              return StoreSave.save();
+          }
+          return Promise.resolve();
+      }
+  };
+
+  // ====================================================================
+  // Store — module CŒUR : cycle de vie projet (création/chargement/suppression/dashboard).
+  // Sous-modules spécialisés (B.1) : StoreMigrations, StoreUpdates, StoreLocks,
+  // StoreRealtime, StoreSave. Store conserve des délégations rétrocompatibles vers eux,
+  // donc le reste du code continue d'appeler Store.save(), Store.acquireLock(), etc.
+  // ====================================================================
   const Store = {
       // V62: Initialisation du tableau snapshots
       getEmpty: () => ({ title: "Nouveau Film", filmId: 'film_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11), synopsis: "", synopsisShort: "", synopsisLong: "", scriptMeta: { author: "", coAuthor: "", contact: "", copyright: "", draft: "Premier jet", draftDate: "", source: "", notes: "" }, snapshots: [], scenes: [], characters: [], actors: [], locations: [], resources: [], crew: [], shootingDays: [], tags: CONFIG.defaultTags, groups: [...CONFIG.defaultGroups, ...CONFIG.crewGroups], shots: [], counter: 1, uiConfig: { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [] }, budget: { total: 0, currency: '€', manager: '', managerEmailNotif: true, envelopes: {}, deptManagers: {} }, expenses: [], presentation: { title: '', genre: '', format: '', duration: '', productionType: '', description: '', team: [], associations: [], enterprises: [], needsCrew: {}, needsActors: [], image: '' }, memberPermissions: {}, chatChannels: [], chatExtraMembers: [], workplanOverrides: {}, scriptReports: {}, episodes: [], seasons: [] }),
@@ -15590,126 +15874,10 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               setTimeout(() => { try { ActiveProfile.renderAllSelectors(); } catch(e){} }, 100);
           } catch(e) { LoadingScreen.hide(); Utils.toast("Erreur: " + e.message, "error"); console.error(e); UI.showDashboard(); }
       },
-      startRealtimeListener: (id) => {
-          // Pas de realtime en mode fichier local
-          if(window.location.protocol === 'file:') return;
-          // Supabase Realtime - écouter les changements sur le projet
-          if(state.dbListener) {
-              supabase.removeChannel(state.dbListener);
-          }
-          
-          state.dbListener = supabase
-              .channel('project_' + id)
-              .on('postgres_changes', 
-                  { event: 'UPDATE', schema: 'public', table: 'projects', filter: 'id=eq.' + id },
-                  (payload) => {
-                      const val = payload.new.data;
-                      if(!val) return;
-                      state.data = { ...state.data, ...val };
-                      if(document.activeElement !== els.title) els.title.value = state.data.title;
-                      Synopsis.renderTree('synopsis');
-                      Synopsis.renderTree('short');
-                      Synopsis.renderTree('long');
-                      if(els.boardSynopsis) els.boardSynopsis.innerText = state.data.synopsis || "(Vide)";
-                      if(els.boardShort) els.boardShort.innerText = state.data.synopsisShort || "(Vide)";
-                      if(els.boardLong) els.boardLong.innerText = state.data.synopsisLong || "(Vide)";
-                      const activeId = document.activeElement && document.activeElement.closest('.script-row') ? parseInt(document.activeElement.closest('.script-row').dataset.id) : null;
-                      const activeContinuous = document.activeElement && document.activeElement.closest('.script-continuous-content');
-                      if(state.currentRole !== 'viewer') { 
-                          const activeTab = document.querySelector('.tab-content.active').id; 
-                          if(activeTab === 'tab-board') UI.renderBoard(); 
-                          if(activeTab === 'tab-script' && !activeId && !activeContinuous) UI.renderScript();
-                          if(activeTab === 'tab-stats') Stats.render();
-                          if(activeTab === 'tab-actors') UI.renderDataTab('actors', els.actorContainer);
-                      } else { UI.renderAll(); }
-                  }
-              )
-              .subscribe();
-      },
-      
-      loadFromSupabase: async (projectId) => {
-          const { data: project } = await supabase
-              .from('projects')
-              .select('data')
-              .eq('id', projectId)
-              .maybeSingle();
-          if(project && project.data) {
-              state.data = { ...state.data, ...project.data };
-              UI.renderAll();
-          }
-      },
-      initPresence: (id) => { 
-          // Pas de presence en mode fichier local
-          if(window.location.protocol === 'file:') return;
-          // Supabase Realtime Presence
-          const email = state.currentUser.email;
-          
-          if(state.presenceChannel) {
-              supabase.removeChannel(state.presenceChannel);
-          }
-          
-          state.presenceChannel = supabase.channel('presence_' + id, {
-              config: { presence: { key: email } }
-          });
-          
-          state.presenceChannel
-              .on('presence', { event: 'sync' }, () => {
-                  const presenceState = state.presenceChannel.presenceState();
-                  els.presenceList.innerHTML = '';
-                  
-                  Object.keys(presenceState).forEach(key => {
-                      const users = presenceState[key];
-                      users.forEach(u => {
-                          const userEmail = u.email || key;
-                          const initials = Utils.getInitials(userEmail);
-                          const bg = Utils.getColor(userEmail);
-                          const wrapper = document.createElement('div');
-                          wrapper.className = 'presence-avatar-wrapper';
-                          const roleInfo = Store.getUserRoleInfo(userEmail);
-                          const personInfo = Store.getPersonInfo(userEmail);
-                          if(roleInfo.class) wrapper.classList.add(roleInfo.class);
-                          const div = document.createElement('div');
-                          div.className = 'presence-avatar';
-                          div.style.backgroundColor = bg;
-                          div.innerText = initials;
-                          wrapper.appendChild(div);
-                          if(roleInfo.icon) {
-                              const badge = document.createElement('span');
-                              badge.className = 'role-icon';
-                              badge.innerText = roleInfo.icon;
-                              wrapper.appendChild(badge);
-                          }
-                          if(roleInfo.extraRoles && roleInfo.extraRoles.length > 0) {
-                              roleInfo.extraRoles.forEach((r, idx) => {
-                                  const extraBadge = document.createElement('span');
-                                  extraBadge.className = 'role-icon extra-role';
-                                  extraBadge.style.right = (-2 + (idx + 1) * 12) + 'px';
-                                  extraBadge.innerText = r.icon;
-                                  wrapper.appendChild(extraBadge);
-                              });
-                          }
-                          const tooltip = document.createElement('div');
-                          tooltip.className = 'avatar-tooltip';
-                          let tooltipHtml = '<div class="avatar-tooltip-name">' + Utils.escape(personInfo.name || userEmail.split('@')[0]) + '</div>';
-                          if(roleInfo.text) tooltipHtml += '<div class="avatar-tooltip-role">' + Utils.escape(roleInfo.text) + '</div>';
-                          if(roleInfo.extraRoles && roleInfo.extraRoles.length > 0) {
-                              roleInfo.extraRoles.forEach(r => {
-                                  tooltipHtml += '<div class="avatar-tooltip-role">' + r.icon + ' ' + Utils.escape(r.name) + '</div>';
-                              });
-                          }
-                          tooltip.innerHTML = tooltipHtml;
-                          wrapper.appendChild(tooltip);
-                          els.presenceList.innerHTML = '';
-                          els.presenceList.appendChild(wrapper);
-                      });
-                  });
-              })
-              .subscribe(async (status) => {
-                  if (status === 'SUBSCRIBED') {
-                      await state.presenceChannel.track({ email: email, time: Date.now() });
-                  }
-              });
-      },
+      // ========== TEMPS RÉEL & CHARGEMENT (B.1.4 → StoreRealtime) ==========
+      startRealtimeListener: (id) => StoreRealtime.startRealtimeListener(id),
+      loadFromSupabase: (projectId) => StoreRealtime.loadFromSupabase(projectId),
+      initPresence: (id) => StoreRealtime.initPresence(id),
       // ========== HELPERS IDENTITÉ (B.1.1 → StoreMigrations) ==========
       getPersonInfo: (email) => StoreMigrations.getPersonInfo(email),
       getUserRoleInfo: (email) => StoreMigrations.getUserRoleInfo(email),
@@ -15726,123 +15894,8 @@ CONFIG.crewGroups.forEach(defaultGrp => {
       // ========== MIGRATIONS DE DONNÉES (B.1.1 → StoreMigrations) ==========
       migrateShootingDays: () => StoreMigrations.migrateShootingDays(),
       migrateBreakdownKeys: () => StoreMigrations.migrateBreakdownKeys(),
-      save: async () => { 
-          if(!state.currentProjectId || !state.currentUser || state.currentRole === 'viewer') return;
-          
-          // Verrou anti-concurrence : si un save est déjà en cours, on note la demande et on sortira
-          // Quand le save courant se termine, on relance automatiquement (cf. fin de la fonction)
-          if(state.savingInProgress) {
-              state.pendingSave = true;
-              return;
-          }
-          
-          // Marquer qu'une sauvegarde est en cours
-          state.savingInProgress = true; 
-          
-          // [Phase D] Snapshots auto désactivés : remplacés par le journal d'actions enrichi
-          
-          const syncIndicator = document.getElementById('sync-indicator');
-          
-          Store.migrateBreakdownKeys();
-          Store.migrateShootingDays(); 
-          
-          // Nettoyer les valeurs undefined (Postgres n'accepte pas undefined)
-          const cleanData = JSON.parse(JSON.stringify(state.data, (key, value) => value === undefined ? null : value));
-          
-          const id = state.currentProjectId; 
-          
-          // Tentatives avec retry exponentiel : 1ère immédiate, puis attente 1s, puis 3s
-          // Une erreur réseau / 5xx / timeout déclenche un retry. Une erreur métier (RLS, schéma) ne retry pas.
-          const maxAttempts = 3;
-          let lastError = null;
-          let attempt = 0;
-          let success = false;
-          
-          while(attempt < maxAttempts && !success) {
-              attempt++;
-              
-              // Afficher l'indicateur de tentative
-              if(syncIndicator) {
-                  syncIndicator.textContent = attempt === 1 ? '🔄' : `🔄${attempt}`;
-                  syncIndicator.style.opacity = '1';
-                  syncIndicator.title = attempt === 1 ? 'Sauvegarde…' : `Nouvelle tentative (${attempt}/${maxAttempts})…`;
-              }
-              
-              try {
-                  const { error } = await supabase
-                      .from('projects')
-                      .update({ 
-                          data: cleanData,
-                          title: state.data.title,
-                          updated_at: new Date().toISOString()
-                      })
-                      .eq('id', id);
-                  
-                  if(!error) { success = true; break; }
-                  
-                  // Erreur Supabase : on regarde si c'est récupérable (réseau/timeout/5xx) ou pas (auth/RLS)
-                  lastError = error;
-                  const isTransient = !error.code || /^5\d\d$/.test(String(error.code)) || /network|fetch|timeout/i.test(error.message || '');
-                  if(!isTransient) break; // erreur métier : pas la peine de retenter
-              } catch(e) {
-                  // Exception réseau (TypeError: NetworkError) : retry
-                  lastError = { message: e.message || 'Erreur réseau' };
-              }
-              
-              // Attendre avant retry (sauf si dernière tentative)
-              if(attempt < maxAttempts) {
-                  const delayMs = attempt === 1 ? 1000 : 3000;
-                  await new Promise(resolve => setTimeout(resolve, delayMs));
-              }
-          }
-          
-          if(!success) {
-              console.error('Erreur sauvegarde après', attempt, 'tentatives:', lastError);
-              Utils.toast(`Erreur de sauvegarde après ${attempt} tentatives. Vérifiez votre connexion.`, 'error');
-              if(syncIndicator) {
-                  syncIndicator.textContent = '❌';
-                  syncIndicator.title = 'Échec de la sauvegarde';
-                  setTimeout(() => {
-                      syncIndicator.textContent = '☁️';
-                      syncIndicator.style.opacity = '0.4';
-                      syncIndicator.title = '';
-                  }, 4000);
-              }
-              state.savingInProgress = false;
-              // Si une nouvelle demande arrive après l'échec, on tentera quand même
-              if(state.pendingSave) {
-                  state.pendingSave = false;
-                  setTimeout(() => Store.save(), 5000); // retry après 5s
-              }
-              return;
-          }
-          
-          // Indicateur de sync : terminé (avec mention du retry si applicable)
-          if(syncIndicator) {
-              syncIndicator.textContent = '✅';
-              syncIndicator.title = attempt > 1 ? `Sauvegardé (après ${attempt} tentatives)` : 'Sauvegardé';
-              setTimeout(() => {
-                  syncIndicator.textContent = '☁️';
-                  syncIndicator.style.opacity = '0.4';
-                  syncIndicator.title = '';
-              }, 2000);
-          }
-          
-          // Marquer que la sauvegarde est terminée
-          state.savingInProgress = false;
-          
-          // Notifier les autres onglets de la modification
-          if(typeof SessionManager !== 'undefined') {
-              SessionManager.notifyDataUpdate();
-          }
-          
-          // Verrou anti-concurrence : si une demande de save a eu lieu pendant qu'on sauvegardait,
-          // on relance maintenant pour ne pas perdre la modif
-          if(state.pendingSave) {
-              state.pendingSave = false;
-              Store.save();
-          }
-      },
+      // ========== SAUVEGARDE (B.1.5 → StoreSave) ==========
+      save: () => StoreSave.save(),
       deleteProject: async (id, role, e) => { 
           if(e) e.stopPropagation(); 
           if(role === 'viewer') return; 
@@ -15856,38 +15909,9 @@ CONFIG.crewGroups.forEach(defaultGrp => {
       clearCurrent: async () => { if(state.currentRole === 'viewer') return; if(await ConfirmModal.confirmDelete("Toutes les données du projet seront effacées.", "Vider tout ?")){ state.data = Store.getEmpty(); Store.save(); UI.renderAll(); } },
       importJSON: (e) => { if(state.currentRole === 'viewer') return; const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>{ try{ state.data = JSON.parse(ev.target.result); Store.save(); UI.renderAll(); UI.switchTab('synopsis'); Utils.toast('Import réussi !', 'success'); } catch(x){ Utils.toast('Erreur fichier.', 'error'); } }; r.readAsText(f); e.target.value=''; },
       
-      // Debounce timer pour saveDebounced
-      _saveDebounceTimer: null,
-      _saveDebounceWait: 800, // ms
-      
-      // saveDebounced : à utiliser pour les modifs en rafales (saisies texte, cases à cocher, drag…)
-      // Au lieu d'envoyer une requête à chaque modif, on attend 800ms d'inactivité avant d'envoyer la dernière version.
-      // Pour les actions "définitives" (suppression, validation modale, fin d'édition), continuer à utiliser Store.save().
-      saveDebounced: () => {
-          if(Store._saveDebounceTimer) clearTimeout(Store._saveDebounceTimer);
-          // Indicateur visuel "en attente" : opacity réduite
-          const syncIndicator = document.getElementById('sync-indicator');
-          if(syncIndicator) {
-              syncIndicator.textContent = '⏱️';
-              syncIndicator.style.opacity = '0.6';
-              syncIndicator.title = 'Sauvegarde différée…';
-          }
-          Store._saveDebounceTimer = setTimeout(() => {
-              Store._saveDebounceTimer = null;
-              Store.save();
-          }, Store._saveDebounceWait);
-      },
-      
-      // saveFlush : force un flush immédiat des modifs debouncées en attente
-      // À appeler avant des actions critiques (changement de projet, déconnexion, fermeture page).
-      saveFlush: () => {
-          if(Store._saveDebounceTimer) {
-              clearTimeout(Store._saveDebounceTimer);
-              Store._saveDebounceTimer = null;
-              return Store.save();
-          }
-          return Promise.resolve();
-      }
+      // saveDebounced / saveFlush (B.1.5 → StoreSave)
+      saveDebounced: () => StoreSave.saveDebounced(),
+      saveFlush: () => StoreSave.saveFlush()
   };
   
   // ==================== MODULE ICONS ====================
@@ -68609,7 +68633,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
