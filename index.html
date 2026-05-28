@@ -6992,7 +6992,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.8.3</p>
+      <p>vv4.8.4</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -17648,6 +17648,535 @@ openBoardPrintEpisodeChooser: () => {
     },
   };
 
+  const UICategories = {
+    // Mode de navigation (classique ou catégories)
+    currentCategory: 'ecriture',
+    categoryTabs: {
+        ecriture: ['seasons', 'episodes', 'synopsis', 'board', 'titlepage', 'script', 'moodboard', 'storyboard'],
+        casting: ['chars', 'actors', 'locs', 'resources'],
+        production: ['presentation', 'crew', 'breakdown', 'planning', 'scriptreport'],
+        admin: ['stats', 'expenses', 'chat']
+    },
+    categoryLabels: {
+        ecriture: { seasons: '📺 Saisons', episodes: '🎬 Épisodes', synopsis: 'Synopsis', board: 'Séquencier', titlepage: 'Titre', script: 'Scénario', moodboard: 'Mood Board', storyboard: 'Storyboard' },
+        casting: { chars: 'Personnages', actors: 'Comédien.nes', locs: 'Décors', resources: 'Ressources' },
+        production: { presentation: 'Présentation', crew: 'Équipes', breakdown: 'Dépouillement', planning: 'Planning', scriptreport: 'Rapport' },
+        admin: { stats: 'Statistiques', expenses: 'Dépenses', chat: 'Chat' }
+    },
+    
+    setNavMode: (mode, init = false) => {
+        const tabsNav = document.getElementById('tabsNav');
+        const tabsCategories = document.getElementById('tabsCategories');
+        const tabsSubnav = document.getElementById('tabsSubnav');
+        const classicOptions = document.getElementById('classic-mode-options');
+        
+        if(mode === 'categories') {
+            tabsNav.classList.add('hidden-by-categories');
+            tabsCategories.classList.add('active');
+            tabsSubnav.classList.add('active');
+            if(classicOptions) classicOptions.style.display = 'none';
+            if(!init) UICategories.switchCategory(UICategories.currentCategory);
+        } else {
+            tabsNav.classList.remove('hidden-by-categories');
+            tabsCategories.classList.remove('active');
+            tabsSubnav.classList.remove('active');
+            if(classicOptions) classicOptions.style.display = '';
+        }
+        PreferencesSync.save('fmp_nav_mode', mode);
+        
+        // Rafraîchir le bouton "Masqués" pour synchroniser entre les vues
+        UI.applyHiddenTabs();
+    },
+    
+    switchCategory: (category) => {
+        UICategories.currentCategory = category;
+        // Persister pour F5
+        try { NavMemory.setTab(category, localStorage.getItem(NavMemory.KEY_SUBTAB)); } catch(e) {}
+        
+        // Mettre à jour les boutons catégorie
+        document.querySelectorAll('.tab-category').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.category === category);
+        });
+        
+        // Mettre à jour la sous-navigation
+        const subnav = document.getElementById('tabsSubnav');
+        const tabs = UICategories.categoryTabs[category] || [];
+        const labels = UICategories.categoryLabels[category] || {};
+        
+        // Filtrer les onglets masqués
+        let visibleTabs = tabs.filter(t => !UI.hiddenTabs.includes(t));
+        
+        // Phase S3.4 + S7.3 : masquer 'episodes' et 'seasons' si ce n'est pas une série
+        const isSeries = state.currentProjectType === 'series';
+        if(!isSeries) {
+            visibleTabs = visibleTabs.filter(t => t !== 'episodes' && t !== 'seasons');
+        }
+        
+        const hiddenInCategory = tabs.filter(t => UI.hiddenTabs.includes(t));
+        
+        let subnavHtml = visibleTabs.map(tab => {
+            const isActive = document.getElementById('tab-' + tab)?.classList.contains('active');
+            return `<button class="tab-subbtn${isActive ? ' active' : ''}" draggable="true" data-tab="${tab}" onclick="app.UI.switchTab('${tab}')">${labels[tab] || tab}<span class="tab-close" onclick="event.stopPropagation(); app.UI.hideTab('${tab}')" title="Masquer cet onglet">×</span></button>`;
+        }).join('');
+        
+        subnav.innerHTML = subnavHtml;
+        subnav.dataset.category = category;
+        
+        // Afficher la subnav temporairement après un changement de catégorie
+        subnav.classList.add('force-visible');
+        clearTimeout(UI._subnavTimer);
+        UI._subnavTimer = setTimeout(() => subnav.classList.remove('force-visible'), 2000);
+        
+        // Réappliquer les couleurs sauvegardées sur les sous-onglets (depuis le projet)
+        const subColors = state.data?.uiConfig?.subColors || {};
+        Object.keys(subColors).forEach(tabName => {
+            const tab = subnav.querySelector(`.tab-subbtn[data-tab="${tabName}"]`);
+            if(tab) {
+                tab.style.background = subColors[tabName];
+                tab.style.color = '#ffffff';
+                tab.style.borderRadius = '6px 6px 0 0';
+            }
+        });
+        
+        // Réattacher les événements contextmenu
+        UICategories.initSubnavContextMenu();
+        
+        // Si aucun onglet visible de cette catégorie n'est actif, activer le premier visible
+        const activeInCategory = visibleTabs.some(tab => document.getElementById('tab-' + tab)?.classList.contains('active'));
+        if(!activeInCategory && visibleTabs.length > 0) {
+            UI.switchTab(visibleTabs[0]);
+        }
+        
+        try { localStorage.setItem('fmp_current_category', category); } catch(e) {}
+    },
+    
+    // Trouver la catégorie d'un onglet
+    getCategoryForTab: (tabName) => {
+        for(const [cat, tabs] of Object.entries(UICategories.categoryTabs)) {
+            if(tabs.includes(tabName)) return cat;
+        }
+        return 'ecriture';
+    },
+    
+    // Couleur des onglets (clic droit)
+    currentTabTarget: null,
+    
+    openTabColorMenu: (e, tab) => {
+        e.preventDefault();
+        UICategories.currentTabTarget = tab;
+        UI.currentTabType = tab.classList.contains('tab-category') ? 'category' : 
+                            tab.classList.contains('tab-subbtn') ? 'subbtn' : 'classic';
+        const menu = document.getElementById('tab-color-menu');
+        menu.classList.add('visible');
+        
+        // Calculer la position pour ne pas sortir de l'écran
+        const menuRect = menu.getBoundingClientRect();
+        const viewportW = window.innerWidth;
+        const viewportH = window.innerHeight;
+        
+        let left = e.clientX;
+        let top = e.clientY;
+        
+        // Ajuster si le menu sort à droite
+        if(left + menuRect.width > viewportW - 10) {
+            left = viewportW - menuRect.width - 10;
+        }
+        // Ajuster si le menu sort en bas
+        if(top + menuRect.height > viewportH - 10) {
+            top = viewportH - menuRect.height - 10;
+        }
+        // Ne pas sortir à gauche ou en haut
+        if(left < 10) left = 10;
+        if(top < 10) top = 10;
+        
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+    },
+    
+    closeTabColorMenu: () => {
+        const menu = document.getElementById('tab-color-menu');
+        menu.classList.remove('visible');
+        UICategories.currentTabTarget = null;
+    },
+    
+    setTabColor: (color) => {
+        if(UICategories.currentTabTarget) {
+            const tabName = UICategories.currentTabTarget.getAttribute('data-tab') || UICategories.currentTabTarget.getAttribute('data-category');
+            const isCategory = UI.currentTabType === 'category';
+            
+            // Initialiser uiConfig si nécessaire
+            if(!state.data.uiConfig) state.data.uiConfig = { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [] };
+            if(!state.data.uiConfig.tabColors) state.data.uiConfig.tabColors = {};
+            if(!state.data.uiConfig.subColors) state.data.uiConfig.subColors = {};
+            if(!state.data.uiConfig.categoryColors) state.data.uiConfig.categoryColors = {};
+            
+            // Appliquer le style visuellement
+            const applyStyle = (el, col) => {
+                if(col) {
+                    el.style.background = col;
+                    el.style.color = '#ffffff';
+                    el.style.borderRadius = '6px 6px 0 0';
+                } else {
+                    el.style.background = '';
+                    el.style.color = '';
+                    el.style.borderRadius = '';
+                }
+            };
+            
+            applyStyle(UICategories.currentTabTarget, color);
+            
+            if(isCategory) {
+                // C'est une catégorie - sauvegarder dans categoryColors
+                if(color) {
+                    state.data.uiConfig.categoryColors[tabName] = color;
+                } else {
+                    delete state.data.uiConfig.categoryColors[tabName];
+                }
+            } else {
+                // C'est un onglet - synchroniser tabColors ET subColors
+                if(color) {
+                    state.data.uiConfig.tabColors[tabName] = color;
+                    state.data.uiConfig.subColors[tabName] = color;
+                } else {
+                    delete state.data.uiConfig.tabColors[tabName];
+                    delete state.data.uiConfig.subColors[tabName];
+                }
+                // Appliquer aussi à l'équivalent dans l'autre vue
+                const classicTab = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+                const subTab = document.querySelector(`.tab-subbtn[data-tab="${tabName}"]`);
+                if(classicTab) applyStyle(classicTab, color);
+                if(subTab) applyStyle(subTab, color);
+            }
+            Store.save();
+        }
+        UICategories.closeTabColorMenu();
+    },
+    
+    openTabHelp: () => {
+        const tabToHelp = {
+            'presentation': 'dashboard',
+            'synopsis': 'scenario',
+            'board': 'sequencier',
+            'script': 'scenario',
+            'storyboard': 'storyboard',
+            'chars': 'equipe',
+            'locs': 'breakdown',
+            'actors': 'equipe',
+            'crew': 'equipe',
+            'breakdown': 'breakdown',
+            'planning': 'planning',
+            'expenses': 'depenses',
+            'budget': 'depenses',
+            'chat': 'collaboration'
+        };
+        if(UICategories.currentTabTarget) {
+            const tabName = UICategories.currentTabTarget.getAttribute('data-tab');
+            UICategories.closeTabColorMenu();
+            // Ouvrir l'aide contextuelle pour cet onglet
+            if(Tutorial.helpTexts[tabName]) {
+                const rect = UICategories.currentTabTarget.getBoundingClientRect();
+                Tutorial.showHelp(tabName, { target: UICategories.currentTabTarget, stopPropagation: () => {} });
+            } else {
+                Tutorial.open();
+            }
+        }
+    },
+    
+    loadTabColors: () => {
+        // Réinitialiser tous les styles d'abord
+        document.querySelectorAll('.tab-btn, .tab-category, .tab-subbtn').forEach(tab => {
+            tab.style.background = '';
+            tab.style.color = '';
+            tab.style.borderRadius = '';
+        });
+        
+        // Charger depuis le projet (ou vide si pas de config)
+        const uiConfig = state.data?.uiConfig || {};
+        
+        // Onglets classiques
+        const tabColors = uiConfig.tabColors || {};
+        Object.keys(tabColors).forEach(tabName => {
+            const tab = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+            if(tab) {
+                tab.style.background = tabColors[tabName];
+                tab.style.color = '#ffffff';
+                tab.style.borderRadius = '6px 6px 0 0';
+            }
+        });
+        // Catégories
+        const categoryColors = uiConfig.categoryColors || {};
+        Object.keys(categoryColors).forEach(catName => {
+            const tab = document.querySelector(`.tab-category[data-category="${catName}"]`);
+            if(tab) {
+                tab.style.background = categoryColors[catName];
+                tab.style.color = '#ffffff';
+                tab.style.borderRadius = '6px 6px 0 0';
+            }
+        });
+        // Sous-onglets
+        const subColors = uiConfig.subColors || {};
+        Object.keys(subColors).forEach(tabName => {
+            const tab = document.querySelector(`.tab-subbtn[data-tab="${tabName}"]`);
+            if(tab) {
+                tab.style.background = subColors[tabName];
+                tab.style.color = '#ffffff';
+                tab.style.borderRadius = '6px 6px 0 0';
+            }
+        });
+    },
+    
+    initTabsContextMenu: () => {
+        // Onglets classiques
+        document.querySelectorAll('.tab-btn').forEach(tab => {
+            tab.addEventListener('contextmenu', (e) => UICategories.openTabColorMenu(e, tab));
+        });
+        // Catégories (mode catégories)
+        document.querySelectorAll('.tab-category').forEach(tab => {
+            tab.addEventListener('contextmenu', (e) => UICategories.openTabColorMenu(e, tab));
+        });
+        // Sous-onglets (mode catégories)
+        document.querySelectorAll('.tab-subbtn').forEach(tab => {
+            tab.addEventListener('contextmenu', (e) => UICategories.openTabColorMenu(e, tab));
+        });
+        // Fermer le menu au clic ailleurs
+        document.addEventListener('click', (e) => {
+            if(!e.target.closest('.tab-color-menu')) {
+                UICategories.closeTabColorMenu();
+            }
+            // Fermer le panneau notifications si clic en dehors
+            if(!e.target.closest('.notif-wrapper')) {
+                Notifications.closePanel();
+            }
+        });
+    },
+    
+    // Réattacher les événements après rebuild de la sous-nav
+    initSubnavContextMenu: () => {
+        document.querySelectorAll('.tab-subbtn').forEach(tab => {
+            tab.addEventListener('contextmenu', (e) => UICategories.openTabColorMenu(e, tab));
+        });
+        // Initialiser le drag & drop des sous-onglets
+        UICategories.initSubnavDragDrop();
+    },
+    
+    // Drag & drop des sous-onglets entre catégories
+    subnavDraggedTab: null,
+    subnavDraggedCategory: null,
+    
+    initSubnavDragDrop: () => {
+        const subnav = document.getElementById('tabsSubnav');
+        if(!subnav) return;
+        
+        subnav.querySelectorAll('.tab-subbtn').forEach(tab => {
+            tab.addEventListener('dragstart', (e) => {
+                UICategories.subnavDraggedTab = tab;
+                UICategories.subnavDraggedCategory = UICategories.currentCategory;
+                tab.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', tab.dataset.tab);
+            });
+            
+            tab.addEventListener('dragend', () => {
+                tab.classList.remove('dragging');
+                subnav.querySelectorAll('.tab-subbtn').forEach(t => t.classList.remove('drag-over'));
+                document.querySelectorAll('.tab-category').forEach(c => c.classList.remove('drag-over'));
+                UICategories.subnavDraggedTab = null;
+                UICategories.subnavDraggedCategory = null;
+            });
+            
+            tab.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                if(UICategories.subnavDraggedTab && UICategories.subnavDraggedTab !== tab) {
+                    tab.classList.add('drag-over');
+                }
+            });
+            
+            tab.addEventListener('dragleave', () => {
+                tab.classList.remove('drag-over');
+            });
+            
+            tab.addEventListener('drop', (e) => {
+                e.preventDefault();
+                tab.classList.remove('drag-over');
+                if(UICategories.subnavDraggedTab && UICategories.subnavDraggedTab !== tab) {
+                    const allTabs = [...subnav.querySelectorAll('.tab-subbtn')];
+                    const draggedIdx = allTabs.indexOf(UICategories.subnavDraggedTab);
+                    const targetIdx = allTabs.indexOf(tab);
+                    
+                    if(draggedIdx < targetIdx) {
+                        tab.after(UICategories.subnavDraggedTab);
+                    } else {
+                        tab.before(UICategories.subnavDraggedTab);
+                    }
+                    
+                    // Sauvegarder le nouvel ordre
+                    UICategories.saveSubnavOrder();
+                }
+            });
+        });
+        
+        // Permettre le drop sur les catégories pour changer de catégorie
+        document.querySelectorAll('.tab-category').forEach(catBtn => {
+            catBtn.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                if(UICategories.subnavDraggedTab && catBtn.dataset.category !== UICategories.subnavDraggedCategory) {
+                    catBtn.classList.add('drag-over');
+                }
+            });
+            
+            catBtn.addEventListener('dragleave', () => {
+                catBtn.classList.remove('drag-over');
+            });
+            
+            catBtn.addEventListener('drop', (e) => {
+                e.preventDefault();
+                catBtn.classList.remove('drag-over');
+                
+                if(UICategories.subnavDraggedTab && catBtn.dataset.category !== UICategories.subnavDraggedCategory) {
+                    const tabName = UICategories.subnavDraggedTab.dataset.tab;
+                    const fromCategory = UICategories.subnavDraggedCategory;
+                    const toCategory = catBtn.dataset.category;
+                    
+                    // Déplacer l'onglet vers la nouvelle catégorie
+                    UICategories.moveTabToCategory(tabName, fromCategory, toCategory);
+                }
+            });
+        });
+    },
+    
+    saveSubnavOrder: () => {
+        const subnav = document.getElementById('tabsSubnav');
+        const category = UICategories.currentCategory;
+        const newOrder = [...subnav.querySelectorAll('.tab-subbtn')].map(t => t.dataset.tab);
+        
+        // Mettre à jour categoryTabs
+        UICategories.categoryTabs[category] = newOrder;
+        
+        // Sauvegarder dans le projet
+        if(state.data && state.data.uiConfig) {
+            if(!state.data.uiConfig.categoryTabsOrder) state.data.uiConfig.categoryTabsOrder = {};
+            state.data.uiConfig.categoryTabsOrder[category] = newOrder;
+            Store.save();
+        }
+        
+        Utils.toast('Ordre des onglets sauvegardé', 'success');
+    },
+    
+    moveTabToCategory: (tabName, fromCategory, toCategory) => {
+        // Retirer de l'ancienne catégorie
+        UICategories.categoryTabs[fromCategory] = UICategories.categoryTabs[fromCategory].filter(t => t !== tabName);
+        
+        // Ajouter à la nouvelle catégorie
+        if(!UICategories.categoryTabs[toCategory].includes(tabName)) {
+            UICategories.categoryTabs[toCategory].push(tabName);
+        }
+        
+        // Ajouter le label si pas déjà présent
+        if(!UICategories.categoryLabels[toCategory][tabName]) {
+            UICategories.categoryLabels[toCategory][tabName] = UICategories.categoryLabels[fromCategory][tabName];
+        }
+        
+        // Sauvegarder dans le projet
+        if(state.data && state.data.uiConfig) {
+            if(!state.data.uiConfig.categoryTabsOrder) state.data.uiConfig.categoryTabsOrder = {};
+            state.data.uiConfig.categoryTabsOrder[fromCategory] = UICategories.categoryTabs[fromCategory];
+            state.data.uiConfig.categoryTabsOrder[toCategory] = UICategories.categoryTabs[toCategory];
+            
+            if(!state.data.uiConfig.categoryLabelsCustom) state.data.uiConfig.categoryLabelsCustom = {};
+            if(!state.data.uiConfig.categoryLabelsCustom[toCategory]) state.data.uiConfig.categoryLabelsCustom[toCategory] = {};
+            state.data.uiConfig.categoryLabelsCustom[toCategory][tabName] = UICategories.categoryLabels[fromCategory][tabName];
+            
+            Store.save();
+        }
+        
+        // Rafraîchir la vue - aller à la nouvelle catégorie
+        UICategories.switchCategory(toCategory);
+        Utils.toast(`"${UICategories.categoryLabels[toCategory][tabName]}" déplacé vers ${toCategory}`, 'success');
+    },
+    
+    // Réinitialiser l'ordre des onglets
+    resetTabsOrder: () => {
+        // Réinitialiser les onglets classiques
+        const tabsNav = document.getElementById('tabsNav');
+        const defaultOrder = [
+            'presentation', 'synopsis', 'board', 'titlepage', 'script', 'storyboard', 
+            'chars', 'actors', 'locs', 'resources', 'crew', 'breakdown', 
+            'stats', 'planning', 'expenses', 'chat'
+        ];
+        const tabs = Array.from(tabsNav.querySelectorAll('.tab-btn'));
+        
+        defaultOrder.forEach(tabName => {
+            const tab = tabs.find(t => t.getAttribute('data-tab') === tabName);
+            if(tab) tabsNav.appendChild(tab);
+        });
+        
+        // Réinitialiser les catégories
+        const catsNav = document.getElementById('tabsCategories');
+        const defaultCatsOrder = ['ecriture', 'casting', 'production', 'admin'];
+        const toggle = document.getElementById('hiddenCategoriesToggle');
+        
+        defaultCatsOrder.forEach(catName => {
+            const cat = catsNav.querySelector(`.tab-category[data-category="${catName}"]`);
+            if(cat) catsNav.insertBefore(cat, toggle);
+        });
+        
+        // Réinitialiser les sous-onglets par catégorie (ordre par défaut)
+        const defaultCategoryTabs = {
+            ecriture: ['synopsis', 'board', 'titlepage', 'script', 'storyboard'],
+            casting: ['chars', 'actors', 'locs', 'resources'],
+            production: ['presentation', 'crew', 'breakdown', 'planning', 'scriptreport'],
+            admin: ['stats', 'expenses', 'chat']
+        };
+        const defaultCategoryLabels = {
+            ecriture: { synopsis: 'Synopsis', board: 'Séquencier', titlepage: 'Titre', script: 'Scénario', storyboard: 'Storyboard' },
+            casting: { chars: 'Personnages', actors: 'Comédien.nes', locs: 'Décors', resources: 'Ressources' },
+            production: { presentation: 'Présentation', crew: 'Équipes', breakdown: 'Dépouillement', planning: 'Planning', scriptreport: 'Rapport' },
+            admin: { stats: 'Statistiques', expenses: 'Dépenses', chat: 'Chat' }
+        };
+        
+        // Restaurer les valeurs par défaut
+        UICategories.categoryTabs = JSON.parse(JSON.stringify(defaultCategoryTabs));
+        UICategories.categoryLabels = JSON.parse(JSON.stringify(defaultCategoryLabels));
+        
+        // Réinitialiser dans le projet
+        if(state.data.uiConfig) {
+            state.data.uiConfig.tabsOrder = [];
+            state.data.uiConfig.categoriesOrder = [];
+            state.data.uiConfig.categoryTabsOrder = {};
+            state.data.uiConfig.categoryLabelsCustom = {};
+            state.data.uiConfig.tabColors = {};
+            state.data.uiConfig.categoryColors = {};
+            state.data.uiConfig.subColors = {};
+            Store.save();
+        }
+        
+        // Réinitialiser les couleurs visuellement
+        document.querySelectorAll('.tab-btn').forEach(tab => {
+            tab.style.background = '';
+            tab.style.color = '';
+            tab.style.borderRadius = '';
+        });
+        document.querySelectorAll('.tab-category').forEach(cat => {
+            cat.style.background = '';
+            cat.style.color = '';
+            cat.style.borderRadius = '';
+        });
+        document.querySelectorAll('.tab-subbtn').forEach(sub => {
+            sub.style.background = '';
+            sub.style.color = '';
+            sub.style.borderRadius = '';
+        });
+        
+        // Rafraîchir la vue catégories si active
+        const tabsCategories = document.getElementById('tabsCategories');
+        if(tabsCategories && tabsCategories.classList.contains('active')) {
+            UICategories.switchCategory(UICategories.currentCategory);
+        }
+        
+        Utils.toast('Ordre et couleurs réinitialisés', 'success');
+    },
+  };
+
   const UI = {
       toggleTheme: () => { document.body.classList.toggle('dark-mode'); PreferencesSync.save(CONFIG.themeKey, document.body.classList.contains('dark-mode') ? 'dark' : 'light'); if(Universe.map) Universe.updateMapTheme(); },
       
@@ -17874,532 +18403,33 @@ openBoardPrintEpisodeChooser: () => {
           CardModal.init();
       },
       
-      // Mode de navigation (classique ou catégories)
-      currentCategory: 'ecriture',
-      categoryTabs: {
-          ecriture: ['seasons', 'episodes', 'synopsis', 'board', 'titlepage', 'script', 'moodboard', 'storyboard'],
-          casting: ['chars', 'actors', 'locs', 'resources'],
-          production: ['presentation', 'crew', 'breakdown', 'planning', 'scriptreport'],
-          admin: ['stats', 'expenses', 'chat']
-      },
-      categoryLabels: {
-          ecriture: { seasons: '📺 Saisons', episodes: '🎬 Épisodes', synopsis: 'Synopsis', board: 'Séquencier', titlepage: 'Titre', script: 'Scénario', moodboard: 'Mood Board', storyboard: 'Storyboard' },
-          casting: { chars: 'Personnages', actors: 'Comédien.nes', locs: 'Décors', resources: 'Ressources' },
-          production: { presentation: 'Présentation', crew: 'Équipes', breakdown: 'Dépouillement', planning: 'Planning', scriptreport: 'Rapport' },
-          admin: { stats: 'Statistiques', expenses: 'Dépenses', chat: 'Chat' }
-      },
-      
-      setNavMode: (mode, init = false) => {
-          const tabsNav = document.getElementById('tabsNav');
-          const tabsCategories = document.getElementById('tabsCategories');
-          const tabsSubnav = document.getElementById('tabsSubnav');
-          const classicOptions = document.getElementById('classic-mode-options');
-          
-          if(mode === 'categories') {
-              tabsNav.classList.add('hidden-by-categories');
-              tabsCategories.classList.add('active');
-              tabsSubnav.classList.add('active');
-              if(classicOptions) classicOptions.style.display = 'none';
-              if(!init) UI.switchCategory(UI.currentCategory);
-          } else {
-              tabsNav.classList.remove('hidden-by-categories');
-              tabsCategories.classList.remove('active');
-              tabsSubnav.classList.remove('active');
-              if(classicOptions) classicOptions.style.display = '';
-          }
-          PreferencesSync.save('fmp_nav_mode', mode);
-          
-          // Rafraîchir le bouton "Masqués" pour synchroniser entre les vues
-          UI.applyHiddenTabs();
-      },
-      
-      switchCategory: (category) => {
-          UI.currentCategory = category;
-          // Persister pour F5
-          try { NavMemory.setTab(category, localStorage.getItem(NavMemory.KEY_SUBTAB)); } catch(e) {}
-          
-          // Mettre à jour les boutons catégorie
-          document.querySelectorAll('.tab-category').forEach(btn => {
-              btn.classList.toggle('active', btn.dataset.category === category);
-          });
-          
-          // Mettre à jour la sous-navigation
-          const subnav = document.getElementById('tabsSubnav');
-          const tabs = UI.categoryTabs[category] || [];
-          const labels = UI.categoryLabels[category] || {};
-          
-          // Filtrer les onglets masqués
-          let visibleTabs = tabs.filter(t => !UI.hiddenTabs.includes(t));
-          
-          // Phase S3.4 + S7.3 : masquer 'episodes' et 'seasons' si ce n'est pas une série
-          const isSeries = state.currentProjectType === 'series';
-          if(!isSeries) {
-              visibleTabs = visibleTabs.filter(t => t !== 'episodes' && t !== 'seasons');
-          }
-          
-          const hiddenInCategory = tabs.filter(t => UI.hiddenTabs.includes(t));
-          
-          let subnavHtml = visibleTabs.map(tab => {
-              const isActive = document.getElementById('tab-' + tab)?.classList.contains('active');
-              return `<button class="tab-subbtn${isActive ? ' active' : ''}" draggable="true" data-tab="${tab}" onclick="app.UI.switchTab('${tab}')">${labels[tab] || tab}<span class="tab-close" onclick="event.stopPropagation(); app.UI.hideTab('${tab}')" title="Masquer cet onglet">×</span></button>`;
-          }).join('');
-          
-          subnav.innerHTML = subnavHtml;
-          subnav.dataset.category = category;
-          
-          // Afficher la subnav temporairement après un changement de catégorie
-          subnav.classList.add('force-visible');
-          clearTimeout(UI._subnavTimer);
-          UI._subnavTimer = setTimeout(() => subnav.classList.remove('force-visible'), 2000);
-          
-          // Réappliquer les couleurs sauvegardées sur les sous-onglets (depuis le projet)
-          const subColors = state.data?.uiConfig?.subColors || {};
-          Object.keys(subColors).forEach(tabName => {
-              const tab = subnav.querySelector(`.tab-subbtn[data-tab="${tabName}"]`);
-              if(tab) {
-                  tab.style.background = subColors[tabName];
-                  tab.style.color = '#ffffff';
-                  tab.style.borderRadius = '6px 6px 0 0';
-              }
-          });
-          
-          // Réattacher les événements contextmenu
-          UI.initSubnavContextMenu();
-          
-          // Si aucun onglet visible de cette catégorie n'est actif, activer le premier visible
-          const activeInCategory = visibleTabs.some(tab => document.getElementById('tab-' + tab)?.classList.contains('active'));
-          if(!activeInCategory && visibleTabs.length > 0) {
-              UI.switchTab(visibleTabs[0]);
-          }
-          
-          try { localStorage.setItem('fmp_current_category', category); } catch(e) {}
-      },
-      
-      // Trouver la catégorie d'un onglet
-      getCategoryForTab: (tabName) => {
-          for(const [cat, tabs] of Object.entries(UI.categoryTabs)) {
-              if(tabs.includes(tabName)) return cat;
-          }
-          return 'ecriture';
-      },
-      
-      // Couleur des onglets (clic droit)
-      currentTabTarget: null,
-      
-      openTabColorMenu: (e, tab) => {
-          e.preventDefault();
-          UI.currentTabTarget = tab;
-          UI.currentTabType = tab.classList.contains('tab-category') ? 'category' : 
-                              tab.classList.contains('tab-subbtn') ? 'subbtn' : 'classic';
-          const menu = document.getElementById('tab-color-menu');
-          menu.classList.add('visible');
-          
-          // Calculer la position pour ne pas sortir de l'écran
-          const menuRect = menu.getBoundingClientRect();
-          const viewportW = window.innerWidth;
-          const viewportH = window.innerHeight;
-          
-          let left = e.clientX;
-          let top = e.clientY;
-          
-          // Ajuster si le menu sort à droite
-          if(left + menuRect.width > viewportW - 10) {
-              left = viewportW - menuRect.width - 10;
-          }
-          // Ajuster si le menu sort en bas
-          if(top + menuRect.height > viewportH - 10) {
-              top = viewportH - menuRect.height - 10;
-          }
-          // Ne pas sortir à gauche ou en haut
-          if(left < 10) left = 10;
-          if(top < 10) top = 10;
-          
-          menu.style.left = left + 'px';
-          menu.style.top = top + 'px';
-      },
-      
-      closeTabColorMenu: () => {
-          const menu = document.getElementById('tab-color-menu');
-          menu.classList.remove('visible');
-          UI.currentTabTarget = null;
-      },
-      
-      setTabColor: (color) => {
-          if(UI.currentTabTarget) {
-              const tabName = UI.currentTabTarget.getAttribute('data-tab') || UI.currentTabTarget.getAttribute('data-category');
-              const isCategory = UI.currentTabType === 'category';
-              
-              // Initialiser uiConfig si nécessaire
-              if(!state.data.uiConfig) state.data.uiConfig = { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [] };
-              if(!state.data.uiConfig.tabColors) state.data.uiConfig.tabColors = {};
-              if(!state.data.uiConfig.subColors) state.data.uiConfig.subColors = {};
-              if(!state.data.uiConfig.categoryColors) state.data.uiConfig.categoryColors = {};
-              
-              // Appliquer le style visuellement
-              const applyStyle = (el, col) => {
-                  if(col) {
-                      el.style.background = col;
-                      el.style.color = '#ffffff';
-                      el.style.borderRadius = '6px 6px 0 0';
-                  } else {
-                      el.style.background = '';
-                      el.style.color = '';
-                      el.style.borderRadius = '';
-                  }
-              };
-              
-              applyStyle(UI.currentTabTarget, color);
-              
-              if(isCategory) {
-                  // C'est une catégorie - sauvegarder dans categoryColors
-                  if(color) {
-                      state.data.uiConfig.categoryColors[tabName] = color;
-                  } else {
-                      delete state.data.uiConfig.categoryColors[tabName];
-                  }
-              } else {
-                  // C'est un onglet - synchroniser tabColors ET subColors
-                  if(color) {
-                      state.data.uiConfig.tabColors[tabName] = color;
-                      state.data.uiConfig.subColors[tabName] = color;
-                  } else {
-                      delete state.data.uiConfig.tabColors[tabName];
-                      delete state.data.uiConfig.subColors[tabName];
-                  }
-                  // Appliquer aussi à l'équivalent dans l'autre vue
-                  const classicTab = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
-                  const subTab = document.querySelector(`.tab-subbtn[data-tab="${tabName}"]`);
-                  if(classicTab) applyStyle(classicTab, color);
-                  if(subTab) applyStyle(subTab, color);
-              }
-              Store.save();
-          }
-          UI.closeTabColorMenu();
-      },
-      
-      openTabHelp: () => {
-          const tabToHelp = {
-              'presentation': 'dashboard',
-              'synopsis': 'scenario',
-              'board': 'sequencier',
-              'script': 'scenario',
-              'storyboard': 'storyboard',
-              'chars': 'equipe',
-              'locs': 'breakdown',
-              'actors': 'equipe',
-              'crew': 'equipe',
-              'breakdown': 'breakdown',
-              'planning': 'planning',
-              'expenses': 'depenses',
-              'budget': 'depenses',
-              'chat': 'collaboration'
-          };
-          if(UI.currentTabTarget) {
-              const tabName = UI.currentTabTarget.getAttribute('data-tab');
-              UI.closeTabColorMenu();
-              // Ouvrir l'aide contextuelle pour cet onglet
-              if(Tutorial.helpTexts[tabName]) {
-                  const rect = UI.currentTabTarget.getBoundingClientRect();
-                  Tutorial.showHelp(tabName, { target: UI.currentTabTarget, stopPropagation: () => {} });
-              } else {
-                  Tutorial.open();
-              }
-          }
-      },
-      
-      loadTabColors: () => {
-          // Réinitialiser tous les styles d'abord
-          document.querySelectorAll('.tab-btn, .tab-category, .tab-subbtn').forEach(tab => {
-              tab.style.background = '';
-              tab.style.color = '';
-              tab.style.borderRadius = '';
-          });
-          
-          // Charger depuis le projet (ou vide si pas de config)
-          const uiConfig = state.data?.uiConfig || {};
-          
-          // Onglets classiques
-          const tabColors = uiConfig.tabColors || {};
-          Object.keys(tabColors).forEach(tabName => {
-              const tab = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
-              if(tab) {
-                  tab.style.background = tabColors[tabName];
-                  tab.style.color = '#ffffff';
-                  tab.style.borderRadius = '6px 6px 0 0';
-              }
-          });
-          // Catégories
-          const categoryColors = uiConfig.categoryColors || {};
-          Object.keys(categoryColors).forEach(catName => {
-              const tab = document.querySelector(`.tab-category[data-category="${catName}"]`);
-              if(tab) {
-                  tab.style.background = categoryColors[catName];
-                  tab.style.color = '#ffffff';
-                  tab.style.borderRadius = '6px 6px 0 0';
-              }
-          });
-          // Sous-onglets
-          const subColors = uiConfig.subColors || {};
-          Object.keys(subColors).forEach(tabName => {
-              const tab = document.querySelector(`.tab-subbtn[data-tab="${tabName}"]`);
-              if(tab) {
-                  tab.style.background = subColors[tabName];
-                  tab.style.color = '#ffffff';
-                  tab.style.borderRadius = '6px 6px 0 0';
-              }
-          });
-      },
-      
-      initTabsContextMenu: () => {
-          // Onglets classiques
-          document.querySelectorAll('.tab-btn').forEach(tab => {
-              tab.addEventListener('contextmenu', (e) => UI.openTabColorMenu(e, tab));
-          });
-          // Catégories (mode catégories)
-          document.querySelectorAll('.tab-category').forEach(tab => {
-              tab.addEventListener('contextmenu', (e) => UI.openTabColorMenu(e, tab));
-          });
-          // Sous-onglets (mode catégories)
-          document.querySelectorAll('.tab-subbtn').forEach(tab => {
-              tab.addEventListener('contextmenu', (e) => UI.openTabColorMenu(e, tab));
-          });
-          // Fermer le menu au clic ailleurs
-          document.addEventListener('click', (e) => {
-              if(!e.target.closest('.tab-color-menu')) {
-                  UI.closeTabColorMenu();
-              }
-              // Fermer le panneau notifications si clic en dehors
-              if(!e.target.closest('.notif-wrapper')) {
-                  Notifications.closePanel();
-              }
-          });
-      },
-      
-      // Réattacher les événements après rebuild de la sous-nav
-      initSubnavContextMenu: () => {
-          document.querySelectorAll('.tab-subbtn').forEach(tab => {
-              tab.addEventListener('contextmenu', (e) => UI.openTabColorMenu(e, tab));
-          });
-          // Initialiser le drag & drop des sous-onglets
-          UI.initSubnavDragDrop();
-      },
-      
-      // Drag & drop des sous-onglets entre catégories
-      subnavDraggedTab: null,
-      subnavDraggedCategory: null,
-      
-      initSubnavDragDrop: () => {
-          const subnav = document.getElementById('tabsSubnav');
-          if(!subnav) return;
-          
-          subnav.querySelectorAll('.tab-subbtn').forEach(tab => {
-              tab.addEventListener('dragstart', (e) => {
-                  UI.subnavDraggedTab = tab;
-                  UI.subnavDraggedCategory = UI.currentCategory;
-                  tab.classList.add('dragging');
-                  e.dataTransfer.effectAllowed = 'move';
-                  e.dataTransfer.setData('text/plain', tab.dataset.tab);
-              });
-              
-              tab.addEventListener('dragend', () => {
-                  tab.classList.remove('dragging');
-                  subnav.querySelectorAll('.tab-subbtn').forEach(t => t.classList.remove('drag-over'));
-                  document.querySelectorAll('.tab-category').forEach(c => c.classList.remove('drag-over'));
-                  UI.subnavDraggedTab = null;
-                  UI.subnavDraggedCategory = null;
-              });
-              
-              tab.addEventListener('dragover', (e) => {
-                  e.preventDefault();
-                  if(UI.subnavDraggedTab && UI.subnavDraggedTab !== tab) {
-                      tab.classList.add('drag-over');
-                  }
-              });
-              
-              tab.addEventListener('dragleave', () => {
-                  tab.classList.remove('drag-over');
-              });
-              
-              tab.addEventListener('drop', (e) => {
-                  e.preventDefault();
-                  tab.classList.remove('drag-over');
-                  if(UI.subnavDraggedTab && UI.subnavDraggedTab !== tab) {
-                      const allTabs = [...subnav.querySelectorAll('.tab-subbtn')];
-                      const draggedIdx = allTabs.indexOf(UI.subnavDraggedTab);
-                      const targetIdx = allTabs.indexOf(tab);
-                      
-                      if(draggedIdx < targetIdx) {
-                          tab.after(UI.subnavDraggedTab);
-                      } else {
-                          tab.before(UI.subnavDraggedTab);
-                      }
-                      
-                      // Sauvegarder le nouvel ordre
-                      UI.saveSubnavOrder();
-                  }
-              });
-          });
-          
-          // Permettre le drop sur les catégories pour changer de catégorie
-          document.querySelectorAll('.tab-category').forEach(catBtn => {
-              catBtn.addEventListener('dragover', (e) => {
-                  e.preventDefault();
-                  if(UI.subnavDraggedTab && catBtn.dataset.category !== UI.subnavDraggedCategory) {
-                      catBtn.classList.add('drag-over');
-                  }
-              });
-              
-              catBtn.addEventListener('dragleave', () => {
-                  catBtn.classList.remove('drag-over');
-              });
-              
-              catBtn.addEventListener('drop', (e) => {
-                  e.preventDefault();
-                  catBtn.classList.remove('drag-over');
-                  
-                  if(UI.subnavDraggedTab && catBtn.dataset.category !== UI.subnavDraggedCategory) {
-                      const tabName = UI.subnavDraggedTab.dataset.tab;
-                      const fromCategory = UI.subnavDraggedCategory;
-                      const toCategory = catBtn.dataset.category;
-                      
-                      // Déplacer l'onglet vers la nouvelle catégorie
-                      UI.moveTabToCategory(tabName, fromCategory, toCategory);
-                  }
-              });
-          });
-      },
-      
-      saveSubnavOrder: () => {
-          const subnav = document.getElementById('tabsSubnav');
-          const category = UI.currentCategory;
-          const newOrder = [...subnav.querySelectorAll('.tab-subbtn')].map(t => t.dataset.tab);
-          
-          // Mettre à jour categoryTabs
-          UI.categoryTabs[category] = newOrder;
-          
-          // Sauvegarder dans le projet
-          if(state.data && state.data.uiConfig) {
-              if(!state.data.uiConfig.categoryTabsOrder) state.data.uiConfig.categoryTabsOrder = {};
-              state.data.uiConfig.categoryTabsOrder[category] = newOrder;
-              Store.save();
-          }
-          
-          Utils.toast('Ordre des onglets sauvegardé', 'success');
-      },
-      
-      moveTabToCategory: (tabName, fromCategory, toCategory) => {
-          // Retirer de l'ancienne catégorie
-          UI.categoryTabs[fromCategory] = UI.categoryTabs[fromCategory].filter(t => t !== tabName);
-          
-          // Ajouter à la nouvelle catégorie
-          if(!UI.categoryTabs[toCategory].includes(tabName)) {
-              UI.categoryTabs[toCategory].push(tabName);
-          }
-          
-          // Ajouter le label si pas déjà présent
-          if(!UI.categoryLabels[toCategory][tabName]) {
-              UI.categoryLabels[toCategory][tabName] = UI.categoryLabels[fromCategory][tabName];
-          }
-          
-          // Sauvegarder dans le projet
-          if(state.data && state.data.uiConfig) {
-              if(!state.data.uiConfig.categoryTabsOrder) state.data.uiConfig.categoryTabsOrder = {};
-              state.data.uiConfig.categoryTabsOrder[fromCategory] = UI.categoryTabs[fromCategory];
-              state.data.uiConfig.categoryTabsOrder[toCategory] = UI.categoryTabs[toCategory];
-              
-              if(!state.data.uiConfig.categoryLabelsCustom) state.data.uiConfig.categoryLabelsCustom = {};
-              if(!state.data.uiConfig.categoryLabelsCustom[toCategory]) state.data.uiConfig.categoryLabelsCustom[toCategory] = {};
-              state.data.uiConfig.categoryLabelsCustom[toCategory][tabName] = UI.categoryLabels[fromCategory][tabName];
-              
-              Store.save();
-          }
-          
-          // Rafraîchir la vue - aller à la nouvelle catégorie
-          UI.switchCategory(toCategory);
-          Utils.toast(`"${UI.categoryLabels[toCategory][tabName]}" déplacé vers ${toCategory}`, 'success');
-      },
-      
-      // Réinitialiser l'ordre des onglets
-      resetTabsOrder: () => {
-          // Réinitialiser les onglets classiques
-          const tabsNav = document.getElementById('tabsNav');
-          const defaultOrder = [
-              'presentation', 'synopsis', 'board', 'titlepage', 'script', 'storyboard', 
-              'chars', 'actors', 'locs', 'resources', 'crew', 'breakdown', 
-              'stats', 'planning', 'expenses', 'chat'
-          ];
-          const tabs = Array.from(tabsNav.querySelectorAll('.tab-btn'));
-          
-          defaultOrder.forEach(tabName => {
-              const tab = tabs.find(t => t.getAttribute('data-tab') === tabName);
-              if(tab) tabsNav.appendChild(tab);
-          });
-          
-          // Réinitialiser les catégories
-          const catsNav = document.getElementById('tabsCategories');
-          const defaultCatsOrder = ['ecriture', 'casting', 'production', 'admin'];
-          const toggle = document.getElementById('hiddenCategoriesToggle');
-          
-          defaultCatsOrder.forEach(catName => {
-              const cat = catsNav.querySelector(`.tab-category[data-category="${catName}"]`);
-              if(cat) catsNav.insertBefore(cat, toggle);
-          });
-          
-          // Réinitialiser les sous-onglets par catégorie (ordre par défaut)
-          const defaultCategoryTabs = {
-              ecriture: ['synopsis', 'board', 'titlepage', 'script', 'storyboard'],
-              casting: ['chars', 'actors', 'locs', 'resources'],
-              production: ['presentation', 'crew', 'breakdown', 'planning', 'scriptreport'],
-              admin: ['stats', 'expenses', 'chat']
-          };
-          const defaultCategoryLabels = {
-              ecriture: { synopsis: 'Synopsis', board: 'Séquencier', titlepage: 'Titre', script: 'Scénario', storyboard: 'Storyboard' },
-              casting: { chars: 'Personnages', actors: 'Comédien.nes', locs: 'Décors', resources: 'Ressources' },
-              production: { presentation: 'Présentation', crew: 'Équipes', breakdown: 'Dépouillement', planning: 'Planning', scriptreport: 'Rapport' },
-              admin: { stats: 'Statistiques', expenses: 'Dépenses', chat: 'Chat' }
-          };
-          
-          // Restaurer les valeurs par défaut
-          UI.categoryTabs = JSON.parse(JSON.stringify(defaultCategoryTabs));
-          UI.categoryLabels = JSON.parse(JSON.stringify(defaultCategoryLabels));
-          
-          // Réinitialiser dans le projet
-          if(state.data.uiConfig) {
-              state.data.uiConfig.tabsOrder = [];
-              state.data.uiConfig.categoriesOrder = [];
-              state.data.uiConfig.categoryTabsOrder = {};
-              state.data.uiConfig.categoryLabelsCustom = {};
-              state.data.uiConfig.tabColors = {};
-              state.data.uiConfig.categoryColors = {};
-              state.data.uiConfig.subColors = {};
-              Store.save();
-          }
-          
-          // Réinitialiser les couleurs visuellement
-          document.querySelectorAll('.tab-btn').forEach(tab => {
-              tab.style.background = '';
-              tab.style.color = '';
-              tab.style.borderRadius = '';
-          });
-          document.querySelectorAll('.tab-category').forEach(cat => {
-              cat.style.background = '';
-              cat.style.color = '';
-              cat.style.borderRadius = '';
-          });
-          document.querySelectorAll('.tab-subbtn').forEach(sub => {
-              sub.style.background = '';
-              sub.style.color = '';
-              sub.style.borderRadius = '';
-          });
-          
-          // Rafraîchir la vue catégories si active
-          const tabsCategories = document.getElementById('tabsCategories');
-          if(tabsCategories && tabsCategories.classList.contains('active')) {
-              UI.switchCategory(UI.currentCategory);
-          }
-          
-          Utils.toast('Ordre et couleurs réinitialisés', 'success');
-      },
+// ===== CATÉGORIES / NAVIGATION / COULEURS ONGLETS — délégué à UICategories =====
+      get currentCategory() { return UICategories.currentCategory; },
+      set currentCategory(v) { UICategories.currentCategory = v; },
+      get categoryTabs() { return UICategories.categoryTabs; },
+      set categoryTabs(v) { UICategories.categoryTabs = v; },
+      get categoryLabels() { return UICategories.categoryLabels; },
+      set categoryLabels(v) { UICategories.categoryLabels = v; },
+      get currentTabTarget() { return UICategories.currentTabTarget; },
+      set currentTabTarget(v) { UICategories.currentTabTarget = v; },
+      get subnavDraggedTab() { return UICategories.subnavDraggedTab; },
+      set subnavDraggedTab(v) { UICategories.subnavDraggedTab = v; },
+      get subnavDraggedCategory() { return UICategories.subnavDraggedCategory; },
+      set subnavDraggedCategory(v) { UICategories.subnavDraggedCategory = v; },
+      setNavMode: (...a) => UICategories.setNavMode(...a),
+      switchCategory: (...a) => UICategories.switchCategory(...a),
+      getCategoryForTab: (...a) => UICategories.getCategoryForTab(...a),
+      openTabColorMenu: (...a) => UICategories.openTabColorMenu(...a),
+      closeTabColorMenu: (...a) => UICategories.closeTabColorMenu(...a),
+      setTabColor: (...a) => UICategories.setTabColor(...a),
+      openTabHelp: (...a) => UICategories.openTabHelp(...a),
+      loadTabColors: (...a) => UICategories.loadTabColors(...a),
+      initTabsContextMenu: (...a) => UICategories.initTabsContextMenu(...a),
+      initSubnavContextMenu: (...a) => UICategories.initSubnavContextMenu(...a),
+      initSubnavDragDrop: (...a) => UICategories.initSubnavDragDrop(...a),
+      saveSubnavOrder: (...a) => UICategories.saveSubnavOrder(...a),
+      moveTabToCategory: (...a) => UICategories.moveTabToCategory(...a),
+      resetTabsOrder: (...a) => UICategories.resetTabsOrder(...a),
       hideAllViews: () => {
           document.getElementById('landing-view').style.display = 'none';
           document.getElementById('dashboard-view').style.display = 'none';
@@ -68758,7 +68788,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
