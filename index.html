@@ -6992,7 +6992,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.8.6</p>
+      <p>vv4.8.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -18532,231 +18532,252 @@ openBoardPrintEpisodeChooser: () => {
     },
   };
 
+  const UITheme = {
+    toggleTheme: () => { document.body.classList.toggle('dark-mode'); PreferencesSync.save(CONFIG.themeKey, document.body.classList.contains('dark-mode') ? 'dark' : 'light'); if(Universe.map) Universe.updateMapTheme(); },
+    
+    // Système de Design
+    designs: [
+        { id: 'classic', name: 'Classique', icon: '🎬', iconStyle: 'emoji' },
+        { id: 'lavender', name: 'Lavande', icon: '💐', iconStyle: 'duotone' },
+        { id: 'minimal', name: 'Minimal', icon: '⬜', iconStyle: 'minimal' }
+    ],
+    currentDesign: 'classic',
+    
+    setDesign: (designId) => {
+        // Retirer tous les designs
+        UITheme.designs.forEach(d => document.body.classList.remove('design-' + d.id));
+        // Appliquer le nouveau (sauf classic qui est le défaut)
+        if(designId !== 'classic') {
+            document.body.classList.add('design-' + designId);
+        }
+        UITheme.currentDesign = designId;
+        PreferencesSync.save('fmp_design', designId);
+        // Appliquer le style d'icônes associé
+        const design = UITheme.designs.find(d => d.id === designId);
+        if(design && design.iconStyle) {
+            Icons.setStyle(design.iconStyle, true); // true = silencieux
+        }
+        // Fermer les dropdowns
+        const dropdown = document.getElementById('design-dropdown');
+        if(dropdown) dropdown.classList.remove('show');
+        const dropdown2 = document.getElementById('design-dropdown-project');
+        if(dropdown2) dropdown2.classList.remove('show');
+        // Re-render le hub si visible
+        if(document.getElementById('dashboard-view')?.style.display === 'flex') Hub.renderCards();
+        Utils.toast('Design ' + (design?.name || designId) + ' appliqué !', 'success');
+    },
+    
+    showDropdown: (name) => {
+        // Fermer tous les autres dropdowns
+        document.querySelectorAll('.menu-dropdown.visible').forEach(d => {
+            if(d.id !== 'dropdown-' + name) d.classList.remove('visible');
+        });
+        const dropdown = document.getElementById('dropdown-' + name);
+        if(dropdown) dropdown.classList.add('visible');
+    },
+    
+    hideDropdown: (name) => {
+        const dropdown = document.getElementById('dropdown-' + name);
+        if(dropdown) dropdown.classList.remove('visible');
+    },
+    
+    closeAllDropdowns: () => {
+        document.querySelectorAll('.menu-dropdown.visible').forEach(d => d.classList.remove('visible'));
+    },
+    
+    // Menu mobile
+    closeMobileSidebar: () => {
+        const sidebar = document.querySelector('.board-sidebar');
+        const overlay = document.getElementById('mobile-overlay');
+        if(sidebar) {
+            sidebar.classList.remove('mobile-open');
+            overlay.classList.remove('active');
+        }
+    },
+    
+    // Mode d'affichage des onglets
+    setTabsMode: (mode) => {
+        const tabsNav = document.getElementById('tabsNav');
+        if(mode === 'adaptive') {
+            tabsNav.classList.add('adaptive');
+        } else {
+            tabsNav.classList.remove('adaptive');
+        }
+        PreferencesSync.save('fmp_tabs_mode', mode);
+    },
+    
+    // Position des onglets (haut, bas, gauche, droite)
+    setTabsPosition: (position) => {
+        const tabsNav = document.getElementById('tabsNav');
+        const body = document.body;
+        const main = document.querySelector('main');
+        
+        // Retirer toutes les classes de position
+        tabsNav.classList.remove('position-top', 'position-bottom', 'position-left', 'position-right');
+        body.classList.remove('tabs-left', 'tabs-right', 'tabs-bottom');
+        
+        // Reset des marges du main
+        if(main) {
+            main.style.marginLeft = '';
+            main.style.marginRight = '';
+            main.style.marginBottom = '';
+        }
+        
+        // Appliquer la nouvelle position
+        tabsNav.classList.add('position-' + position);
+        if(position === 'left') body.classList.add('tabs-left');
+        if(position === 'right') body.classList.add('tabs-right');
+        if(position === 'bottom') body.classList.add('tabs-bottom');
+        
+        // En position latérale, forcer le mode Défilant (pas d'Adaptatif)
+        if(position === 'left' || position === 'right') {
+            tabsNav.classList.remove('adaptive');
+            PreferencesSync.save('fmp_tabs_mode', 'scroll');
+        }
+        
+        // Mettre à jour l'état du menu
+        UITheme.updatePositionMenuState();
+        
+        PreferencesSync.save('fmp_tabs_position', position);
+    },
+    
+    togglePositionMenu: () => {
+        const menu = document.getElementById('tabs-position-menu');
+        if(menu) {
+            const isVisible = menu.style.display !== 'none';
+            menu.style.display = isVisible ? 'none' : 'block';
+            
+            // Mettre à jour les états actifs
+            if(!isVisible) {
+                UITheme.updatePositionMenuState();
+                setTimeout(() => {
+                    const closeHandler = (e) => {
+                        if(!e.target.closest('.tabs-position-dropdown')) {
+                            menu.style.display = 'none';
+                            document.removeEventListener('click', closeHandler);
+                        }
+                    };
+                    document.addEventListener('click', closeHandler);
+                }, 10);
+            }
+        }
+    },
+    
+    updatePositionMenuState: () => {
+        // Mettre à jour Navigation
+        const currentNav = (() => { try { return localStorage.getItem('fmp_nav_mode') || 'categories'; } catch(e) { return 'categories'; } })();
+        document.querySelectorAll('.position-menu-item[data-nav]').forEach(item => {
+            item.classList.toggle('active', item.getAttribute('data-nav') === currentNav);
+        });
+        
+        // Vérifier si on est en mode Catégories
+        const isCategories = currentNav === 'categories';
+        
+        // Mettre à jour Position (griser si Catégories)
+        const currentPos = (() => { try { return localStorage.getItem('fmp_tabs_position') || 'top'; } catch(e) { return 'top'; } })();
+        document.querySelectorAll('.position-menu-item[data-pos]').forEach(item => {
+            item.classList.toggle('active', item.getAttribute('data-pos') === currentPos && !isCategories);
+            item.classList.toggle('disabled', isCategories);
+            item.style.opacity = isCategories ? '0.4' : '1';
+            item.style.pointerEvents = isCategories ? 'none' : 'auto';
+        });
+        
+        // Mettre à jour Mode (griser si Catégories)
+        const currentMode = (() => { try { return localStorage.getItem('fmp_tabs_mode') || 'adaptive'; } catch(e) { return 'adaptive'; } })();
+        document.querySelectorAll('.position-menu-item[data-mode]').forEach(item => {
+            item.classList.toggle('active', item.getAttribute('data-mode') === currentMode && !isCategories);
+            item.classList.toggle('disabled', isCategories);
+            item.style.opacity = isCategories ? '0.4' : '1';
+            item.style.pointerEvents = isCategories ? 'none' : 'auto';
+        });
+        
+        // Afficher/masquer section Mode selon la position (seulement pour haut/bas en mode Classique)
+        const modeSection = document.getElementById('tabs-mode-section');
+        if(modeSection) {
+            const showMode = !isCategories && (currentPos === 'top' || currentPos === 'bottom');
+            modeSection.style.display = showMode ? 'block' : 'none';
+        }
+        
+        // Griser aussi le titre de section Position si Catégories
+        const positionLabel = document.getElementById('position-section-label');
+        if(positionLabel) {
+            positionLabel.style.opacity = isCategories ? '0.4' : '1';
+        }
+        const positionHint = document.getElementById('position-disabled-hint');
+        if(positionHint) {
+            positionHint.style.display = isCategories ? 'inline' : 'none';
+        }
+    },
+    
+    setNavModeFromMenu: (mode) => {
+        UI.setNavMode(mode);
+        UITheme.updatePositionMenuState();
+    },
+    
+    setTabsModeFromMenu: (mode) => {
+        UITheme.setTabsMode(mode);
+        UITheme.updatePositionMenuState();
+    },
+    
+    initTabsMode: () => {
+        // Init position des onglets (doit être fait en premier)
+        const savedPosition = (() => { try { return localStorage.getItem('fmp_tabs_position') || 'top'; } catch(e) { return 'top'; } })();
+        UITheme.setTabsPosition(savedPosition);
+        
+        // Init mode (seulement si position haut/bas, sinon forcer défilant)
+        const savedMode = (() => { try { return localStorage.getItem('fmp_tabs_mode') || 'adaptive'; } catch(e) { return 'adaptive'; } })();
+        if(savedPosition === 'top' || savedPosition === 'bottom') {
+            UITheme.setTabsMode(savedMode);
+        } else {
+            UITheme.setTabsMode('scroll');
+        }
+        
+        // Positionnement dynamique des tooltips pour éviter qu'ils sortent de l'écran
+        document.addEventListener('mouseover', (e) => {
+            const el = e.target.closest('[data-tooltip]');
+            if(el) {
+                const rect = el.getBoundingClientRect();
+                const tooltip = el.querySelector('::after');
+                // Utiliser CSS custom properties pour positionner
+                const tooltipX = Math.min(Math.max(rect.left + rect.width/2, 100), window.innerWidth - 100);
+                const tooltipY = rect.bottom + 10;
+                el.style.setProperty('--tooltip-x', tooltipX + 'px');
+                el.style.setProperty('--tooltip-y', tooltipY + 'px');
+            }
+        });
+        
+        // Init mode navigation (classique ou catégories) - Catégories par défaut
+        const savedNavMode = (() => { try { return localStorage.getItem('fmp_nav_mode') || 'categories'; } catch(e) { return 'categories'; } })();
+        UI.setNavMode(savedNavMode, true);
+        
+        // Charger et appliquer les catégories masquées
+        UI.loadHiddenCategories();
+        UI.applyHiddenCategories();
+        
+        // Init CardModal
+        CardModal.init();
+    },
+  };
+
   const UI = {
-      toggleTheme: () => { document.body.classList.toggle('dark-mode'); PreferencesSync.save(CONFIG.themeKey, document.body.classList.contains('dark-mode') ? 'dark' : 'light'); if(Universe.map) Universe.updateMapTheme(); },
-      
-      // Système de Design
-      designs: [
-          { id: 'classic', name: 'Classique', icon: '🎬', iconStyle: 'emoji' },
-          { id: 'lavender', name: 'Lavande', icon: '💐', iconStyle: 'duotone' },
-          { id: 'minimal', name: 'Minimal', icon: '⬜', iconStyle: 'minimal' }
-      ],
-      currentDesign: 'classic',
-      
-      setDesign: (designId) => {
-          // Retirer tous les designs
-          UI.designs.forEach(d => document.body.classList.remove('design-' + d.id));
-          // Appliquer le nouveau (sauf classic qui est le défaut)
-          if(designId !== 'classic') {
-              document.body.classList.add('design-' + designId);
-          }
-          UI.currentDesign = designId;
-          PreferencesSync.save('fmp_design', designId);
-          // Appliquer le style d'icônes associé
-          const design = UI.designs.find(d => d.id === designId);
-          if(design && design.iconStyle) {
-              Icons.setStyle(design.iconStyle, true); // true = silencieux
-          }
-          // Fermer les dropdowns
-          const dropdown = document.getElementById('design-dropdown');
-          if(dropdown) dropdown.classList.remove('show');
-          const dropdown2 = document.getElementById('design-dropdown-project');
-          if(dropdown2) dropdown2.classList.remove('show');
-          // Re-render le hub si visible
-          if(document.getElementById('dashboard-view')?.style.display === 'flex') Hub.renderCards();
-          Utils.toast('Design ' + (design?.name || designId) + ' appliqué !', 'success');
-      },
-      
-      showDropdown: (name) => {
-          // Fermer tous les autres dropdowns
-          document.querySelectorAll('.menu-dropdown.visible').forEach(d => {
-              if(d.id !== 'dropdown-' + name) d.classList.remove('visible');
-          });
-          const dropdown = document.getElementById('dropdown-' + name);
-          if(dropdown) dropdown.classList.add('visible');
-      },
-      
-      hideDropdown: (name) => {
-          const dropdown = document.getElementById('dropdown-' + name);
-          if(dropdown) dropdown.classList.remove('visible');
-      },
-      
-      closeAllDropdowns: () => {
-          document.querySelectorAll('.menu-dropdown.visible').forEach(d => d.classList.remove('visible'));
-      },
-      
-      // Menu mobile
-      closeMobileSidebar: () => {
-          const sidebar = document.querySelector('.board-sidebar');
-          const overlay = document.getElementById('mobile-overlay');
-          if(sidebar) {
-              sidebar.classList.remove('mobile-open');
-              overlay.classList.remove('active');
-          }
-      },
-      
-      // Mode d'affichage des onglets
-      setTabsMode: (mode) => {
-          const tabsNav = document.getElementById('tabsNav');
-          if(mode === 'adaptive') {
-              tabsNav.classList.add('adaptive');
-          } else {
-              tabsNav.classList.remove('adaptive');
-          }
-          PreferencesSync.save('fmp_tabs_mode', mode);
-      },
-      
-      // Position des onglets (haut, bas, gauche, droite)
-      setTabsPosition: (position) => {
-          const tabsNav = document.getElementById('tabsNav');
-          const body = document.body;
-          const main = document.querySelector('main');
-          
-          // Retirer toutes les classes de position
-          tabsNav.classList.remove('position-top', 'position-bottom', 'position-left', 'position-right');
-          body.classList.remove('tabs-left', 'tabs-right', 'tabs-bottom');
-          
-          // Reset des marges du main
-          if(main) {
-              main.style.marginLeft = '';
-              main.style.marginRight = '';
-              main.style.marginBottom = '';
-          }
-          
-          // Appliquer la nouvelle position
-          tabsNav.classList.add('position-' + position);
-          if(position === 'left') body.classList.add('tabs-left');
-          if(position === 'right') body.classList.add('tabs-right');
-          if(position === 'bottom') body.classList.add('tabs-bottom');
-          
-          // En position latérale, forcer le mode Défilant (pas d'Adaptatif)
-          if(position === 'left' || position === 'right') {
-              tabsNav.classList.remove('adaptive');
-              PreferencesSync.save('fmp_tabs_mode', 'scroll');
-          }
-          
-          // Mettre à jour l'état du menu
-          UI.updatePositionMenuState();
-          
-          PreferencesSync.save('fmp_tabs_position', position);
-      },
-      
-      togglePositionMenu: () => {
-          const menu = document.getElementById('tabs-position-menu');
-          if(menu) {
-              const isVisible = menu.style.display !== 'none';
-              menu.style.display = isVisible ? 'none' : 'block';
-              
-              // Mettre à jour les états actifs
-              if(!isVisible) {
-                  UI.updatePositionMenuState();
-                  setTimeout(() => {
-                      const closeHandler = (e) => {
-                          if(!e.target.closest('.tabs-position-dropdown')) {
-                              menu.style.display = 'none';
-                              document.removeEventListener('click', closeHandler);
-                          }
-                      };
-                      document.addEventListener('click', closeHandler);
-                  }, 10);
-              }
-          }
-      },
-      
-      updatePositionMenuState: () => {
-          // Mettre à jour Navigation
-          const currentNav = (() => { try { return localStorage.getItem('fmp_nav_mode') || 'categories'; } catch(e) { return 'categories'; } })();
-          document.querySelectorAll('.position-menu-item[data-nav]').forEach(item => {
-              item.classList.toggle('active', item.getAttribute('data-nav') === currentNav);
-          });
-          
-          // Vérifier si on est en mode Catégories
-          const isCategories = currentNav === 'categories';
-          
-          // Mettre à jour Position (griser si Catégories)
-          const currentPos = (() => { try { return localStorage.getItem('fmp_tabs_position') || 'top'; } catch(e) { return 'top'; } })();
-          document.querySelectorAll('.position-menu-item[data-pos]').forEach(item => {
-              item.classList.toggle('active', item.getAttribute('data-pos') === currentPos && !isCategories);
-              item.classList.toggle('disabled', isCategories);
-              item.style.opacity = isCategories ? '0.4' : '1';
-              item.style.pointerEvents = isCategories ? 'none' : 'auto';
-          });
-          
-          // Mettre à jour Mode (griser si Catégories)
-          const currentMode = (() => { try { return localStorage.getItem('fmp_tabs_mode') || 'adaptive'; } catch(e) { return 'adaptive'; } })();
-          document.querySelectorAll('.position-menu-item[data-mode]').forEach(item => {
-              item.classList.toggle('active', item.getAttribute('data-mode') === currentMode && !isCategories);
-              item.classList.toggle('disabled', isCategories);
-              item.style.opacity = isCategories ? '0.4' : '1';
-              item.style.pointerEvents = isCategories ? 'none' : 'auto';
-          });
-          
-          // Afficher/masquer section Mode selon la position (seulement pour haut/bas en mode Classique)
-          const modeSection = document.getElementById('tabs-mode-section');
-          if(modeSection) {
-              const showMode = !isCategories && (currentPos === 'top' || currentPos === 'bottom');
-              modeSection.style.display = showMode ? 'block' : 'none';
-          }
-          
-          // Griser aussi le titre de section Position si Catégories
-          const positionLabel = document.getElementById('position-section-label');
-          if(positionLabel) {
-              positionLabel.style.opacity = isCategories ? '0.4' : '1';
-          }
-          const positionHint = document.getElementById('position-disabled-hint');
-          if(positionHint) {
-              positionHint.style.display = isCategories ? 'inline' : 'none';
-          }
-      },
-      
-      setNavModeFromMenu: (mode) => {
-          UI.setNavMode(mode);
-          UI.updatePositionMenuState();
-      },
-      
-      setTabsModeFromMenu: (mode) => {
-          UI.setTabsMode(mode);
-          UI.updatePositionMenuState();
-      },
-      
-      initTabsMode: () => {
-          // Init position des onglets (doit être fait en premier)
-          const savedPosition = (() => { try { return localStorage.getItem('fmp_tabs_position') || 'top'; } catch(e) { return 'top'; } })();
-          UI.setTabsPosition(savedPosition);
-          
-          // Init mode (seulement si position haut/bas, sinon forcer défilant)
-          const savedMode = (() => { try { return localStorage.getItem('fmp_tabs_mode') || 'adaptive'; } catch(e) { return 'adaptive'; } })();
-          if(savedPosition === 'top' || savedPosition === 'bottom') {
-              UI.setTabsMode(savedMode);
-          } else {
-              UI.setTabsMode('scroll');
-          }
-          
-          // Positionnement dynamique des tooltips pour éviter qu'ils sortent de l'écran
-          document.addEventListener('mouseover', (e) => {
-              const el = e.target.closest('[data-tooltip]');
-              if(el) {
-                  const rect = el.getBoundingClientRect();
-                  const tooltip = el.querySelector('::after');
-                  // Utiliser CSS custom properties pour positionner
-                  const tooltipX = Math.min(Math.max(rect.left + rect.width/2, 100), window.innerWidth - 100);
-                  const tooltipY = rect.bottom + 10;
-                  el.style.setProperty('--tooltip-x', tooltipX + 'px');
-                  el.style.setProperty('--tooltip-y', tooltipY + 'px');
-              }
-          });
-          
-          // Init mode navigation (classique ou catégories) - Catégories par défaut
-          const savedNavMode = (() => { try { return localStorage.getItem('fmp_nav_mode') || 'categories'; } catch(e) { return 'categories'; } })();
-          UI.setNavMode(savedNavMode, true);
-          
-          // Charger et appliquer les catégories masquées
-          UI.loadHiddenCategories();
-          UI.applyHiddenCategories();
-          
-          // Init CardModal
-          CardModal.init();
-      },
+// ===== THÈME / DESIGN / DROPDOWNS / NAV ONGLETS — délégué à UITheme =====
+      get designs() { return UITheme.designs; },
+      set designs(v) { UITheme.designs = v; },
+      get currentDesign() { return UITheme.currentDesign; },
+      set currentDesign(v) { UITheme.currentDesign = v; },
+      toggleTheme: (...a) => UITheme.toggleTheme(...a),
+      setDesign: (...a) => UITheme.setDesign(...a),
+      showDropdown: (...a) => UITheme.showDropdown(...a),
+      hideDropdown: (...a) => UITheme.hideDropdown(...a),
+      closeAllDropdowns: (...a) => UITheme.closeAllDropdowns(...a),
+      closeMobileSidebar: (...a) => UITheme.closeMobileSidebar(...a),
+      setTabsMode: (...a) => UITheme.setTabsMode(...a),
+      setTabsPosition: (...a) => UITheme.setTabsPosition(...a),
+      togglePositionMenu: (...a) => UITheme.togglePositionMenu(...a),
+      updatePositionMenuState: (...a) => UITheme.updatePositionMenuState(...a),
+      setNavModeFromMenu: (...a) => UITheme.setNavModeFromMenu(...a),
+      setTabsModeFromMenu: (...a) => UITheme.setTabsModeFromMenu(...a),
+      initTabsMode: (...a) => UITheme.initTabsMode(...a),
       
 // ===== CATÉGORIES / NAVIGATION / COULEURS ONGLETS — délégué à UICategories =====
       get currentCategory() { return UICategories.currentCategory; },
@@ -68847,7 +68868,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
