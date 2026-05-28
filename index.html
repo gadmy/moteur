@@ -6996,7 +6996,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.9.1</p>
+      <p>vv4.9.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -33173,7 +33173,346 @@ const ProfileCalendar = {
     },
   };
 
-const PublicProfile = {
+const ProfileGallery = {
+    uploadGalleryPhoto: async (index, event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const item = document.getElementById('gallery-item-' + index);
+        const input = document.getElementById('gallery-input-' + index);
+        
+        if (!file.type.startsWith('image/')) {
+            Utils.toast('Fichier non valide', 'error');
+            return;
+        }
+        
+        if (file.size > 5 * 1024 * 1024) {
+            Utils.toast('Fichier trop volumineux (max 5 Mo)', 'error');
+            return;
+        }
+        
+        item.innerHTML = '<span class="gallery-placeholder">⏳</span>';
+        
+        try {
+            const compressedBlob = await PublicProfile.compressImageToBlob(file, 800, 0.8);
+            const userId = state.currentUser.id;
+            const fileName = `gallery_${index}_${Date.now()}.jpg`;
+            const filePath = `${userId}/${fileName}`;
+            
+            // Supprimer l'ancienne photo si elle existe
+            const oldUrl = input.value;
+            if (oldUrl && oldUrl.includes('supabase')) {
+                const oldPath = oldUrl.split('/gallery/')[1];
+                if (oldPath) {
+                    const {error: rmErr1} = await supabase.storage.from('gallery').remove([oldPath]);
+                    if(rmErr1) console.error('Erreur suppression ancienne photo:', rmErr1);
+                }
+            }
+            
+            const { data, error } = await supabase.storage
+                .from('gallery')
+                .upload(filePath, compressedBlob, {
+                    contentType: 'image/jpeg',
+                    upsert: true
+                });
+            
+            if (error) throw error;
+            
+            const { data: urlData } = supabase.storage
+                .from('gallery')
+                .getPublicUrl(filePath);
+            
+            input.value = urlData.publicUrl;
+            PublicProfile.updateGallery(index, urlData.publicUrl);
+            Utils.toast('Photo uploadée', 'success');
+        } catch (err) {
+            console.error('Erreur upload galerie:', err);
+            item.innerHTML = '<span class="gallery-placeholder">+</span>';
+            Utils.toast('Erreur lors de l\'upload', 'error');
+        }
+    },
+    
+    removeGalleryPhoto: async (index) => {
+        const input = document.getElementById('gallery-input-' + index);
+        if(input) {
+            // Supprimer du storage si c'est une URL Supabase
+            const url = input.value;
+            if (url && url.includes('supabase')) {
+                const path = url.split('/gallery/')[1];
+                if (path) {
+                    const {error: rmErr4} = await supabase.storage.from('gallery').remove([path]);
+                    if(rmErr4) console.error('Erreur suppression photo:', rmErr4);
+                }
+            }
+            input.value = '';
+            PublicProfile.updateGallery(index, '');
+        }
+    },
+    
+    loadGallery: (photos) => {
+        if(!photos) photos = [];
+        for(let i = 0; i < 3; i++) {
+            const input = document.getElementById('gallery-input-' + i);
+            if(input) {
+                input.value = photos[i] || '';
+                PublicProfile.updateGallery(i, photos[i] || '');
+            }
+        }
+    },
+    
+    // Galerie photos techniciens
+    updateCrewGallery: (index, url) => {
+        const item = document.getElementById('crew-gallery-item-' + index);
+        if(!item) return;
+        
+        if(url && url.trim()) {
+            item.innerHTML = `
+                <img src="${url}" alt="Photo ${index + 1}" onerror="this.parentElement.innerHTML='<span class=\\'gallery-placeholder\\'>+</span>'">
+                <button class="gallery-remove" onclick="event.stopPropagation(); app.ProfileGallery.removeCrewGalleryPhoto(${index})">✕</button>
+            `;
+        } else {
+            item.innerHTML = '<span class="gallery-placeholder">+</span>';
+        }
+    },
+    
+    uploadCrewGalleryPhoto: async (index, event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const item = document.getElementById('crew-gallery-item-' + index);
+        const input = document.getElementById('crew-gallery-input-' + index);
+        
+        if (!file.type.startsWith('image/')) {
+            Utils.toast('Fichier non valide', 'error');
+            return;
+        }
+        
+        if (file.size > 5 * 1024 * 1024) {
+            Utils.toast('Fichier trop volumineux (max 5 Mo)', 'error');
+            return;
+        }
+        
+        item.innerHTML = '<span class="gallery-placeholder">⏳</span>';
+        
+        try {
+            const compressedBlob = await PublicProfile.compressImageToBlob(file, 800, 0.8);
+            const userId = state.currentUser.id;
+            const fileName = `crew_gallery_${index}_${Date.now()}.jpg`;
+            const filePath = `${userId}/${fileName}`;
+            
+            // Supprimer l'ancienne photo si elle existe
+            const oldUrl = input.value;
+            if (oldUrl && oldUrl.includes('supabase')) {
+                const oldPath = oldUrl.split('/gallery/')[1];
+                if (oldPath) {
+                    const {error: rmErr2} = await supabase.storage.from('gallery').remove([oldPath]);
+                    if(rmErr2) console.error('Erreur suppression ancienne photo:', rmErr2);
+                }
+            }
+            
+            const { data, error } = await supabase.storage
+                .from('gallery')
+                .upload(filePath, compressedBlob, {
+                    contentType: 'image/jpeg',
+                    upsert: true
+                });
+            
+            if (error) throw error;
+            
+            const { data: urlData } = supabase.storage
+                .from('gallery')
+                .getPublicUrl(filePath);
+            
+            input.value = urlData.publicUrl;
+            ProfileGallery.updateCrewGallery(index, urlData.publicUrl);
+            Utils.toast('Photo uploadée', 'success');
+        } catch (err) {
+            console.error('Erreur upload galerie crew:', err);
+            item.innerHTML = '<span class="gallery-placeholder">+</span>';
+            Utils.toast('Erreur lors de l\'upload', 'error');
+        }
+    },
+    
+    removeCrewGalleryPhoto: async (index) => {
+        const input = document.getElementById('crew-gallery-input-' + index);
+        if(input) {
+            // Supprimer du storage si c'est une URL Supabase
+            const url = input.value;
+            if (url && url.includes('supabase')) {
+                const path = url.split('/gallery/')[1];
+                if (path) {
+                    const {error: rmErr5} = await supabase.storage.from('gallery').remove([path]);
+                    if(rmErr5) console.error('Erreur suppression photo:', rmErr5);
+                }
+            }
+            input.value = '';
+            ProfileGallery.updateCrewGallery(index, '');
+        }
+    },
+    
+    loadCrewGallery: (photos) => {
+        if(!photos) photos = [];
+        for(let i = 0; i < 3; i++) {
+            const input = document.getElementById('crew-gallery-input-' + i);
+            if(input) {
+                input.value = photos[i] || '';
+                ProfileGallery.updateCrewGallery(i, photos[i] || '');
+            }
+        }
+    },
+  };
+
+  const ProfileSkills = {
+    // ========== LANGUES ET SPORTS AVEC NIVEAUX ==========
+    languageLevels: {
+        'notions': '📘 Notions',
+        'intermediaire': '📗 Intermédiaire', 
+        'courant': '📙 Courant',
+        'bilingue': '📕 Bilingue',
+        'maternelle': '🏠 Maternelle'
+    },
+    sportLevels: {
+        'debutant': '🌱 Débutant',
+        'amateur': '⭐ Amateur',
+        'confirme': '⭐⭐ Confirmé',
+        'competition': '🏆 Compétition',
+        'professionnel': '👑 Pro'
+    },
+    
+    addLanguage: async () => {
+        const select = document.getElementById('profile-language-select');
+        const levelSelect = document.getElementById('profile-language-level');
+        let name = select.value;
+        const level = levelSelect.value;
+        
+        if(!name) return;
+        
+        // Si "Autre", demander le nom
+        if(name === '__custom__') {
+            name = await ConfirmModal.prompt('Nom de la langue :', 'Ajouter une langue', 'Ex: Mandarin...');
+            if(!name || !name.trim()) { select.value = ''; return; }
+            name = name.trim();
+        }
+        
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile) return;
+        
+        if(!profile.languagesWithLevels) profile.languagesWithLevels = [];
+        
+        // Vérifier si déjà ajouté
+        if(profile.languagesWithLevels.some(l => l.name.toLowerCase() === name.toLowerCase())) {
+            Utils.toast('Cette langue est déjà ajoutée', 'warning');
+            select.value = '';
+            return;
+        }
+        
+        profile.languagesWithLevels.push({ name, level });
+        ProfileSkills.renderLanguagesList();
+        select.value = '';
+    },
+    
+    removeLanguage: (idx) => {
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile || !profile.languagesWithLevels) return;
+        profile.languagesWithLevels.splice(idx, 1);
+        ProfileSkills.renderLanguagesList();
+    },
+    
+    renderLanguagesList: () => {
+        const container = document.getElementById('profile-languages-list');
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!container || !profile) return;
+        
+        const langs = profile.languagesWithLevels || [];
+        container.innerHTML = langs.map((l, i) => `
+            <span class="n8-flex-2">
+                <strong>${Utils.escape(l.name)}</strong>
+                <span class="text-sec">${ProfileSkills.languageLevels[l.level] || l.level}</span>
+                <span onclick="app.ProfileSkills.removeLanguage(${i})" style="cursor:pointer; color:var(--danger); margin-left:3px;">✖</span>
+            </span>
+        `).join('');
+        
+        // Mise à jour du champ caché pour compatibilité
+        document.getElementById('profile-languages').value = langs.map(l => `${l.name} (${l.level})`).join(', ');
+    },
+    
+    addSport: async () => {
+        const select = document.getElementById('profile-sport-select');
+        const levelSelect = document.getElementById('profile-sport-level');
+        let name = select.value;
+        const level = levelSelect.value;
+        
+        if(!name) return;
+        
+        // Si "Autre", demander le nom
+        if(name === '__custom__') {
+            name = await ConfirmModal.prompt('Nom du sport ou compétence :', 'Ajouter une compétence', 'Ex: Escalade...');
+            if(!name || !name.trim()) { select.value = ''; return; }
+            name = name.trim();
+        }
+        
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile) return;
+        
+        if(!profile.sportsWithLevels) profile.sportsWithLevels = [];
+        
+        // Vérifier si déjà ajouté
+        if(profile.sportsWithLevels.some(s => s.name.toLowerCase() === name.toLowerCase())) {
+            Utils.toast('Ce sport est déjà ajouté', 'warning');
+            select.value = '';
+            return;
+        }
+        
+        profile.sportsWithLevels.push({ name, level });
+        ProfileSkills.renderSportsList();
+        select.value = '';
+    },
+    
+    removeSport: (idx) => {
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile || !profile.sportsWithLevels) return;
+        profile.sportsWithLevels.splice(idx, 1);
+        ProfileSkills.renderSportsList();
+    },
+    
+    renderSportsList: () => {
+        const container = document.getElementById('profile-sports-list');
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!container || !profile) return;
+        
+        const sports = profile.sportsWithLevels || [];
+        container.innerHTML = sports.map((s, i) => `
+            <span class="n8-flex-2">
+                <strong>${Utils.escape(s.name)}</strong>
+                <span class="text-sec">${ProfileSkills.sportLevels[s.level] || s.level}</span>
+                <span onclick="app.ProfileSkills.removeSport(${i})" style="cursor:pointer; color:var(--danger); margin-left:3px;">✖</span>
+            </span>
+        `).join('');
+        
+        // Mise à jour du champ caché pour compatibilité
+        document.getElementById('profile-sports').value = sports.map(s => `${s.name} (${s.level})`).join(', ');
+    },
+    
+    // Migration des anciennes données texte vers le nouveau format
+    migrateSkillsData: (profile) => {
+        // Migrer les langues
+        if(profile.languages && typeof profile.languages === 'string' && !profile.languagesWithLevels) {
+            profile.languagesWithLevels = profile.languages.split(',').map(l => l.trim()).filter(l => l).map(l => ({
+                name: l.replace(/\s*\([^)]*\)\s*$/, '').trim(),
+                level: 'courant'
+            }));
+        }
+        // Migrer les sports
+        if(profile.sports && typeof profile.sports === 'string' && !profile.sportsWithLevels) {
+            profile.sportsWithLevels = profile.sports.split(',').map(s => s.trim()).filter(s => s).map(s => ({
+                name: s.replace(/\s*\([^)]*\)\s*$/, '').trim(),
+                level: 'confirme'
+            }));
+        }
+    },
+  };
+
+  const PublicProfile = {
     profiles: [], // Liste des profils de l'utilisateur
     currentProfileIndex: -1, // Index du profil actuellement affiché
     equipment: { cameras: [], lenses: [], lights: [], sounds: [], grips: [], makeups: [], other: [] },
@@ -33412,192 +33751,14 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         }
     },
     
-    uploadGalleryPhoto: async (index, event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-        
-        const item = document.getElementById('gallery-item-' + index);
-        const input = document.getElementById('gallery-input-' + index);
-        
-        if (!file.type.startsWith('image/')) {
-            Utils.toast('Fichier non valide', 'error');
-            return;
-        }
-        
-        if (file.size > 5 * 1024 * 1024) {
-            Utils.toast('Fichier trop volumineux (max 5 Mo)', 'error');
-            return;
-        }
-        
-        item.innerHTML = '<span class="gallery-placeholder">⏳</span>';
-        
-        try {
-            const compressedBlob = await PublicProfile.compressImageToBlob(file, 800, 0.8);
-            const userId = state.currentUser.id;
-            const fileName = `gallery_${index}_${Date.now()}.jpg`;
-            const filePath = `${userId}/${fileName}`;
-            
-            // Supprimer l'ancienne photo si elle existe
-            const oldUrl = input.value;
-            if (oldUrl && oldUrl.includes('supabase')) {
-                const oldPath = oldUrl.split('/gallery/')[1];
-                if (oldPath) {
-                    const {error: rmErr1} = await supabase.storage.from('gallery').remove([oldPath]);
-                    if(rmErr1) console.error('Erreur suppression ancienne photo:', rmErr1);
-                }
-            }
-            
-            const { data, error } = await supabase.storage
-                .from('gallery')
-                .upload(filePath, compressedBlob, {
-                    contentType: 'image/jpeg',
-                    upsert: true
-                });
-            
-            if (error) throw error;
-            
-            const { data: urlData } = supabase.storage
-                .from('gallery')
-                .getPublicUrl(filePath);
-            
-            input.value = urlData.publicUrl;
-            PublicProfile.updateGallery(index, urlData.publicUrl);
-            Utils.toast('Photo uploadée', 'success');
-        } catch (err) {
-            console.error('Erreur upload galerie:', err);
-            item.innerHTML = '<span class="gallery-placeholder">+</span>';
-            Utils.toast('Erreur lors de l\'upload', 'error');
-        }
-    },
-    
-    removeGalleryPhoto: async (index) => {
-        const input = document.getElementById('gallery-input-' + index);
-        if(input) {
-            // Supprimer du storage si c'est une URL Supabase
-            const url = input.value;
-            if (url && url.includes('supabase')) {
-                const path = url.split('/gallery/')[1];
-                if (path) {
-                    const {error: rmErr4} = await supabase.storage.from('gallery').remove([path]);
-                    if(rmErr4) console.error('Erreur suppression photo:', rmErr4);
-                }
-            }
-            input.value = '';
-            PublicProfile.updateGallery(index, '');
-        }
-    },
-    
-    loadGallery: (photos) => {
-        if(!photos) photos = [];
-        for(let i = 0; i < 3; i++) {
-            const input = document.getElementById('gallery-input-' + i);
-            if(input) {
-                input.value = photos[i] || '';
-                PublicProfile.updateGallery(i, photos[i] || '');
-            }
-        }
-    },
-    
-    // Galerie photos techniciens
-    updateCrewGallery: (index, url) => {
-        const item = document.getElementById('crew-gallery-item-' + index);
-        if(!item) return;
-        
-        if(url && url.trim()) {
-            item.innerHTML = `
-                <img src="${url}" alt="Photo ${index + 1}" onerror="this.parentElement.innerHTML='<span class=\\'gallery-placeholder\\'>+</span>'">
-                <button class="gallery-remove" onclick="event.stopPropagation(); app.PublicProfile.removeCrewGalleryPhoto(${index})">✕</button>
-            `;
-        } else {
-            item.innerHTML = '<span class="gallery-placeholder">+</span>';
-        }
-    },
-    
-    uploadCrewGalleryPhoto: async (index, event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-        
-        const item = document.getElementById('crew-gallery-item-' + index);
-        const input = document.getElementById('crew-gallery-input-' + index);
-        
-        if (!file.type.startsWith('image/')) {
-            Utils.toast('Fichier non valide', 'error');
-            return;
-        }
-        
-        if (file.size > 5 * 1024 * 1024) {
-            Utils.toast('Fichier trop volumineux (max 5 Mo)', 'error');
-            return;
-        }
-        
-        item.innerHTML = '<span class="gallery-placeholder">⏳</span>';
-        
-        try {
-            const compressedBlob = await PublicProfile.compressImageToBlob(file, 800, 0.8);
-            const userId = state.currentUser.id;
-            const fileName = `crew_gallery_${index}_${Date.now()}.jpg`;
-            const filePath = `${userId}/${fileName}`;
-            
-            // Supprimer l'ancienne photo si elle existe
-            const oldUrl = input.value;
-            if (oldUrl && oldUrl.includes('supabase')) {
-                const oldPath = oldUrl.split('/gallery/')[1];
-                if (oldPath) {
-                    const {error: rmErr2} = await supabase.storage.from('gallery').remove([oldPath]);
-                    if(rmErr2) console.error('Erreur suppression ancienne photo:', rmErr2);
-                }
-            }
-            
-            const { data, error } = await supabase.storage
-                .from('gallery')
-                .upload(filePath, compressedBlob, {
-                    contentType: 'image/jpeg',
-                    upsert: true
-                });
-            
-            if (error) throw error;
-            
-            const { data: urlData } = supabase.storage
-                .from('gallery')
-                .getPublicUrl(filePath);
-            
-            input.value = urlData.publicUrl;
-            PublicProfile.updateCrewGallery(index, urlData.publicUrl);
-            Utils.toast('Photo uploadée', 'success');
-        } catch (err) {
-            console.error('Erreur upload galerie crew:', err);
-            item.innerHTML = '<span class="gallery-placeholder">+</span>';
-            Utils.toast('Erreur lors de l\'upload', 'error');
-        }
-    },
-    
-    removeCrewGalleryPhoto: async (index) => {
-        const input = document.getElementById('crew-gallery-input-' + index);
-        if(input) {
-            // Supprimer du storage si c'est une URL Supabase
-            const url = input.value;
-            if (url && url.includes('supabase')) {
-                const path = url.split('/gallery/')[1];
-                if (path) {
-                    const {error: rmErr5} = await supabase.storage.from('gallery').remove([path]);
-                    if(rmErr5) console.error('Erreur suppression photo:', rmErr5);
-                }
-            }
-            input.value = '';
-            PublicProfile.updateCrewGallery(index, '');
-        }
-    },
-    
-    loadCrewGallery: (photos) => {
-        if(!photos) photos = [];
-        for(let i = 0; i < 3; i++) {
-            const input = document.getElementById('crew-gallery-input-' + i);
-            if(input) {
-                input.value = photos[i] || '';
-                PublicProfile.updateCrewGallery(i, photos[i] || '');
-            }
-        }
-    },
+// ===== GALERIE PHOTOS (profil + crew) — délégué à ProfileGallery =====
+    uploadGalleryPhoto: (...a) => ProfileGallery.uploadGalleryPhoto(...a),
+    removeGalleryPhoto: (...a) => ProfileGallery.removeGalleryPhoto(...a),
+    loadGallery: (...a) => ProfileGallery.loadGallery(...a),
+    updateCrewGallery: (...a) => ProfileGallery.updateCrewGallery(...a),
+    uploadCrewGalleryPhoto: (...a) => ProfileGallery.uploadCrewGalleryPhoto(...a),
+    removeCrewGalleryPhoto: (...a) => ProfileGallery.removeCrewGalleryPhoto(...a),
+    loadCrewGallery: (...a) => ProfileGallery.loadCrewGallery(...a),
 	
 	// Affiche/masque une section de matériel
     toggleEquipmentSection: (section) => {
@@ -33770,153 +33931,18 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         return availability;
     },
     
-    // ========== LANGUES ET SPORTS AVEC NIVEAUX ==========
-    languageLevels: {
-        'notions': '📘 Notions',
-        'intermediaire': '📗 Intermédiaire', 
-        'courant': '📙 Courant',
-        'bilingue': '📕 Bilingue',
-        'maternelle': '🏠 Maternelle'
-    },
-    sportLevels: {
-        'debutant': '🌱 Débutant',
-        'amateur': '⭐ Amateur',
-        'confirme': '⭐⭐ Confirmé',
-        'competition': '🏆 Compétition',
-        'professionnel': '👑 Pro'
-    },
-    
-    addLanguage: async () => {
-        const select = document.getElementById('profile-language-select');
-        const levelSelect = document.getElementById('profile-language-level');
-        let name = select.value;
-        const level = levelSelect.value;
-        
-        if(!name) return;
-        
-        // Si "Autre", demander le nom
-        if(name === '__custom__') {
-            name = await ConfirmModal.prompt('Nom de la langue :', 'Ajouter une langue', 'Ex: Mandarin...');
-            if(!name || !name.trim()) { select.value = ''; return; }
-            name = name.trim();
-        }
-        
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!profile) return;
-        
-        if(!profile.languagesWithLevels) profile.languagesWithLevels = [];
-        
-        // Vérifier si déjà ajouté
-        if(profile.languagesWithLevels.some(l => l.name.toLowerCase() === name.toLowerCase())) {
-            Utils.toast('Cette langue est déjà ajoutée', 'warning');
-            select.value = '';
-            return;
-        }
-        
-        profile.languagesWithLevels.push({ name, level });
-        PublicProfile.renderLanguagesList();
-        select.value = '';
-    },
-    
-    removeLanguage: (idx) => {
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!profile || !profile.languagesWithLevels) return;
-        profile.languagesWithLevels.splice(idx, 1);
-        PublicProfile.renderLanguagesList();
-    },
-    
-    renderLanguagesList: () => {
-        const container = document.getElementById('profile-languages-list');
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!container || !profile) return;
-        
-        const langs = profile.languagesWithLevels || [];
-        container.innerHTML = langs.map((l, i) => `
-            <span class="n8-flex-2">
-                <strong>${Utils.escape(l.name)}</strong>
-                <span class="text-sec">${PublicProfile.languageLevels[l.level] || l.level}</span>
-                <span onclick="app.PublicProfile.removeLanguage(${i})" style="cursor:pointer; color:var(--danger); margin-left:3px;">✖</span>
-            </span>
-        `).join('');
-        
-        // Mise à jour du champ caché pour compatibilité
-        document.getElementById('profile-languages').value = langs.map(l => `${l.name} (${l.level})`).join(', ');
-    },
-    
-    addSport: async () => {
-        const select = document.getElementById('profile-sport-select');
-        const levelSelect = document.getElementById('profile-sport-level');
-        let name = select.value;
-        const level = levelSelect.value;
-        
-        if(!name) return;
-        
-        // Si "Autre", demander le nom
-        if(name === '__custom__') {
-            name = await ConfirmModal.prompt('Nom du sport ou compétence :', 'Ajouter une compétence', 'Ex: Escalade...');
-            if(!name || !name.trim()) { select.value = ''; return; }
-            name = name.trim();
-        }
-        
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!profile) return;
-        
-        if(!profile.sportsWithLevels) profile.sportsWithLevels = [];
-        
-        // Vérifier si déjà ajouté
-        if(profile.sportsWithLevels.some(s => s.name.toLowerCase() === name.toLowerCase())) {
-            Utils.toast('Ce sport est déjà ajouté', 'warning');
-            select.value = '';
-            return;
-        }
-        
-        profile.sportsWithLevels.push({ name, level });
-        PublicProfile.renderSportsList();
-        select.value = '';
-    },
-    
-    removeSport: (idx) => {
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!profile || !profile.sportsWithLevels) return;
-        profile.sportsWithLevels.splice(idx, 1);
-        PublicProfile.renderSportsList();
-    },
-    
-    renderSportsList: () => {
-        const container = document.getElementById('profile-sports-list');
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!container || !profile) return;
-        
-        const sports = profile.sportsWithLevels || [];
-        container.innerHTML = sports.map((s, i) => `
-            <span class="n8-flex-2">
-                <strong>${Utils.escape(s.name)}</strong>
-                <span class="text-sec">${PublicProfile.sportLevels[s.level] || s.level}</span>
-                <span onclick="app.PublicProfile.removeSport(${i})" style="cursor:pointer; color:var(--danger); margin-left:3px;">✖</span>
-            </span>
-        `).join('');
-        
-        // Mise à jour du champ caché pour compatibilité
-        document.getElementById('profile-sports').value = sports.map(s => `${s.name} (${s.level})`).join(', ');
-    },
-    
-    // Migration des anciennes données texte vers le nouveau format
-    migrateSkillsData: (profile) => {
-        // Migrer les langues
-        if(profile.languages && typeof profile.languages === 'string' && !profile.languagesWithLevels) {
-            profile.languagesWithLevels = profile.languages.split(',').map(l => l.trim()).filter(l => l).map(l => ({
-                name: l.replace(/\s*\([^)]*\)\s*$/, '').trim(),
-                level: 'courant'
-            }));
-        }
-        // Migrer les sports
-        if(profile.sports && typeof profile.sports === 'string' && !profile.sportsWithLevels) {
-            profile.sportsWithLevels = profile.sports.split(',').map(s => s.trim()).filter(s => s).map(s => ({
-                name: s.replace(/\s*\([^)]*\)\s*$/, '').trim(),
-                level: 'confirme'
-            }));
-        }
-    },
+// ========== LANGUES ET SPORTS — délégué à ProfileSkills ==========
+    get languageLevels() { return ProfileSkills.languageLevels; },
+    set languageLevels(v) { ProfileSkills.languageLevels = v; },
+    get sportLevels() { return ProfileSkills.sportLevels; },
+    set sportLevels(v) { ProfileSkills.sportLevels = v; },
+    addLanguage: (...a) => ProfileSkills.addLanguage(...a),
+    removeLanguage: (...a) => ProfileSkills.removeLanguage(...a),
+    renderLanguagesList: (...a) => ProfileSkills.renderLanguagesList(...a),
+    addSport: (...a) => ProfileSkills.addSport(...a),
+    removeSport: (...a) => ProfileSkills.removeSport(...a),
+    renderSportsList: (...a) => ProfileSkills.renderSportsList(...a),
+    migrateSkillsData: (...a) => ProfileSkills.migrateSkillsData(...a),
     
     // Change de profil
     switchToProfile: (index) => {
@@ -68924,7 +68950,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, CrewExport, Planning, Contacts, ActorSearch, PublicProfile, ProfileCalendar, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, CrewExport, Planning, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
