@@ -6992,7 +6992,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.8.4</p>
+      <p>vv4.8.5</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -13785,6 +13785,7 @@ crewRoles: {
       channel: null,
       heartbeatInterval: null,
       isLeaderTab: false,
+      missedChecks: 0,           // compteur de tolérance avant kick (anti faux-positif)
       
       init: () => {
           // Générer un ID unique pour cet onglet
@@ -13987,39 +13988,66 @@ crewRoles: {
           if(SessionManager.heartbeatInterval) clearInterval(SessionManager.heartbeatInterval);
           SessionManager.heartbeatInterval = setInterval(SessionManager.checkSessionStillValid, SessionManager.HEARTBEAT_INTERVAL_MS);
           
-          // Nettoyer à la fermeture
+          // Nettoyer à la fermeture : arrêter le heartbeat ET supprimer la session en base
+          // (sendBeacon serait idéal mais l'API Supabase suffit en best-effort ici).
           window.addEventListener('beforeunload', () => {
               if(SessionManager.heartbeatInterval) clearInterval(SessionManager.heartbeatInterval);
+              SessionManager.deleteOwnSession();
           });
           
           return true;
       },
       
       // Vérifie périodiquement que notre session existe encore en base
-      // Si elle a été supprimée (par un nouveau client qui a pris la place), on est kické
+      // Si elle a été supprimée (par un nouveau client qui a pris la place), on est kické.
+      // ROBUSTESSE : on ne kicke PAS au premier échec (un SELECT vide peut venir d'un
+      // glitch RLS/réseau transitoire, surtout juste après un TOKEN_REFRESHED). On exige
+      // 2 échecs consécutifs, ET on tente d'abord de recréer notre propre session
+      // (self-healing) : si on est vraiment seul, le re-upsert nous remet en base sans kick.
       checkSessionStillValid: async () => {
           if(!SessionManager.currentUserId || !SessionManager.sessionToken) return;
           
           try {
-              // Cherche notre ligne par session_token
+              // Cherche notre ligne par session_token ET user_id (ne pas dépendre que de la RLS)
               const { data, error } = await SessionManager._withTimeout(
                   supabase.from('active_sessions')
                       .select('id')
+                      .eq('user_id', SessionManager.currentUserId)
                       .eq('session_token', SessionManager.sessionToken)
               );
               
               if(error) {
                   console.warn('[SessionManager] Heartbeat error (ignoré):', error.message);
-                  return;
+                  return; // erreur réseau/serveur : on ne touche pas au compteur, on réessaiera
               }
               
               if(!data || data.length === 0) {
-                  // Notre ligne a été supprimée → kick !
-                  SessionManager.showKickedModal();
+                  // Notre ligne est absente. Avant de kicker, on incrémente un compteur de
+                  // tolérance et on tente de recréer notre session (cas "un seul onglet" :
+                  // la ligne a pu être nettoyée à tort, on se réinscrit simplement).
+                  SessionManager.missedChecks = (SessionManager.missedChecks || 0) + 1;
+                  console.warn('[SessionManager] Session absente en base (tentative ' + SessionManager.missedChecks + '/2)');
+                  
+                  if(SessionManager.missedChecks >= 2) {
+                      // Deux échecs consécutifs : un autre client a probablement pris la place → kick.
+                      SessionManager.showKickedModal();
+                      return;
+                  }
+                  
+                  // Premier échec : self-healing. On ré-enregistre notre session.
+                  await SessionManager._withTimeout(
+                      supabase.from('active_sessions').upsert({
+                          user_id: SessionManager.currentUserId,
+                          session_token: SessionManager.sessionToken,
+                          last_seen: new Date().toISOString(),
+                          user_agent: navigator.userAgent.slice(0, 200)
+                      }, { onConflict: 'session_token' })
+                  ).catch(e => console.warn('[SessionManager] Re-upsert échoué:', e.message));
                   return;
               }
               
-              // Tout va bien : on met à jour last_seen
+              // Tout va bien : on remet le compteur à zéro et on met à jour last_seen
+              SessionManager.missedChecks = 0;
               await SessionManager._withTimeout(
                   supabase.from('active_sessions')
                       .update({ last_seen: new Date().toISOString() })
@@ -14076,6 +14104,19 @@ crewRoles: {
           });
       },
       
+      // Supprime notre propre session en base (best-effort, non bloquant).
+      // Évite de laisser une session "fantôme" qui compterait dans MAX_SESSIONS
+      // et pourrait provoquer un kick injustifié à la reconnexion suivante.
+      deleteOwnSession: () => {
+          if(!SessionManager.sessionToken || typeof supabase === 'undefined') return;
+          try {
+              supabase.from('active_sessions')
+                  .delete()
+                  .eq('session_token', SessionManager.sessionToken)
+                  .then(() => {}, () => {});
+          } catch(_) { /* silencieux */ }
+      },
+      
       cleanup: () => {
           if(SessionManager.channel) {
               SessionManager.channel.close();
@@ -14083,6 +14124,7 @@ crewRoles: {
           if(SessionManager.heartbeatInterval) {
               clearInterval(SessionManager.heartbeatInterval);
           }
+          SessionManager.deleteOwnSession();
       }
   };
 
@@ -18177,6 +18219,315 @@ openBoardPrintEpisodeChooser: () => {
     },
   };
 
+  const UIDashboard = {
+    showDashboard: async () => { 
+        UI.hideAllViews();
+        els.authView.style.display = 'none'; 
+        els.dashboardView.style.display = 'flex';
+        
+        // Restauration du projet après F5 (capture AVANT de nettoyer NavMemory)
+        const _lastProjectId = NavMemory.getProject();
+        const _savedNav = NavMemory.getTab();
+        
+        // On est de retour au dashboard : on oublie le projet précédent
+        NavMemory.setProject(null);
+        NavMemory.setTab(null, null);
+        
+        // Si on avait un projet en mémoire, le rouvrir après que le dashboard soit chargé
+        if(_lastProjectId) {
+            setTimeout(async () => {
+                try {
+                    await Store.loadProject(_lastProjectId);
+                    // Restaurer l'onglet après l'ouverture du projet
+                    if(_savedNav.tab) {
+                        setTimeout(() => {
+                            try {
+                                if(_savedNav.tab) UI.switchCategory(_savedNav.tab);
+                                if(_savedNav.subtab) {
+                                    setTimeout(() => UI.switchTab(_savedNav.subtab), 150);
+                                }
+                            } catch(e) { console.warn('Restauration onglet échouée:', e); }
+                        }, 300);
+                    }
+                } catch(e) {
+                    console.warn('Impossible de restaurer le projet ' + _lastProjectId + ':', e);
+                }
+            }, 500);
+        }
+        
+        // Nettoyer le chat
+        if(typeof Chat !== 'undefined') Chat.cleanup();
+        // Nettoyer les locks de scène
+        if(typeof Store !== 'undefined' && Store.cleanupLocks) await Store.cleanupLocks();
+        const accountType = state.userProfile?.accountType || 'producer';
+        const typeLabel = accountType === 'actor' ? '🎭 Comédien.ne' : (accountType === 'crew' ? '🎥 Technicien.ne' : '🎬 Réalisateur');
+        document.getElementById('user-welcome').innerText = typeLabel + " • " + (state.currentUser ? state.currentUser.email : ""); 
+        
+        // Mettre à jour le bouton profil
+        const profileBtn = document.getElementById('btn-my-profile');
+        if(profileBtn) {
+            const profileComplete = state.userProfile?.profileComplete;
+            profileBtn.innerHTML = profileComplete ? '👤 Mon Profil' : '⚠️ Compléter mon profil';
+            profileBtn.style.background = 'var(--panel-bg)';
+        }
+        
+        await UIDashboard.renderDashboard(); 
+        
+        // Timer pour mettre à jour le countdown de l'essai
+        if(UI.trialTimer) clearInterval(UI.trialTimer);
+        if(Pricing.isInTrial()) {
+            UI.trialTimer = setInterval(() => {
+                if(Pricing.isInTrial()) {
+                    UIDashboard.renderProjectList();
+                } else {
+                    clearInterval(UI.trialTimer);
+                    UIDashboard.renderProjectList(); // Afficher que l'essai est terminé
+                }
+            }, 60000); // Mise à jour toutes les minutes
+        }
+    },
+
+    renderDashboard: async () => { 
+        // V2.1.6 : Hub central au démarrage
+        Hub.render();
+    },
+    
+    showPriorityMenu: (e, projectId) => {
+        e.stopPropagation();
+        // Fermer menu existant
+        const existing = document.querySelector('.priority-menu');
+        if(existing) existing.remove();
+        
+        const priorities = [
+            { label: 'Principal', class: 'principal', color: '#4CAF50' },
+            { label: 'Secondaire', class: 'secondaire', color: '#2196F3' },
+            { label: 'Urgent', class: 'urgent', color: '#f44336' },
+            { label: 'En attente', class: 'en-attente', color: '#9E9E9E' },
+            { label: 'Une idée', class: 'une-idee', color: '#FF9800' },
+            { label: 'Je sais pas trop', class: 'je-sais-pas-trop', color: '#9C27B0' },
+            { label: 'Archivé', class: 'archive', color: '#795548' },
+            { label: 'Aucune', class: '', color: 'transparent' }
+        ];
+        
+        const menu = document.createElement('div');
+        menu.className = 'priority-menu';
+        menu.innerHTML = priorities.map(p => `
+            <div class="priority-menu-item" onclick="app.UIDashboard.setPriority('${projectId}', '${p.label === 'Aucune' ? '' : p.label}')">
+                <span class="dot" style="background:${p.color}"></span>
+                ${p.label}
+            </div>
+        `).join('');
+        
+        const rect = e.target.getBoundingClientRect();
+        menu.style.position = 'fixed';
+        menu.style.top = (rect.bottom + 5) + 'px';
+        menu.style.left = rect.left + 'px';
+        
+        document.body.appendChild(menu);
+        
+        // Fermer au clic ailleurs
+        setTimeout(() => {
+            document.addEventListener('click', function closeMenu(ev) {
+                if(!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', closeMenu); }
+            });
+        }, 10);
+    },
+    
+    setPriority: async (projectId, priority) => {
+        const menu = document.querySelector('.priority-menu');
+        if(menu) menu.remove();
+        
+        try {
+            // Charger les données actuelles du projet
+            const { data: project } = await supabase
+                .from('projects')
+                .select('data')
+                .eq('id', projectId)
+                .maybeSingle();
+            
+            if (project) {
+                const updatedData = { ...project.data, priority: priority || null };
+                await supabase.from('projects').update({ data: updatedData }).eq('id', projectId);
+            }
+            
+            Utils.toast(priority ? `Priorité "${priority}" définie` : 'Priorité supprimée', 'success');
+            UIDashboard.renderProjectList();
+        } catch(e) {
+            Utils.toast('Erreur lors de la mise à jour', 'error');
+        }
+    },
+    
+    reorderProjects: async (draggedId, targetId) => {
+        const list = await Store.getProjectsList();
+        
+        // Trouver les index
+        const draggedIdx = list.findIndex(p => p.id === draggedId);
+        const targetIdx = list.findIndex(p => p.id === targetId);
+        
+        if(draggedIdx === -1 || targetIdx === -1) return;
+        
+        // Capturer les positions actuelles des cartes
+        const cards = Array.from(document.querySelectorAll('.project-card'));
+        const oldPositions = new Map();
+        cards.forEach(card => {
+            const rect = card.getBoundingClientRect();
+            oldPositions.set(card.dataset.projectId, { left: rect.left, top: rect.top });
+        });
+        
+        // Réorganiser
+        const [dragged] = list.splice(draggedIdx, 1);
+        list.splice(targetIdx, 0, dragged);
+        
+        // Sauvegarder l'ordre pour chaque projet
+        try {
+            for (let idx = 0; idx < list.length; idx++) {
+                const p = list[idx];
+                const { data: proj } = await supabase.from('projects').select('data').eq('id', p.id).maybeSingle();
+                if (proj) {
+                    const updatedData = { ...proj.data, order: idx };
+                    await supabase.from('projects').update({ data: updatedData }).eq('id', p.id);
+                }
+            }
+            
+            // Reconstruire la liste
+            await UIDashboard.renderProjectList();
+            
+            // Animer vers les nouvelles positions (FLIP animation)
+            const newCards = Array.from(document.querySelectorAll('.project-card'));
+            newCards.forEach(card => {
+                const projectId = card.dataset.projectId;
+                const oldPos = oldPositions.get(projectId);
+                if(oldPos) {
+                    const newRect = card.getBoundingClientRect();
+                    const deltaX = oldPos.left - newRect.left;
+                    const deltaY = oldPos.top - newRect.top;
+                    
+                    if(deltaX !== 0 || deltaY !== 0) {
+                        card.style.transition = 'none';
+                        card.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+                        
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                card.style.transition = 'transform 0.7s cubic-bezier(0.25, 0.1, 0.25, 1)';
+                                card.style.transform = 'translate(0, 0)';
+                            });
+                        });
+                        
+                        // Nettoyer après l'animation
+                        setTimeout(() => {
+                            card.style.transition = '';
+                            card.style.transform = '';
+                        }, 750);
+                    }
+                }
+            });
+            
+        } catch(e) {
+            Utils.toast('Erreur lors du réordonnancement', 'error');
+        }
+    },
+
+    renderProjectList: async () => {
+        els.projectList.innerHTML = '<div style="padding:20px; color:#999">Chargement...</div>'; 
+        const list = await Store.getProjectsList(); 
+        els.projectList.innerHTML = ''; 
+        
+        const accountType = state.userProfile?.accountType || 'crew';
+        
+        // Bannière d'essai (si en période d'essai)
+        const trialBanner = Pricing.getTrialBanner();
+        if(trialBanner) {
+            const bannerDiv = document.createElement('div');
+            bannerDiv.style.cssText = 'grid-column: 1 / -1;';
+            bannerDiv.innerHTML = trialBanner;
+            els.projectList.appendChild(bannerDiv);
+        }
+        
+        // Widget de facturation (si abonné avec des projets)
+        const billingWidget = await Pricing.getBillingWidget();
+        if(billingWidget) {
+            const billingDiv = document.createElement('div');
+            billingDiv.style.cssText = 'grid-column: 1 / -1;';
+            billingDiv.innerHTML = billingWidget;
+            els.projectList.appendChild(billingDiv);
+        }
+        
+        // Carte nouveau projet (tout le monde peut créer un projet)
+        const newCard = document.createElement('div'); 
+        newCard.className = 'new-project-card'; 
+        newCard.innerHTML = `<span>+</span><div>Nouveau Projet</div>`; 
+        newCard.onclick = Store.createNewProject; 
+        els.projectList.appendChild(newCard); 
+        
+        const importCard = document.createElement('div');
+        importCard.className = 'new-project-card import-card';
+        importCard.innerHTML = `<span>📂</span><div>Importer (PDF / FDX)</div>`;
+        importCard.onclick = () => els.importInput.click();
+        els.projectList.appendChild(importCard);
+        
+       
+
+        // Liste des projets
+        if(list.length > 0) {
+            // Trier par ordre personnalisé puis par date
+            list.sort((a, b) => {
+                const orderA = a.order !== undefined ? a.order : 9999;
+                const orderB = b.order !== undefined ? b.order : 9999;
+                if(orderA !== orderB) return orderA - orderB;
+                return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
+            });
+            
+            list.forEach((p, idx) => { 
+                const card = document.createElement('div'); 
+                card.className = 'project-card'; 
+                card.draggable = true;
+                card.dataset.projectId = p.id;
+                card.dataset.index = idx;
+                let badgeColor = p.role==='owner'?'var(--primary)':(p.role==='editor'?'orange':'gray'); 
+                let badgeText = p.role==='owner'?'PROPRIÉTAIRE':(p.role==='editor'?'ÉDITEUR':'LECTEUR');
+                const priorityClass = p.priority ? p.priority.replace(/\s+/g, '-').toLowerCase() : '';
+                const priorityBadge = p.priority ? `<span class="priority-badge ${priorityClass}">${p.priority}</span>` : '';
+                // S3.5 : badge Série si project_type === 'series' (sur sa propre ligne)
+                const seriesBadge = (p.project_type === 'series') 
+                    ? `<div class="p-series-line"><span class="p-series-badge" title="Projet série">📺 ${p.episodeCount} épisode${p.episodeCount>1?'s':''}</span></div>`
+                    : '';
+                
+                card.innerHTML = `<span class="p-role-badge" style="color:${badgeColor}; border-color:${badgeColor}">${badgeText}</span><div><div class="p-title">${Utils.escape(p.title)}</div>${seriesBadge}<div class="p-meta">Modifié : ${p.date} ${priorityBadge}</div></div><div class="p-actions"><button class="p-btn-priority" onclick="app.UIDashboard.showPriorityMenu(event, '${p.id}')" title="Priorité">🏷️</button><button class="p-btn-del" onclick="app.Store.deleteProject('${p.id}', '${p.role}', event)">🗑️</button></div>`; 
+                card.onclick = (e) => { if(!e.target.closest('.p-actions')) Store.loadProject(p.id); };
+                
+                // Drag & drop events
+                card.addEventListener('dragstart', (e) => { 
+                    card.classList.add('dragging'); 
+                    e.dataTransfer.setData('text/plain', p.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                    setTimeout(() => card.style.visibility = 'hidden', 0);
+                });
+                card.addEventListener('dragend', () => { 
+                    card.classList.remove('dragging'); 
+                    card.style.visibility = 'visible';
+                    document.querySelectorAll('.project-card').forEach(c => { c.classList.remove('drag-over'); c.classList.remove('drag-over-left'); }); 
+                });
+                card.addEventListener('dragover', (e) => { 
+                    e.preventDefault(); 
+                    if(!card.classList.contains('dragging')) {
+                        document.querySelectorAll('.project-card').forEach(c => { if(c !== card) { c.classList.remove('drag-over'); c.classList.remove('drag-over-left'); }});
+                        card.classList.add('drag-over');
+                    }
+                });
+                card.addEventListener('dragleave', (e) => { 
+                    if(!card.contains(e.relatedTarget)) {
+                        card.classList.remove('drag-over'); 
+                        card.classList.remove('drag-over-left'); 
+                    }
+                });
+                card.addEventListener('drop', (e) => { e.preventDefault(); card.classList.remove('drag-over'); card.classList.remove('drag-over-left'); const draggedId = e.dataTransfer.getData('text/plain'); if(draggedId !== p.id) UIDashboard.reorderProjects(draggedId, p.id); });
+                
+                els.projectList.appendChild(card); 
+            });
+        }
+    },
+  };
+
   const UI = {
       toggleTheme: () => { document.body.classList.toggle('dark-mode'); PreferencesSync.save(CONFIG.themeKey, document.body.classList.contains('dark-mode') ? 'dark' : 'light'); if(Universe.map) Universe.updateMapTheme(); },
       
@@ -18444,72 +18795,14 @@ openBoardPrintEpisodeChooser: () => {
           document.getElementById('feed-view').classList.remove('active');
           document.getElementById('courses-view').classList.remove('active');
           },
-      showDashboard: async () => { 
-          UI.hideAllViews();
-          els.authView.style.display = 'none'; 
-          els.dashboardView.style.display = 'flex';
-          
-          // Restauration du projet après F5 (capture AVANT de nettoyer NavMemory)
-          const _lastProjectId = NavMemory.getProject();
-          const _savedNav = NavMemory.getTab();
-          
-          // On est de retour au dashboard : on oublie le projet précédent
-          NavMemory.setProject(null);
-          NavMemory.setTab(null, null);
-          
-          // Si on avait un projet en mémoire, le rouvrir après que le dashboard soit chargé
-          if(_lastProjectId) {
-              setTimeout(async () => {
-                  try {
-                      await Store.loadProject(_lastProjectId);
-                      // Restaurer l'onglet après l'ouverture du projet
-                      if(_savedNav.tab) {
-                          setTimeout(() => {
-                              try {
-                                  if(_savedNav.tab) UI.switchCategory(_savedNav.tab);
-                                  if(_savedNav.subtab) {
-                                      setTimeout(() => UI.switchTab(_savedNav.subtab), 150);
-                                  }
-                              } catch(e) { console.warn('Restauration onglet échouée:', e); }
-                          }, 300);
-                      }
-                  } catch(e) {
-                      console.warn('Impossible de restaurer le projet ' + _lastProjectId + ':', e);
-                  }
-              }, 500);
-          }
-          
-          // Nettoyer le chat
-          if(typeof Chat !== 'undefined') Chat.cleanup();
-          // Nettoyer les locks de scène
-          if(typeof Store !== 'undefined' && Store.cleanupLocks) await Store.cleanupLocks();
-          const accountType = state.userProfile?.accountType || 'producer';
-          const typeLabel = accountType === 'actor' ? '🎭 Comédien.ne' : (accountType === 'crew' ? '🎥 Technicien.ne' : '🎬 Réalisateur');
-          document.getElementById('user-welcome').innerText = typeLabel + " • " + (state.currentUser ? state.currentUser.email : ""); 
-          
-          // Mettre à jour le bouton profil
-          const profileBtn = document.getElementById('btn-my-profile');
-          if(profileBtn) {
-              const profileComplete = state.userProfile?.profileComplete;
-              profileBtn.innerHTML = profileComplete ? '👤 Mon Profil' : '⚠️ Compléter mon profil';
-              profileBtn.style.background = 'var(--panel-bg)';
-          }
-          
-          await UI.renderDashboard(); 
-          
-          // Timer pour mettre à jour le countdown de l'essai
-          if(UI.trialTimer) clearInterval(UI.trialTimer);
-          if(Pricing.isInTrial()) {
-              UI.trialTimer = setInterval(() => {
-                  if(Pricing.isInTrial()) {
-                      UI.renderProjectList();
-                  } else {
-                      clearInterval(UI.trialTimer);
-                      UI.renderProjectList(); // Afficher que l'essai est terminé
-                  }
-              }, 60000); // Mise à jour toutes les minutes
-          }
-      },
+		  
+// ===== DASHBOARD / LISTE PROJETS — délégué à UIDashboard =====
+      showDashboard: (...a) => UIDashboard.showDashboard(...a),
+      renderDashboard: (...a) => UIDashboard.renderDashboard(...a),
+      showPriorityMenu: (...a) => UIDashboard.showPriorityMenu(...a),
+      setPriority: (...a) => UIDashboard.setPriority(...a),
+      reorderProjects: (...a) => UIDashboard.reorderProjects(...a),
+      renderProjectList: (...a) => UIDashboard.renderProjectList(...a),
       toggleSidebarContent: () => { if(els.toggleSynop.checked) els.blockSynop.classList.add('visible'); else els.blockSynop.classList.remove('visible'); if(els.toggleShort.checked) els.blockShort.classList.add('visible'); else els.blockShort.classList.remove('visible'); if(els.toggleLong.checked) els.blockLong.classList.add('visible'); else els.blockLong.classList.remove('visible'); },
       
       boardMode: 'normal',
@@ -18545,245 +18838,7 @@ openBoardPrintEpisodeChooser: () => {
           } catch(e) {}
       },
 
-      renderDashboard: async () => { 
-          // V2.1.6 : Hub central au démarrage
-          Hub.render();
-      },
-      
-      showPriorityMenu: (e, projectId) => {
-          e.stopPropagation();
-          // Fermer menu existant
-          const existing = document.querySelector('.priority-menu');
-          if(existing) existing.remove();
-          
-          const priorities = [
-              { label: 'Principal', class: 'principal', color: '#4CAF50' },
-              { label: 'Secondaire', class: 'secondaire', color: '#2196F3' },
-              { label: 'Urgent', class: 'urgent', color: '#f44336' },
-              { label: 'En attente', class: 'en-attente', color: '#9E9E9E' },
-              { label: 'Une idée', class: 'une-idee', color: '#FF9800' },
-              { label: 'Je sais pas trop', class: 'je-sais-pas-trop', color: '#9C27B0' },
-              { label: 'Archivé', class: 'archive', color: '#795548' },
-              { label: 'Aucune', class: '', color: 'transparent' }
-          ];
-          
-          const menu = document.createElement('div');
-          menu.className = 'priority-menu';
-          menu.innerHTML = priorities.map(p => `
-              <div class="priority-menu-item" onclick="app.UI.setPriority('${projectId}', '${p.label === 'Aucune' ? '' : p.label}')">
-                  <span class="dot" style="background:${p.color}"></span>
-                  ${p.label}
-              </div>
-          `).join('');
-          
-          const rect = e.target.getBoundingClientRect();
-          menu.style.position = 'fixed';
-          menu.style.top = (rect.bottom + 5) + 'px';
-          menu.style.left = rect.left + 'px';
-          
-          document.body.appendChild(menu);
-          
-          // Fermer au clic ailleurs
-          setTimeout(() => {
-              document.addEventListener('click', function closeMenu(ev) {
-                  if(!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', closeMenu); }
-              });
-          }, 10);
-      },
-      
-      setPriority: async (projectId, priority) => {
-          const menu = document.querySelector('.priority-menu');
-          if(menu) menu.remove();
-          
-          try {
-              // Charger les données actuelles du projet
-              const { data: project } = await supabase
-                  .from('projects')
-                  .select('data')
-                  .eq('id', projectId)
-                  .maybeSingle();
-              
-              if (project) {
-                  const updatedData = { ...project.data, priority: priority || null };
-                  await supabase.from('projects').update({ data: updatedData }).eq('id', projectId);
-              }
-              
-              Utils.toast(priority ? `Priorité "${priority}" définie` : 'Priorité supprimée', 'success');
-              UI.renderProjectList();
-          } catch(e) {
-              Utils.toast('Erreur lors de la mise à jour', 'error');
-          }
-      },
-      
-      reorderProjects: async (draggedId, targetId) => {
-          const list = await Store.getProjectsList();
-          
-          // Trouver les index
-          const draggedIdx = list.findIndex(p => p.id === draggedId);
-          const targetIdx = list.findIndex(p => p.id === targetId);
-          
-          if(draggedIdx === -1 || targetIdx === -1) return;
-          
-          // Capturer les positions actuelles des cartes
-          const cards = Array.from(document.querySelectorAll('.project-card'));
-          const oldPositions = new Map();
-          cards.forEach(card => {
-              const rect = card.getBoundingClientRect();
-              oldPositions.set(card.dataset.projectId, { left: rect.left, top: rect.top });
-          });
-          
-          // Réorganiser
-          const [dragged] = list.splice(draggedIdx, 1);
-          list.splice(targetIdx, 0, dragged);
-          
-          // Sauvegarder l'ordre pour chaque projet
-          try {
-              for (let idx = 0; idx < list.length; idx++) {
-                  const p = list[idx];
-                  const { data: proj } = await supabase.from('projects').select('data').eq('id', p.id).maybeSingle();
-                  if (proj) {
-                      const updatedData = { ...proj.data, order: idx };
-                      await supabase.from('projects').update({ data: updatedData }).eq('id', p.id);
-                  }
-              }
-              
-              // Reconstruire la liste
-              await UI.renderProjectList();
-              
-              // Animer vers les nouvelles positions (FLIP animation)
-              const newCards = Array.from(document.querySelectorAll('.project-card'));
-              newCards.forEach(card => {
-                  const projectId = card.dataset.projectId;
-                  const oldPos = oldPositions.get(projectId);
-                  if(oldPos) {
-                      const newRect = card.getBoundingClientRect();
-                      const deltaX = oldPos.left - newRect.left;
-                      const deltaY = oldPos.top - newRect.top;
-                      
-                      if(deltaX !== 0 || deltaY !== 0) {
-                          card.style.transition = 'none';
-                          card.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
-                          
-                          requestAnimationFrame(() => {
-                              requestAnimationFrame(() => {
-                                  card.style.transition = 'transform 0.7s cubic-bezier(0.25, 0.1, 0.25, 1)';
-                                  card.style.transform = 'translate(0, 0)';
-                              });
-                          });
-                          
-                          // Nettoyer après l'animation
-                          setTimeout(() => {
-                              card.style.transition = '';
-                              card.style.transform = '';
-                          }, 750);
-                      }
-                  }
-              });
-              
-          } catch(e) {
-              Utils.toast('Erreur lors du réordonnancement', 'error');
-          }
-      },
 
-      renderProjectList: async () => {
-          els.projectList.innerHTML = '<div style="padding:20px; color:#999">Chargement...</div>'; 
-          const list = await Store.getProjectsList(); 
-          els.projectList.innerHTML = ''; 
-          
-          const accountType = state.userProfile?.accountType || 'crew';
-          
-          // Bannière d'essai (si en période d'essai)
-          const trialBanner = Pricing.getTrialBanner();
-          if(trialBanner) {
-              const bannerDiv = document.createElement('div');
-              bannerDiv.style.cssText = 'grid-column: 1 / -1;';
-              bannerDiv.innerHTML = trialBanner;
-              els.projectList.appendChild(bannerDiv);
-          }
-          
-          // Widget de facturation (si abonné avec des projets)
-          const billingWidget = await Pricing.getBillingWidget();
-          if(billingWidget) {
-              const billingDiv = document.createElement('div');
-              billingDiv.style.cssText = 'grid-column: 1 / -1;';
-              billingDiv.innerHTML = billingWidget;
-              els.projectList.appendChild(billingDiv);
-          }
-          
-          // Carte nouveau projet (tout le monde peut créer un projet)
-          const newCard = document.createElement('div'); 
-          newCard.className = 'new-project-card'; 
-          newCard.innerHTML = `<span>+</span><div>Nouveau Projet</div>`; 
-          newCard.onclick = Store.createNewProject; 
-          els.projectList.appendChild(newCard); 
-          
-          const importCard = document.createElement('div');
-          importCard.className = 'new-project-card import-card';
-          importCard.innerHTML = `<span>📂</span><div>Importer (PDF / FDX)</div>`;
-          importCard.onclick = () => els.importInput.click();
-          els.projectList.appendChild(importCard);
-          
-         
-
-          // Liste des projets
-          if(list.length > 0) {
-              // Trier par ordre personnalisé puis par date
-              list.sort((a, b) => {
-                  const orderA = a.order !== undefined ? a.order : 9999;
-                  const orderB = b.order !== undefined ? b.order : 9999;
-                  if(orderA !== orderB) return orderA - orderB;
-                  return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
-              });
-              
-              list.forEach((p, idx) => { 
-                  const card = document.createElement('div'); 
-                  card.className = 'project-card'; 
-                  card.draggable = true;
-                  card.dataset.projectId = p.id;
-                  card.dataset.index = idx;
-                  let badgeColor = p.role==='owner'?'var(--primary)':(p.role==='editor'?'orange':'gray'); 
-                  let badgeText = p.role==='owner'?'PROPRIÉTAIRE':(p.role==='editor'?'ÉDITEUR':'LECTEUR');
-                  const priorityClass = p.priority ? p.priority.replace(/\s+/g, '-').toLowerCase() : '';
-                  const priorityBadge = p.priority ? `<span class="priority-badge ${priorityClass}">${p.priority}</span>` : '';
-                  // S3.5 : badge Série si project_type === 'series' (sur sa propre ligne)
-                  const seriesBadge = (p.project_type === 'series') 
-                      ? `<div class="p-series-line"><span class="p-series-badge" title="Projet série">📺 ${p.episodeCount} épisode${p.episodeCount>1?'s':''}</span></div>`
-                      : '';
-                  
-                  card.innerHTML = `<span class="p-role-badge" style="color:${badgeColor}; border-color:${badgeColor}">${badgeText}</span><div><div class="p-title">${Utils.escape(p.title)}</div>${seriesBadge}<div class="p-meta">Modifié : ${p.date} ${priorityBadge}</div></div><div class="p-actions"><button class="p-btn-priority" onclick="app.UI.showPriorityMenu(event, '${p.id}')" title="Priorité">🏷️</button><button class="p-btn-del" onclick="app.Store.deleteProject('${p.id}', '${p.role}', event)">🗑️</button></div>`; 
-                  card.onclick = (e) => { if(!e.target.closest('.p-actions')) Store.loadProject(p.id); };
-                  
-                  // Drag & drop events
-                  card.addEventListener('dragstart', (e) => { 
-                      card.classList.add('dragging'); 
-                      e.dataTransfer.setData('text/plain', p.id);
-                      e.dataTransfer.effectAllowed = 'move';
-                      setTimeout(() => card.style.visibility = 'hidden', 0);
-                  });
-                  card.addEventListener('dragend', () => { 
-                      card.classList.remove('dragging'); 
-                      card.style.visibility = 'visible';
-                      document.querySelectorAll('.project-card').forEach(c => { c.classList.remove('drag-over'); c.classList.remove('drag-over-left'); }); 
-                  });
-                  card.addEventListener('dragover', (e) => { 
-                      e.preventDefault(); 
-                      if(!card.classList.contains('dragging')) {
-                          document.querySelectorAll('.project-card').forEach(c => { if(c !== card) { c.classList.remove('drag-over'); c.classList.remove('drag-over-left'); }});
-                          card.classList.add('drag-over');
-                      }
-                  });
-                  card.addEventListener('dragleave', (e) => { 
-                      if(!card.contains(e.relatedTarget)) {
-                          card.classList.remove('drag-over'); 
-                          card.classList.remove('drag-over-left'); 
-                      }
-                  });
-                  card.addEventListener('drop', (e) => { e.preventDefault(); card.classList.remove('drag-over'); card.classList.remove('drag-over-left'); const draggedId = e.dataTransfer.getData('text/plain'); if(draggedId !== p.id) UI.reorderProjects(draggedId, p.id); });
-                  
-                  els.projectList.appendChild(card); 
-              });
-          }
-      },
       
       launchEditor: () => { 
           els.dashboardView.style.display = 'none'; 
@@ -68788,7 +68843,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
