@@ -18759,8 +18759,1305 @@ openBoardPrintEpisodeChooser: () => {
     },
   };
 
+  const UIData = {
+    renderDataTab: (type, container) => {
+        const arr = state.data[type]; container.innerHTML = '';
+        if(!arr || arr.length === 0) { 
+            const emptyStates = {
+                characters: {
+                    icon: '🎭',
+                    title: 'Aucun personnage',
+                    desc: 'Ajoutez les personnages de votre histoire. Ils pourront ensuite être liés aux comédiens et apparaîtront dans le dépouillement.',
+                    btn: '+ Ajouter un personnage',
+                    action: 'app.Actions.addDataItem(\'characters\')'
+                },
+                actors: {
+                    icon: '🎬',
+                    title: 'Aucun comédien',
+                    desc: 'Constituez votre casting en ajoutant des comédiens. Vous pourrez les associer aux personnages et gérer leurs disponibilités.',
+                    btn: '+ Ajouter un comédien',
+                    action: 'app.Actions.addDataItem(\'actors\')'
+                },
+                locations: {
+                    icon: '🏠',
+                    title: 'Aucun décor',
+                    desc: 'Ajoutez les décors de votre scénario. Vous pourrez ensuite renseigner les lieux réels de tournage avec adresse et contact.',
+                    btn: '+ Ajouter un décor',
+                    action: 'app.Actions.addDataItem(\'locations\')'
+                }
+            };
+            const es = emptyStates[type] || { icon: '📁', title: 'Aucune donnée', desc: '', btn: '+ Ajouter', action: '' };
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">${es.icon}</div>
+                    <div class="empty-state-title">${es.title}</div>
+                    <div class="empty-state-desc">${es.desc}</div>
+                    <button class="empty-state-btn" onclick="${es.action}">${es.btn}</button>
+                    <div class="empty-state-tips">💡 <strong>Astuce :</strong> Vous pouvez aussi importer depuis un scénario existant via le menu Fichier.</div>
+                </div>
+            `;
+            return; 
+        } 
+        
+        // Déterminer les permissions selon le type
+        const typeToSection = { 'characters': 'personnages', 'actors': 'comediens', 'locations': 'lieux' };
+        const sectionName = typeToSection[type];
+        const isView = state.currentRole === 'viewer' || (sectionName && !Permissions.canEdit(sectionName)); 
+        let groupType = '';
+        if(type === 'characters') groupType = 'perso'; else if(type === 'actors') groupType = 'actor'; else if(type === 'locations') groupType = 'lieu';
+
+        const relevantGroups = state.data.groups.filter(g => g.type === groupType);
+        
+        // Barre de toggle vue compacte / détaillée — injectée dans la toolbar du haut (à droite)
+        const viewMode = CardModal.getViewMode(type);
+        const toolbarIds = { characters: 'chars-toolbar', actors: 'actors-toolbar', locations: 'locations-toolbar' };
+        const toolbar = document.getElementById(toolbarIds[type]);
+        if(toolbar) {
+            // Retirer un éventuel toggle précédent pour ne pas en empiler
+            const oldToggle = toolbar.querySelector('.view-toggle-bar');
+            if(oldToggle) oldToggle.remove();
+            const toggleBar = document.createElement('div');
+            toggleBar.className = 'view-toggle-bar';
+            toggleBar.innerHTML = `
+                <button class="view-toggle-btn ${viewMode === 'compact' ? 'active' : ''}" onclick="app.CardModal.setViewMode('${type}', 'compact')">🔲 Compact</button>
+                <button class="view-toggle-btn ${viewMode === 'detailed' ? 'active' : ''}" onclick="app.CardModal.setViewMode('${type}', 'detailed')">📋 Détaillé</button>
+            `;
+            toolbar.appendChild(toggleBar);
+        }
+        
+        if(viewMode === 'compact') {
+            // Vue compacte : grille de petites cartes
+            relevantGroups.forEach(grp => {
+                const itemsInGroup = arr.filter(item => item.group_id === grp.id);
+                if(itemsInGroup.length > 0) {
+                    const section = document.createElement('div'); section.className = 'group-section';
+                    section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}</div><div class="compact-cards-grid"></div>`;
+                    const grid = section.querySelector('.compact-cards-grid');
+                    CardModal.renderCompactCards(itemsInGroup, type, grid);
+                    container.appendChild(section);
+                }
+            });
+            const noGroup = arr.filter(item => !item.group_id || !relevantGroups.find(g => g.id === item.group_id));
+            if(noGroup.length > 0) {
+                const section = document.createElement('div'); section.className = 'group-section';
+                section.innerHTML = `<div class="group-header text-sec">Non classé</div><div class="compact-cards-grid"></div>`;
+                const grid = section.querySelector('.compact-cards-grid');
+                CardModal.renderCompactCards(noGroup, type, grid);
+                container.appendChild(section);
+            }
+        } else {
+            // Vue détaillée : fiches complètes (ancien mode)
+            relevantGroups.forEach(grp => {
+                const itemsInGroup = arr.filter(item => item.group_id === grp.id);
+                if(itemsInGroup.length > 0) {
+                    const section = document.createElement('div'); section.className = 'group-section';
+                    section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}</div><div class="data-grid"></div>`;
+                    const grid = section.querySelector('.data-grid');
+                    UIData.renderDataCards(itemsInGroup, type, grid, relevantGroups);
+                    container.appendChild(section);
+                }
+            });
+            const noGroup = arr.filter(item => !item.group_id || !relevantGroups.find(g => g.id === item.group_id));
+            if(noGroup.length > 0) {
+                const section = document.createElement('div'); section.className = 'group-section';
+                section.innerHTML = `<div class="group-header text-sec">Non classé</div><div class="data-grid"></div>`;
+                const grid = section.querySelector('.data-grid');
+                UIData.renderDataCards(noGroup, type, grid, relevantGroups);
+                container.appendChild(section);
+            }
+        }
+    },
+    
+    renderDataCards: (items, type, container, availableGroups) => {
+        const isView = state.currentRole === 'viewer';
+        items.forEach((item) => { 
+            const idx = state.data[type].indexOf(item);
+            const div = document.createElement('div'); div.className = 'data-card'; 
+            const delBtn = isView ? '' : `<button onclick="app.Actions.deleteDataItem('${type}', ${idx})" style="color:var(--danger);border:none;background:none;cursor:pointer">🗑️</button>`; 
+            
+            let groupSelect = '';
+            if(!isView) {
+                groupSelect = `<select class="group-select" onchange="app.Actions.changeGroup('${type}', ${idx}, this.value)">`;
+                groupSelect += `<option value="">-- Groupe --</option>`;
+                availableGroups.forEach(g => { groupSelect += `<option value="${g.id}" ${item.group_id === g.id ? 'selected' : ''}>${g.name}</option>`; });
+                groupSelect += `</select>`;
+            }
+
+            let contentHtml = '';
+            if (type === 'actors') {
+                // Vérifier si le profil est verrouillé (revendiqué par quelqu'un)
+                const isLocked = !!item.publicProfileId;
+                const isReadOnly = isView || isLocked;
+                
+                // Trouver le personnage que cet acteur joue
+                const linkedCharacter = state.data.characters.find(c => c.actor_id === item.id);
+                
+                contentHtml += `<div class="actor-card-header">`;
+                if(item.photo) contentHtml += `<img src="${item.photo}" class="actor-photo-preview">`;
+                const isInContacts = state.contacts && state.contacts.actors && state.contacts.actors.some(c => c.id === item.id);
+                const lockedBadge = isLocked ? `<span style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: bold;">🔒 Profil revendiqué</span>` : '';
+                contentHtml += `<div style="flex-grow:1;"><div style="font-weight:bold; font-size:1rem; margin-bottom:5px; display:flex; align-items:center; gap:8px;">${Utils.escape(item.name)} ${lockedBadge} ${!isView ? `<button class="save-contact-btn ${isInContacts ? 'saved' : ''}" onclick="event.stopPropagation(); app.Contacts.saveActorToContacts(${idx})" title="${isInContacts ? 'Déjà dans vos contacts' : 'Sauvegarder dans contacts'}">${isInContacts ? '⭐' : '☆'}</button>` : ''}</div>`;
+                contentHtml += `<select class="actor-input" style="margin-bottom:5px; width:auto;" onchange="app.Actions.updateActorMeta(${idx}, 'gender', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                    ${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(item.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
+                </select>`;
+                
+                // Afficher le rôle
+                if(linkedCharacter) {
+                    contentHtml += `<div style="color:var(--primary); font-size:0.9rem; margin-bottom:5px;">🎭 Joue : <strong>${Utils.escape(linkedCharacter.name)}</strong></div>`;
+                } else {
+                    contentHtml += `<div style="color:var(--text-sec); font-size:0.85rem; margin-bottom:5px; font-style:italic;">Aucun personnage lié</div>`;
+                }
+                
+                if(!isReadOnly) {
+                    const photoBtnLabel = item.photo ? '🖼️ Changer la photo' : '📤 Importer une photo';
+                    contentHtml += `<div class="flex-gap10" style="align-items:center;">
+                        <input type="file" id="actor-photo-input-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.uploadActorPhoto(${idx}, this)">
+                        <button onclick="document.getElementById('actor-photo-input-${idx}').click()" class="btn-primary-sm-r6" style="flex:0 0 auto;">${photoBtnLabel}</button>
+                        ${item.photo ? `<button onclick="app.Actions.updateActorMeta(${idx}, 'photo', '')" class="btn-icon-sm" title="Supprimer la photo" style="background:var(--danger); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer;">✕</button>` : ''}
+                    </div>`;
+                }
+                contentHtml += `</div>${delBtn}</div>`;
+                contentHtml += `<div class="actor-input-row mt-10">`;
+                contentHtml += `<input class="actor-input" placeholder="Email" value="${item.email||''}" onchange="app.Actions.updateActorMeta(${idx}, 'email', this.value)" ${isReadOnly?'disabled':''}>`;
+                contentHtml += `<input class="actor-input" placeholder="Tél" value="${item.phone||''}" onchange="app.Actions.updateActorMeta(${idx}, 'phone', this.value)" ${isReadOnly?'disabled':''}>`;
+                contentHtml += `</div>`;
+                contentHtml += `<div class="actor-input-row mt-5">`;
+                contentHtml += `<input class="actor-input" placeholder="📍 Ville / Région" value="${item.city||''}" onchange="app.Actions.updateActorMeta(${idx}, 'city', this.value)" ${isReadOnly?'disabled':''}>`;
+                contentHtml += `<input class="actor-input" placeholder="Site Web" value="${item.website||''}" onchange="app.Actions.updateActorMeta(${idx}, 'website', this.value)" ${isReadOnly?'disabled':''}>`;
+                contentHtml += `</div>`;
+                contentHtml += `<textarea class="data-desc mt-5" placeholder="Adresse / Notes..." oninput="app.Actions.updateActorMeta(${idx}, 'address', this.value)" ${isReadOnly?'disabled':''}>${item.address || ''}</textarea>`;
+                contentHtml += `<textarea class="data-desc" style="margin-top:5px; height:50px;" placeholder="Bio..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isReadOnly?'disabled':''}>${item.bio || ''}</textarea>`;
+                
+                // Section Description physique (vérifier visibilité)
+                if(UI.isSectionVisibleForProject(item, 'physical')) {
+                contentHtml += `<div class="actor-physical-section info-box">
+                    <strong class="form-label-block">📏 Description physique</strong>
+                    <div class="actor-input-row mb-8">
+                        <input class="actor-input" type="number" placeholder="Taille (cm)" value="${item.height || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'height', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        <input class="actor-input" type="number" placeholder="Poids (kg)" value="${item.weight || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'weight', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        <input class="actor-input" type="number" placeholder="Âge" value="${item.age || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'age', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                    </div>
+                    <div class="actor-input-row mb-8">
+                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'eyeColor', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                            ${ProfileRenderer.selectOptions.eyeColor.map(o => '<option value="'+o.value+'" '+(item.eyeColor === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
+                        </select>
+                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'hairColor', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                            ${ProfileRenderer.selectOptions.hairColor.map(o => '<option value="'+o.value+'" '+(item.hairColor === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
+                        </select>
+                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'hairLength', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                            ${ProfileRenderer.selectOptions.hairLength.map(o => '<option value="'+o.value+'" '+(item.hairLength === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
+                        </select>
+                    </div>
+                    <div class="actor-input-row mb-8">
+                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'corpulence', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                            ${ProfileRenderer.selectOptions.corpulence.map(o => '<option value="'+o.value+'" '+(item.corpulence === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
+                        </select>
+                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'ethnicity', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                            ${ProfileRenderer.selectOptions.ethnicity.map(o => '<option value="'+o.value+'" '+(item.ethnicity === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
+                        </select>
+                    </div>
+                    <div class="actor-input-row">
+                        <input class="actor-input" placeholder="Sports pratiqués (équitation, natation...)" value="${item.sports || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'sports', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        <input class="actor-input" placeholder="Langues parlées (français, anglais...)" value="${item.languages || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'languages', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                    </div>
+                </div>`;
+                }
+                
+                // Section Galerie Photos (vérifier visibilité)
+                if(UI.isSectionVisibleForProject(item, 'gallery')) {
+                const galleryPhotos = item.galleryPhotos || [];
+                const galleryHTML = galleryPhotos.map((url, i) => `
+                    <div style="position:relative; width:80px; height:80px;">
+                        <img src="${url}" style="width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--border);">
+                        ${!isReadOnly ? `<button onclick="app.Actions.removeActorGalleryPhoto(${idx}, ${i})" class="n8-avatar-3">✕</button>` : ''}
+                    </div>
+                `).join('');
+                
+                contentHtml += `<div class="info-box">
+                    <strong class="form-label-block">📸 Galerie Photos</strong>
+                    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+                        ${galleryHTML || '<span style="color:var(--text-sec); font-size:0.85rem;">Aucune photo</span>'}
+                    </div>
+                    ${!isReadOnly ? `<div class="flex-gap10" style="align-items:center;">
+                        <input type="file" id="actor-gallery-input-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.addActorGalleryPhoto(${idx})">
+                        <button onclick="document.getElementById('actor-gallery-input-${idx}').click()" class="btn-primary-sm-r6" ${galleryPhotos.length >= 3 ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>📤 Ajouter une photo${galleryPhotos.length > 0 ? ` (${galleryPhotos.length}/3)` : ''}</button>
+                    </div>` : ''}
+                </div>`;
+                }
+                
+                // Section Bande Démo (vérifier visibilité)
+                if(UI.isSectionVisibleForProject(item, 'demoreel')) {
+                contentHtml += `<div class="info-box">
+                    <strong class="form-label-block">🎬 Bande Démo</strong>
+                    <input class="actor-input" type="url" placeholder="URL YouTube ou Vimeo (https://...)" value="${item.demoreel || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'demoreel', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                    ${item.demoreel ? `<div class="mt-10"><iframe src="${ProfileRenderer.getEmbedUrl(item.demoreel)}" width="100%" height="200" frameborder="0" allowfullscreen class="br-8"></iframe></div>` : ''}
+                </div>`;
+                }
+                
+                // Section Tarif pour les acteurs (vérifier visibilité)
+                if(UI.isSectionVisibleForProject(item, 'tarif')) {
+                const actorCurrencyOptions = (CONFIG.currencies || ['€', '$', '£', 'CHF']).map(c => `<option value="${c}" ${item.rateCurrency === c ? 'selected' : ''}>${c}</option>`).join('');
+                const actorRateTypeOptions = (CONFIG.rateTypes || ['Jour', 'Semaine', 'Forfait', 'Heure']).map(t => `<option value="${t}" ${item.rateType === t ? 'selected' : ''}>${t}</option>`).join('');
+                
+                contentHtml += `<div class="actor-input-row mt-10">
+                    <input type="number" class="actor-input" placeholder="Tarif" value="${item.dailyRate || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'dailyRate', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                    <select class="actor-input" style="width:auto;" onchange="app.Actions.updateActorMeta(${idx}, 'rateCurrency', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        ${actorCurrencyOptions}
+                    </select>
+                    <select class="actor-input" style="width:auto;" onchange="app.Actions.updateActorMeta(${idx}, 'rateType', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        ${actorRateTypeOptions}
+                    </select>
+                    <label style="display:flex; align-items:center; gap:5px; cursor:pointer; white-space:nowrap;">
+                        <input type="checkbox" ${item.rateNegotiable ? 'checked' : ''} onchange="app.Actions.updateActorMeta(${idx}, 'rateNegotiable', this.checked)" ${isReadOnly ? 'disabled' : ''}>
+                        <span class="fs-085">🤝 Négociable</span>
+                    </label>
+                </div>`;
+                
+                // Section Statut professionnel
+                contentHtml += `<div style="margin-top:10px; padding:10px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
+                    <strong class="fs-09">📋 Statut professionnel</strong>
+                    <div class="actor-input-row mt-8">
+                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'professionalStatus', this.value); app.UIData.renderDataTab('actors', els.actorContainer);" ${isReadOnly ? 'disabled' : ''}>
+                            ${ProfileRenderer.selectOptions.professionalStatus.map(o => '<option value="'+o.value+'" '+(item.professionalStatus === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
+                        </select>
+                    </div>
+                    ${item.professionalStatus === 'intermittent' ? `
+                    <div class="actor-input-row mt-8">
+                        <input class="actor-input" placeholder="N° Sécurité Sociale" value="${item.numSecu || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'numSecu', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        <input class="actor-input" placeholder="N° Congés Spectacles" value="${item.numCongesSpectacles || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'numCongesSpectacles', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                    </div>` : ''}
+                    ${item.professionalStatus === 'micro-entrepreneur' ? `
+                    <div class="actor-input-row mt-8">
+                        <input class="actor-input" placeholder="N° SIRET" value="${item.siret || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'siret', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                    </div>` : ''}
+                    
+                    <strong style="font-size: 0.9rem; display:block; margin-top:15px;">🤝 Type de collaboration</strong>
+                    <div class="collab-type-selector">
+                        <div class="collab-type-btn pro ${item.collabType === 'pro' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Actions.updateActorMeta(${idx}, 'collabType', 'pro'); app.UIData.renderDataTab('actors', els.actorContainer);` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
+                            🎬 Pro
+                        </div>
+                        <div class="collab-type-btn semi-pro ${item.collabType === 'semi-pro' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Actions.updateActorMeta(${idx}, 'collabType', 'semi-pro'); app.UIData.renderDataTab('actors', els.actorContainer);` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
+                            ⚡ Semi-pro
+                        </div>
+                        <div class="collab-type-btn benevole ${item.collabType === 'benevole' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Actions.updateActorMeta(${idx}, 'collabType', 'benevole'); app.UIData.renderDataTab('actors', els.actorContainer);` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
+                            ❤️ Bénévole
+                        </div>
+                    </div>
+                    <p class="text-sec-xs-mt8">
+                        ${item.collabType === 'pro' ? '💼 Contrat classique, horaires et tarifs standards' : 
+                          item.collabType === 'semi-pro' ? '🤝 Flexible sur les conditions mais rémunéré·e' : 
+                          item.collabType === 'benevole' ? '🎁 Pas de rémunération, défraiement repas + transport' : 
+                          'Sélectionnez votre type de collaboration préféré'}
+                    </p>
+                </div>`;
+                }
+                
+                // Section Disponibilités pour les acteurs (vérifier visibilité)
+                if(UI.isSectionVisibleForProject(item, 'calendar')) {
+                const actorAvailDates = item.availabilityDates || [];
+                const actorAvailDatesHTML = actorAvailDates.map((d, i) => `<span style="display:inline-flex; align-items:center; background:#E8F5E9; border:1px solid #4CAF50; color:#2E7D32; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✓ ${d.from} → ${d.to} ${!isReadOnly ? `<span onclick="app.Actions.removeActorAvailability(${idx}, ${i})" class="delete-link">✖</span>` : ''}</span>`).join('');
+                
+                // Indisponibilités
+                const actorUnavailDates = item.unavailabilityDates || [];
+                const actorUnavailDatesHTML = actorUnavailDates.map((d, i) => `<span style="display:inline-flex; align-items:center; background:#FFEBEE; border:1px solid #f44336; color:#C62828; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✗ ${d.from} → ${d.to} ${d.reason ? '(' + Utils.escape(d.reason) + ')' : ''} ${!isReadOnly ? `<span onclick="app.Actions.removeActorUnavailability(${idx}, ${i})" class="delete-link">✖</span>` : ''}</span>`).join('');
+                
+                contentHtml += `<div class="crew-availability-section mt-10">
+                    <strong class="fs-09">📅 Disponibilités & Indisponibilités</strong>
+                    <textarea class="actor-input" style="min-height: 50px; margin-top: 5px; width:100%;" placeholder="Situation / Notes de disponibilité..." onchange="app.Actions.updateActorMeta(${idx}, 'availabilityText', this.value)" ${isReadOnly ? 'disabled' : ''}>${item.availabilityText || ''}</textarea>
+                    <div id="actor-calendar-${idx}"></div>
+                    <div class="mt-10">
+                        <div class="form-label">🟢 Disponible :</div>
+                        ${actorAvailDatesHTML || '<span class="text-sec-xs">Aucune période renseignée</span>'}
+                    </div>
+                    <div class="mt-10">
+                        <div class="form-label">🔴 Indisponible :</div>
+                        ${actorUnavailDatesHTML || '<span class="text-sec-xs">Aucune période renseignée</span>'}
+                        </div>
+                </div>`;
+                }
+                
+                // Section Véhicule (vérifier visibilité)
+                if(UI.isSectionVisibleForProject(item, 'vehicle')) {
+                contentHtml += `<div class="crew-vehicle-section mt-10">
+                    <label class="crew-vehicle-toggle">
+                        <input type="checkbox" ${item.hasVehicle ? 'checked' : ''} onchange="app.Actions.toggleActorVehicle(${idx}, this.checked)" ${isReadOnly ? 'disabled' : ''}>
+                        <strong>🚗 Possède un véhicule</strong>
+                    </label>
+                    <div class="crew-vehicle-details ${item.hasVehicle ? 'visible' : ''}" id="actor-vehicle-${idx}">
+                        <div class="actor-input-row mt-8">
+                            <input class="actor-input" placeholder="Type de véhicule" value="${item.vehicleType || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'vehicleType', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                            <input class="actor-input" placeholder="Immatriculation" value="${item.vehiclePlate || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'vehiclePlate', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        </div>
+                        <div class="actor-input-row mt-8">
+                            <input class="actor-input" type="number" min="1" max="9" placeholder="Nb places dispo" value="${item.vehicleSeats || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'vehicleSeats', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" ${item.vehicleTrunk ? 'checked' : ''} onchange="app.Actions.updateActorMeta(${idx}, 'vehicleTrunk', this.checked)" ${isReadOnly ? 'disabled' : ''}>
+                                <span>🧳 Coffre disponible</span>
+                            </label>
+                        </div>
+                        <textarea class="data-desc" style="margin-top:8px; height:40px;" placeholder="Notes véhicule..." oninput="app.Actions.updateActorMeta(${idx}, 'vehicleNotes', this.value)" ${isReadOnly ? 'disabled' : ''}>${item.vehicleNotes || ''}</textarea>
+                    </div>
+                </div>`;
+                }
+                
+                // Bouton Contrat
+                if(!isView) {
+                    contentHtml += `<div style="margin-top:15px; padding-top:15px; border-top:1px solid var(--border); display:flex; gap:10px; flex-wrap:wrap;">
+                        <button onclick="app.Contracts.openModal('actor', ${idx})" style="padding:8px 15px; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85rem;">📝 Contrat</button>
+                    </div>`;
+                }
+                
+                // Bouton Contrat
+                if(!isView) {
+                    contentHtml += `<div style="margin-top:15px; padding-top:15px; border-top:1px solid var(--border); display:flex; gap:10px; flex-wrap:wrap;">
+                        <button onclick="app.Contracts.openModal('actor', ${idx})" style="padding:8px 15px; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85rem;">📝 Contrat</button>
+                    </div>`;
+                }
+                
+                // S7 : Section "Apparaît dans" (via breakdown.COMEDIENS)
+                const actorScenes = (state.data.scenes || []).filter(s => 
+                    (s.breakdown?.COMEDIENS || []).some(n => n.toLowerCase() === item.name.toLowerCase())
+                );
+                if(actorScenes.length > 0) {
+                    const isSeries = state.currentProjectType === 'series';
+                    const allScenes = state.data.scenes;
+                    const sceneNumbers = actorScenes.map(s => {
+                        let label;
+                        if(isSeries) {
+                            const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
+                            if(ep) {
+                                const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
+                                label = UI.formatSceneNumber(s, scenesInEp.indexOf(s));
+                            } else {
+                                label = '#' + (allScenes.indexOf(s) + 1);
+                            }
+                        } else {
+                            label = '#' + (allScenes.indexOf(s) + 1);
+                        }
+                        return `<span class="appearance-tag">${label}</span>`;
+                    }).join(' ');
+                    contentHtml += `<div class="appearances-section">
+                        <span class="appearances-label">🎬 Joue dans (${actorScenes.length}) :</span>
+                        ${sceneNumbers}
+                    </div>`;
+                }
+                
+                contentHtml += groupSelect;
+            } else if(type === 'locations') {
+                // === DÉCORS : Fiche enrichie ===
+                contentHtml += `<div class="data-header"><span class="data-name">🏠 ${Utils.escape(item.name)}</span>${delBtn}</div>`;
+                contentHtml += `<textarea class="data-desc" placeholder="Description du décor..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isView?'disabled':''}>${item.desc || ''}</textarea>`;
+                
+                // Section Adresse & Contact
+                contentHtml += `<div style="margin-top:12px; padding:12px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
+                    <strong class="form-label-block">📍 Lieu de tournage</strong>
+                    <input class="actor-input" placeholder="Nom du lieu réel (ex: Musée d'Histoire Naturelle)" value="${item.realName || ''}" oninput="app.Actions.updateLocationMeta(${idx}, 'realName', this.value)" ${isView?'disabled':''} style="margin-bottom:8px;">
+                    <div class="address-autocomplete-container" style="position:relative; margin-bottom:8px;">
+                        <input class="actor-input" id="loc-address-${idx}" placeholder="Adresse complète (autocomplétion)" value="${item.address || ''}" oninput="app.Actions.searchLocationAddress(${idx}, this.value)" ${isView?'disabled':''} autocomplete="off">
+                        <div id="loc-suggestions-${idx}" class="address-suggestions"></div>
+                    </div>
+                    <div style="display:flex; gap:8px; margin-bottom:8px;">
+                        <input class="actor-input flex-1" placeholder="👤 Contact sur place" value="${item.contactName || ''}" oninput="app.Actions.updateLocationMeta(${idx}, 'contactName', this.value)" ${isView?'disabled':''}>
+                        <input class="actor-input" placeholder="📞 Téléphone" value="${item.contactPhone || ''}" oninput="app.Actions.updateLocationMeta(${idx}, 'contactPhone', this.value)" ${isView?'disabled':''} style="width:140px;">
+                    </div>
+                    <textarea class="data-desc" style="min-height:40px;" placeholder="Notes d'accès (code porte, parking, interphone...)" oninput="app.Actions.updateLocationMeta(${idx}, 'accessNotes', this.value)" ${isView?'disabled':''}>${item.accessNotes || ''}</textarea>
+                </div>`;
+                
+                // Section Photos de repérage
+                contentHtml += `<div style="margin-top:12px; padding:12px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
+                    <strong class="form-label-block">📸 Photos de repérage</strong>
+                    <div id="location-gallery-${idx}" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+                        ${(item.galleryPhotos || []).map((photo, pIdx) => `
+                            <div style="position:relative; width:80px; height:80px;">
+                                <img src="${photo}" style="width:100%; height:100%; object-fit:cover; border-radius:4px; cursor:pointer;" onclick="window.open('${photo}', '_blank')">
+                                ${!isView ? `<button onclick="app.Actions.removeLocationPhoto(${idx}, ${pIdx})" style="position:absolute; top:-5px; right:-5px; background:var(--danger); color:white; border:none; border-radius:50%; width:18px; height:18px; cursor:pointer; font-size:10px;">✕</button>` : ''}
+                            </div>
+                        `).join('')}
+                        ${(item.galleryPhotos || []).length === 0 ? '<span style="color:var(--text-sec); font-size:0.85rem; font-style:italic;">Aucune photo</span>' : ''}
+                    </div>
+                    ${!isView ? `<div class="flex-gap10" style="align-items:center;">
+                        <input type="file" id="loc-gallery-input-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.addLocationPhoto(${idx}, this)">
+                        <button onclick="document.getElementById('loc-gallery-input-${idx}').click()" class="btn-primary-sm-r6">📤 Ajouter une photo</button>
+                    </div>` : ''}
+                </div>`;
+                
+                // Scènes tournées dans ce décor
+                const locationScenes = state.data.scenes.filter(s => {
+                    if(!s.title) return false;
+                    const locMatch = s.title.match(/^(?:INT\.|EXT\.|I\/E)\s*([^\-]+)/i);
+                    if(locMatch && locMatch[1]) {
+                        return locMatch[1].trim().toUpperCase() === item.name.toUpperCase();
+                    }
+                    return false;
+                });
+                
+                if(locationScenes.length > 0) {
+                    // S7 : utiliser formatSceneNumber pour avoir la notation série S01E01-SC01
+                    const isSeries = state.currentProjectType === 'series';
+                    const allScenes = state.data.scenes;
+                    const sceneNumbers = locationScenes.map(s => {
+                        let label;
+                        if(isSeries) {
+                            const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
+                            if(ep) {
+                                const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
+                                label = UI.formatSceneNumber(s, scenesInEp.indexOf(s));
+                            } else {
+                                label = '#' + (allScenes.indexOf(s) + 1);
+                            }
+                        } else {
+                            label = '#' + (allScenes.indexOf(s) + 1);
+                        }
+                        return `<span class="appearance-tag" onclick="app.UI.switchTab('script')" style="cursor:pointer;">${label}</span>`;
+                    }).join(' ');
+                    contentHtml += `<div class="appearances-section">
+                        <span class="appearances-label">🎬 Scènes dans ce décor (${locationScenes.length}) :</span>
+                        ${sceneNumbers}
+                    </div>`;
+                } else {
+                    contentHtml += `<div class="appearances-section">
+                        <span class="appearances-label" style="font-style:italic;">Aucune scène dans ce décor</span>
+                    </div>`;
+                }
+                
+                // Sélecteur de groupe pour les décors
+                contentHtml += groupSelect;
+            } else {
+                // PERSONNAGES (characters)
+                const contentKey = 'bio';
+                contentHtml += `<div class="data-header"><span class="data-name">${Utils.escape(item.name)}</span>${delBtn}</div>`;
+                contentHtml += `<textarea class="data-desc" placeholder="Notes..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isView?'disabled':''}>${item[contentKey] || ''}</textarea>`;
+                
+                if(type === 'characters') {
+                // Dropdown sexe pour personnages
+                contentHtml += `<select class="group-select" style="margin-top:8px; margin-bottom:8px; width:auto; border-color:var(--border);" onchange="app.Actions.updateCharacterMeta(${idx}, 'gender', this.value)" ${isView ? 'disabled' : ''}>
+                    ${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(item.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
+                </select>`;
+                
+                // Trouver les scènes où ce personnage apparaît
+                const characterScenes = state.data.scenes.filter(s => {
+                    if(!s.perso) return false;
+                    const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
+                    return names.includes(item.name.toUpperCase());
+                });
+                
+                if(characterScenes.length > 0) {
+                    // S7 : utiliser formatSceneNumber pour avoir la notation série S01E01-SC01
+                    const isSeries = state.currentProjectType === 'series';
+                    const allScenes = state.data.scenes;
+                    const sceneNumbers = characterScenes.map(s => {
+                        let label;
+                        if(isSeries) {
+                            const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
+                            if(ep) {
+                                const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
+                                label = UI.formatSceneNumber(s, scenesInEp.indexOf(s));
+                            } else {
+                                label = '#' + (allScenes.indexOf(s) + 1);
+                            }
+                        } else {
+                            label = '#' + (allScenes.indexOf(s) + 1);
+                        }
+                        return `<span class="appearance-tag">${label}</span>`;
+                    }).join(' ');
+                    contentHtml += `<div class="appearances-section">
+                        <span class="appearances-label">📍 Apparaît dans (${characterScenes.length}) :</span>
+                        ${sceneNumbers}
+                    </div>`;
+                } else {
+                    contentHtml += `<div class="appearances-section">
+                        <span class="appearances-label" style="font-style:italic;">N'apparaît dans aucune scène</span>
+                    </div>`;
+                }
+                
+                if(!isView) {
+                    contentHtml += `<select class="group-select" style="margin-top:5px; width:100%; border-color:var(--border);" onchange="app.Actions.linkActor(${idx}, this.value)">`; 
+                    contentHtml += `<option value="">-- Lier Comédien.ne --</option>`;
+                    if(state.data.actors) {
+                        state.data.actors.forEach(actor => {
+                            const isSelected = item.actor_id && item.actor_id === actor.id ? 'selected' : '';
+                            contentHtml += `<option value="${actor.id}" ${isSelected}>${actor.name}</option>`;
+                        });
+                    }
+                    contentHtml += `</select>`;
+                } else if (item.actor_id) {
+                    const actor = state.data.actors.find(a => a.id === item.actor_id);
+                    if(actor) contentHtml += `<div style="margin-top:5px;font-size:0.85rem;color:var(--primary)">🎭 ${actor.name}</div>`;
+                }
+            }
+                contentHtml += groupSelect;
+            }
+            div.innerHTML = contentHtml; 
+            container.appendChild(div); 
+        });
+        
+        // Initialiser les calendriers pour les acteurs
+        if(type === 'actors') {
+            setTimeout(() => {
+                items.forEach((item, i) => {
+                    const idx = state.data.actors.indexOf(item);
+                    const calContainer = document.getElementById('actor-calendar-' + idx);
+                    if(calContainer && state.currentRole !== 'viewer') {
+                        UI.renderAvailabilityCalendar('actor-calendar-' + idx, 'actor', idx);
+                    }
+                });
+            }, 100);
+        }
+    },
+    
+	  renderCrewTab: () => {
+        const container = document.getElementById('crewContainer');
+        container.innerHTML = '';
+        
+        if(!state.data.crew || state.data.crew.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">🎥</div>
+                    <div class="empty-state-title">Aucun technicien</div>
+                    <div class="empty-state-desc">Constituez votre équipe technique en ajoutant des membres. Vous pourrez gérer leurs rôles, tarifs et disponibilités.</div>
+                    <button class="empty-state-btn" onclick="app.Crew.addMember()">+ Ajouter un technicien</button>
+                    <div class="empty-state-tips">💡 <strong>Astuce :</strong> Organisez votre équipe par départements (Réalisation, Image, Son, etc.)</div>
+                </div>
+            `;
+            return;
+        }
+        
+        const isView = state.currentRole === 'viewer' || !Permissions.canEdit('equipe');
+        const crewGroups = state.data.groups.filter(g => g.type === 'crew');
+        
+        // Barre de toggle vue compacte / détaillée — injectée dans la toolbar du haut (à droite)
+        const viewMode = CardModal.getViewMode('crew');
+        const crewToolbar = document.getElementById('crew-toolbar');
+        if(crewToolbar) {
+            const oldToggle = crewToolbar.querySelector('.view-toggle-bar');
+            if(oldToggle) oldToggle.remove();
+            const toggleBar = document.createElement('div');
+            toggleBar.className = 'view-toggle-bar';
+            toggleBar.innerHTML = `
+                <button class="view-toggle-btn ${viewMode === 'compact' ? 'active' : ''}" onclick="app.CardModal.setViewMode('crew', 'compact')">🔲 Compact</button>
+                <button class="view-toggle-btn ${viewMode === 'detailed' ? 'active' : ''}" onclick="app.CardModal.setViewMode('crew', 'detailed')">📋 Détaillé</button>
+            `;
+            crewToolbar.appendChild(toggleBar);
+        }
+        
+        if(viewMode === 'compact') {
+            // Vue compacte
+            crewGroups.forEach(grp => {
+                const membersInGroup = state.data.crew.filter(m => m.group_id === grp.id);
+                if(membersInGroup.length > 0) {
+                    const section = document.createElement('div');
+                    section.className = 'group-section';
+                    section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}</div><div class="compact-cards-grid"></div>`;
+                    const grid = section.querySelector('.compact-cards-grid');
+                    CardModal.renderCompactCrewCards(membersInGroup, grid, isView);
+                    container.appendChild(section);
+                }
+            });
+            
+            const noGroup = state.data.crew.filter(m => !m.group_id || !crewGroups.find(g => g.id === m.group_id));
+            if(noGroup.length > 0) {
+                const section = document.createElement('div');
+                section.className = 'group-section';
+                section.innerHTML = `<div class="group-header text-sec">Non classé</div><div class="compact-cards-grid"></div>`;
+                const grid = section.querySelector('.compact-cards-grid');
+                CardModal.renderCompactCrewCards(noGroup, grid, isView);
+                container.appendChild(section);
+            }
+        } else {
+            // Vue détaillée (ancien mode)
+            crewGroups.forEach(grp => {
+                const membersInGroup = state.data.crew.filter(m => m.group_id === grp.id);
+                if(membersInGroup.length > 0) {
+                    const section = document.createElement('div');
+                    section.className = 'group-section';
+                    section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}</div><div class="data-grid"></div>`;
+                    const grid = section.querySelector('.data-grid');
+                    
+                    membersInGroup.forEach(member => {
+                        const idx = state.data.crew.indexOf(member);
+                        const card = UIData.createCrewCard(member, idx, crewGroups, isView);
+                        grid.appendChild(card);
+                    });
+                    
+                    container.appendChild(section);
+                }
+            });
+            
+            const noGroup = state.data.crew.filter(m => !m.group_id || !crewGroups.find(g => g.id === m.group_id));
+            if(noGroup.length > 0) {
+                const section = document.createElement('div');
+                section.className = 'group-section';
+                section.innerHTML = `<div class="group-header text-sec">Non classé</div><div class="data-grid"></div>`;
+                const grid = section.querySelector('.data-grid');
+                
+                noGroup.forEach(member => {
+                    const idx = state.data.crew.indexOf(member);
+                    const card = UIData.createCrewCard(member, idx, crewGroups, isView);
+                    grid.appendChild(card);
+                });
+                
+                container.appendChild(section);
+            }
+            
+            // Initialiser les calendriers pour les techniciens (mode détaillé uniquement)
+            if(!isView) {
+                setTimeout(() => {
+                    state.data.crew.forEach((member, idx) => {
+                        const calContainer = document.getElementById('crew-calendar-' + idx);
+                        if(calContainer) {
+                            UI.renderAvailabilityCalendar('crew-calendar-' + idx, 'crew', idx);
+                        }
+                    });
+                }, 100);
+            }
+        }
+    },
+    
+    createCrewCard: (member, idx, availableGroups, isView) => {
+        // Vérifier si le profil est verrouillé (revendiqué par quelqu'un)
+        const isLocked = !!member.publicProfileId;
+        const isReadOnly = isView || isLocked;
+        
+        const card = document.createElement('div');
+        card.className = 'crew-card';
+        
+        const roles = member.group_id ? Crew.getRolesForGroup(member.group_id) : [];
+        
+        let rolesOptions = '<option value="">-- Fonction --</option>';
+        roles.forEach(r => {
+            rolesOptions += `<option value="${r}" ${member.role === r ? 'selected' : ''}>${r}</option>`;
+        });
+        rolesOptions += '<option value="__custom__">➕ Autre...</option>';
+        
+        let groupOptions = '<option value="">-- Département --</option>';
+        availableGroups.forEach(g => {
+            groupOptions += `<option value="${g.id}" ${member.group_id === g.id ? 'selected' : ''}>${g.name}</option>`;
+        });
+        
+        let currencyOptions = '';
+        CONFIG.currencies.forEach(c => {
+            currencyOptions += `<option value="${c}" ${member.rateCurrency === c ? 'selected' : ''}>${c}</option>`;
+        });
+        
+        let rateTypeOptions = '';
+        CONFIG.rateTypes.forEach(t => {
+            rateTypeOptions += `<option value="${t}" ${member.rateType === t ? 'selected' : ''}>${t}</option>`;
+        });
+        
+        // Availability dates HTML
+        let availDatesHTML = '';
+        if(member.availabilityDates && member.availabilityDates.length > 0) {
+            member.availabilityDates.forEach((d, dIdx) => {
+                const fromDate = new Date(d.from).toLocaleDateString();
+                const toDate = d.to ? new Date(d.to).toLocaleDateString() : fromDate;
+                availDatesHTML += `
+                    <span style="display:inline-flex; align-items:center; background:#E8F5E9; border:1px solid #4CAF50; color:#2E7D32; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✓ ${fromDate} → ${toDate} ${!isReadOnly ? `<span onclick="app.Crew.removeAvailabilityDate(${idx}, ${dIdx})" class="delete-link">✖</span>` : ''}</span>
+                `;
+            });
+        }
+        
+        // Unavailability dates HTML
+        let unavailDatesHTML = '';
+        if(member.unavailabilityDates && member.unavailabilityDates.length > 0) {
+            member.unavailabilityDates.forEach((d, dIdx) => {
+                const fromDate = new Date(d.from).toLocaleDateString();
+                const toDate = d.to ? new Date(d.to).toLocaleDateString() : fromDate;
+                unavailDatesHTML += `
+                    <span style="display:inline-flex; align-items:center; background:#FFEBEE; border:1px solid #f44336; color:#C62828; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✗ ${fromDate} → ${toDate} ${d.reason ? '(' + Utils.escape(d.reason) + ')' : ''} ${!isReadOnly ? `<span onclick="app.Crew.removeUnavailabilityDate(${idx}, ${dIdx})" class="delete-link">✖</span>` : ''}</span>
+                `;
+            });
+        }
+        
+        card.innerHTML = `
+            <div class="crew-card-header">
+                ${member.photo ? `<img src="${member.photo}" class="crew-photo-preview">` : '<div class="crew-photo-preview" style="display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">👤</div>'}
+                <div class="crew-info-main">
+                    <div class="crew-name" style="display:flex; align-items:center; gap:8px;">${Utils.escape(member.name)} ${isLocked ? `<span style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: bold;">🔒 Profil revendiqué</span>` : ''} ${!isView ? `<button class="save-contact-btn ${state.contacts && state.contacts.crew && state.contacts.crew.some(c => c.id === member.id) ? 'saved' : ''}" onclick="event.stopPropagation(); app.Contacts.saveCrewToContacts(${idx})" title="Sauvegarder dans contacts">${state.contacts && state.contacts.crew && state.contacts.crew.some(c => c.id === member.id) ? '⭐' : '☆'}</button>` : ''}</div>
+                    <div class="crew-role">${member.role || 'Fonction non définie'}</div>
+                </div>
+                ${!isView ? `<button onclick="app.Crew.deleteMember(${idx})" style="background: none; border: none; color: var(--danger); cursor: pointer; font-size: 1.2rem;">🗑️</button>` : ''}
+            </div>
+            
+            ${!isView ? `
+            <div class="crew-row">
+                <select class="crew-input" onchange="app.Crew.updateMember(${idx}, 'group_id', this.value)" title="Département" ${isLocked ? 'disabled' : ''}>
+                    ${groupOptions}
+                </select>
+                <select class="crew-input" id="role-select-${idx}" onchange="app.UIData.handleRoleChange(${idx}, this.value)" ${isLocked ? 'disabled' : ''}>
+                    ${rolesOptions}
+                </select>
+            </div>
+            <select class="crew-input mt-8" onchange="app.Crew.updateMember(${idx}, 'gender', this.value)" ${isLocked ? 'disabled' : ''}>
+                ${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(member.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
+            </select>
+            ` : ''}
+            
+            ${!isReadOnly ? `<div class="flex-gap10" style="align-items:center;">
+                <input type="file" id="crew-photo-input-${idx}" accept="image/*" style="display:none;" onchange="app.Crew.uploadPhoto(${idx}, this)">
+                <button onclick="document.getElementById('crew-photo-input-${idx}').click()" class="btn-primary-sm-r6" style="flex:0 0 auto;">${member.photo ? '🖼️ Changer la photo' : '📤 Importer une photo'}</button>
+                ${member.photo ? `<button onclick="app.Crew.updateMember(${idx}, 'photo', ''); app.UI.renderCrewTab();" class="btn-icon-sm" title="Supprimer la photo" style="background:var(--danger); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer;">✕</button>` : ''}
+            </div>` : ''}
+            
+            <div class="crew-row">
+                <input class="crew-input" placeholder="Email" value="${member.email || ''}" onchange="app.Crew.updateMember(${idx}, 'email', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                <input class="crew-input" placeholder="Téléphone" value="${member.phone || ''}" onchange="app.Crew.updateMember(${idx}, 'phone', this.value)" ${isReadOnly ? 'disabled' : ''}>
+            </div>
+            
+            <div class="crew-row">
+                <input class="crew-input" placeholder="📍 Ville / Région" value="${member.city || ''}" onchange="app.Crew.updateMember(${idx}, 'city', this.value)" ${isReadOnly ? 'disabled' : ''}>
+            </div>
+            
+            <textarea class="crew-input" style="min-height: 60px;" placeholder="Adresse..." onchange="app.Crew.updateMember(${idx}, 'address', this.value)" ${isReadOnly ? 'disabled' : ''}>${member.address || ''}</textarea>
+            
+            ${UI.isSectionVisibleForProject(member, 'crew-gallery') ? `<div class="info-box">
+                <strong class="form-label-block">📸 Galerie Photos</strong>
+                <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+                    ${(member.galleryPhotos || []).map((url, i) => `
+                        <div style="position:relative; width:80px; height:80px;">
+                            <img src="${url}" style="width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--border);">
+                            ${!isReadOnly ? `<button onclick="app.Crew.removeGalleryPhoto(${idx}, ${i})" class="n8-avatar-3">✕</button>` : ''}
+                        </div>
+                    `).join('') || '<span style="color:var(--text-sec); font-size:0.85rem;">Aucune photo</span>'}
+                </div>
+                ${!isReadOnly ? `<div class="flex-gap10" style="align-items:center;">
+                    <input type="file" id="crew-gallery-input-${idx}" accept="image/*" style="display:none;" onchange="app.Crew.addGalleryPhoto(${idx})">
+                    <button onclick="document.getElementById('crew-gallery-input-${idx}').click()" class="btn-primary-sm-r6">📤 Ajouter une photo</button>
+                </div>` : ''}
+            </div>` : ''}
+            
+            ${UI.isSectionVisibleForProject(member, 'crew-demoreel') ? `<div class="info-box">
+                <strong class="form-label-block">🎬 Bande Démo</strong>
+                <input class="crew-input" type="url" placeholder="URL YouTube ou Vimeo (https://...)" value="${member.demoreel || ''}" onchange="app.Crew.updateMember(${idx}, 'demoreel', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                ${member.demoreel ? `<div class="mt-10"><iframe src="${ProfileRenderer.getEmbedUrl(member.demoreel)}" width="100%" height="200" frameborder="0" allowfullscreen class="br-8"></iframe></div>` : ''}
+            </div>` : ''}
+            
+            ${UI.isSectionVisibleForProject(member, 'tarif') ? `<div class="crew-rate-row mt-10">
+                <input type="number" class="crew-input crew-rate-amount" placeholder="Tarif" value="${member.dailyRate || ''}" onchange="app.Crew.updateMember(${idx}, 'dailyRate', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                <select class="crew-input crew-rate-currency" onchange="app.Crew.updateMember(${idx}, 'rateCurrency', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                    ${currencyOptions}
+                </select>
+                <select class="crew-input crew-rate-type" onchange="app.Crew.updateMember(${idx}, 'rateType', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                    ${rateTypeOptions}
+                </select>
+                <label style="display:flex; align-items:center; gap:5px; cursor:pointer; white-space:nowrap;">
+                    <input type="checkbox" ${member.rateNegotiable ? 'checked' : ''} onchange="app.Crew.updateMember(${idx}, 'rateNegotiable', this.checked)" ${isReadOnly ? 'disabled' : ''}>
+                    <span class="fs-085">🤝 Négociable</span>
+                </label>
+            </div>
+            
+            <div style="margin-top:10px; padding:10px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
+                <strong class="fs-09">📋 Statut professionnel</strong>
+                <div class="mt-8">
+                    <select class="crew-input w-full" onchange="app.Crew.updateMember(${idx}, 'professionalStatus', this.value); app.UI.renderCrewTab();" ${isReadOnly ? 'disabled' : ''}>
+                        <option value="" ${!member.professionalStatus ? 'selected' : ''}>-- Statut --</option>
+                        <option value="intermittent" ${member.professionalStatus === 'intermittent' ? 'selected' : ''}>Intermittent·e du spectacle</option>
+                        <option value="micro-entrepreneur" ${member.professionalStatus === 'micro-entrepreneur' ? 'selected' : ''}>Micro-entrepreneur·e</option>
+                        <option value="amateur" ${member.professionalStatus === 'amateur' ? 'selected' : ''}>Amateur·rice (pas de statut)</option>
+                    </select>
+                </div>
+                ${member.professionalStatus === 'intermittent' ? `
+                <div class="crew-rate-row mt-8">
+                    <input class="crew-input" placeholder="N° Sécurité Sociale" value="${member.numSecu || ''}" onchange="app.Crew.updateMember(${idx}, 'numSecu', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                    <input class="crew-input" placeholder="N° Congés Spectacles" value="${member.numCongesSpectacles || ''}" onchange="app.Crew.updateMember(${idx}, 'numCongesSpectacles', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                </div>` : ''}
+                ${member.professionalStatus === 'micro-entrepreneur' ? `
+                <div class="mt-8">
+                    <input class="crew-input w-full" placeholder="N° SIRET" value="${member.siret || ''}" onchange="app.Crew.updateMember(${idx}, 'siret', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                </div>` : ''}
+                
+                <strong style="font-size: 0.9rem; display:block; margin-top:15px;">🤝 Type de collaboration</strong>
+                <div class="collab-type-selector">
+                    <div class="collab-type-btn pro ${member.collabType === 'pro' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Crew.updateMember(${idx}, 'collabType', 'pro'); app.UI.renderCrewTab();` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
+                        🎬 Pro
+                    </div>
+                    <div class="collab-type-btn semi-pro ${member.collabType === 'semi-pro' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Crew.updateMember(${idx}, 'collabType', 'semi-pro'); app.UI.renderCrewTab();` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
+                        ⚡ Semi-pro
+                    </div>
+                    <div class="collab-type-btn benevole ${member.collabType === 'benevole' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Crew.updateMember(${idx}, 'collabType', 'benevole'); app.UI.renderCrewTab();` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
+                        ❤️ Bénévole
+                    </div>
+                </div>
+                <p class="text-sec-xs-mt8">
+                    ${member.collabType === 'pro' ? '💼 Contrat classique, horaires et tarifs standards' : 
+                      member.collabType === 'semi-pro' ? '🤝 Flexible sur les conditions mais rémunéré·e' : 
+                      member.collabType === 'benevole' ? '🎁 Pas de rémunération, défraiement repas + transport' : 
+                      'Sélectionnez votre type de collaboration préféré'}
+                </p>
+            </div>` : ''}
+            
+            ${UI.isSectionVisibleForProject(member, 'calendar') ? `<div class="crew-availability-section">
+                <strong class="fs-09">📅 Disponibilités & Indisponibilités</strong>
+                <textarea class="crew-input" style="min-height: 50px; margin-top: 5px;" placeholder="Situation / Notes de disponibilité..." onchange="app.Crew.updateMember(${idx}, 'availabilityText', this.value)" ${isReadOnly ? 'disabled' : ''}>${member.availabilityText || ''}</textarea>
+                <div id="crew-calendar-${idx}"></div>
+                <div class="mt-10">
+                    <div class="form-label">🟢 Disponible :</div>
+                    ${availDatesHTML || '<span class="text-sec-xs">Aucune période renseignée</span>'}
+                </div>
+                <div class="mt-10">
+                    <div class="form-label">🔴 Indisponible :</div>
+                    ${unavailDatesHTML || '<span class="text-sec-xs">Aucune période renseignée</span>'}
+                    </div>
+            </div>` : ''}
+            
+            ${UI.isSectionVisibleForProject(member, 'vehicle') ? `<div class="crew-vehicle-section">
+                <label class="crew-vehicle-toggle">
+                    <input type="checkbox" ${member.hasVehicle ? 'checked' : ''} onchange="app.Crew.toggleVehicle(${idx}, this.checked)" ${isReadOnly ? 'disabled' : ''}>
+                    <strong>🚗 Possède un véhicule</strong>
+                </label>
+                <div class="crew-vehicle-details ${member.hasVehicle ? 'visible' : ''}" id="crew-vehicle-${idx}">
+                    <div class="crew-row">
+                        <input class="crew-input" placeholder="Type de véhicule" value="${member.vehicleType || ''}" onchange="app.Crew.updateMember(${idx}, 'vehicleType', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        <input class="crew-input" placeholder="Immatriculation" value="${member.vehiclePlate || ''}" onchange="app.Crew.updateMember(${idx}, 'vehiclePlate', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                    </div>
+                    <div class="crew-row mt-10">
+                        <input class="crew-input" type="number" min="1" max="9" placeholder="Nb places dispo" value="${member.vehicleSeats || ''}" onchange="app.Crew.updateMember(${idx}, 'vehicleSeats', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" ${member.vehicleTrunk ? 'checked' : ''} onchange="app.Crew.updateMember(${idx}, 'vehicleTrunk', this.checked)" ${isReadOnly ? 'disabled' : ''}>
+                            <span>🧳 Coffre disponible</span>
+                        </label>
+                    </div>
+                    <textarea class="crew-input" style="min-height: 40px; margin-top: 10px;" placeholder="Notes véhicule..." onchange="app.Crew.updateMember(${idx}, 'vehicleNotes', this.value)" ${isReadOnly ? 'disabled' : ''}>${member.vehicleNotes || ''}</textarea>
+                </div>
+            </div>` : ''}
+            
+            <textarea class="crew-input" style="min-height: 60px; margin-top: 10px;" placeholder="Notes générales..." onchange="app.Crew.updateMember(${idx}, 'notes', this.value)" ${isReadOnly ? 'disabled' : ''}>${member.notes || ''}</textarea>
+            
+            ${!isReadOnly ? `<div style="margin-top:15px; padding-top:15px; border-top:1px solid var(--border); display:flex; gap:10px; flex-wrap:wrap;">
+                <button onclick="app.Contracts.openModal('crew', ${idx})" style="padding:8px 15px; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85rem;">📝 Contrat</button>
+            </div>` : ''}
+        `;
+        
+        return card;
+    },
+    
+    handleRoleChange: (idx, value) => {
+        if(value === '__custom__') {
+            const member = state.data.crew[idx];
+            const newRole = Crew.addCustomRole(member.group_id);
+            if(newRole) {
+                Crew.updateMember(idx, 'role', newRole);
+                UI.renderCrewTab();
+            } else {
+                // Reset select
+                document.getElementById(`role-select-${idx}`).value = member.role || '';
+            }
+        } else {
+            Crew.updateMember(idx, 'role', value);
+        }
+    },
+
+    handleDragOver: (e, container, selector) => { e.preventDefault(); if(state.currentRole === 'viewer') return; const after = Utils.getDragAfterElement(container, e.clientY, selector); const drag = document.querySelector(selector + '.dragging'); if(drag) after ? container.insertBefore(drag, after) : container.appendChild(drag); },
+    goToStoryboard: (sceneId) => {
+      UI.switchTab('storyboard');
+      setTimeout(() => {
+          const scene = state.data.scenes.find(s => s.id === sceneId || String(s.id) === String(sceneId));
+          if(scene) {
+              Storyboard.selectScene(scene.id);
+          }
+      }, 150);
+  },
+	
+	renderAvailabilityCalendar: (containerId, personType, personIdx) => {
+      const container = document.getElementById(containerId);
+      if(!container) return;
+      
+      const person = personType === 'actor' ? state.data.actors[personIdx] : state.data.crew[personIdx];
+      if(!person) return;
+      
+      // Vérifier si le profil est verrouillé (revendiqué)
+      const isLocked = !!person.publicProfileId;
+      
+      const today = new Date();
+      const currentMonth = person._calendarMonth !== undefined ? person._calendarMonth : today.getMonth();
+      const currentYear = person._calendarYear !== undefined ? person._calendarYear : today.getFullYear();
+      
+      const firstDay = new Date(currentYear, currentMonth, 1);
+      const lastDay = new Date(currentYear, currentMonth + 1, 0);
+      const startDay = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
+      
+      const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+      const dayNames = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+      
+      const availDates = person.availabilityDates || [];
+      const unavailDates = person.unavailabilityDates || [];
+      const shootDates = person.shootingDates || [];
+      
+      const isDateShooting = (dateStr) => {
+          return shootDates.find(sd => sd.date === dateStr);
+      };
+      
+      const isDateAvailable = (dateStr) => {
+          return availDates.some(range => {
+              const from = new Date(range.from);
+              const to = new Date(range.to);
+              const check = new Date(dateStr);
+              return check >= from && check <= to;
+          });
+      };
+      
+      const isDateUnavailable = (dateStr) => {
+          return unavailDates.some(range => {
+              const from = new Date(range.from);
+              const to = new Date(range.to);
+              const check = new Date(dateStr);
+              return check >= from && check <= to;
+          });
+      };
+      
+      let html = `<div class="availability-calendar">
+          <div class="availability-calendar-header">
+              <button onclick="app.UI.changeCalendarMonth('${containerId}', '${personType}', ${personIdx}, -1)">◀</button>
+              <strong>${monthNames[currentMonth]} ${currentYear}</strong>
+              <button onclick="app.UI.changeCalendarMonth('${containerId}', '${personType}', ${personIdx}, 1)">▶</button>
+          </div>
+          ${isLocked ? `<div style="font-size:0.7rem; text-align:center; margin-bottom:5px; color:var(--text-sec);">🔒 Calendrier en lecture seule</div>` : `<div style="font-size:0.7rem; text-align:center; margin-bottom:5px; color:var(--text-sec);">🟢 dispo | 🔴 indispo | 🎬 tournage</div>`}
+          <div class="availability-calendar-grid">`;
+      
+      dayNames.forEach(d => {
+          html += `<div class="availability-calendar-day-header">${d}</div>`;
+      });
+      
+      for(let i = 0; i < startDay; i++) {
+          html += `<div class="availability-calendar-day empty"></div>`;
+      }
+      
+      for(let day = 1; day <= lastDay.getDate(); day++) {
+          const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const isToday = today.getFullYear() === currentYear && today.getMonth() === currentMonth && today.getDate() === day;
+          const isAvail = isDateAvailable(dateStr);
+          const isUnavail = isDateUnavailable(dateStr);
+          
+          const shootingInfo = isDateShooting(dateStr);
+          
+          let dayClass = 'availability-calendar-day';
+          if(isToday) dayClass += ' today';
+          if(shootingInfo) dayClass += ' shooting';
+          else if(isAvail) dayClass += ' available';
+          if(isUnavail) dayClass += ' unavailable';
+          if(isLocked) dayClass += ' locked';
+          
+          const shootTitle = shootingInfo ? `title="🎬 J${shootingInfo.dayNumber} - ${shootingInfo.projectName}${shootingInfo.callTime ? ' | Convoc: ' + shootingInfo.callTime : ''}${shootingInfo.location ? ' | ' + shootingInfo.location : ''}"` : '';
+          
+          html += `<div class="${dayClass}" 
+              data-date="${dateStr}"
+              ${shootTitle}
+              ${!isLocked ? `onmousedown="app.UI.startCalendarDrag('${containerId}', '${personType}', ${personIdx}, '${dateStr}', event)"
+              onmouseenter="app.UI.continueCalendarDrag('${dateStr}')"
+              onmouseup="app.UI.endCalendarDrag()"` : ''}
+              oncontextmenu="return false;">${day}</div>`;
+      }
+      
+      html += `</div></div>`;
+      container.innerHTML = html;
+  },
+  
+  changeCalendarMonth: (containerId, personType, personIdx, delta) => {
+      const person = personType === 'actor' ? state.data.actors[personIdx] : state.data.crew[personIdx];
+      if(!person) return;
+      
+      const today = new Date();
+      let currentMonth = person._calendarMonth !== undefined ? person._calendarMonth : today.getMonth();
+      let currentYear = person._calendarYear !== undefined ? person._calendarYear : today.getFullYear();
+      
+      currentMonth += delta;
+      if(currentMonth > 11) { currentMonth = 0; currentYear++; }
+      if(currentMonth < 0) { currentMonth = 11; currentYear--; }
+      
+      person._calendarMonth = currentMonth;
+      person._calendarYear = currentYear;
+      
+      UI.renderAvailabilityCalendar(containerId, personType, personIdx);
+  },
+  
+  _calendarDrag: { active: false, containerId: null, personType: null, personIdx: null, startDate: null, dates: [], isRightClick: false },
+  
+  startCalendarDrag: (containerId, personType, personIdx, dateStr, event) => {
+      event.preventDefault();
+      const isRightClick = event.button === 2;
+      UI._calendarDrag = { active: true, containerId, personType, personIdx, startDate: dateStr, dates: [dateStr], isRightClick };
+      document.addEventListener('mouseup', UI.endCalendarDrag);
+  },
+  
+  continueCalendarDrag: (dateStr) => {
+      if(!UI._calendarDrag.active) return;
+      if(!UI._calendarDrag.dates.includes(dateStr)) {
+          UI._calendarDrag.dates.push(dateStr);
+      }
+      const container = document.getElementById(UI._calendarDrag.containerId);
+      if(container) {
+          const color = UI._calendarDrag.isRightClick ? '#f44336' : '#4CAF50';
+          container.querySelectorAll('.availability-calendar-day').forEach(el => {
+              if(UI._calendarDrag.dates.includes(el.dataset.date)) {
+                  el.style.background = color;
+                  el.style.color = 'white';
+              }
+          });
+      }
+  },
+  
+  endCalendarDrag: () => {
+      if(!UI._calendarDrag.active) return;
+      
+      const { personType, personIdx, dates, isRightClick } = UI._calendarDrag;
+      if(dates.length > 0) {
+          dates.sort();
+          const from = dates[0];
+          const to = dates[dates.length - 1];
+          
+          const person = personType === 'actor' ? state.data.actors[personIdx] : state.data.crew[personIdx];
+          if(person) {
+              // Initialiser les tableaux si nécessaire
+              if(!person.availabilityDates) person.availabilityDates = [];
+              if(!person.unavailabilityDates) person.unavailabilityDates = [];
+              
+              const targetArray = isRightClick ? person.unavailabilityDates : person.availabilityDates;
+              const otherArray = isRightClick ? person.availabilityDates : person.unavailabilityDates;
+              
+              // Vérifier si on clique sur une date déjà dans le même état (pour la désélectionner)
+              if(dates.length === 1) {
+                  const existingIdx = targetArray.findIndex(range => {
+                      const checkDate = new Date(dates[0]);
+                      return checkDate >= new Date(range.from) && checkDate <= new Date(range.to);
+                  });
+                  if(existingIdx > -1) {
+                      // Désélectionner
+                      targetArray.splice(existingIdx, 1);
+                  } else {
+                      // Retirer de l'autre état si présent
+                      const otherIdx = otherArray.findIndex(range => {
+                          const checkDate = new Date(dates[0]);
+                          return checkDate >= new Date(range.from) && checkDate <= new Date(range.to);
+                      });
+                      if(otherIdx > -1) {
+                          otherArray.splice(otherIdx, 1);
+                      }
+                      // Ajouter au nouvel état
+                      targetArray.push({ from, to });
+                  }
+              } else {
+                  // Sélection multiple : ajouter la plage
+                  targetArray.push({ from, to });
+              }
+              
+              Store.save();
+              UI.renderAvailabilityCalendar(UI._calendarDrag.containerId, personType, personIdx);
+              
+              // Rafraîchir aussi la liste des dates
+              if(personType === 'actor') {
+                  UIData.renderDataTab('actors', els.actorContainer);
+              } else {
+                  UI.renderCrewTab();
+              }
+          }
+      }
+      
+      UI._calendarDrag = { active: false, containerId: null, personType: null, personIdx: null, startDate: null, dates: [], isRightClick: false };
+      document.removeEventListener('mouseup', UI.endCalendarDrag);
+  },
+	
+	applyTabPermissions: () => {
+        if(state.currentRole === 'owner') {
+            // Le propriétaire voit tout
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.style.opacity = '1';
+                btn.style.pointerEvents = 'auto';
+            });
+            return;
+        }
+        
+const tabToSection = {
+      'synopsis': 'synopsis', 'board': 'sequencier', 'script': 'scenario', 
+      'storyboard': 'storyboard', 'chars': 'personnages', 'locs': 'lieux',
+      'actors': 'comediens', 'resources': 'ressources', 'crew': 'equipe', 'breakdown': 'depouillement',
+      'stats': 'stats', 'planning': 'planning', 'expenses': 'depenses'
+  };
+        
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            const tabName = btn.dataset.tab;
+            const section = tabToSection[tabName];
+            
+            if(section && !Permissions.canAccess(section)) {
+                btn.style.opacity = '0.4';
+                btn.style.pointerEvents = 'none';
+                btn.title = '🔒 Accès restreint';
+            } else {
+                btn.style.opacity = '1';
+                btn.style.pointerEvents = 'auto';
+                btn.title = '';
+                
+                // Indiquer si lecture seule
+                if(section && !Permissions.canEdit(section)) {
+                    btn.title = '👁️ Lecture seule';
+                }
+            }
+        });
+    },
+	
+	initCategoriesDragDrop: () => {
+      const nav = document.getElementById('tabsCategories');
+      if(!nav) return;
+      
+      let draggedCat = null;
+      
+      nav.querySelectorAll('.tab-category').forEach(cat => {
+          cat.addEventListener('dragstart', (e) => {
+              draggedCat = cat;
+              cat.classList.add('dragging');
+              e.dataTransfer.effectAllowed = 'move';
+          });
+          
+          cat.addEventListener('dragend', () => {
+              cat.classList.remove('dragging');
+              nav.querySelectorAll('.tab-category').forEach(c => c.classList.remove('drag-over'));
+              draggedCat = null;
+              UI.saveCategoriesOrder();
+          });
+          
+          cat.addEventListener('dragover', (e) => {
+              e.preventDefault();
+              if(draggedCat && draggedCat !== cat) {
+                  cat.classList.add('drag-over');
+              }
+          });
+          
+          cat.addEventListener('dragleave', () => {
+              cat.classList.remove('drag-over');
+          });
+          
+          cat.addEventListener('drop', (e) => {
+              e.preventDefault();
+              cat.classList.remove('drag-over');
+              if(draggedCat && draggedCat !== cat) {
+                  const allCats = [...nav.querySelectorAll('.tab-category')];
+                  const draggedIdx = allCats.indexOf(draggedCat);
+                  const targetIdx = allCats.indexOf(cat);
+                  
+                  if(draggedIdx < targetIdx) {
+                      cat.after(draggedCat);
+                  } else {
+                      cat.before(draggedCat);
+                  }
+              }
+          });
+      });
+  },
+  
+  saveCategoriesOrder: () => {
+      const nav = document.getElementById('tabsCategories');
+      if(!nav) return;
+      const order = [...nav.querySelectorAll('.tab-category')].map(c => c.dataset.category);
+      if(!state.data.uiConfig) state.data.uiConfig = { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [], hiddenCategories: [] };
+      state.data.uiConfig.categoriesOrder = order;
+      Store.save();
+  },
+  
+  loadCategoriesOrder: () => {
+      const uiConfig = state.data?.uiConfig || {};
+      const order = uiConfig.categoriesOrder || [];
+      if(order.length > 0) {
+          const nav = document.getElementById('tabsCategories');
+          if(!nav) return;
+          const toggle = document.getElementById('hiddenCategoriesToggle');
+          order.forEach(catName => {
+              const cat = nav.querySelector(`.tab-category[data-category="${catName}"]`);
+              if(cat) nav.insertBefore(cat, toggle);
+          });
+      }
+  },
+  
+  loadCategoryTabsOrder: () => {
+      const uiConfig = state.data?.uiConfig || {};
+      const savedOrder = uiConfig.categoryTabsOrder || {};
+      const savedLabels = uiConfig.categoryLabelsCustom || {};
+      
+      // Restaurer l'ordre des sous-onglets pour chaque catégorie
+      Object.keys(savedOrder).forEach(category => {
+          if(savedOrder[category] && savedOrder[category].length > 0) {
+              UI.categoryTabs[category] = savedOrder[category];
+          }
+      });
+      
+      // Restaurer les labels personnalisés (pour les onglets déplacés)
+      Object.keys(savedLabels).forEach(category => {
+          if(savedLabels[category]) {
+              UI.categoryLabels[category] = { ...UI.categoryLabels[category], ...savedLabels[category] };
+          }
+      });
+  },
+  
+	initTabsDragDrop: () => {
+      const nav = document.getElementById('tabsNav');
+      if(!nav) return;
+      
+      let draggedTab = null;
+      
+      nav.querySelectorAll('.tab-btn').forEach(tab => {
+          tab.addEventListener('dragstart', (e) => {
+              draggedTab = tab;
+              tab.classList.add('dragging');
+              e.dataTransfer.effectAllowed = 'move';
+          });
+          
+          tab.addEventListener('dragend', () => {
+              tab.classList.remove('dragging');
+              nav.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('drag-over'));
+              draggedTab = null;
+              UI.updateTabNumbers();
+          });
+          
+          tab.addEventListener('dragover', (e) => {
+              e.preventDefault();
+              if(draggedTab && draggedTab !== tab) {
+                  tab.classList.add('drag-over');
+              }
+          });
+          
+          tab.addEventListener('dragleave', () => {
+              tab.classList.remove('drag-over');
+          });
+          
+          tab.addEventListener('drop', (e) => {
+              e.preventDefault();
+              tab.classList.remove('drag-over');
+              if(draggedTab && draggedTab !== tab) {
+                  const allTabs = [...nav.querySelectorAll('.tab-btn')];
+                  const draggedIdx = allTabs.indexOf(draggedTab);
+                  const targetIdx = allTabs.indexOf(tab);
+                  
+                  if(draggedIdx < targetIdx) {
+                      tab.after(draggedTab);
+                  } else {
+                      tab.before(draggedTab);
+                  }
+              }
+          });
+      });
+  },
+  
+  updateTabNumbers: () => {
+      const nav = document.getElementById('tabsNav');
+      if(!nav) return;
+      
+      nav.querySelectorAll('.tab-btn').forEach((tab, idx) => {
+          const text = tab.textContent.replace(/^\d+\.\s*/, '');
+          tab.textContent = `${idx + 1}. ${text}`;
+      });
+  },
+	
+	  applyLocks: () => {
+        document.querySelectorAll('.script-row').forEach(row => {
+            const sid = row.dataset.id;
+            const lock = state.activeLocks[sid];
+            const editor = row.querySelector('.script-editor-box');
+            const overlay = row.querySelector('.lock-overlay');
+            if(lock && lock.uid !== state.currentUser.uid) { row.classList.add('is-locked'); editor.contentEditable = "false"; overlay.innerText = `🔒 Modifié par ${lock.user.split('@')[0]}`; } 
+            else { row.classList.remove('is-locked'); if(state.currentRole !== 'viewer') editor.contentEditable = "true"; }
+        });
+    },
+  };
+
   const UI = {
-// ===== THÈME / DESIGN / DROPDOWNS / NAV ONGLETS — délégué à UITheme =====
+      // ===== THÈME / DESIGN / DROPDOWNS / NAV ONGLETS — délégué à UITheme =====
       get designs() { return UITheme.designs; },
       set designs(v) { UITheme.designs = v; },
       get currentDesign() { return UITheme.currentDesign; },
@@ -19364,1300 +20661,13 @@ openBoardPrintEpisodeChooser: () => {
           Comments.updateAllBadges();
       },
       
-      renderDataTab: (type, container) => {
-          const arr = state.data[type]; container.innerHTML = '';
-          if(!arr || arr.length === 0) { 
-              const emptyStates = {
-                  characters: {
-                      icon: '🎭',
-                      title: 'Aucun personnage',
-                      desc: 'Ajoutez les personnages de votre histoire. Ils pourront ensuite être liés aux comédiens et apparaîtront dans le dépouillement.',
-                      btn: '+ Ajouter un personnage',
-                      action: 'app.Actions.addDataItem(\'characters\')'
-                  },
-                  actors: {
-                      icon: '🎬',
-                      title: 'Aucun comédien',
-                      desc: 'Constituez votre casting en ajoutant des comédiens. Vous pourrez les associer aux personnages et gérer leurs disponibilités.',
-                      btn: '+ Ajouter un comédien',
-                      action: 'app.Actions.addDataItem(\'actors\')'
-                  },
-                  locations: {
-                      icon: '🏠',
-                      title: 'Aucun décor',
-                      desc: 'Ajoutez les décors de votre scénario. Vous pourrez ensuite renseigner les lieux réels de tournage avec adresse et contact.',
-                      btn: '+ Ajouter un décor',
-                      action: 'app.Actions.addDataItem(\'locations\')'
-                  }
-              };
-              const es = emptyStates[type] || { icon: '📁', title: 'Aucune donnée', desc: '', btn: '+ Ajouter', action: '' };
-              container.innerHTML = `
-                  <div class="empty-state">
-                      <div class="empty-state-icon">${es.icon}</div>
-                      <div class="empty-state-title">${es.title}</div>
-                      <div class="empty-state-desc">${es.desc}</div>
-                      <button class="empty-state-btn" onclick="${es.action}">${es.btn}</button>
-                      <div class="empty-state-tips">💡 <strong>Astuce :</strong> Vous pouvez aussi importer depuis un scénario existant via le menu Fichier.</div>
-                  </div>
-              `;
-              return; 
-          } 
-          
-          // Déterminer les permissions selon le type
-          const typeToSection = { 'characters': 'personnages', 'actors': 'comediens', 'locations': 'lieux' };
-          const sectionName = typeToSection[type];
-          const isView = state.currentRole === 'viewer' || (sectionName && !Permissions.canEdit(sectionName)); 
-          let groupType = '';
-          if(type === 'characters') groupType = 'perso'; else if(type === 'actors') groupType = 'actor'; else if(type === 'locations') groupType = 'lieu';
-
-          const relevantGroups = state.data.groups.filter(g => g.type === groupType);
-          
-          // Barre de toggle vue compacte / détaillée — injectée dans la toolbar du haut (à droite)
-          const viewMode = CardModal.getViewMode(type);
-          const toolbarIds = { characters: 'chars-toolbar', actors: 'actors-toolbar', locations: 'locations-toolbar' };
-          const toolbar = document.getElementById(toolbarIds[type]);
-          if(toolbar) {
-              // Retirer un éventuel toggle précédent pour ne pas en empiler
-              const oldToggle = toolbar.querySelector('.view-toggle-bar');
-              if(oldToggle) oldToggle.remove();
-              const toggleBar = document.createElement('div');
-              toggleBar.className = 'view-toggle-bar';
-              toggleBar.innerHTML = `
-                  <button class="view-toggle-btn ${viewMode === 'compact' ? 'active' : ''}" onclick="app.CardModal.setViewMode('${type}', 'compact')">🔲 Compact</button>
-                  <button class="view-toggle-btn ${viewMode === 'detailed' ? 'active' : ''}" onclick="app.CardModal.setViewMode('${type}', 'detailed')">📋 Détaillé</button>
-              `;
-              toolbar.appendChild(toggleBar);
-          }
-          
-          if(viewMode === 'compact') {
-              // Vue compacte : grille de petites cartes
-              relevantGroups.forEach(grp => {
-                  const itemsInGroup = arr.filter(item => item.group_id === grp.id);
-                  if(itemsInGroup.length > 0) {
-                      const section = document.createElement('div'); section.className = 'group-section';
-                      section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}</div><div class="compact-cards-grid"></div>`;
-                      const grid = section.querySelector('.compact-cards-grid');
-                      CardModal.renderCompactCards(itemsInGroup, type, grid);
-                      container.appendChild(section);
-                  }
-              });
-              const noGroup = arr.filter(item => !item.group_id || !relevantGroups.find(g => g.id === item.group_id));
-              if(noGroup.length > 0) {
-                  const section = document.createElement('div'); section.className = 'group-section';
-                  section.innerHTML = `<div class="group-header text-sec">Non classé</div><div class="compact-cards-grid"></div>`;
-                  const grid = section.querySelector('.compact-cards-grid');
-                  CardModal.renderCompactCards(noGroup, type, grid);
-                  container.appendChild(section);
-              }
-          } else {
-              // Vue détaillée : fiches complètes (ancien mode)
-              relevantGroups.forEach(grp => {
-                  const itemsInGroup = arr.filter(item => item.group_id === grp.id);
-                  if(itemsInGroup.length > 0) {
-                      const section = document.createElement('div'); section.className = 'group-section';
-                      section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}</div><div class="data-grid"></div>`;
-                      const grid = section.querySelector('.data-grid');
-                      UI.renderDataCards(itemsInGroup, type, grid, relevantGroups);
-                      container.appendChild(section);
-                  }
-              });
-              const noGroup = arr.filter(item => !item.group_id || !relevantGroups.find(g => g.id === item.group_id));
-              if(noGroup.length > 0) {
-                  const section = document.createElement('div'); section.className = 'group-section';
-                  section.innerHTML = `<div class="group-header text-sec">Non classé</div><div class="data-grid"></div>`;
-                  const grid = section.querySelector('.data-grid');
-                  UI.renderDataCards(noGroup, type, grid, relevantGroups);
-                  container.appendChild(section);
-              }
-          }
-      },
-      
-      renderDataCards: (items, type, container, availableGroups) => {
-          const isView = state.currentRole === 'viewer';
-          items.forEach((item) => { 
-              const idx = state.data[type].indexOf(item);
-              const div = document.createElement('div'); div.className = 'data-card'; 
-              const delBtn = isView ? '' : `<button onclick="app.Actions.deleteDataItem('${type}', ${idx})" style="color:var(--danger);border:none;background:none;cursor:pointer">🗑️</button>`; 
-              
-              let groupSelect = '';
-              if(!isView) {
-                  groupSelect = `<select class="group-select" onchange="app.Actions.changeGroup('${type}', ${idx}, this.value)">`;
-                  groupSelect += `<option value="">-- Groupe --</option>`;
-                  availableGroups.forEach(g => { groupSelect += `<option value="${g.id}" ${item.group_id === g.id ? 'selected' : ''}>${g.name}</option>`; });
-                  groupSelect += `</select>`;
-              }
-
-              let contentHtml = '';
-              if (type === 'actors') {
-                  // Vérifier si le profil est verrouillé (revendiqué par quelqu'un)
-                  const isLocked = !!item.publicProfileId;
-                  const isReadOnly = isView || isLocked;
-                  
-                  // Trouver le personnage que cet acteur joue
-                  const linkedCharacter = state.data.characters.find(c => c.actor_id === item.id);
-                  
-                  contentHtml += `<div class="actor-card-header">`;
-                  if(item.photo) contentHtml += `<img src="${item.photo}" class="actor-photo-preview">`;
-                  const isInContacts = state.contacts && state.contacts.actors && state.contacts.actors.some(c => c.id === item.id);
-                  const lockedBadge = isLocked ? `<span style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: bold;">🔒 Profil revendiqué</span>` : '';
-                  contentHtml += `<div style="flex-grow:1;"><div style="font-weight:bold; font-size:1rem; margin-bottom:5px; display:flex; align-items:center; gap:8px;">${Utils.escape(item.name)} ${lockedBadge} ${!isView ? `<button class="save-contact-btn ${isInContacts ? 'saved' : ''}" onclick="event.stopPropagation(); app.Contacts.saveActorToContacts(${idx})" title="${isInContacts ? 'Déjà dans vos contacts' : 'Sauvegarder dans contacts'}">${isInContacts ? '⭐' : '☆'}</button>` : ''}</div>`;
-                  contentHtml += `<select class="actor-input" style="margin-bottom:5px; width:auto;" onchange="app.Actions.updateActorMeta(${idx}, 'gender', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                      ${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(item.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                  </select>`;
-                  
-                  // Afficher le rôle
-                  if(linkedCharacter) {
-                      contentHtml += `<div style="color:var(--primary); font-size:0.9rem; margin-bottom:5px;">🎭 Joue : <strong>${Utils.escape(linkedCharacter.name)}</strong></div>`;
-                  } else {
-                      contentHtml += `<div style="color:var(--text-sec); font-size:0.85rem; margin-bottom:5px; font-style:italic;">Aucun personnage lié</div>`;
-                  }
-                  
-                  if(!isReadOnly) {
-                      const photoBtnLabel = item.photo ? '🖼️ Changer la photo' : '📤 Importer une photo';
-                      contentHtml += `<div class="flex-gap10" style="align-items:center;">
-                          <input type="file" id="actor-photo-input-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.uploadActorPhoto(${idx}, this)">
-                          <button onclick="document.getElementById('actor-photo-input-${idx}').click()" class="btn-primary-sm-r6" style="flex:0 0 auto;">${photoBtnLabel}</button>
-                          ${item.photo ? `<button onclick="app.Actions.updateActorMeta(${idx}, 'photo', '')" class="btn-icon-sm" title="Supprimer la photo" style="background:var(--danger); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer;">✕</button>` : ''}
-                      </div>`;
-                  }
-                  contentHtml += `</div>${delBtn}</div>`;
-                  contentHtml += `<div class="actor-input-row mt-10">`;
-                  contentHtml += `<input class="actor-input" placeholder="Email" value="${item.email||''}" onchange="app.Actions.updateActorMeta(${idx}, 'email', this.value)" ${isReadOnly?'disabled':''}>`;
-                  contentHtml += `<input class="actor-input" placeholder="Tél" value="${item.phone||''}" onchange="app.Actions.updateActorMeta(${idx}, 'phone', this.value)" ${isReadOnly?'disabled':''}>`;
-                  contentHtml += `</div>`;
-                  contentHtml += `<div class="actor-input-row mt-5">`;
-                  contentHtml += `<input class="actor-input" placeholder="📍 Ville / Région" value="${item.city||''}" onchange="app.Actions.updateActorMeta(${idx}, 'city', this.value)" ${isReadOnly?'disabled':''}>`;
-                  contentHtml += `<input class="actor-input" placeholder="Site Web" value="${item.website||''}" onchange="app.Actions.updateActorMeta(${idx}, 'website', this.value)" ${isReadOnly?'disabled':''}>`;
-                  contentHtml += `</div>`;
-                  contentHtml += `<textarea class="data-desc mt-5" placeholder="Adresse / Notes..." oninput="app.Actions.updateActorMeta(${idx}, 'address', this.value)" ${isReadOnly?'disabled':''}>${item.address || ''}</textarea>`;
-                  contentHtml += `<textarea class="data-desc" style="margin-top:5px; height:50px;" placeholder="Bio..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isReadOnly?'disabled':''}>${item.bio || ''}</textarea>`;
-                  
-                  // Section Description physique (vérifier visibilité)
-                  if(UI.isSectionVisibleForProject(item, 'physical')) {
-                  contentHtml += `<div class="actor-physical-section info-box">
-                      <strong class="form-label-block">📏 Description physique</strong>
-                      <div class="actor-input-row mb-8">
-                          <input class="actor-input" type="number" placeholder="Taille (cm)" value="${item.height || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'height', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                          <input class="actor-input" type="number" placeholder="Poids (kg)" value="${item.weight || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'weight', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                          <input class="actor-input" type="number" placeholder="Âge" value="${item.age || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'age', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                      </div>
-                      <div class="actor-input-row mb-8">
-                          <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'eyeColor', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                              ${ProfileRenderer.selectOptions.eyeColor.map(o => '<option value="'+o.value+'" '+(item.eyeColor === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                          </select>
-                          <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'hairColor', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                              ${ProfileRenderer.selectOptions.hairColor.map(o => '<option value="'+o.value+'" '+(item.hairColor === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                          </select>
-                          <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'hairLength', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                              ${ProfileRenderer.selectOptions.hairLength.map(o => '<option value="'+o.value+'" '+(item.hairLength === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                          </select>
-                      </div>
-                      <div class="actor-input-row mb-8">
-                          <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'corpulence', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                              ${ProfileRenderer.selectOptions.corpulence.map(o => '<option value="'+o.value+'" '+(item.corpulence === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                          </select>
-                          <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'ethnicity', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                              ${ProfileRenderer.selectOptions.ethnicity.map(o => '<option value="'+o.value+'" '+(item.ethnicity === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                          </select>
-                      </div>
-                      <div class="actor-input-row">
-                          <input class="actor-input" placeholder="Sports pratiqués (équitation, natation...)" value="${item.sports || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'sports', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                          <input class="actor-input" placeholder="Langues parlées (français, anglais...)" value="${item.languages || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'languages', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                      </div>
-                  </div>`;
-                  }
-                  
-                  // Section Galerie Photos (vérifier visibilité)
-                  if(UI.isSectionVisibleForProject(item, 'gallery')) {
-                  const galleryPhotos = item.galleryPhotos || [];
-                  const galleryHTML = galleryPhotos.map((url, i) => `
-                      <div style="position:relative; width:80px; height:80px;">
-                          <img src="${url}" style="width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--border);">
-                          ${!isReadOnly ? `<button onclick="app.Actions.removeActorGalleryPhoto(${idx}, ${i})" class="n8-avatar-3">✕</button>` : ''}
-                      </div>
-                  `).join('');
-                  
-                  contentHtml += `<div class="info-box">
-                      <strong class="form-label-block">📸 Galerie Photos</strong>
-                      <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
-                          ${galleryHTML || '<span style="color:var(--text-sec); font-size:0.85rem;">Aucune photo</span>'}
-                      </div>
-                      ${!isReadOnly ? `<div class="flex-gap10" style="align-items:center;">
-                          <input type="file" id="actor-gallery-input-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.addActorGalleryPhoto(${idx})">
-                          <button onclick="document.getElementById('actor-gallery-input-${idx}').click()" class="btn-primary-sm-r6" ${galleryPhotos.length >= 3 ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>📤 Ajouter une photo${galleryPhotos.length > 0 ? ` (${galleryPhotos.length}/3)` : ''}</button>
-                      </div>` : ''}
-                  </div>`;
-                  }
-                  
-                  // Section Bande Démo (vérifier visibilité)
-                  if(UI.isSectionVisibleForProject(item, 'demoreel')) {
-                  contentHtml += `<div class="info-box">
-                      <strong class="form-label-block">🎬 Bande Démo</strong>
-                      <input class="actor-input" type="url" placeholder="URL YouTube ou Vimeo (https://...)" value="${item.demoreel || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'demoreel', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                      ${item.demoreel ? `<div class="mt-10"><iframe src="${ProfileRenderer.getEmbedUrl(item.demoreel)}" width="100%" height="200" frameborder="0" allowfullscreen class="br-8"></iframe></div>` : ''}
-                  </div>`;
-                  }
-                  
-                  // Section Tarif pour les acteurs (vérifier visibilité)
-                  if(UI.isSectionVisibleForProject(item, 'tarif')) {
-                  const actorCurrencyOptions = (CONFIG.currencies || ['€', '$', '£', 'CHF']).map(c => `<option value="${c}" ${item.rateCurrency === c ? 'selected' : ''}>${c}</option>`).join('');
-                  const actorRateTypeOptions = (CONFIG.rateTypes || ['Jour', 'Semaine', 'Forfait', 'Heure']).map(t => `<option value="${t}" ${item.rateType === t ? 'selected' : ''}>${t}</option>`).join('');
-                  
-                  contentHtml += `<div class="actor-input-row mt-10">
-                      <input type="number" class="actor-input" placeholder="Tarif" value="${item.dailyRate || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'dailyRate', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                      <select class="actor-input" style="width:auto;" onchange="app.Actions.updateActorMeta(${idx}, 'rateCurrency', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                          ${actorCurrencyOptions}
-                      </select>
-                      <select class="actor-input" style="width:auto;" onchange="app.Actions.updateActorMeta(${idx}, 'rateType', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                          ${actorRateTypeOptions}
-                      </select>
-                      <label style="display:flex; align-items:center; gap:5px; cursor:pointer; white-space:nowrap;">
-                          <input type="checkbox" ${item.rateNegotiable ? 'checked' : ''} onchange="app.Actions.updateActorMeta(${idx}, 'rateNegotiable', this.checked)" ${isReadOnly ? 'disabled' : ''}>
-                          <span class="fs-085">🤝 Négociable</span>
-                      </label>
-                  </div>`;
-                  
-                  // Section Statut professionnel
-                  contentHtml += `<div style="margin-top:10px; padding:10px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
-                      <strong class="fs-09">📋 Statut professionnel</strong>
-                      <div class="actor-input-row mt-8">
-                          <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'professionalStatus', this.value); app.UI.renderDataTab('actors', els.actorContainer);" ${isReadOnly ? 'disabled' : ''}>
-                              ${ProfileRenderer.selectOptions.professionalStatus.map(o => '<option value="'+o.value+'" '+(item.professionalStatus === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                          </select>
-                      </div>
-                      ${item.professionalStatus === 'intermittent' ? `
-                      <div class="actor-input-row mt-8">
-                          <input class="actor-input" placeholder="N° Sécurité Sociale" value="${item.numSecu || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'numSecu', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                          <input class="actor-input" placeholder="N° Congés Spectacles" value="${item.numCongesSpectacles || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'numCongesSpectacles', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                      </div>` : ''}
-                      ${item.professionalStatus === 'micro-entrepreneur' ? `
-                      <div class="actor-input-row mt-8">
-                          <input class="actor-input" placeholder="N° SIRET" value="${item.siret || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'siret', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                      </div>` : ''}
-                      
-                      <strong style="font-size: 0.9rem; display:block; margin-top:15px;">🤝 Type de collaboration</strong>
-                      <div class="collab-type-selector">
-                          <div class="collab-type-btn pro ${item.collabType === 'pro' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Actions.updateActorMeta(${idx}, 'collabType', 'pro'); app.UI.renderDataTab('actors', els.actorContainer);` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
-                              🎬 Pro
-                          </div>
-                          <div class="collab-type-btn semi-pro ${item.collabType === 'semi-pro' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Actions.updateActorMeta(${idx}, 'collabType', 'semi-pro'); app.UI.renderDataTab('actors', els.actorContainer);` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
-                              ⚡ Semi-pro
-                          </div>
-                          <div class="collab-type-btn benevole ${item.collabType === 'benevole' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Actions.updateActorMeta(${idx}, 'collabType', 'benevole'); app.UI.renderDataTab('actors', els.actorContainer);` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
-                              ❤️ Bénévole
-                          </div>
-                      </div>
-                      <p class="text-sec-xs-mt8">
-                          ${item.collabType === 'pro' ? '💼 Contrat classique, horaires et tarifs standards' : 
-                            item.collabType === 'semi-pro' ? '🤝 Flexible sur les conditions mais rémunéré·e' : 
-                            item.collabType === 'benevole' ? '🎁 Pas de rémunération, défraiement repas + transport' : 
-                            'Sélectionnez votre type de collaboration préféré'}
-                      </p>
-                  </div>`;
-                  }
-                  
-                  // Section Disponibilités pour les acteurs (vérifier visibilité)
-                  if(UI.isSectionVisibleForProject(item, 'calendar')) {
-                  const actorAvailDates = item.availabilityDates || [];
-                  const actorAvailDatesHTML = actorAvailDates.map((d, i) => `<span style="display:inline-flex; align-items:center; background:#E8F5E9; border:1px solid #4CAF50; color:#2E7D32; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✓ ${d.from} → ${d.to} ${!isReadOnly ? `<span onclick="app.Actions.removeActorAvailability(${idx}, ${i})" class="delete-link">✖</span>` : ''}</span>`).join('');
-                  
-                  // Indisponibilités
-                  const actorUnavailDates = item.unavailabilityDates || [];
-                  const actorUnavailDatesHTML = actorUnavailDates.map((d, i) => `<span style="display:inline-flex; align-items:center; background:#FFEBEE; border:1px solid #f44336; color:#C62828; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✗ ${d.from} → ${d.to} ${d.reason ? '(' + Utils.escape(d.reason) + ')' : ''} ${!isReadOnly ? `<span onclick="app.Actions.removeActorUnavailability(${idx}, ${i})" class="delete-link">✖</span>` : ''}</span>`).join('');
-                  
-                  contentHtml += `<div class="crew-availability-section mt-10">
-                      <strong class="fs-09">📅 Disponibilités & Indisponibilités</strong>
-                      <textarea class="actor-input" style="min-height: 50px; margin-top: 5px; width:100%;" placeholder="Situation / Notes de disponibilité..." onchange="app.Actions.updateActorMeta(${idx}, 'availabilityText', this.value)" ${isReadOnly ? 'disabled' : ''}>${item.availabilityText || ''}</textarea>
-                      <div id="actor-calendar-${idx}"></div>
-                      <div class="mt-10">
-                          <div class="form-label">🟢 Disponible :</div>
-                          ${actorAvailDatesHTML || '<span class="text-sec-xs">Aucune période renseignée</span>'}
-                      </div>
-                      <div class="mt-10">
-                          <div class="form-label">🔴 Indisponible :</div>
-                          ${actorUnavailDatesHTML || '<span class="text-sec-xs">Aucune période renseignée</span>'}
-                          </div>
-                  </div>`;
-                  }
-                  
-                  // Section Véhicule (vérifier visibilité)
-                  if(UI.isSectionVisibleForProject(item, 'vehicle')) {
-                  contentHtml += `<div class="crew-vehicle-section mt-10">
-                      <label class="crew-vehicle-toggle">
-                          <input type="checkbox" ${item.hasVehicle ? 'checked' : ''} onchange="app.Actions.toggleActorVehicle(${idx}, this.checked)" ${isReadOnly ? 'disabled' : ''}>
-                          <strong>🚗 Possède un véhicule</strong>
-                      </label>
-                      <div class="crew-vehicle-details ${item.hasVehicle ? 'visible' : ''}" id="actor-vehicle-${idx}">
-                          <div class="actor-input-row mt-8">
-                              <input class="actor-input" placeholder="Type de véhicule" value="${item.vehicleType || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'vehicleType', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                              <input class="actor-input" placeholder="Immatriculation" value="${item.vehiclePlate || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'vehiclePlate', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                          </div>
-                          <div class="actor-input-row mt-8">
-                              <input class="actor-input" type="number" min="1" max="9" placeholder="Nb places dispo" value="${item.vehicleSeats || ''}" onchange="app.Actions.updateActorMeta(${idx}, 'vehicleSeats', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                                  <input type="checkbox" ${item.vehicleTrunk ? 'checked' : ''} onchange="app.Actions.updateActorMeta(${idx}, 'vehicleTrunk', this.checked)" ${isReadOnly ? 'disabled' : ''}>
-                                  <span>🧳 Coffre disponible</span>
-                              </label>
-                          </div>
-                          <textarea class="data-desc" style="margin-top:8px; height:40px;" placeholder="Notes véhicule..." oninput="app.Actions.updateActorMeta(${idx}, 'vehicleNotes', this.value)" ${isReadOnly ? 'disabled' : ''}>${item.vehicleNotes || ''}</textarea>
-                      </div>
-                  </div>`;
-                  }
-                  
-                  // Bouton Contrat
-                  if(!isView) {
-                      contentHtml += `<div style="margin-top:15px; padding-top:15px; border-top:1px solid var(--border); display:flex; gap:10px; flex-wrap:wrap;">
-                          <button onclick="app.Contracts.openModal('actor', ${idx})" style="padding:8px 15px; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85rem;">📝 Contrat</button>
-                      </div>`;
-                  }
-                  
-                  // Bouton Contrat
-                  if(!isView) {
-                      contentHtml += `<div style="margin-top:15px; padding-top:15px; border-top:1px solid var(--border); display:flex; gap:10px; flex-wrap:wrap;">
-                          <button onclick="app.Contracts.openModal('actor', ${idx})" style="padding:8px 15px; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85rem;">📝 Contrat</button>
-                      </div>`;
-                  }
-                  
-                  // S7 : Section "Apparaît dans" (via breakdown.COMEDIENS)
-                  const actorScenes = (state.data.scenes || []).filter(s => 
-                      (s.breakdown?.COMEDIENS || []).some(n => n.toLowerCase() === item.name.toLowerCase())
-                  );
-                  if(actorScenes.length > 0) {
-                      const isSeries = state.currentProjectType === 'series';
-                      const allScenes = state.data.scenes;
-                      const sceneNumbers = actorScenes.map(s => {
-                          let label;
-                          if(isSeries) {
-                              const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
-                              if(ep) {
-                                  const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
-                                  label = UI.formatSceneNumber(s, scenesInEp.indexOf(s));
-                              } else {
-                                  label = '#' + (allScenes.indexOf(s) + 1);
-                              }
-                          } else {
-                              label = '#' + (allScenes.indexOf(s) + 1);
-                          }
-                          return `<span class="appearance-tag">${label}</span>`;
-                      }).join(' ');
-                      contentHtml += `<div class="appearances-section">
-                          <span class="appearances-label">🎬 Joue dans (${actorScenes.length}) :</span>
-                          ${sceneNumbers}
-                      </div>`;
-                  }
-                  
-                  contentHtml += groupSelect;
-              } else if(type === 'locations') {
-                  // === DÉCORS : Fiche enrichie ===
-                  contentHtml += `<div class="data-header"><span class="data-name">🏠 ${Utils.escape(item.name)}</span>${delBtn}</div>`;
-                  contentHtml += `<textarea class="data-desc" placeholder="Description du décor..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isView?'disabled':''}>${item.desc || ''}</textarea>`;
-                  
-                  // Section Adresse & Contact
-                  contentHtml += `<div style="margin-top:12px; padding:12px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
-                      <strong class="form-label-block">📍 Lieu de tournage</strong>
-                      <input class="actor-input" placeholder="Nom du lieu réel (ex: Musée d'Histoire Naturelle)" value="${item.realName || ''}" oninput="app.Actions.updateLocationMeta(${idx}, 'realName', this.value)" ${isView?'disabled':''} style="margin-bottom:8px;">
-                      <div class="address-autocomplete-container" style="position:relative; margin-bottom:8px;">
-                          <input class="actor-input" id="loc-address-${idx}" placeholder="Adresse complète (autocomplétion)" value="${item.address || ''}" oninput="app.Actions.searchLocationAddress(${idx}, this.value)" ${isView?'disabled':''} autocomplete="off">
-                          <div id="loc-suggestions-${idx}" class="address-suggestions"></div>
-                      </div>
-                      <div style="display:flex; gap:8px; margin-bottom:8px;">
-                          <input class="actor-input flex-1" placeholder="👤 Contact sur place" value="${item.contactName || ''}" oninput="app.Actions.updateLocationMeta(${idx}, 'contactName', this.value)" ${isView?'disabled':''}>
-                          <input class="actor-input" placeholder="📞 Téléphone" value="${item.contactPhone || ''}" oninput="app.Actions.updateLocationMeta(${idx}, 'contactPhone', this.value)" ${isView?'disabled':''} style="width:140px;">
-                      </div>
-                      <textarea class="data-desc" style="min-height:40px;" placeholder="Notes d'accès (code porte, parking, interphone...)" oninput="app.Actions.updateLocationMeta(${idx}, 'accessNotes', this.value)" ${isView?'disabled':''}>${item.accessNotes || ''}</textarea>
-                  </div>`;
-                  
-                  // Section Photos de repérage
-                  contentHtml += `<div style="margin-top:12px; padding:12px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
-                      <strong class="form-label-block">📸 Photos de repérage</strong>
-                      <div id="location-gallery-${idx}" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-                          ${(item.galleryPhotos || []).map((photo, pIdx) => `
-                              <div style="position:relative; width:80px; height:80px;">
-                                  <img src="${photo}" style="width:100%; height:100%; object-fit:cover; border-radius:4px; cursor:pointer;" onclick="window.open('${photo}', '_blank')">
-                                  ${!isView ? `<button onclick="app.Actions.removeLocationPhoto(${idx}, ${pIdx})" style="position:absolute; top:-5px; right:-5px; background:var(--danger); color:white; border:none; border-radius:50%; width:18px; height:18px; cursor:pointer; font-size:10px;">✕</button>` : ''}
-                              </div>
-                          `).join('')}
-                          ${(item.galleryPhotos || []).length === 0 ? '<span style="color:var(--text-sec); font-size:0.85rem; font-style:italic;">Aucune photo</span>' : ''}
-                      </div>
-                      ${!isView ? `<div class="flex-gap10" style="align-items:center;">
-                          <input type="file" id="loc-gallery-input-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.addLocationPhoto(${idx}, this)">
-                          <button onclick="document.getElementById('loc-gallery-input-${idx}').click()" class="btn-primary-sm-r6">📤 Ajouter une photo</button>
-                      </div>` : ''}
-                  </div>`;
-                  
-                  // Scènes tournées dans ce décor
-                  const locationScenes = state.data.scenes.filter(s => {
-                      if(!s.title) return false;
-                      const locMatch = s.title.match(/^(?:INT\.|EXT\.|I\/E)\s*([^\-]+)/i);
-                      if(locMatch && locMatch[1]) {
-                          return locMatch[1].trim().toUpperCase() === item.name.toUpperCase();
-                      }
-                      return false;
-                  });
-                  
-                  if(locationScenes.length > 0) {
-                      // S7 : utiliser formatSceneNumber pour avoir la notation série S01E01-SC01
-                      const isSeries = state.currentProjectType === 'series';
-                      const allScenes = state.data.scenes;
-                      const sceneNumbers = locationScenes.map(s => {
-                          let label;
-                          if(isSeries) {
-                              const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
-                              if(ep) {
-                                  const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
-                                  label = UI.formatSceneNumber(s, scenesInEp.indexOf(s));
-                              } else {
-                                  label = '#' + (allScenes.indexOf(s) + 1);
-                              }
-                          } else {
-                              label = '#' + (allScenes.indexOf(s) + 1);
-                          }
-                          return `<span class="appearance-tag" onclick="app.UI.switchTab('script')" style="cursor:pointer;">${label}</span>`;
-                      }).join(' ');
-                      contentHtml += `<div class="appearances-section">
-                          <span class="appearances-label">🎬 Scènes dans ce décor (${locationScenes.length}) :</span>
-                          ${sceneNumbers}
-                      </div>`;
-                  } else {
-                      contentHtml += `<div class="appearances-section">
-                          <span class="appearances-label" style="font-style:italic;">Aucune scène dans ce décor</span>
-                      </div>`;
-                  }
-                  
-                  // Sélecteur de groupe pour les décors
-                  contentHtml += groupSelect;
-              } else {
-                  // PERSONNAGES (characters)
-                  const contentKey = 'bio';
-                  contentHtml += `<div class="data-header"><span class="data-name">${Utils.escape(item.name)}</span>${delBtn}</div>`;
-                  contentHtml += `<textarea class="data-desc" placeholder="Notes..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isView?'disabled':''}>${item[contentKey] || ''}</textarea>`;
-                  
-                  if(type === 'characters') {
-                  // Dropdown sexe pour personnages
-                  contentHtml += `<select class="group-select" style="margin-top:8px; margin-bottom:8px; width:auto; border-color:var(--border);" onchange="app.Actions.updateCharacterMeta(${idx}, 'gender', this.value)" ${isView ? 'disabled' : ''}>
-                      ${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(item.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                  </select>`;
-                  
-                  // Trouver les scènes où ce personnage apparaît
-                  const characterScenes = state.data.scenes.filter(s => {
-                      if(!s.perso) return false;
-                      const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
-                      return names.includes(item.name.toUpperCase());
-                  });
-                  
-                  if(characterScenes.length > 0) {
-                      // S7 : utiliser formatSceneNumber pour avoir la notation série S01E01-SC01
-                      const isSeries = state.currentProjectType === 'series';
-                      const allScenes = state.data.scenes;
-                      const sceneNumbers = characterScenes.map(s => {
-                          let label;
-                          if(isSeries) {
-                              const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
-                              if(ep) {
-                                  const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
-                                  label = UI.formatSceneNumber(s, scenesInEp.indexOf(s));
-                              } else {
-                                  label = '#' + (allScenes.indexOf(s) + 1);
-                              }
-                          } else {
-                              label = '#' + (allScenes.indexOf(s) + 1);
-                          }
-                          return `<span class="appearance-tag">${label}</span>`;
-                      }).join(' ');
-                      contentHtml += `<div class="appearances-section">
-                          <span class="appearances-label">📍 Apparaît dans (${characterScenes.length}) :</span>
-                          ${sceneNumbers}
-                      </div>`;
-                  } else {
-                      contentHtml += `<div class="appearances-section">
-                          <span class="appearances-label" style="font-style:italic;">N'apparaît dans aucune scène</span>
-                      </div>`;
-                  }
-                  
-                  if(!isView) {
-                      contentHtml += `<select class="group-select" style="margin-top:5px; width:100%; border-color:var(--border);" onchange="app.Actions.linkActor(${idx}, this.value)">`; 
-                      contentHtml += `<option value="">-- Lier Comédien.ne --</option>`;
-                      if(state.data.actors) {
-                          state.data.actors.forEach(actor => {
-                              const isSelected = item.actor_id && item.actor_id === actor.id ? 'selected' : '';
-                              contentHtml += `<option value="${actor.id}" ${isSelected}>${actor.name}</option>`;
-                          });
-                      }
-                      contentHtml += `</select>`;
-                  } else if (item.actor_id) {
-                      const actor = state.data.actors.find(a => a.id === item.actor_id);
-                      if(actor) contentHtml += `<div style="margin-top:5px;font-size:0.85rem;color:var(--primary)">🎭 ${actor.name}</div>`;
-                  }
-              }
-                  contentHtml += groupSelect;
-              }
-              div.innerHTML = contentHtml; 
-              container.appendChild(div); 
-          });
-          
-          // Initialiser les calendriers pour les acteurs
-          if(type === 'actors') {
-              setTimeout(() => {
-                  items.forEach((item, i) => {
-                      const idx = state.data.actors.indexOf(item);
-                      const calContainer = document.getElementById('actor-calendar-' + idx);
-                      if(calContainer && state.currentRole !== 'viewer') {
-                          UI.renderAvailabilityCalendar('actor-calendar-' + idx, 'actor', idx);
-                      }
-                  });
-              }, 100);
-          }
-      },
-      
-	  renderCrewTab: () => {
-          const container = document.getElementById('crewContainer');
-          container.innerHTML = '';
-          
-          if(!state.data.crew || state.data.crew.length === 0) {
-              container.innerHTML = `
-                  <div class="empty-state">
-                      <div class="empty-state-icon">🎥</div>
-                      <div class="empty-state-title">Aucun technicien</div>
-                      <div class="empty-state-desc">Constituez votre équipe technique en ajoutant des membres. Vous pourrez gérer leurs rôles, tarifs et disponibilités.</div>
-                      <button class="empty-state-btn" onclick="app.Crew.addMember()">+ Ajouter un technicien</button>
-                      <div class="empty-state-tips">💡 <strong>Astuce :</strong> Organisez votre équipe par départements (Réalisation, Image, Son, etc.)</div>
-                  </div>
-              `;
-              return;
-          }
-          
-          const isView = state.currentRole === 'viewer' || !Permissions.canEdit('equipe');
-          const crewGroups = state.data.groups.filter(g => g.type === 'crew');
-          
-          // Barre de toggle vue compacte / détaillée — injectée dans la toolbar du haut (à droite)
-          const viewMode = CardModal.getViewMode('crew');
-          const crewToolbar = document.getElementById('crew-toolbar');
-          if(crewToolbar) {
-              const oldToggle = crewToolbar.querySelector('.view-toggle-bar');
-              if(oldToggle) oldToggle.remove();
-              const toggleBar = document.createElement('div');
-              toggleBar.className = 'view-toggle-bar';
-              toggleBar.innerHTML = `
-                  <button class="view-toggle-btn ${viewMode === 'compact' ? 'active' : ''}" onclick="app.CardModal.setViewMode('crew', 'compact')">🔲 Compact</button>
-                  <button class="view-toggle-btn ${viewMode === 'detailed' ? 'active' : ''}" onclick="app.CardModal.setViewMode('crew', 'detailed')">📋 Détaillé</button>
-              `;
-              crewToolbar.appendChild(toggleBar);
-          }
-          
-          if(viewMode === 'compact') {
-              // Vue compacte
-              crewGroups.forEach(grp => {
-                  const membersInGroup = state.data.crew.filter(m => m.group_id === grp.id);
-                  if(membersInGroup.length > 0) {
-                      const section = document.createElement('div');
-                      section.className = 'group-section';
-                      section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}</div><div class="compact-cards-grid"></div>`;
-                      const grid = section.querySelector('.compact-cards-grid');
-                      CardModal.renderCompactCrewCards(membersInGroup, grid, isView);
-                      container.appendChild(section);
-                  }
-              });
-              
-              const noGroup = state.data.crew.filter(m => !m.group_id || !crewGroups.find(g => g.id === m.group_id));
-              if(noGroup.length > 0) {
-                  const section = document.createElement('div');
-                  section.className = 'group-section';
-                  section.innerHTML = `<div class="group-header text-sec">Non classé</div><div class="compact-cards-grid"></div>`;
-                  const grid = section.querySelector('.compact-cards-grid');
-                  CardModal.renderCompactCrewCards(noGroup, grid, isView);
-                  container.appendChild(section);
-              }
-          } else {
-              // Vue détaillée (ancien mode)
-              crewGroups.forEach(grp => {
-                  const membersInGroup = state.data.crew.filter(m => m.group_id === grp.id);
-                  if(membersInGroup.length > 0) {
-                      const section = document.createElement('div');
-                      section.className = 'group-section';
-                      section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}</div><div class="data-grid"></div>`;
-                      const grid = section.querySelector('.data-grid');
-                      
-                      membersInGroup.forEach(member => {
-                          const idx = state.data.crew.indexOf(member);
-                          const card = UI.createCrewCard(member, idx, crewGroups, isView);
-                          grid.appendChild(card);
-                      });
-                      
-                      container.appendChild(section);
-                  }
-              });
-              
-              const noGroup = state.data.crew.filter(m => !m.group_id || !crewGroups.find(g => g.id === m.group_id));
-              if(noGroup.length > 0) {
-                  const section = document.createElement('div');
-                  section.className = 'group-section';
-                  section.innerHTML = `<div class="group-header text-sec">Non classé</div><div class="data-grid"></div>`;
-                  const grid = section.querySelector('.data-grid');
-                  
-                  noGroup.forEach(member => {
-                      const idx = state.data.crew.indexOf(member);
-                      const card = UI.createCrewCard(member, idx, crewGroups, isView);
-                      grid.appendChild(card);
-                  });
-                  
-                  container.appendChild(section);
-              }
-              
-              // Initialiser les calendriers pour les techniciens (mode détaillé uniquement)
-              if(!isView) {
-                  setTimeout(() => {
-                      state.data.crew.forEach((member, idx) => {
-                          const calContainer = document.getElementById('crew-calendar-' + idx);
-                          if(calContainer) {
-                              UI.renderAvailabilityCalendar('crew-calendar-' + idx, 'crew', idx);
-                          }
-                      });
-                  }, 100);
-              }
-          }
-      },
-      
-      createCrewCard: (member, idx, availableGroups, isView) => {
-          // Vérifier si le profil est verrouillé (revendiqué par quelqu'un)
-          const isLocked = !!member.publicProfileId;
-          const isReadOnly = isView || isLocked;
-          
-          const card = document.createElement('div');
-          card.className = 'crew-card';
-          
-          const roles = member.group_id ? Crew.getRolesForGroup(member.group_id) : [];
-          
-          let rolesOptions = '<option value="">-- Fonction --</option>';
-          roles.forEach(r => {
-              rolesOptions += `<option value="${r}" ${member.role === r ? 'selected' : ''}>${r}</option>`;
-          });
-          rolesOptions += '<option value="__custom__">➕ Autre...</option>';
-          
-          let groupOptions = '<option value="">-- Département --</option>';
-          availableGroups.forEach(g => {
-              groupOptions += `<option value="${g.id}" ${member.group_id === g.id ? 'selected' : ''}>${g.name}</option>`;
-          });
-          
-          let currencyOptions = '';
-          CONFIG.currencies.forEach(c => {
-              currencyOptions += `<option value="${c}" ${member.rateCurrency === c ? 'selected' : ''}>${c}</option>`;
-          });
-          
-          let rateTypeOptions = '';
-          CONFIG.rateTypes.forEach(t => {
-              rateTypeOptions += `<option value="${t}" ${member.rateType === t ? 'selected' : ''}>${t}</option>`;
-          });
-          
-          // Availability dates HTML
-          let availDatesHTML = '';
-          if(member.availabilityDates && member.availabilityDates.length > 0) {
-              member.availabilityDates.forEach((d, dIdx) => {
-                  const fromDate = new Date(d.from).toLocaleDateString();
-                  const toDate = d.to ? new Date(d.to).toLocaleDateString() : fromDate;
-                  availDatesHTML += `
-                      <span style="display:inline-flex; align-items:center; background:#E8F5E9; border:1px solid #4CAF50; color:#2E7D32; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✓ ${fromDate} → ${toDate} ${!isReadOnly ? `<span onclick="app.Crew.removeAvailabilityDate(${idx}, ${dIdx})" class="delete-link">✖</span>` : ''}</span>
-                  `;
-              });
-          }
-          
-          // Unavailability dates HTML
-          let unavailDatesHTML = '';
-          if(member.unavailabilityDates && member.unavailabilityDates.length > 0) {
-              member.unavailabilityDates.forEach((d, dIdx) => {
-                  const fromDate = new Date(d.from).toLocaleDateString();
-                  const toDate = d.to ? new Date(d.to).toLocaleDateString() : fromDate;
-                  unavailDatesHTML += `
-                      <span style="display:inline-flex; align-items:center; background:#FFEBEE; border:1px solid #f44336; color:#C62828; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✗ ${fromDate} → ${toDate} ${d.reason ? '(' + Utils.escape(d.reason) + ')' : ''} ${!isReadOnly ? `<span onclick="app.Crew.removeUnavailabilityDate(${idx}, ${dIdx})" class="delete-link">✖</span>` : ''}</span>
-                  `;
-              });
-          }
-          
-          card.innerHTML = `
-              <div class="crew-card-header">
-                  ${member.photo ? `<img src="${member.photo}" class="crew-photo-preview">` : '<div class="crew-photo-preview" style="display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">👤</div>'}
-                  <div class="crew-info-main">
-                      <div class="crew-name" style="display:flex; align-items:center; gap:8px;">${Utils.escape(member.name)} ${isLocked ? `<span style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: bold;">🔒 Profil revendiqué</span>` : ''} ${!isView ? `<button class="save-contact-btn ${state.contacts && state.contacts.crew && state.contacts.crew.some(c => c.id === member.id) ? 'saved' : ''}" onclick="event.stopPropagation(); app.Contacts.saveCrewToContacts(${idx})" title="Sauvegarder dans contacts">${state.contacts && state.contacts.crew && state.contacts.crew.some(c => c.id === member.id) ? '⭐' : '☆'}</button>` : ''}</div>
-                      <div class="crew-role">${member.role || 'Fonction non définie'}</div>
-                  </div>
-                  ${!isView ? `<button onclick="app.Crew.deleteMember(${idx})" style="background: none; border: none; color: var(--danger); cursor: pointer; font-size: 1.2rem;">🗑️</button>` : ''}
-              </div>
-              
-              ${!isView ? `
-              <div class="crew-row">
-                  <select class="crew-input" onchange="app.Crew.updateMember(${idx}, 'group_id', this.value)" title="Département" ${isLocked ? 'disabled' : ''}>
-                      ${groupOptions}
-                  </select>
-                  <select class="crew-input" id="role-select-${idx}" onchange="app.UI.handleRoleChange(${idx}, this.value)" ${isLocked ? 'disabled' : ''}>
-                      ${rolesOptions}
-                  </select>
-              </div>
-              <select class="crew-input mt-8" onchange="app.Crew.updateMember(${idx}, 'gender', this.value)" ${isLocked ? 'disabled' : ''}>
-                  ${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(member.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-              </select>
-              ` : ''}
-              
-              ${!isReadOnly ? `<div class="flex-gap10" style="align-items:center;">
-                  <input type="file" id="crew-photo-input-${idx}" accept="image/*" style="display:none;" onchange="app.Crew.uploadPhoto(${idx}, this)">
-                  <button onclick="document.getElementById('crew-photo-input-${idx}').click()" class="btn-primary-sm-r6" style="flex:0 0 auto;">${member.photo ? '🖼️ Changer la photo' : '📤 Importer une photo'}</button>
-                  ${member.photo ? `<button onclick="app.Crew.updateMember(${idx}, 'photo', ''); app.UI.renderCrewTab();" class="btn-icon-sm" title="Supprimer la photo" style="background:var(--danger); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer;">✕</button>` : ''}
-              </div>` : ''}
-              
-              <div class="crew-row">
-                  <input class="crew-input" placeholder="Email" value="${member.email || ''}" onchange="app.Crew.updateMember(${idx}, 'email', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                  <input class="crew-input" placeholder="Téléphone" value="${member.phone || ''}" onchange="app.Crew.updateMember(${idx}, 'phone', this.value)" ${isReadOnly ? 'disabled' : ''}>
-              </div>
-              
-              <div class="crew-row">
-                  <input class="crew-input" placeholder="📍 Ville / Région" value="${member.city || ''}" onchange="app.Crew.updateMember(${idx}, 'city', this.value)" ${isReadOnly ? 'disabled' : ''}>
-              </div>
-              
-              <textarea class="crew-input" style="min-height: 60px;" placeholder="Adresse..." onchange="app.Crew.updateMember(${idx}, 'address', this.value)" ${isReadOnly ? 'disabled' : ''}>${member.address || ''}</textarea>
-              
-              ${UI.isSectionVisibleForProject(member, 'crew-gallery') ? `<div class="info-box">
-                  <strong class="form-label-block">📸 Galerie Photos</strong>
-                  <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
-                      ${(member.galleryPhotos || []).map((url, i) => `
-                          <div style="position:relative; width:80px; height:80px;">
-                              <img src="${url}" style="width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--border);">
-                              ${!isReadOnly ? `<button onclick="app.Crew.removeGalleryPhoto(${idx}, ${i})" class="n8-avatar-3">✕</button>` : ''}
-                          </div>
-                      `).join('') || '<span style="color:var(--text-sec); font-size:0.85rem;">Aucune photo</span>'}
-                  </div>
-                  ${!isReadOnly ? `<div class="flex-gap10" style="align-items:center;">
-                      <input type="file" id="crew-gallery-input-${idx}" accept="image/*" style="display:none;" onchange="app.Crew.addGalleryPhoto(${idx})">
-                      <button onclick="document.getElementById('crew-gallery-input-${idx}').click()" class="btn-primary-sm-r6">📤 Ajouter une photo</button>
-                  </div>` : ''}
-              </div>` : ''}
-              
-              ${UI.isSectionVisibleForProject(member, 'crew-demoreel') ? `<div class="info-box">
-                  <strong class="form-label-block">🎬 Bande Démo</strong>
-                  <input class="crew-input" type="url" placeholder="URL YouTube ou Vimeo (https://...)" value="${member.demoreel || ''}" onchange="app.Crew.updateMember(${idx}, 'demoreel', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                  ${member.demoreel ? `<div class="mt-10"><iframe src="${ProfileRenderer.getEmbedUrl(member.demoreel)}" width="100%" height="200" frameborder="0" allowfullscreen class="br-8"></iframe></div>` : ''}
-              </div>` : ''}
-              
-              ${UI.isSectionVisibleForProject(member, 'tarif') ? `<div class="crew-rate-row mt-10">
-                  <input type="number" class="crew-input crew-rate-amount" placeholder="Tarif" value="${member.dailyRate || ''}" onchange="app.Crew.updateMember(${idx}, 'dailyRate', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                  <select class="crew-input crew-rate-currency" onchange="app.Crew.updateMember(${idx}, 'rateCurrency', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                      ${currencyOptions}
-                  </select>
-                  <select class="crew-input crew-rate-type" onchange="app.Crew.updateMember(${idx}, 'rateType', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                      ${rateTypeOptions}
-                  </select>
-                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer; white-space:nowrap;">
-                      <input type="checkbox" ${member.rateNegotiable ? 'checked' : ''} onchange="app.Crew.updateMember(${idx}, 'rateNegotiable', this.checked)" ${isReadOnly ? 'disabled' : ''}>
-                      <span class="fs-085">🤝 Négociable</span>
-                  </label>
-              </div>
-              
-              <div style="margin-top:10px; padding:10px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
-                  <strong class="fs-09">📋 Statut professionnel</strong>
-                  <div class="mt-8">
-                      <select class="crew-input w-full" onchange="app.Crew.updateMember(${idx}, 'professionalStatus', this.value); app.UI.renderCrewTab();" ${isReadOnly ? 'disabled' : ''}>
-                          <option value="" ${!member.professionalStatus ? 'selected' : ''}>-- Statut --</option>
-                          <option value="intermittent" ${member.professionalStatus === 'intermittent' ? 'selected' : ''}>Intermittent·e du spectacle</option>
-                          <option value="micro-entrepreneur" ${member.professionalStatus === 'micro-entrepreneur' ? 'selected' : ''}>Micro-entrepreneur·e</option>
-                          <option value="amateur" ${member.professionalStatus === 'amateur' ? 'selected' : ''}>Amateur·rice (pas de statut)</option>
-                      </select>
-                  </div>
-                  ${member.professionalStatus === 'intermittent' ? `
-                  <div class="crew-rate-row mt-8">
-                      <input class="crew-input" placeholder="N° Sécurité Sociale" value="${member.numSecu || ''}" onchange="app.Crew.updateMember(${idx}, 'numSecu', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                      <input class="crew-input" placeholder="N° Congés Spectacles" value="${member.numCongesSpectacles || ''}" onchange="app.Crew.updateMember(${idx}, 'numCongesSpectacles', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                  </div>` : ''}
-                  ${member.professionalStatus === 'micro-entrepreneur' ? `
-                  <div class="mt-8">
-                      <input class="crew-input w-full" placeholder="N° SIRET" value="${member.siret || ''}" onchange="app.Crew.updateMember(${idx}, 'siret', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                  </div>` : ''}
-                  
-                  <strong style="font-size: 0.9rem; display:block; margin-top:15px;">🤝 Type de collaboration</strong>
-                  <div class="collab-type-selector">
-                      <div class="collab-type-btn pro ${member.collabType === 'pro' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Crew.updateMember(${idx}, 'collabType', 'pro'); app.UI.renderCrewTab();` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
-                          🎬 Pro
-                      </div>
-                      <div class="collab-type-btn semi-pro ${member.collabType === 'semi-pro' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Crew.updateMember(${idx}, 'collabType', 'semi-pro'); app.UI.renderCrewTab();` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
-                          ⚡ Semi-pro
-                      </div>
-                      <div class="collab-type-btn benevole ${member.collabType === 'benevole' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Crew.updateMember(${idx}, 'collabType', 'benevole'); app.UI.renderCrewTab();` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
-                          ❤️ Bénévole
-                      </div>
-                  </div>
-                  <p class="text-sec-xs-mt8">
-                      ${member.collabType === 'pro' ? '💼 Contrat classique, horaires et tarifs standards' : 
-                        member.collabType === 'semi-pro' ? '🤝 Flexible sur les conditions mais rémunéré·e' : 
-                        member.collabType === 'benevole' ? '🎁 Pas de rémunération, défraiement repas + transport' : 
-                        'Sélectionnez votre type de collaboration préféré'}
-                  </p>
-              </div>` : ''}
-              
-              ${UI.isSectionVisibleForProject(member, 'calendar') ? `<div class="crew-availability-section">
-                  <strong class="fs-09">📅 Disponibilités & Indisponibilités</strong>
-                  <textarea class="crew-input" style="min-height: 50px; margin-top: 5px;" placeholder="Situation / Notes de disponibilité..." onchange="app.Crew.updateMember(${idx}, 'availabilityText', this.value)" ${isReadOnly ? 'disabled' : ''}>${member.availabilityText || ''}</textarea>
-                  <div id="crew-calendar-${idx}"></div>
-                  <div class="mt-10">
-                      <div class="form-label">🟢 Disponible :</div>
-                      ${availDatesHTML || '<span class="text-sec-xs">Aucune période renseignée</span>'}
-                  </div>
-                  <div class="mt-10">
-                      <div class="form-label">🔴 Indisponible :</div>
-                      ${unavailDatesHTML || '<span class="text-sec-xs">Aucune période renseignée</span>'}
-                      </div>
-              </div>` : ''}
-              
-              ${UI.isSectionVisibleForProject(member, 'vehicle') ? `<div class="crew-vehicle-section">
-                  <label class="crew-vehicle-toggle">
-                      <input type="checkbox" ${member.hasVehicle ? 'checked' : ''} onchange="app.Crew.toggleVehicle(${idx}, this.checked)" ${isReadOnly ? 'disabled' : ''}>
-                      <strong>🚗 Possède un véhicule</strong>
-                  </label>
-                  <div class="crew-vehicle-details ${member.hasVehicle ? 'visible' : ''}" id="crew-vehicle-${idx}">
-                      <div class="crew-row">
-                          <input class="crew-input" placeholder="Type de véhicule" value="${member.vehicleType || ''}" onchange="app.Crew.updateMember(${idx}, 'vehicleType', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                          <input class="crew-input" placeholder="Immatriculation" value="${member.vehiclePlate || ''}" onchange="app.Crew.updateMember(${idx}, 'vehiclePlate', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                      </div>
-                      <div class="crew-row mt-10">
-                          <input class="crew-input" type="number" min="1" max="9" placeholder="Nb places dispo" value="${member.vehicleSeats || ''}" onchange="app.Crew.updateMember(${idx}, 'vehicleSeats', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                              <input type="checkbox" ${member.vehicleTrunk ? 'checked' : ''} onchange="app.Crew.updateMember(${idx}, 'vehicleTrunk', this.checked)" ${isReadOnly ? 'disabled' : ''}>
-                              <span>🧳 Coffre disponible</span>
-                          </label>
-                      </div>
-                      <textarea class="crew-input" style="min-height: 40px; margin-top: 10px;" placeholder="Notes véhicule..." onchange="app.Crew.updateMember(${idx}, 'vehicleNotes', this.value)" ${isReadOnly ? 'disabled' : ''}>${member.vehicleNotes || ''}</textarea>
-                  </div>
-              </div>` : ''}
-              
-              <textarea class="crew-input" style="min-height: 60px; margin-top: 10px;" placeholder="Notes générales..." onchange="app.Crew.updateMember(${idx}, 'notes', this.value)" ${isReadOnly ? 'disabled' : ''}>${member.notes || ''}</textarea>
-              
-              ${!isReadOnly ? `<div style="margin-top:15px; padding-top:15px; border-top:1px solid var(--border); display:flex; gap:10px; flex-wrap:wrap;">
-                  <button onclick="app.Contracts.openModal('crew', ${idx})" style="padding:8px 15px; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85rem;">📝 Contrat</button>
-              </div>` : ''}
-          `;
-          
-          return card;
-      },
-      
-      handleRoleChange: (idx, value) => {
-          if(value === '__custom__') {
-              const member = state.data.crew[idx];
-              const newRole = Crew.addCustomRole(member.group_id);
-              if(newRole) {
-                  Crew.updateMember(idx, 'role', newRole);
-                  UI.renderCrewTab();
-              } else {
-                  // Reset select
-                  document.getElementById(`role-select-${idx}`).value = member.role || '';
-              }
-          } else {
-              Crew.updateMember(idx, 'role', value);
-          }
-      },
-
-      handleDragOver: (e, container, selector) => { e.preventDefault(); if(state.currentRole === 'viewer') return; const after = Utils.getDragAfterElement(container, e.clientY, selector); const drag = document.querySelector(selector + '.dragging'); if(drag) after ? container.insertBefore(drag, after) : container.appendChild(drag); },
-      goToStoryboard: (sceneId) => {
-        UI.switchTab('storyboard');
-        setTimeout(() => {
-            const scene = state.data.scenes.find(s => s.id === sceneId || String(s.id) === String(sceneId));
-            if(scene) {
-                Storyboard.selectScene(scene.id);
-            }
-        }, 150);
-    },
-	
-	renderAvailabilityCalendar: (containerId, personType, personIdx) => {
-        const container = document.getElementById(containerId);
-        if(!container) return;
-        
-        const person = personType === 'actor' ? state.data.actors[personIdx] : state.data.crew[personIdx];
-        if(!person) return;
-        
-        // Vérifier si le profil est verrouillé (revendiqué)
-        const isLocked = !!person.publicProfileId;
-        
-        const today = new Date();
-        const currentMonth = person._calendarMonth !== undefined ? person._calendarMonth : today.getMonth();
-        const currentYear = person._calendarYear !== undefined ? person._calendarYear : today.getFullYear();
-        
-        const firstDay = new Date(currentYear, currentMonth, 1);
-        const lastDay = new Date(currentYear, currentMonth + 1, 0);
-        const startDay = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
-        
-        const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
-        const dayNames = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-        
-        const availDates = person.availabilityDates || [];
-        const unavailDates = person.unavailabilityDates || [];
-        const shootDates = person.shootingDates || [];
-        
-        const isDateShooting = (dateStr) => {
-            return shootDates.find(sd => sd.date === dateStr);
-        };
-        
-        const isDateAvailable = (dateStr) => {
-            return availDates.some(range => {
-                const from = new Date(range.from);
-                const to = new Date(range.to);
-                const check = new Date(dateStr);
-                return check >= from && check <= to;
-            });
-        };
-        
-        const isDateUnavailable = (dateStr) => {
-            return unavailDates.some(range => {
-                const from = new Date(range.from);
-                const to = new Date(range.to);
-                const check = new Date(dateStr);
-                return check >= from && check <= to;
-            });
-        };
-        
-        let html = `<div class="availability-calendar">
-            <div class="availability-calendar-header">
-                <button onclick="app.UI.changeCalendarMonth('${containerId}', '${personType}', ${personIdx}, -1)">◀</button>
-                <strong>${monthNames[currentMonth]} ${currentYear}</strong>
-                <button onclick="app.UI.changeCalendarMonth('${containerId}', '${personType}', ${personIdx}, 1)">▶</button>
-            </div>
-            ${isLocked ? `<div style="font-size:0.7rem; text-align:center; margin-bottom:5px; color:var(--text-sec);">🔒 Calendrier en lecture seule</div>` : `<div style="font-size:0.7rem; text-align:center; margin-bottom:5px; color:var(--text-sec);">🟢 dispo | 🔴 indispo | 🎬 tournage</div>`}
-            <div class="availability-calendar-grid">`;
-        
-        dayNames.forEach(d => {
-            html += `<div class="availability-calendar-day-header">${d}</div>`;
-        });
-        
-        for(let i = 0; i < startDay; i++) {
-            html += `<div class="availability-calendar-day empty"></div>`;
-        }
-        
-        for(let day = 1; day <= lastDay.getDate(); day++) {
-            const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const isToday = today.getFullYear() === currentYear && today.getMonth() === currentMonth && today.getDate() === day;
-            const isAvail = isDateAvailable(dateStr);
-            const isUnavail = isDateUnavailable(dateStr);
-            
-            const shootingInfo = isDateShooting(dateStr);
-            
-            let dayClass = 'availability-calendar-day';
-            if(isToday) dayClass += ' today';
-            if(shootingInfo) dayClass += ' shooting';
-            else if(isAvail) dayClass += ' available';
-            if(isUnavail) dayClass += ' unavailable';
-            if(isLocked) dayClass += ' locked';
-            
-            const shootTitle = shootingInfo ? `title="🎬 J${shootingInfo.dayNumber} - ${shootingInfo.projectName}${shootingInfo.callTime ? ' | Convoc: ' + shootingInfo.callTime : ''}${shootingInfo.location ? ' | ' + shootingInfo.location : ''}"` : '';
-            
-            html += `<div class="${dayClass}" 
-                data-date="${dateStr}"
-                ${shootTitle}
-                ${!isLocked ? `onmousedown="app.UI.startCalendarDrag('${containerId}', '${personType}', ${personIdx}, '${dateStr}', event)"
-                onmouseenter="app.UI.continueCalendarDrag('${dateStr}')"
-                onmouseup="app.UI.endCalendarDrag()"` : ''}
-                oncontextmenu="return false;">${day}</div>`;
-        }
-        
-        html += `</div></div>`;
-        container.innerHTML = html;
-    },
-    
-    changeCalendarMonth: (containerId, personType, personIdx, delta) => {
-        const person = personType === 'actor' ? state.data.actors[personIdx] : state.data.crew[personIdx];
-        if(!person) return;
-        
-        const today = new Date();
-        let currentMonth = person._calendarMonth !== undefined ? person._calendarMonth : today.getMonth();
-        let currentYear = person._calendarYear !== undefined ? person._calendarYear : today.getFullYear();
-        
-        currentMonth += delta;
-        if(currentMonth > 11) { currentMonth = 0; currentYear++; }
-        if(currentMonth < 0) { currentMonth = 11; currentYear--; }
-        
-        person._calendarMonth = currentMonth;
-        person._calendarYear = currentYear;
-        
-        UI.renderAvailabilityCalendar(containerId, personType, personIdx);
-    },
-    
-    _calendarDrag: { active: false, containerId: null, personType: null, personIdx: null, startDate: null, dates: [], isRightClick: false },
-    
-    startCalendarDrag: (containerId, personType, personIdx, dateStr, event) => {
-        event.preventDefault();
-        const isRightClick = event.button === 2;
-        UI._calendarDrag = { active: true, containerId, personType, personIdx, startDate: dateStr, dates: [dateStr], isRightClick };
-        document.addEventListener('mouseup', UI.endCalendarDrag);
-    },
-    
-    continueCalendarDrag: (dateStr) => {
-        if(!UI._calendarDrag.active) return;
-        if(!UI._calendarDrag.dates.includes(dateStr)) {
-            UI._calendarDrag.dates.push(dateStr);
-        }
-        const container = document.getElementById(UI._calendarDrag.containerId);
-        if(container) {
-            const color = UI._calendarDrag.isRightClick ? '#f44336' : '#4CAF50';
-            container.querySelectorAll('.availability-calendar-day').forEach(el => {
-                if(UI._calendarDrag.dates.includes(el.dataset.date)) {
-                    el.style.background = color;
-                    el.style.color = 'white';
-                }
-            });
-        }
-    },
-    
-    endCalendarDrag: () => {
-        if(!UI._calendarDrag.active) return;
-        
-        const { personType, personIdx, dates, isRightClick } = UI._calendarDrag;
-        if(dates.length > 0) {
-            dates.sort();
-            const from = dates[0];
-            const to = dates[dates.length - 1];
-            
-            const person = personType === 'actor' ? state.data.actors[personIdx] : state.data.crew[personIdx];
-            if(person) {
-                // Initialiser les tableaux si nécessaire
-                if(!person.availabilityDates) person.availabilityDates = [];
-                if(!person.unavailabilityDates) person.unavailabilityDates = [];
-                
-                const targetArray = isRightClick ? person.unavailabilityDates : person.availabilityDates;
-                const otherArray = isRightClick ? person.availabilityDates : person.unavailabilityDates;
-                
-                // Vérifier si on clique sur une date déjà dans le même état (pour la désélectionner)
-                if(dates.length === 1) {
-                    const existingIdx = targetArray.findIndex(range => {
-                        const checkDate = new Date(dates[0]);
-                        return checkDate >= new Date(range.from) && checkDate <= new Date(range.to);
-                    });
-                    if(existingIdx > -1) {
-                        // Désélectionner
-                        targetArray.splice(existingIdx, 1);
-                    } else {
-                        // Retirer de l'autre état si présent
-                        const otherIdx = otherArray.findIndex(range => {
-                            const checkDate = new Date(dates[0]);
-                            return checkDate >= new Date(range.from) && checkDate <= new Date(range.to);
-                        });
-                        if(otherIdx > -1) {
-                            otherArray.splice(otherIdx, 1);
-                        }
-                        // Ajouter au nouvel état
-                        targetArray.push({ from, to });
-                    }
-                } else {
-                    // Sélection multiple : ajouter la plage
-                    targetArray.push({ from, to });
-                }
-                
-                Store.save();
-                UI.renderAvailabilityCalendar(UI._calendarDrag.containerId, personType, personIdx);
-                
-                // Rafraîchir aussi la liste des dates
-                if(personType === 'actor') {
-                    UI.renderDataTab('actors', els.actorContainer);
-                } else {
-                    UI.renderCrewTab();
-                }
-            }
-        }
-        
-        UI._calendarDrag = { active: false, containerId: null, personType: null, personIdx: null, startDate: null, dates: [], isRightClick: false };
-        document.removeEventListener('mouseup', UI.endCalendarDrag);
-    },
-	
-	applyTabPermissions: () => {
-          if(state.currentRole === 'owner') {
-              // Le propriétaire voit tout
-              document.querySelectorAll('.tab-btn').forEach(btn => {
-                  btn.style.opacity = '1';
-                  btn.style.pointerEvents = 'auto';
-              });
-              return;
-          }
-          
-const tabToSection = {
-        'synopsis': 'synopsis', 'board': 'sequencier', 'script': 'scenario', 
-        'storyboard': 'storyboard', 'chars': 'personnages', 'locs': 'lieux',
-        'actors': 'comediens', 'resources': 'ressources', 'crew': 'equipe', 'breakdown': 'depouillement',
-        'stats': 'stats', 'planning': 'planning', 'expenses': 'depenses'
-    };
-          
-          document.querySelectorAll('.tab-btn').forEach(btn => {
-              const tabName = btn.dataset.tab;
-              const section = tabToSection[tabName];
-              
-              if(section && !Permissions.canAccess(section)) {
-                  btn.style.opacity = '0.4';
-                  btn.style.pointerEvents = 'none';
-                  btn.title = '🔒 Accès restreint';
-              } else {
-                  btn.style.opacity = '1';
-                  btn.style.pointerEvents = 'auto';
-                  btn.title = '';
-                  
-                  // Indiquer si lecture seule
-                  if(section && !Permissions.canEdit(section)) {
-                      btn.title = '👁️ Lecture seule';
-                  }
-              }
-          });
-      },
-	
-	initCategoriesDragDrop: () => {
-        const nav = document.getElementById('tabsCategories');
-        if(!nav) return;
-        
-        let draggedCat = null;
-        
-        nav.querySelectorAll('.tab-category').forEach(cat => {
-            cat.addEventListener('dragstart', (e) => {
-                draggedCat = cat;
-                cat.classList.add('dragging');
-                e.dataTransfer.effectAllowed = 'move';
-            });
-            
-            cat.addEventListener('dragend', () => {
-                cat.classList.remove('dragging');
-                nav.querySelectorAll('.tab-category').forEach(c => c.classList.remove('drag-over'));
-                draggedCat = null;
-                UI.saveCategoriesOrder();
-            });
-            
-            cat.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                if(draggedCat && draggedCat !== cat) {
-                    cat.classList.add('drag-over');
-                }
-            });
-            
-            cat.addEventListener('dragleave', () => {
-                cat.classList.remove('drag-over');
-            });
-            
-            cat.addEventListener('drop', (e) => {
-                e.preventDefault();
-                cat.classList.remove('drag-over');
-                if(draggedCat && draggedCat !== cat) {
-                    const allCats = [...nav.querySelectorAll('.tab-category')];
-                    const draggedIdx = allCats.indexOf(draggedCat);
-                    const targetIdx = allCats.indexOf(cat);
-                    
-                    if(draggedIdx < targetIdx) {
-                        cat.after(draggedCat);
-                    } else {
-                        cat.before(draggedCat);
-                    }
-                }
-            });
-        });
-    },
-    
-    saveCategoriesOrder: () => {
-        const nav = document.getElementById('tabsCategories');
-        if(!nav) return;
-        const order = [...nav.querySelectorAll('.tab-category')].map(c => c.dataset.category);
-        if(!state.data.uiConfig) state.data.uiConfig = { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [], hiddenCategories: [] };
-        state.data.uiConfig.categoriesOrder = order;
-        Store.save();
-    },
-    
-    loadCategoriesOrder: () => {
-        const uiConfig = state.data?.uiConfig || {};
-        const order = uiConfig.categoriesOrder || [];
-        if(order.length > 0) {
-            const nav = document.getElementById('tabsCategories');
-            if(!nav) return;
-            const toggle = document.getElementById('hiddenCategoriesToggle');
-            order.forEach(catName => {
-                const cat = nav.querySelector(`.tab-category[data-category="${catName}"]`);
-                if(cat) nav.insertBefore(cat, toggle);
-            });
-        }
-    },
-    
-    loadCategoryTabsOrder: () => {
-        const uiConfig = state.data?.uiConfig || {};
-        const savedOrder = uiConfig.categoryTabsOrder || {};
-        const savedLabels = uiConfig.categoryLabelsCustom || {};
-        
-        // Restaurer l'ordre des sous-onglets pour chaque catégorie
-        Object.keys(savedOrder).forEach(category => {
-            if(savedOrder[category] && savedOrder[category].length > 0) {
-                UI.categoryTabs[category] = savedOrder[category];
-            }
-        });
-        
-        // Restaurer les labels personnalisés (pour les onglets déplacés)
-        Object.keys(savedLabels).forEach(category => {
-            if(savedLabels[category]) {
-                UI.categoryLabels[category] = { ...UI.categoryLabels[category], ...savedLabels[category] };
-            }
-        });
-    },
-    
-	initTabsDragDrop: () => {
-        const nav = document.getElementById('tabsNav');
-        if(!nav) return;
-        
-        let draggedTab = null;
-        
-        nav.querySelectorAll('.tab-btn').forEach(tab => {
-            tab.addEventListener('dragstart', (e) => {
-                draggedTab = tab;
-                tab.classList.add('dragging');
-                e.dataTransfer.effectAllowed = 'move';
-            });
-            
-            tab.addEventListener('dragend', () => {
-                tab.classList.remove('dragging');
-                nav.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('drag-over'));
-                draggedTab = null;
-                UI.updateTabNumbers();
-            });
-            
-            tab.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                if(draggedTab && draggedTab !== tab) {
-                    tab.classList.add('drag-over');
-                }
-            });
-            
-            tab.addEventListener('dragleave', () => {
-                tab.classList.remove('drag-over');
-            });
-            
-            tab.addEventListener('drop', (e) => {
-                e.preventDefault();
-                tab.classList.remove('drag-over');
-                if(draggedTab && draggedTab !== tab) {
-                    const allTabs = [...nav.querySelectorAll('.tab-btn')];
-                    const draggedIdx = allTabs.indexOf(draggedTab);
-                    const targetIdx = allTabs.indexOf(tab);
-                    
-                    if(draggedIdx < targetIdx) {
-                        tab.after(draggedTab);
-                    } else {
-                        tab.before(draggedTab);
-                    }
-                }
-            });
-        });
-    },
-    
-    updateTabNumbers: () => {
-        const nav = document.getElementById('tabsNav');
-        if(!nav) return;
-        
-        nav.querySelectorAll('.tab-btn').forEach((tab, idx) => {
-            const text = tab.textContent.replace(/^\d+\.\s*/, '');
-            tab.textContent = `${idx + 1}. ${text}`;
-        });
-    },
-	
-	  applyLocks: () => {
-          document.querySelectorAll('.script-row').forEach(row => {
-              const sid = row.dataset.id;
-              const lock = state.activeLocks[sid];
-              const editor = row.querySelector('.script-editor-box');
-              const overlay = row.querySelector('.lock-overlay');
-              if(lock && lock.uid !== state.currentUser.uid) { row.classList.add('is-locked'); editor.contentEditable = "false"; overlay.innerText = `🔒 Modifié par ${lock.user.split('@')[0]}`; } 
-              else { row.classList.remove('is-locked'); if(state.currentRole !== 'viewer') editor.contentEditable = "true"; }
-          });
-      },
+      // ===== RENDU ONGLETS DATA (persos/lieux/équipes) — délégué à UIData =====
+      renderDataTab: (...a) => UIData.renderDataTab(...a),
+      renderDataCards: (...a) => UIData.renderDataCards(...a),
+      createCrewCard: (...a) => UIData.createCrewCard(...a),
+      handleRoleChange: (...a) => UIData.handleRoleChange(...a),
+      handleDragOver: (...a) => UIData.handleDragOver(...a),
+      goToStoryboard: (...a) => UIData.goToStoryboard(...a),
       
       // Vérifie si une section est visible pour un profil dans le contexte projet
       isSectionVisibleForProject: (item, section) => {
@@ -68868,7 +68878,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
