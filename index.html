@@ -6943,7 +6943,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.7.9</p>
+      <p>vv4.8.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -22152,6 +22152,248 @@ const tabToSection = {
 
   };
   
+  // BreakdownExport — sous-module B.4.1 : export PDF du dépouillement (autonome)
+  const BreakdownExport = {
+      exportPDF: (opts = {}) => {
+          const { jsPDF } = window.jspdf;
+          const doc = new jsPDF('p', 'mm', 'a4');
+          const pageWidth = doc.internal.pageSize.getWidth();
+          const pageHeight = doc.internal.pageSize.getHeight();
+          const margin = 15;
+          let y = margin;
+          
+          const projectTitle = state.data.title || 'Projet sans titre';
+          const scenes = state.data.scenes || [];
+          
+          if(scenes.length === 0) {
+              Utils.toast('Aucune scène à exporter', 'warning');
+              return;
+          }
+          
+          // Couleurs par catégorie
+          const catColors = {
+              'PERSONNAGES': [76, 175, 80],
+              'FIGURANTS': [139, 195, 74],
+              'COSTUMES': [156, 39, 176],
+              'MAQUILLAGE': [233, 30, 99],
+              'ACCESSOIRES': [255, 152, 0],
+              'VÉHICULES': [96, 125, 139],
+              'DECORS-LIEUX': [33, 150, 243],
+              'EFFETS SPÉCIAUX': [244, 67, 54],
+              'SONS': [0, 188, 212],
+              'ANIMAUX': [121, 85, 72],
+              'CASCADES': [255, 87, 34],
+              'NOTES': [158, 158, 158]
+          };
+          
+          // ===== PAGE DE GARDE (Phase C.1) — optionnelle =====
+          if(opts.includeCover !== false) {
+              PdfTheme.coverPage(doc, { sectionName: 'Dépouillement' });
+              doc.addPage();
+          }
+          y = margin;
+          
+          // Légende des catégories
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+          doc.text('Légende des catégories :', margin, y);
+          y += 6;
+          
+          doc.setFontSize(8);
+          doc.setFont('helvetica', 'normal');
+          let legendX = margin;
+          let legendCol = 0;
+          Object.entries(catColors).forEach(([cat, rgb], idx) => {
+              if(legendCol >= 3) {
+                  legendCol = 0;
+                  legendX = margin;
+                  y += 5;
+              }
+              doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+              doc.circle(legendX + 2, y - 1, 2, 'F');
+              doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+              doc.text(cat, legendX + 6, y);
+              legendX += 60;
+              legendCol++;
+          });
+          
+          y += 15;
+          
+          // ===== DÉPOUILLEMENT PAR SCÈNE =====
+          scenes.forEach((scene, sceneIdx) => {
+              const breakdown = scene.breakdown || {};
+              const hasContent = Object.values(breakdown).some(arr => arr && arr.length > 0);
+              
+              if(!hasContent) return;
+              
+              // Nouvelle page si nécessaire
+              if(y > pageHeight - 60) {
+                  doc.addPage();
+                  y = margin;
+              }
+              
+              // En-tête de scène
+              doc.setFillColor(...PdfTheme.COLORS.BG_LIGHT);
+              doc.rect(margin, y, pageWidth - margin * 2, 10, 'F');
+              doc.setDrawColor(...PdfTheme.COLORS.BORDER);
+              doc.rect(margin, y, pageWidth - margin * 2, 10, 'S');
+              
+              doc.setFontSize(10);
+              doc.setFont('helvetica', 'bold');
+              doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+              const sceneTitle = `#${sceneIdx + 1} - ${scene.title || 'Sans titre'}`;
+              doc.text(sceneTitle, margin + 3, y + 7);
+              
+              // Badge statut
+              if(scene.isFinal) {
+                  doc.setFillColor(...PdfTheme.COLORS.SUCCESS);
+                  doc.setTextColor(...PdfTheme.COLORS.WHITE);
+                  doc.roundedRect(pageWidth - margin - 20, y + 2, 18, 6, 1, 1, 'F');
+                  doc.setFontSize(6);
+                  doc.text('FINAL', pageWidth - margin - 11, y + 6, { align: 'center' });
+              } else {
+                  doc.setFillColor(...PdfTheme.COLORS.WARNING);
+                  doc.setTextColor(...PdfTheme.COLORS.BLACK);
+                  doc.roundedRect(pageWidth - margin - 25, y + 2, 23, 6, 1, 1, 'F');
+                  doc.setFontSize(6);
+                  doc.text('BROUILLON', pageWidth - margin - 13.5, y + 6, { align: 'center' });
+              }
+              
+              y += 14;
+              
+              // Catégories du dépouillement
+              Object.entries(breakdown).forEach(([cat, items]) => {
+                  if(!items || items.length === 0) return;
+                  
+                  if(y > pageHeight - 25) {
+                      doc.addPage();
+                      y = margin;
+                  }
+                  
+                  const rgb = catColors[cat] || [100, 100, 100];
+                  
+                  // Nom de la catégorie
+                  doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+                  doc.circle(margin + 2, y + 1, 2, 'F');
+                  doc.setFontSize(9);
+                  doc.setFont('helvetica', 'bold');
+                  doc.setTextColor(rgb[0], rgb[1], rgb[2]);
+                  doc.text(cat, margin + 6, y + 2);
+                  
+                  // Liste des éléments
+                  doc.setFont('helvetica', 'normal');
+                  doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+                  doc.setFontSize(8);
+                  
+                  const itemsText = items.map(item => typeof item === 'string' ? item : item.name || item).join(', ');
+                  const lines = doc.splitTextToSize(itemsText, pageWidth - margin * 2 - 10);
+                  
+                  y += 5;
+                  lines.forEach(line => {
+                      if(y > pageHeight - 15) {
+                          doc.addPage();
+                          y = margin;
+                      }
+                      doc.text(line, margin + 6, y);
+                      y += 4;
+                  });
+                  
+                  y += 3;
+              });
+              
+              y += 8;
+          });
+          
+          // ===== RÉCAPITULATIF GLOBAL =====
+          doc.addPage();
+          y = margin;
+          
+          doc.setFillColor(...PdfTheme.COLORS.BANNER_BLUE);
+          doc.rect(0, 0, pageWidth, 20, 'F');
+          doc.setTextColor(...PdfTheme.COLORS.WHITE);
+          doc.setFontSize(14);
+          doc.setFont('helvetica', 'bold');
+          doc.text('RÉCAPITULATIF GLOBAL', pageWidth / 2, 13, { align: 'center' });
+          
+          y = 30;
+          
+          // Agrégation par catégorie
+          const globalBreakdown = {};
+          scenes.forEach(scene => {
+              const breakdown = scene.breakdown || {};
+              Object.entries(breakdown).forEach(([cat, items]) => {
+                  if(!items || items.length === 0) return;
+                  if(!globalBreakdown[cat]) globalBreakdown[cat] = new Set();
+                  items.forEach(item => {
+                      const name = typeof item === 'string' ? item : item.name || item;
+                      globalBreakdown[cat].add(name);
+                  });
+              });
+          });
+          
+          Object.entries(globalBreakdown).forEach(([cat, itemsSet], catIdx) => {
+              if(y > pageHeight - 30) {
+                  doc.addPage();
+                  y = margin;
+              }
+              
+              const rgb = catColors[cat] || [100, 100, 100];
+              const items = Array.from(itemsSet);
+              
+              // Espace avant chaque nouvelle catégorie (sauf la 1ère)
+              if(catIdx > 0) y += 4;
+              
+              // En-tête catégorie
+              doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+              doc.rect(margin, y, pageWidth - margin * 2, 8, 'F');
+              doc.setTextColor(...PdfTheme.COLORS.WHITE);
+              doc.setFontSize(10);
+              doc.setFont('helvetica', 'bold');
+              doc.text(PdfTheme.cleanText(`${cat} (${items.length})`), margin + 3, y + 6);
+              y += 8;
+              
+              // Espace entre bandeau coloré et 1ère ligne du tableau
+              y += 4;
+              
+              // Liste
+              doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+              doc.setFontSize(9);
+              doc.setFont('helvetica', 'normal');
+              
+              items.forEach((item, idx) => {
+                  if(y > pageHeight - 15) {
+                      doc.addPage();
+                      y = margin;
+                  }
+                  // Compter dans combien de scènes
+                  const sceneCount = scenes.filter(s => {
+                      const bd = s.breakdown?.[cat] || [];
+                      return bd.some(i => (typeof i === 'string' ? i : i.name) === item);
+                  }).length;
+                  
+                  doc.text(PdfTheme.cleanText(`• ${item}`), margin + 3, y);
+                  doc.setTextColor(...PdfTheme.COLORS.TEXT_FAINT);
+                  doc.text(`(${sceneCount} scène${sceneCount > 1 ? 's' : ''})`, margin + 100, y);
+                  doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+                  y += 5;
+              });
+              
+              y += 10;
+          });
+          
+          // ===== FOOTERS UNIFIÉS (Phase C.1) =====
+          PdfTheme.applyFooters(doc, { forDossier: !!opts.returnBlob });
+          
+          // ===== TÉLÉCHARGEMENT (nom unifié) =====
+          if(opts.returnBlob) return doc.output('blob');
+          doc.save(PdfTheme.filename('Dépouillement'));
+          
+          Utils.toast('Dépouillement PDF exporté !', 'success');
+          History.log('EXPORT', 'Dépouillement PDF généré');
+      }
+  };
+
   const Breakdown = {
       init: () => {
           els.bdRightContent.innerHTML = '';
@@ -22337,6 +22579,7 @@ const tabToSection = {
               svg.appendChild(arrow);
           }
       },
+      // ===================== MENUS CONTEXTUELS (clic droit) =====================
       handleRightClick: (e) => { 
           if(state.currentRole === 'viewer' || !Permissions.canEdit('depouillement')) return; 
           if(!state.activeBdSceneId) return; 
@@ -22538,6 +22781,7 @@ const tabToSection = {
           els.bdCtxMenu.style.left = left2 + 'px';
       },
       
+      // ===================== AJOUT / SUPPRESSION D'ITEMS =====================
       // Variante de addItem qui ne réinitialise PAS l'onglet Dépouillement (pas affiché depuis le scénario)
       addItemFromScript: (sceneId, cat, text) => {
           if(state.currentRole === 'viewer' || !Permissions.canEdit('depouillement')) return;
@@ -22779,244 +23023,7 @@ const tabToSection = {
       },
       
       // ========== EXPORT PDF DÉPOUILLEMENT ==========
-      exportPDF: (opts = {}) => {
-          const { jsPDF } = window.jspdf;
-          const doc = new jsPDF('p', 'mm', 'a4');
-          const pageWidth = doc.internal.pageSize.getWidth();
-          const pageHeight = doc.internal.pageSize.getHeight();
-          const margin = 15;
-          let y = margin;
-          
-          const projectTitle = state.data.title || 'Projet sans titre';
-          const scenes = state.data.scenes || [];
-          
-          if(scenes.length === 0) {
-              Utils.toast('Aucune scène à exporter', 'warning');
-              return;
-          }
-          
-          // Couleurs par catégorie
-          const catColors = {
-              'PERSONNAGES': [76, 175, 80],
-              'FIGURANTS': [139, 195, 74],
-              'COSTUMES': [156, 39, 176],
-              'MAQUILLAGE': [233, 30, 99],
-              'ACCESSOIRES': [255, 152, 0],
-              'VÉHICULES': [96, 125, 139],
-              'DECORS-LIEUX': [33, 150, 243],
-              'EFFETS SPÉCIAUX': [244, 67, 54],
-              'SONS': [0, 188, 212],
-              'ANIMAUX': [121, 85, 72],
-              'CASCADES': [255, 87, 34],
-              'NOTES': [158, 158, 158]
-          };
-          
-          // ===== PAGE DE GARDE (Phase C.1) — optionnelle =====
-          if(opts.includeCover !== false) {
-              PdfTheme.coverPage(doc, { sectionName: 'Dépouillement' });
-              doc.addPage();
-          }
-          y = margin;
-          
-          // Légende des catégories
-          doc.setFontSize(10);
-          doc.setFont('helvetica', 'bold');
-          doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-          doc.text('Légende des catégories :', margin, y);
-          y += 6;
-          
-          doc.setFontSize(8);
-          doc.setFont('helvetica', 'normal');
-          let legendX = margin;
-          let legendCol = 0;
-          Object.entries(catColors).forEach(([cat, rgb], idx) => {
-              if(legendCol >= 3) {
-                  legendCol = 0;
-                  legendX = margin;
-                  y += 5;
-              }
-              doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-              doc.circle(legendX + 2, y - 1, 2, 'F');
-              doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-              doc.text(cat, legendX + 6, y);
-              legendX += 60;
-              legendCol++;
-          });
-          
-          y += 15;
-          
-          // ===== DÉPOUILLEMENT PAR SCÈNE =====
-          scenes.forEach((scene, sceneIdx) => {
-              const breakdown = scene.breakdown || {};
-              const hasContent = Object.values(breakdown).some(arr => arr && arr.length > 0);
-              
-              if(!hasContent) return;
-              
-              // Nouvelle page si nécessaire
-              if(y > pageHeight - 60) {
-                  doc.addPage();
-                  y = margin;
-              }
-              
-              // En-tête de scène
-              doc.setFillColor(...PdfTheme.COLORS.BG_LIGHT);
-              doc.rect(margin, y, pageWidth - margin * 2, 10, 'F');
-              doc.setDrawColor(...PdfTheme.COLORS.BORDER);
-              doc.rect(margin, y, pageWidth - margin * 2, 10, 'S');
-              
-              doc.setFontSize(10);
-              doc.setFont('helvetica', 'bold');
-              doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-              const sceneTitle = `#${sceneIdx + 1} - ${scene.title || 'Sans titre'}`;
-              doc.text(sceneTitle, margin + 3, y + 7);
-              
-              // Badge statut
-              if(scene.isFinal) {
-                  doc.setFillColor(...PdfTheme.COLORS.SUCCESS);
-                  doc.setTextColor(...PdfTheme.COLORS.WHITE);
-                  doc.roundedRect(pageWidth - margin - 20, y + 2, 18, 6, 1, 1, 'F');
-                  doc.setFontSize(6);
-                  doc.text('FINAL', pageWidth - margin - 11, y + 6, { align: 'center' });
-              } else {
-                  doc.setFillColor(...PdfTheme.COLORS.WARNING);
-                  doc.setTextColor(...PdfTheme.COLORS.BLACK);
-                  doc.roundedRect(pageWidth - margin - 25, y + 2, 23, 6, 1, 1, 'F');
-                  doc.setFontSize(6);
-                  doc.text('BROUILLON', pageWidth - margin - 13.5, y + 6, { align: 'center' });
-              }
-              
-              y += 14;
-              
-              // Catégories du dépouillement
-              Object.entries(breakdown).forEach(([cat, items]) => {
-                  if(!items || items.length === 0) return;
-                  
-                  if(y > pageHeight - 25) {
-                      doc.addPage();
-                      y = margin;
-                  }
-                  
-                  const rgb = catColors[cat] || [100, 100, 100];
-                  
-                  // Nom de la catégorie
-                  doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-                  doc.circle(margin + 2, y + 1, 2, 'F');
-                  doc.setFontSize(9);
-                  doc.setFont('helvetica', 'bold');
-                  doc.setTextColor(rgb[0], rgb[1], rgb[2]);
-                  doc.text(cat, margin + 6, y + 2);
-                  
-                  // Liste des éléments
-                  doc.setFont('helvetica', 'normal');
-                  doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-                  doc.setFontSize(8);
-                  
-                  const itemsText = items.map(item => typeof item === 'string' ? item : item.name || item).join(', ');
-                  const lines = doc.splitTextToSize(itemsText, pageWidth - margin * 2 - 10);
-                  
-                  y += 5;
-                  lines.forEach(line => {
-                      if(y > pageHeight - 15) {
-                          doc.addPage();
-                          y = margin;
-                      }
-                      doc.text(line, margin + 6, y);
-                      y += 4;
-                  });
-                  
-                  y += 3;
-              });
-              
-              y += 8;
-          });
-          
-          // ===== RÉCAPITULATIF GLOBAL =====
-          doc.addPage();
-          y = margin;
-          
-          doc.setFillColor(...PdfTheme.COLORS.BANNER_BLUE);
-          doc.rect(0, 0, pageWidth, 20, 'F');
-          doc.setTextColor(...PdfTheme.COLORS.WHITE);
-          doc.setFontSize(14);
-          doc.setFont('helvetica', 'bold');
-          doc.text('RÉCAPITULATIF GLOBAL', pageWidth / 2, 13, { align: 'center' });
-          
-          y = 30;
-          
-          // Agrégation par catégorie
-          const globalBreakdown = {};
-          scenes.forEach(scene => {
-              const breakdown = scene.breakdown || {};
-              Object.entries(breakdown).forEach(([cat, items]) => {
-                  if(!items || items.length === 0) return;
-                  if(!globalBreakdown[cat]) globalBreakdown[cat] = new Set();
-                  items.forEach(item => {
-                      const name = typeof item === 'string' ? item : item.name || item;
-                      globalBreakdown[cat].add(name);
-                  });
-              });
-          });
-          
-          Object.entries(globalBreakdown).forEach(([cat, itemsSet], catIdx) => {
-              if(y > pageHeight - 30) {
-                  doc.addPage();
-                  y = margin;
-              }
-              
-              const rgb = catColors[cat] || [100, 100, 100];
-              const items = Array.from(itemsSet);
-              
-              // Espace avant chaque nouvelle catégorie (sauf la 1ère)
-              if(catIdx > 0) y += 4;
-              
-              // En-tête catégorie
-              doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-              doc.rect(margin, y, pageWidth - margin * 2, 8, 'F');
-              doc.setTextColor(...PdfTheme.COLORS.WHITE);
-              doc.setFontSize(10);
-              doc.setFont('helvetica', 'bold');
-              doc.text(PdfTheme.cleanText(`${cat} (${items.length})`), margin + 3, y + 6);
-              y += 8;
-              
-              // Espace entre bandeau coloré et 1ère ligne du tableau
-              y += 4;
-              
-              // Liste
-              doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-              doc.setFontSize(9);
-              doc.setFont('helvetica', 'normal');
-              
-              items.forEach((item, idx) => {
-                  if(y > pageHeight - 15) {
-                      doc.addPage();
-                      y = margin;
-                  }
-                  // Compter dans combien de scènes
-                  const sceneCount = scenes.filter(s => {
-                      const bd = s.breakdown?.[cat] || [];
-                      return bd.some(i => (typeof i === 'string' ? i : i.name) === item);
-                  }).length;
-                  
-                  doc.text(PdfTheme.cleanText(`• ${item}`), margin + 3, y);
-                  doc.setTextColor(...PdfTheme.COLORS.TEXT_FAINT);
-                  doc.text(`(${sceneCount} scène${sceneCount > 1 ? 's' : ''})`, margin + 100, y);
-                  doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-                  y += 5;
-              });
-              
-              y += 10;
-          });
-          
-          // ===== FOOTERS UNIFIÉS (Phase C.1) =====
-          PdfTheme.applyFooters(doc, { forDossier: !!opts.returnBlob });
-          
-          // ===== TÉLÉCHARGEMENT (nom unifié) =====
-          if(opts.returnBlob) return doc.output('blob');
-          doc.save(PdfTheme.filename('Dépouillement'));
-          
-          Utils.toast('Dépouillement PDF exporté !', 'success');
-          History.log('EXPORT', 'Dépouillement PDF généré');
-      }
+      exportPDF: (opts = {}) => BreakdownExport.exportPDF(opts)
   };
 
 // ============ MOOD BOARD MODULE ============
@@ -31085,7 +31092,12 @@ const DrawingEditor = {
   });
   
   // ==================== MODULE RESOURCES ====================
+  // ====================================================================
+  // Resources — gestion des ressources/objets du projet (CRUD + liens scènes + export PDF).
+  // Module CRUD cohérent (peu d'état partagé), organisé en sections internes.
+  // ====================================================================
   const Resources = {
+      // ----- ÉTAT + RENDU -----
       currentFilter: 'all',
       
       init: () => {
@@ -31190,6 +31202,7 @@ const DrawingEditor = {
           return '';
       },
       
+      // ===================== CRUD (créer / éditer / supprimer) =====================
       add: async () => {
           if(state.currentRole === 'viewer') return;
           
@@ -31449,6 +31462,7 @@ const DrawingEditor = {
           Utils.toast('Ressource supprimée', 'success');
       },
       
+      // ===================== RELATIONS (lier scènes / fusionner) =====================
       link: async (id) => {
           const resource = (state.data.resources || []).find(r => r.id === id);
           if(!resource) return;
@@ -31670,6 +31684,7 @@ const DrawingEditor = {
           }, 0);
       },
       
+      // ===================== EXPORT PDF =====================
       // [Phase C.5.2 → refonte multi-modes Phase D] Export PDF des ressources
       // 3 modes : detailed (par cat, fiche compacte) | list (tableau dense) | card (1 page/ressource)
       openExportModal: () => {
@@ -67401,7 +67416,15 @@ const Weather = {
       }
   };
 
+  // ====================================================================
+  // BeatBoard — tableau de séquences en cartes (canvas interactif pan/zoom/drag).
+  // Module cohérent à état canvas fortement couplé : organisé en sections internes
+  // (état, rendu, cartes/scènes, drag&drop, lignes, pan&zoom, layout/export) plutôt
+  // qu'éclaté en sous-modules, car zoom/pan/draggedCard/selectedCards sont manipulés
+  // ensemble par presque toutes les méthodes.
+  // ====================================================================
   const BeatBoard = {
+      // ----- ÉTAT (canvas + sélection) -----
       viewMode: 'sequencer', // 'sequencer' ou 'beatboard'
       zoom: 1,
       panX: 0,
@@ -67415,6 +67438,7 @@ const Weather = {
       activeTagLines: {}, // { tagId: true/false } pour toggle individuel
       selectedCards: [], // IDs des cartes sélectionnées
       
+      // ===================== RENDU =====================
       setViewMode: (mode) => {
           BeatBoard.viewMode = mode;
           const seqView = document.getElementById('sequencer-view');
@@ -67573,6 +67597,7 @@ const Weather = {
           return card;
       },
       
+      // ===================== CARTES & SCÈNES =====================
       toggleSelection: (sceneId) => {
           const idx = BeatBoard.selectedCards.indexOf(sceneId);
           if(idx === -1) {
@@ -67669,6 +67694,7 @@ const Weather = {
           Utils.toast('Scène créée (hors timeline)', 'success');
       },
       
+      // ===================== DRAG & DROP =====================
       startDrag: (e, card, scene) => {
           if(e.button !== 0) return;
           e.preventDefault();
@@ -68056,6 +68082,7 @@ const Weather = {
           }
       },
       
+      // ===================== LIGNES (connexions visuelles) =====================
       drawLine: () => {
           const svg = document.getElementById('beatboardSvg');
           if(!svg) return;
@@ -68239,6 +68266,7 @@ const Weather = {
               }).join('');
       },
       
+      // ===================== LAYOUT & EXPORT =====================
       autoLayout: (type) => {
           const scenes = state.data.scenes;
           const cardW = 200, cardH = 140, gap = 30;
@@ -68291,6 +68319,7 @@ const Weather = {
               `).join('');
       },
       
+      // ===================== PAN & ZOOM (navigation canvas) =====================
       initPan: () => {
           const container = document.getElementById('beatboardContainer');
           const canvas = document.getElementById('beatboardCanvas');
@@ -68650,7 +68679,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, Actions, Breakdown, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, Planning, Contacts, ActorSearch, PublicProfile, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
