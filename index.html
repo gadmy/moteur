@@ -6996,7 +6996,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.9.4</p>
+      <p>vv4.9.5</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -33827,12 +33827,148 @@ const ProfileGallery = {
     },
   };
 
+  const ProfileActualites = {
+    // Publier une actualité (limite 1 par jour)
+    publishActualite: async () => {
+        const content = document.getElementById('profile-actualite-content')?.value?.trim();
+        if(!content) {
+            Utils.toast('Écrivez quelque chose avant de publier', 'warning');
+            return;
+        }
+        
+        if(!state.currentUser) return;
+        
+        // H2: récupérer le profil actif (celui dont l'onglet est sélectionné)
+        const activeProfile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!activeProfile || !activeProfile.id) {
+            Utils.toast('Vous devez d\'abord créer ou sélectionner un profil public avant de publier une actualité.', 'warning', 5000);
+            return;
+        }
+        const profileId = activeProfile.id;
+        
+        // Vérifier si déjà publié aujourd'hui SUR CE PROFIL PRÉCIS
+        // (bypass pour les admins, utile pour les tests)
+        if(!Admin.isAdmin()) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            const { data: existing, error: checkError } = await supabase
+                .from('profile_actualites')
+                .select('id, created_at')
+                .eq('profile_id', profileId)
+                .gte('created_at', today.toISOString());
+            
+            if(!checkError && existing && existing.length > 0) {
+                Utils.toast('🚫 Vous avez déjà publié une actualité aujourd\'hui sur ce profil. Revenez demain !', 'warning', 5000);
+                return;
+            }
+        }
+        
+        // Publier (lié au profil précis)
+        const { error } = await supabase
+            .from('profile_actualites')
+            .insert({
+                profile_id: profileId,
+                author_email: state.currentUser.email,
+                author_name: state.userProfile?.displayName || state.currentUser.email.split('@')[0],
+                content: content
+            });
+        
+        if(error) {
+            console.error('Erreur publication actualité:', error);
+            Utils.toast('Erreur lors de la publication', 'error');
+            return;
+        }
+        
+        document.getElementById('profile-actualite-content').value = '';
+        Utils.toast('📰 Actualité publiée !', 'success');
+        ProfileActualites.loadMyActualites();
+    },
+    
+    // Charger mes actualités (filtrées sur le profil actif)
+    loadMyActualites: async () => {
+        if(!state.currentUser) return;
+        
+        const container = document.getElementById('profile-my-actualites');
+        if(!container) return;
+        
+        // H3: filtrer sur le profil actif, pas juste l'email
+        const activeProfile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!activeProfile || !activeProfile.id) {
+            container.innerHTML = '<p class="text-sec-italic">Sélectionnez un profil pour voir ses actualités.</p>';
+            return;
+        }
+        
+        const { data: actualites } = await supabase
+            .from('profile_actualites')
+            .select('*')
+            .eq('profile_id', activeProfile.id)
+            .order('created_at', { ascending: false })
+            .limit(5);
+        
+        if(!actualites || actualites.length === 0) {
+            container.innerHTML = '<p class="text-sec-italic">Aucune actualité publiée sur ce profil</p>';
+            return;
+        }
+        
+        container.innerHTML = '<h4 style="margin-bottom: 10px; font-size: 0.9rem; color: var(--text-sec);">Dernières actualités de ce profil :</h4>' +
+            actualites.map(a => `
+                <div style="padding: 12px; background: var(--bg); border-radius: 8px; margin-bottom: 8px; border: 1px solid var(--border);">
+                    <div style="display: flex; justify-content: space-between; align-items: start; gap: 10px;">
+                        <div class="flex-1">
+                            <div class="text-sec-sm-mb5">${Utils.timeAgo(a.created_at)}</div>
+                            <div>${Utils.escape(a.content)}</div>
+                        </div>
+                        <button onclick="app.ProfileActualites.deleteActualite('${a.id}')" style="background: none; border: none; color: var(--danger); cursor: pointer; padding: 5px;" title="Supprimer">🗑️</button>
+                    </div>
+                </div>
+            `).join('');
+        
+        // Mettre à jour le statut
+        const statusEl = document.getElementById('profile-actualite-status');
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayPost = actualites.find(a => new Date(a.created_at) >= today);
+        
+        if(todayPost) {
+            statusEl.style.display = 'block';
+            statusEl.style.background = 'var(--warning-bg, #fff3cd)';
+            statusEl.style.color = 'var(--warning-text, #856404)';
+            statusEl.innerHTML = '⏳ Vous avez déjà publié aujourd\'hui. Prochaine publication possible demain.';
+        } else {
+            statusEl.style.display = 'none';
+        }
+    },
+    
+    // Supprimer une actualité
+    deleteActualite: async (id) => {
+        if(!confirm('Supprimer cette actualité ?')) return;
+        
+        const { error } = await supabase
+            .from('profile_actualites')
+            .delete()
+            .eq('id', id);
+        
+        if(error) {
+            Utils.toast('Erreur lors de la suppression', 'error');
+            return;
+        }
+        
+        Utils.toast('Actualité supprimée', 'success');
+        ProfileActualites.loadMyActualites();
+    }
+  };
+
   const PublicProfile = {
+    // ============================================================
+    // ===== ÉTAT & CYCLE DE VIE DES PROFILS =====
+    // ============================================================
     profiles: [], // Liste des profils de l'utilisateur
     currentProfileIndex: -1, // Index du profil actuellement affiché
     equipment: { cameras: [], lenses: [], lights: [], sounds: [], grips: [], makeups: [], other: [] },
     profileProjects: {}, // Mapping profileId -> [{projectId, projectTitle, role}]
     
+    // ===== PROJETS ASSOCIÉS / VISIBILITÉ =====
     // Charge les projets associés à chaque profil
     loadProfileProjects: async () => {
         PublicProfile.profileProjects = {};
@@ -34277,6 +34413,9 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         document.getElementById('profile-all-sections').style.display = 'block';
     },
     
+    // ============================================================
+    // ===== FORMULAIRE PROFIL (chargement / sauvegarde) =====
+    // ============================================================
     // Charge un profil dans le formulaire
     loadProfileToForm: (profile) => {
         // Type de profil
@@ -35125,6 +35264,7 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         await PublicProfile.saveCurrentProfile();
     },
     
+    // ===== PHOTO / AVATAR =====
     updatePhotoPreview: () => {
         const url = document.getElementById('profile-photo').value.trim();
         const preview = document.getElementById('profile-photo-preview');
@@ -35306,6 +35446,7 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         }
     },
     
+    // ===== ÉQUIPEMENT / MATÉRIEL =====
     addEquipment: (type) => {
         let value = '';
         let list = [];
@@ -35446,6 +35587,7 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
     renderProfileDatesList: (...a) => ProfileCalendar.renderProfileDatesList(...a),
     removeProfileDate: (...a) => ProfileCalendar.removeProfileDate(...a),
     
+    // ===== COLLABORATION (types de collab) =====
     // Met à jour le style des labels de collaboration
     updateCollabLabel: (type) => {
         const labels = {
@@ -35499,138 +35641,16 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         profile.collabTypes = collabTypes;
     },
     
-    // Publier une actualité (limite 1 par jour)
-    publishActualite: async () => {
-        const content = document.getElementById('profile-actualite-content')?.value?.trim();
-        if(!content) {
-            Utils.toast('Écrivez quelque chose avant de publier', 'warning');
-            return;
-        }
-        
-        if(!state.currentUser) return;
-        
-        // H2: récupérer le profil actif (celui dont l'onglet est sélectionné)
-        const activeProfile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!activeProfile || !activeProfile.id) {
-            Utils.toast('Vous devez d\'abord créer ou sélectionner un profil public avant de publier une actualité.', 'warning', 5000);
-            return;
-        }
-        const profileId = activeProfile.id;
-        
-        // Vérifier si déjà publié aujourd'hui SUR CE PROFIL PRÉCIS
-        // (bypass pour les admins, utile pour les tests)
-        if(!Admin.isAdmin()) {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            
-            const { data: existing, error: checkError } = await supabase
-                .from('profile_actualites')
-                .select('id, created_at')
-                .eq('profile_id', profileId)
-                .gte('created_at', today.toISOString());
-            
-            if(!checkError && existing && existing.length > 0) {
-                Utils.toast('🚫 Vous avez déjà publié une actualité aujourd\'hui sur ce profil. Revenez demain !', 'warning', 5000);
-                return;
-            }
-        }
-        
-        // Publier (lié au profil précis)
-        const { error } = await supabase
-            .from('profile_actualites')
-            .insert({
-                profile_id: profileId,
-                author_email: state.currentUser.email,
-                author_name: state.userProfile?.displayName || state.currentUser.email.split('@')[0],
-                content: content
-            });
-        
-        if(error) {
-            console.error('Erreur publication actualité:', error);
-            Utils.toast('Erreur lors de la publication', 'error');
-            return;
-        }
-        
-        document.getElementById('profile-actualite-content').value = '';
-        Utils.toast('📰 Actualité publiée !', 'success');
-        PublicProfile.loadMyActualites();
-    },
-    
-    // Charger mes actualités (filtrées sur le profil actif)
-    loadMyActualites: async () => {
-        if(!state.currentUser) return;
-        
-        const container = document.getElementById('profile-my-actualites');
-        if(!container) return;
-        
-        // H3: filtrer sur le profil actif, pas juste l'email
-        const activeProfile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!activeProfile || !activeProfile.id) {
-            container.innerHTML = '<p class="text-sec-italic">Sélectionnez un profil pour voir ses actualités.</p>';
-            return;
-        }
-        
-        const { data: actualites } = await supabase
-            .from('profile_actualites')
-            .select('*')
-            .eq('profile_id', activeProfile.id)
-            .order('created_at', { ascending: false })
-            .limit(5);
-        
-        if(!actualites || actualites.length === 0) {
-            container.innerHTML = '<p class="text-sec-italic">Aucune actualité publiée sur ce profil</p>';
-            return;
-        }
-        
-        container.innerHTML = '<h4 style="margin-bottom: 10px; font-size: 0.9rem; color: var(--text-sec);">Dernières actualités de ce profil :</h4>' +
-            actualites.map(a => `
-                <div style="padding: 12px; background: var(--bg); border-radius: 8px; margin-bottom: 8px; border: 1px solid var(--border);">
-                    <div style="display: flex; justify-content: space-between; align-items: start; gap: 10px;">
-                        <div class="flex-1">
-                            <div class="text-sec-sm-mb5">${Utils.timeAgo(a.created_at)}</div>
-                            <div>${Utils.escape(a.content)}</div>
-                        </div>
-                        <button onclick="app.PublicProfile.deleteActualite('${a.id}')" style="background: none; border: none; color: var(--danger); cursor: pointer; padding: 5px;" title="Supprimer">🗑️</button>
-                    </div>
-                </div>
-            `).join('');
-        
-        // Mettre à jour le statut
-        const statusEl = document.getElementById('profile-actualite-status');
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const todayPost = actualites.find(a => new Date(a.created_at) >= today);
-        
-        if(todayPost) {
-            statusEl.style.display = 'block';
-            statusEl.style.background = 'var(--warning-bg, #fff3cd)';
-            statusEl.style.color = 'var(--warning-text, #856404)';
-            statusEl.innerHTML = '⏳ Vous avez déjà publié aujourd\'hui. Prochaine publication possible demain.';
-        } else {
-            statusEl.style.display = 'none';
-        }
-    },
-    
-    // Supprimer une actualité
-    deleteActualite: async (id) => {
-        if(!confirm('Supprimer cette actualité ?')) return;
-        
-        const { error } = await supabase
-            .from('profile_actualites')
-            .delete()
-            .eq('id', id);
-        
-        if(error) {
-            Utils.toast('Erreur lors de la suppression', 'error');
-            return;
-        }
-        
-        Utils.toast('Actualité supprimée', 'success');
-        PublicProfile.loadMyActualites();
-    }
+// ===== ACTUALITÉS — délégué à ProfileActualites =====
+    publishActualite: (...a) => ProfileActualites.publishActualite(...a),
+    loadMyActualites: (...a) => ProfileActualites.loadMyActualites(...a),
+    deleteActualite: (...a) => ProfileActualites.deleteActualite(...a)
 };
 
 const Chat = {
+    // ============================================================
+    // ===== ÉTAT & INITIALISATION =====
+    // ============================================================
     currentChannel: null,
     channels: [
         { id: 'general', name: '📢 Général', icon: '📢', type: 'system', description: 'Tout le monde' },
@@ -35661,6 +35681,7 @@ const Chat = {
         }
     },
     
+    // ===== CHANNELS : liste & navigation =====
     renderChannelsList: () => {
         const container = document.getElementById('chat-channels-list');
         if(!container) return;
@@ -35756,6 +35777,7 @@ const Chat = {
         Chat.loadMembers(channelId);
     },
     
+    // ===== MESSAGES : chargement, rendu, envoi =====
     loadMessages: (channelId) => {
         const container = document.getElementById('chat-messages-container');
         container.innerHTML = '<div class="chat-empty">🔄 Chargement...</div>';
@@ -35892,6 +35914,7 @@ const Chat = {
         }
     },
     
+    // ===== MEMBRES du channel =====
     loadMembers: (channelId) => {
         const container = document.getElementById('chat-members-list');
         const addSection = document.getElementById('chat-add-member-section');
@@ -36034,6 +36057,7 @@ const Chat = {
         }
     },
     
+    // ===== CHANNELS CUSTOM : création / suppression / membres =====
     createCustomChannel: () => {
         if(state.currentRole !== 'owner') {
             Utils.toast('Seul le propriétaire peut créer des groupes.', 'error');
@@ -36224,6 +36248,7 @@ const Chat = {
         Chat.renderChannelsList();
     },
     
+    // ===== CLEANUP =====
     cleanup: () => {
         // Détacher le listener quand on quitte le projet
         if(Chat.messagesListener) {
@@ -36235,6 +36260,9 @@ const Chat = {
 };
 
 const Permissions = {
+    // ============================================================
+    // ===== LOGIQUE D'ACCÈS (calcul des droits) =====
+    // ============================================================
     // Obtenir les permissions d'un membre du projet
     getForMember: (member, type) => {
         // type = 'actor' ou 'crew'
@@ -36304,6 +36332,9 @@ const Permissions = {
         return perms[section] === 'write';
     },
     
+    // ============================================================
+    // ===== MODALE & UI DE GESTION DES PERMISSIONS =====
+    // ============================================================
     // Ouvrir le modal de gestion des permissions
     openModal: () => {
         if(state.currentRole !== 'owner') {
@@ -36508,6 +36539,9 @@ const Permissions = {
     };
 
 const GlobalSearch = {
+    // ============================================================
+    // ===== ÉTAT & OUVERTURE =====
+    // ============================================================
     currentType: 'actors',
     results: [],
     
@@ -36553,6 +36587,7 @@ const GlobalSearch = {
         if(modal) modal.remove();
     },
     
+    // ===== FILTRES & RECHERCHE =====
     getActorFiltersHTML: () => {
         return `
             <div class="global-search-filters-row">
@@ -36826,6 +36861,7 @@ const GlobalSearch = {
         resultsDiv.innerHTML = html;
     },
     
+    // ===== ACTIONS (voir profil, ajouter au projet, notifier) =====
     viewProfile: (idx) => {
         const person = GlobalSearch.results[idx];
         if(!person) return;
@@ -37818,6 +37854,608 @@ if(isActors) {
     }
 };
   
+  const PlanningExport = {
+    // ============================================================
+    // ===== EXPORT PDF PLANNING (jsPDF natif) =====
+    // ============================================================
+    // Génère 1 PDF contenant N jours de tournage, 1 jour = ~1 page avec
+    // toutes les infos utiles : date, lieu, horaires, programme scènes,
+    // convocations groupées (comédiens par groupe + techniciens par dept),
+    // dépouillement, notes, météo perso.
+    
+    openExportModal: () => {
+        const days = state.data.shootingDays || [];
+        if(days.length === 0) {
+            Utils.toast('Aucun jour de tournage à exporter', 'warning');
+            return;
+        }
+        
+        const sorted = [...days].sort((a, b) => {
+            const da = new Date(a.startDate || a.date || 0);
+            const db = new Date(b.startDate || b.date || 0);
+            return da - db;
+        });
+        
+        const items = sorted.map((d, i) => {
+            const startDate = d.startDate || d.date;
+            const dateObj = startDate ? new Date(startDate) : null;
+            const dateStr = dateObj && !isNaN(dateObj)
+                ? dateObj.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+                : '(date non définie)';
+            const dayName = d.name || `Jour ${d.dayNumber || (i + 1)}`;
+            const location = d.location || d.locationRealName || '—';
+            const sceneCount = (d.scenes || []).length;
+            const callCount = (d.callSheet || []).length;
+            const validBadge = d.validated ? '<span style="background:var(--success);color:#fff;padding:1px 6px;border-radius:4px;font-size:0.7rem;margin-left:6px;">✅ Validé</span>' : '';
+            return `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()">
+                <td style="width:24px;padding:5px 8px;vertical-align:middle;"><input type="checkbox" class="fds-pdfchk" value="${d.id}" checked style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td>
+                <td style="padding:5px 8px;font-size:0.85rem;line-height:1.3;vertical-align:middle;">
+                    <strong>${Utils.escape(dayName)}</strong> — ${dateStr}${validBadge}
+                    <div style="color:var(--text-sec);font-size:0.78rem;margin-top:2px;">📍 ${Utils.escape(location)} · 🎬 ${sceneCount} sc. · 👥 ${callCount} convoqué(s)</div>
+                </td>
+            </tr>`;
+        }).join('');
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:560px;padding:20px;">
+            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">📅 Export Planning PDF</div>
+            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:8px;">Jours de tournage à inclure (${sorted.length}) :</div>
+            <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;"><table style="width:100%;border-collapse:collapse;">${items}</table></div>
+            <div style="display:flex;gap:6px;margin-bottom:14px;">
+                <button type="button" id="fds-pdf-all" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout cocher</button>
+                <button type="button" id="fds-pdf-none" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout décocher</button>
+                <button type="button" id="fds-pdf-validated" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">✅ Validés uniquement</button>
+            </div>
+            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Page de garde :</div>
+            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
+                <button type="button" class="fmt-btn active" id="fds-pdf-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre</button>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="confirm-modal-btn cancel" id="fds-pdf-cancel" style="margin:0;">Annuler</button>
+                <button class="confirm-modal-btn confirm" id="fds-pdf-ok" style="margin:0;">📄 Générer le PDF</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        
+        overlay.querySelector('#fds-pdf-all').onclick = () => overlay.querySelectorAll('.fds-pdfchk').forEach(cb => cb.checked = true);
+        overlay.querySelector('#fds-pdf-none').onclick = () => overlay.querySelectorAll('.fds-pdfchk').forEach(cb => cb.checked = false);
+        overlay.querySelector('#fds-pdf-validated').onclick = () => {
+            const validIds = new Set(sorted.filter(d => d.validated).map(d => d.id));
+            overlay.querySelectorAll('.fds-pdfchk').forEach(cb => { cb.checked = validIds.has(cb.value); });
+        };
+        const coverBtn = overlay.querySelector('#fds-pdf-cover');
+        coverBtn.onclick = () => {
+            const isActive = coverBtn.classList.toggle('active');
+            coverBtn.dataset.active = isActive ? '1' : '0';
+        };
+        overlay.querySelector('#fds-pdf-cancel').onclick = () => overlay.remove();
+        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+        overlay.querySelector('#fds-pdf-ok').onclick = () => {
+            const dayIds = Array.from(overlay.querySelectorAll('.fds-pdfchk:checked')).map(cb => cb.value);
+            if(dayIds.length === 0) { Utils.toast('Aucun jour sélectionné', 'warning'); return; }
+            const includeCover = coverBtn.dataset.active === '1';
+            overlay.remove();
+            PlanningExport.exportPlanningPDF({ dayIds, includeCover });
+        };
+    },
+    
+    exportPlanningPDF: async (opts = {}) => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 18;
+        const usableWidth = pageWidth - margin * 2;
+        
+        const allDays = state.data.shootingDays || [];
+        const days = (opts.dayIds && opts.dayIds.length > 0)
+            ? allDays.filter(d => opts.dayIds.includes(d.id))
+            : allDays;
+        
+        if(days.length === 0) {
+            Utils.toast('Aucun jour à exporter', 'warning');
+            return;
+        }
+        
+        days.sort((a, b) => {
+            const da = new Date(a.startDate || a.date || 0);
+            const db = new Date(b.startDate || b.date || 0);
+            return da - db;
+        });
+        
+        Utils.toast('Génération du PDF planning...', 'info');
+        
+        if(opts.includeCover && typeof FichesPDF !== 'undefined' && FichesPDF._drawCoverPage) {
+            FichesPDF._drawCoverPage(doc, 'Planning');
+            doc.addPage();
+        }
+        
+        const allScenes = state.data.scenes || [];
+        const allActors = state.data.actors || [];
+        const allCrew = state.data.crew || [];
+        const allCharacters = state.data.characters || [];
+const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
+        const crewGroupsAll = (state.data.groups || []).filter(g => g.type === 'crew');
+        const isSeries = state.currentProjectType === 'series';
+        
+        const categoryToCrewGroup = {
+            'ACCESSOIRES': 'gc5', 'DECORS-LIEUX': 'gc5',
+            'COSTUMES': 'gc6',
+            'MAQUILLAGE-COIFFURE': 'gc7',
+            'VEHICULES': 'gc12', 'LOGISTIQUE': 'gc12',
+            'SON-MUSIQUE': 'gc4',
+            'LUMIERE': 'gc2',
+            'FIGURATION': 'gc9', 'ANIMAUX': 'gc9',
+            'EFFETS SPECIAUX (SFX)': 'gc16',
+            'EFFETS VISUELS (VFX)': 'gc13'
+        };
+        
+        const transportLabel = (call) => {
+            const t = call.transport;
+            const lookupNames = () => (call.withWho || []).map(id => {
+                const sep = id.indexOf('_');
+                if(sep < 0) return '';
+                const type = id.substring(0, sep);
+                const personId = id.substring(sep + 1);
+                const p = type === 'actor' ? allActors.find(a => a.id === personId) : allCrew.find(c => c.id === personId);
+                return p ? p.name : '';
+            }).filter(Boolean).join(', ');
+            if(t === 'own')         return 'Véhicule perso';
+            if(t === 'own-brings')  { const n = lookupNames(); return 'Véhic. perso + ' + (n || 'pers.'); }
+            if(t === 'with')        { const n = lookupNames(); return 'Avec ' + (n || '—'); }
+            if(t === 'taxi')        return 'Taxi';
+            if(t === 'public')      return 'Transp. en commun';
+            return '—';
+        };
+        
+        let y = margin;
+        const ensureSpace = (space) => {
+            if(y + space > pageHeight - margin - 8) {
+                doc.addPage();
+                y = margin;
+            }
+        };
+        
+        const drawSectionHeader = (title) => {
+            ensureSpace(8 + 3);
+            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
+            doc.rect(margin, y, usableWidth, 6, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(...PdfTheme.COLORS.WHITE);
+            doc.text(title.toUpperCase(), margin + 3, y + 4.2);
+            y += 6 + 2.5;
+        };
+        
+        const drawSubGroupHeader = (text) => {
+            ensureSpace(5);
+            doc.setFillColor(...PdfTheme.COLORS.BORDER_LIGHT);
+            doc.rect(margin, y, usableWidth, 4.5, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8);
+            doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
+            doc.text(text, margin + 2, y + 3.2);
+            y += 4.5 + 1;
+        };
+        
+        const drawTableRow = (cols, cells, opts = {}) => {
+            const rowH = opts.height || 5;
+            ensureSpace(rowH);
+            if(opts.fillRow) {
+                doc.setFillColor(...PdfTheme.COLORS.BG_LIGHTER);
+                doc.rect(margin, y, usableWidth, rowH, 'F');
+            }
+            doc.setFont('helvetica', opts.bold ? 'bold' : 'normal');
+            doc.setFontSize(opts.fontSize || 8.5);
+            doc.setTextColor(opts.color || 50, opts.color || 50, opts.color || 50);
+            cells.forEach((cell, i) => {
+                const col = cols[i];
+                let txt = String(cell || '');
+                while(doc.getTextWidth(txt) > col.w - 2 && txt.length > 3) {
+                    txt = txt.substring(0, txt.length - 2) + '…';
+                }
+                const tx = col.align === 'right' ? col.x + col.w - 1 : col.x + 1;
+                doc.text(txt, tx, y + rowH - 1.4, { align: col.align || 'left' });
+            });
+            if(opts.divider) {
+                doc.setDrawColor(...PdfTheme.COLORS.BORDER_LIGHT);
+                doc.setLineWidth(0.1);
+                doc.setLineDashPattern([0.5, 0.5], 0);
+                doc.line(margin, y + rowH, margin + usableWidth, y + rowH);
+                doc.setLineDashPattern([], 0);
+            }
+            y += rowH;
+        };
+        
+        const drawTextBlock = (text, opts = {}) => {
+            if(!text) return;
+            doc.setFont('helvetica', opts.italic ? 'italic' : 'normal');
+            doc.setFontSize(opts.fontSize || 8.5);
+            doc.setTextColor(opts.color || 60, opts.color || 60, opts.color || 60);
+            const lines = doc.splitTextToSize(String(text), usableWidth - 2);
+            lines.forEach(line => {
+                ensureSpace(4);
+                doc.text(line, margin + 1, y + 3);
+                y += 4;
+            });
+            y += 1;
+        };
+        
+        const sceneLabel = (s) => {
+            if(isSeries && s.episodeId) {
+                const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
+                if(ep) {
+                    const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
+                    return UI.formatSceneNumber(s, scenesInEp.indexOf(s));
+                }
+            }
+            return '#' + (allScenes.indexOf(s) + 1);
+        };
+        
+        // ========= EN-TÊTE EN BANDEAU GRIS (cohérent avec les autres sections) =========
+        ensureSpace(16);
+doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
+        doc.rect(margin, y, usableWidth, 9, 'F');
+        doc.setTextColor(...PdfTheme.COLORS.WHITE);
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text('PLANNING DE TOURNAGE', margin + 4, y + 6.2);
+        y += 12;
+        // Sous-titre discret avec le nombre de jours
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(9.5);
+        doc.setTextColor(...PdfTheme.COLORS.TEXT_LIGHT);
+        doc.text(`${days.length} jour${days.length > 1 ? 's' : ''} de tournage`, margin, y + 4);
+        y += 10;
+        
+        drawSectionHeader('Sommaire');
+        const sumCols = [
+            { x: margin,       w: 8 },
+            { x: margin + 9,   w: 35 },
+            { x: margin + 45,  w: 38 },
+            { x: margin + 84,  w: 50 },
+            { x: margin + 135, w: usableWidth - 135 - 2, align: 'right' }
+        ];
+        drawTableRow(sumCols, ['#', 'Date', 'Nom', 'Lieu', 'Scènes'], { bold: true, fontSize: 8.5, fillRow: true });
+        days.forEach((d, i) => {
+            const startDate = d.startDate || d.date;
+            const dObj = startDate ? new Date(startDate) : null;
+            const dateStr = dObj && !isNaN(dObj)
+                ? dObj.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' })
+                : '—';
+            const dayName = d.name || `Jour ${d.dayNumber || (i + 1)}`;
+            const loc = d.location || d.locationRealName || '—';
+            const sc = (d.scenes || []).length;
+            drawTableRow(sumCols, [String(i + 1), dateStr, dayName, loc, `${sc} sc.`], { fontSize: 8.5, divider: true });
+        });
+        y += 4;
+        
+        // ========= UNE PAGE PAR JOUR =========
+        days.forEach((shootDay, dayIdx) => {
+            doc.addPage();
+            y = margin;
+            
+            const startDate = shootDay.startDate || shootDay.date;
+            const dateObj = startDate ? new Date(startDate) : null;
+            const dateStr = dateObj && !isNaN(dateObj)
+                ? dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+                : '(date non définie)';
+            const dayName = shootDay.name || `Jour ${shootDay.dayNumber || (dayIdx + 1)}`;
+            
+            // En-tête
+            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
+            doc.rect(0, 0, pageWidth, 18, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(13);
+            doc.setTextColor(...PdfTheme.COLORS.WHITE);
+            doc.text('FEUILLE DE SERVICE', margin, 8);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(10);
+            doc.text(`${dayIdx + 1} / ${days.length}`, pageWidth - margin, 8, { align: 'right' });
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(11);
+            doc.text(`${dayName} — ${dateStr}`, margin, 14.5);
+            if(shootDay.validated) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.setTextColor(...PdfTheme.COLORS.STAT_GREEN);
+                doc.text('VALIDÉ', pageWidth - margin, 14.5, { align: 'right' });
+            }
+            y = 22;
+            
+            // LIEU
+            drawSectionHeader('Lieu de tournage');
+            const locName = shootDay.location || shootDay.locationRealName || '—';
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
+            ensureSpace(5);
+            doc.text(locName, margin + 1, y + 3.5);
+            y += 5;
+            if(shootDay.locationAddress) drawTextBlock('Adresse : ' + shootDay.locationAddress);
+            if(shootDay.contactName || shootDay.contactPhone) {
+                const cBits = [];
+                if(shootDay.contactName)  cBits.push('Contact : ' + shootDay.contactName);
+                if(shootDay.contactPhone) cBits.push('Tél : ' + shootDay.contactPhone);
+                drawTextBlock(cBits.join('   ·   '));
+            }
+            if(shootDay.locationNotes) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8.5);
+                doc.setTextColor(...PdfTheme.COLORS.WARNING);
+                const accLines = doc.splitTextToSize('Accès : ' + shootDay.locationNotes, usableWidth - 2);
+                accLines.forEach(line => { ensureSpace(4); doc.text(line, margin + 1, y + 3); y += 4; });
+                y += 1;
+            }
+            if(shootDay.locationLat && shootDay.locationLng) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(7.5);
+                doc.setTextColor(...PdfTheme.COLORS.TEXT_LIGHT);
+                ensureSpace(4);
+                doc.text(`GPS : ${shootDay.locationLat}, ${shootDay.locationLng}`, margin + 1, y + 3);
+                y += 5;
+            }
+            
+            // HORAIRES
+            drawSectionHeader('Horaires généraux');
+            const horCols = [
+                { x: margin,                          w: usableWidth * 0.25 },
+                { x: margin + usableWidth * 0.25,     w: usableWidth * 0.25 },
+                { x: margin + usableWidth * 0.50,     w: usableWidth * 0.25 },
+                { x: margin + usableWidth * 0.75,     w: usableWidth * 0.25 }
+            ];
+            drawTableRow(horCols,
+                ['Convocation', shootDay.crewCall || '--:--', 'Prêt à tourner', shootDay.readyToShoot || '--:--'],
+                { bold: true, fontSize: 8.5, divider: true });
+            drawTableRow(horCols,
+                ['Déjeuner', `${shootDay.lunchStart || '--:--'} - ${shootDay.lunchEnd || '--:--'}`, 'Fin estimée', shootDay.estimatedWrap || '--:--'],
+                { bold: true, fontSize: 8.5, divider: true });
+            y += 2;
+            
+            // PROGRAMME
+            drawSectionHeader('Programme du jour');
+const scenes = shootDay.scenes || [];
+            if(scenes.length === 0) {
+                drawTextBlock('Aucune scène planifiée pour ce jour.', { italic: true, color: 150 });
+            } else {
+                const scCols = [
+                    { x: margin,                          w: 18 },
+                    { x: margin + 18,                     w: 16 },
+                    { x: margin + 34,                     w: usableWidth - 34 - 50 - 18 },
+                    { x: margin + usableWidth - 50 - 18,  w: 32 },
+                    { x: margin + usableWidth - 36,       w: 16, align: 'right' },
+                    { x: margin + usableWidth - 20,       w: 20, align: 'right' }
+                ];
+                drawTableRow(scCols, ['Heure', 'N°', 'Scène', 'Personnages', 'Durée', 'Plans'],
+                    { bold: true, fontSize: 8, fillRow: true });
+                scenes.forEach(ref => {
+                    const sc = allScenes.find(s => s.id === ref.sceneId);
+                    if(!sc) return;
+                    const allShots = (state.data.shots || []).filter(s => s.sceneId === ref.sceneId || String(s.sceneId) === String(ref.sceneId));
+                    const totalShots = allShots.length;
+                    const selectedShots = ref.selectedShots || [];
+                    let shotsInfo = totalShots === 0 ? '—' : (selectedShots.length > 0 ? `${selectedShots.length}/${totalShots}` : `0/${totalShots}`);
+                    
+                    drawTableRow(scCols, [
+                        ref.startTime || '--:--',
+                        sceneLabel(sc),
+                        sc.title || '(sans titre)',
+                        sc.perso || '—',
+                        sc.time ? sc.time + ' min' : '—',
+                        shotsInfo
+                    ], { fontSize: 8, divider: true });
+                });
+            }
+            y += 2;
+            
+            // CONVOCATIONS (section optionnelle, contrôlée par opts.includeCallSheet)
+            if(opts.includeCallSheet !== false) {
+            drawSectionHeader('Convocations');
+            const callsAll = shootDay.callSheet || [];
+            if(callsAll.length === 0) {
+                drawTextBlock('Aucune convocation.', { italic: true, color: 150 });
+            } else {
+                const callCols = [
+                    { x: margin,                          w: usableWidth * 0.30 },
+                    { x: margin + usableWidth * 0.30,     w: usableWidth * 0.22 },
+                    { x: margin + usableWidth * 0.52,     w: usableWidth * 0.13 },
+                    { x: margin + usableWidth * 0.65,     w: usableWidth * 0.20 },
+                    { x: margin + usableWidth * 0.85,     w: usableWidth * 0.15 }
+                ];
+                
+                const actorCalls = callsAll.filter(c => c.type === 'actor');
+                const crewCalls = callsAll.filter(c => c.type === 'crew');
+                
+                if(actorCalls.length > 0) {
+                    drawTableRow(callCols, ['Nom', 'Rôle', 'Convoc.', 'Transport', 'Notes'],
+                        { bold: true, fontSize: 8, fillRow: true });
+                    
+                    actorGroups.forEach(grp => {
+                        const groupCalls = actorCalls.filter(call => {
+                            const actor = allActors.find(a => a.id === call.personId);
+                            return actor && actor.group_id === grp.id;
+                        });
+                        if(groupCalls.length === 0) return;
+                        drawSubGroupHeader('COMÉDIENS — ' + grp.name);
+                        groupCalls.forEach(call => {
+                            const person = allActors.find(a => a.id === call.personId);
+                            if(!person) return;
+                            const character = allCharacters.find(c => c.actor_id === person.id);
+                            const role = character ? character.name : 'Comédien·ne';
+                            drawTableRow(callCols, [
+                                person.name || '—',
+                                role,
+                                call.callTime || '--:--',
+                                transportLabel(call),
+                                call.notes || '—'
+                            ], { fontSize: 8, divider: true });
+                        });
+                    });
+                    
+                    const noGroupActorCalls = actorCalls.filter(call => {
+                        const actor = allActors.find(a => a.id === call.personId);
+                        return actor && (!actor.group_id || !actorGroups.find(g => g.id === actor.group_id));
+                    });
+                    if(noGroupActorCalls.length > 0) {
+                        drawSubGroupHeader('COMÉDIENS — Non classés');
+                        noGroupActorCalls.forEach(call => {
+                            const person = allActors.find(a => a.id === call.personId);
+                            if(!person) return;
+                            const character = allCharacters.find(c => c.actor_id === person.id);
+                            const role = character ? character.name : 'Comédien·ne';
+                            drawTableRow(callCols, [
+                                person.name || '—',
+                                role,
+                                call.callTime || '--:--',
+                                transportLabel(call),
+                                call.notes || '—'
+                            ], { fontSize: 8, divider: true });
+                        });
+                    }
+                }
+                
+                if(crewCalls.length > 0) {
+                    if(actorCalls.length === 0) {
+                        drawTableRow(callCols, ['Nom', 'Fonction', 'Convoc.', 'Transport', 'Notes'],
+                            { bold: true, fontSize: 8, fillRow: true });
+                    }
+                    
+                    crewGroupsAll.forEach(grp => {
+                        const groupCalls = crewCalls.filter(call => {
+                            const member = allCrew.find(c => c.id === call.personId);
+                            return member && member.group_id === grp.id;
+                        });
+                        if(groupCalls.length === 0) return;
+                        drawSubGroupHeader('ÉQUIPE — ' + grp.name);
+                        groupCalls.forEach(call => {
+                            const person = allCrew.find(c => c.id === call.personId);
+                            if(!person) return;
+                            drawTableRow(callCols, [
+                                person.name || '—',
+                                person.role || 'Technicien·ne',
+                                call.callTime || '--:--',
+    transportLabel(call),
+                                call.notes || '—'
+                            ], { fontSize: 8, divider: true });
+                        });
+                    });
+                    
+                    const noGroupCrewCalls = crewCalls.filter(call => {
+                        const member = allCrew.find(c => c.id === call.personId);
+                        return member && (!member.group_id || !crewGroupsAll.find(g => g.id === member.group_id));
+                    });
+                    if(noGroupCrewCalls.length > 0) {
+                        drawSubGroupHeader('ÉQUIPE — Non classés');
+                        noGroupCrewCalls.forEach(call => {
+                            const person = allCrew.find(c => c.id === call.personId);
+                            if(!person) return;
+                            drawTableRow(callCols, [
+                                person.name || '—',
+                                person.role || 'Technicien·ne',
+                                call.callTime || '--:--',
+                                transportLabel(call),
+                                call.notes || '—'
+                            ], { fontSize: 8, divider: true });
+                        });
+                    }
+                }
+            }
+            y += 2;
+            } // fin if(opts.includeCallSheet !== false)
+            
+            // DÉPOUILLEMENT
+            const allCategories = {};
+            scenes.forEach(ref => {
+                const sc = allScenes.find(s => s.id === ref.sceneId);
+                if(sc && sc.breakdown) {
+                    Object.entries(sc.breakdown).forEach(([category, items]) => {
+                        if(Array.isArray(items) && items.length > 0) {
+                            if(!allCategories[category]) allCategories[category] = new Set();
+                            items.forEach(item => allCategories[category].add(item));
+                        }
+                    });
+                }
+            });
+            
+            const getResponsibleForCategory = (category) => {
+                const groupId = categoryToCrewGroup[category];
+                if(!groupId) return null;
+                const responsible = (shootDay.callSheet || []).find(call => {
+                    if(call.type !== 'crew') return false;
+                    const crew = allCrew.find(c => c.id === call.personId);
+                    return crew && crew.group_id === groupId;
+                });
+                if(responsible) {
+                    const crew = allCrew.find(c => c.id === responsible.personId);
+                    return crew ? crew.name : null;
+                }
+                return null;
+            };
+            
+            if(Object.keys(allCategories).length > 0) {
+                drawSectionHeader('Dépouillement / besoins');
+                Object.entries(allCategories).forEach(([cat, itemsSet]) => {
+                    const items = Array.from(itemsSet);
+                    const resp = getResponsibleForCategory(cat);
+                    ensureSpace(4);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(8.5);
+                    doc.setTextColor(...PdfTheme.COLORS.BANNER_DARK);
+                    const respText = resp ? '  (Responsable : ' + resp + ')' : '';
+                    doc.text(cat + respText, margin + 1, y + 3);
+                    y += 4;
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(8);
+                    doc.setTextColor(...PdfTheme.COLORS.TEXT_BODY);
+                    const line = '• ' + items.join('   ·   ');
+                    const lines = doc.splitTextToSize(line, usableWidth - 4);
+                    lines.forEach(l => { ensureSpace(3.5); doc.text(l, margin + 3, y + 2.8); y += 3.5; });
+                    y += 1;
+                });
+            }
+            
+            // NOTES & MÉTÉO
+            const hasNotes = shootDay.notes || shootDay.customWeather;
+            if(hasNotes) {
+                drawSectionHeader('Notes & consignes');
+                if(shootDay.customWeather) {
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(8.5);
+                    doc.setTextColor(...PdfTheme.COLORS.BANNER_DARK);
+                    ensureSpace(4);
+                    doc.text('Météo / consignes :', margin + 1, y + 3);
+                    y += 4;
+                    drawTextBlock(shootDay.customWeather, { fontSize: 8.5, color: 60 });
+                }
+                if(shootDay.notes) {
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(8.5);
+                    doc.setTextColor(...PdfTheme.COLORS.BANNER_DARK);
+                    ensureSpace(4);
+                    doc.text('Notes générales :', margin + 1, y + 3);
+                    y += 4;
+                    drawTextBlock(shootDay.notes, { fontSize: 8.5, color: 60 });
+                }
+            }
+        });
+        
+        // Footer
+        if(typeof FichesPDF !== 'undefined' && FichesPDF._drawFooters) {
+            FichesPDF._drawFooters(doc, opts.includeCover, !!opts.returnBlob);
+        }
+        
+        // Sauvegarde
+        if(opts.returnBlob) return doc.output('blob');
+        const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
+            ? PdfTheme.filename('Planning')
+            : `${state.data.title || 'Projet'} - Planning - moteur.studio.pdf`;
+        doc.save(filename);
+        Utils.toast(`Planning PDF exporté (${days.length} jour${days.length > 1 ? 's' : ''}) !`, 'success');
+        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', `Planning PDF généré (${days.length} jours)`);
+    }
+  };
+
   const Planning = {
     currentView: 'month',
     currentMode: 'calendar',
@@ -42460,605 +43098,9 @@ END:VEVENT
         container.innerHTML = html;
     },
     
-    // ============================================================
-    // ===== EXPORT PDF PLANNING (jsPDF natif) =====
-    // ============================================================
-    // Génère 1 PDF contenant N jours de tournage, 1 jour = ~1 page avec
-    // toutes les infos utiles : date, lieu, horaires, programme scènes,
-    // convocations groupées (comédiens par groupe + techniciens par dept),
-    // dépouillement, notes, météo perso.
-    
-    openExportModal: () => {
-        const days = state.data.shootingDays || [];
-        if(days.length === 0) {
-            Utils.toast('Aucun jour de tournage à exporter', 'warning');
-            return;
-        }
-        
-        const sorted = [...days].sort((a, b) => {
-            const da = new Date(a.startDate || a.date || 0);
-            const db = new Date(b.startDate || b.date || 0);
-            return da - db;
-        });
-        
-        const items = sorted.map((d, i) => {
-            const startDate = d.startDate || d.date;
-            const dateObj = startDate ? new Date(startDate) : null;
-            const dateStr = dateObj && !isNaN(dateObj)
-                ? dateObj.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
-                : '(date non définie)';
-            const dayName = d.name || `Jour ${d.dayNumber || (i + 1)}`;
-            const location = d.location || d.locationRealName || '—';
-            const sceneCount = (d.scenes || []).length;
-            const callCount = (d.callSheet || []).length;
-            const validBadge = d.validated ? '<span style="background:var(--success);color:#fff;padding:1px 6px;border-radius:4px;font-size:0.7rem;margin-left:6px;">✅ Validé</span>' : '';
-            return `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()">
-                <td style="width:24px;padding:5px 8px;vertical-align:middle;"><input type="checkbox" class="fds-pdfchk" value="${d.id}" checked style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td>
-                <td style="padding:5px 8px;font-size:0.85rem;line-height:1.3;vertical-align:middle;">
-                    <strong>${Utils.escape(dayName)}</strong> — ${dateStr}${validBadge}
-                    <div style="color:var(--text-sec);font-size:0.78rem;margin-top:2px;">📍 ${Utils.escape(location)} · 🎬 ${sceneCount} sc. · 👥 ${callCount} convoqué(s)</div>
-                </td>
-            </tr>`;
-        }).join('');
-        
-        const overlay = document.createElement('div');
-        overlay.className = 'confirm-modal-overlay';
-        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:560px;padding:20px;">
-            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">📅 Export Planning PDF</div>
-            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:8px;">Jours de tournage à inclure (${sorted.length}) :</div>
-            <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;"><table style="width:100%;border-collapse:collapse;">${items}</table></div>
-            <div style="display:flex;gap:6px;margin-bottom:14px;">
-                <button type="button" id="fds-pdf-all" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout cocher</button>
-                <button type="button" id="fds-pdf-none" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout décocher</button>
-                <button type="button" id="fds-pdf-validated" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">✅ Validés uniquement</button>
-            </div>
-            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Page de garde :</div>
-            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
-                <button type="button" class="fmt-btn active" id="fds-pdf-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre</button>
-            </div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <button class="confirm-modal-btn cancel" id="fds-pdf-cancel" style="margin:0;">Annuler</button>
-                <button class="confirm-modal-btn confirm" id="fds-pdf-ok" style="margin:0;">📄 Générer le PDF</button>
-            </div>
-        </div>`;
-        document.body.appendChild(overlay);
-        
-        overlay.querySelector('#fds-pdf-all').onclick = () => overlay.querySelectorAll('.fds-pdfchk').forEach(cb => cb.checked = true);
-        overlay.querySelector('#fds-pdf-none').onclick = () => overlay.querySelectorAll('.fds-pdfchk').forEach(cb => cb.checked = false);
-        overlay.querySelector('#fds-pdf-validated').onclick = () => {
-            const validIds = new Set(sorted.filter(d => d.validated).map(d => d.id));
-            overlay.querySelectorAll('.fds-pdfchk').forEach(cb => { cb.checked = validIds.has(cb.value); });
-        };
-        const coverBtn = overlay.querySelector('#fds-pdf-cover');
-        coverBtn.onclick = () => {
-            const isActive = coverBtn.classList.toggle('active');
-            coverBtn.dataset.active = isActive ? '1' : '0';
-        };
-        overlay.querySelector('#fds-pdf-cancel').onclick = () => overlay.remove();
-        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
-        overlay.querySelector('#fds-pdf-ok').onclick = () => {
-            const dayIds = Array.from(overlay.querySelectorAll('.fds-pdfchk:checked')).map(cb => cb.value);
-            if(dayIds.length === 0) { Utils.toast('Aucun jour sélectionné', 'warning'); return; }
-            const includeCover = coverBtn.dataset.active === '1';
-            overlay.remove();
-            Planning.exportPlanningPDF({ dayIds, includeCover });
-        };
-    },
-    
-    exportPlanningPDF: async (opts = {}) => {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('p', 'mm', 'a4');
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-        const margin = 18;
-        const usableWidth = pageWidth - margin * 2;
-        
-        const allDays = state.data.shootingDays || [];
-        const days = (opts.dayIds && opts.dayIds.length > 0)
-            ? allDays.filter(d => opts.dayIds.includes(d.id))
-            : allDays;
-        
-        if(days.length === 0) {
-            Utils.toast('Aucun jour à exporter', 'warning');
-            return;
-        }
-        
-        days.sort((a, b) => {
-            const da = new Date(a.startDate || a.date || 0);
-            const db = new Date(b.startDate || b.date || 0);
-            return da - db;
-        });
-        
-        Utils.toast('Génération du PDF planning...', 'info');
-        
-        if(opts.includeCover && typeof FichesPDF !== 'undefined' && FichesPDF._drawCoverPage) {
-            FichesPDF._drawCoverPage(doc, 'Planning');
-            doc.addPage();
-        }
-        
-        const allScenes = state.data.scenes || [];
-        const allActors = state.data.actors || [];
-        const allCrew = state.data.crew || [];
-        const allCharacters = state.data.characters || [];
-        const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
-        const crewGroupsAll = (state.data.groups || []).filter(g => g.type === 'crew');
-        const isSeries = state.currentProjectType === 'series';
-        
-        const categoryToCrewGroup = {
-            'ACCESSOIRES': 'gc5', 'DECORS-LIEUX': 'gc5',
-            'COSTUMES': 'gc6',
-            'MAQUILLAGE-COIFFURE': 'gc7',
-            'VEHICULES': 'gc12', 'LOGISTIQUE': 'gc12',
-            'SON-MUSIQUE': 'gc4',
-            'LUMIERE': 'gc2',
-            'FIGURATION': 'gc9', 'ANIMAUX': 'gc9',
-            'EFFETS SPECIAUX (SFX)': 'gc16',
-            'EFFETS VISUELS (VFX)': 'gc13'
-        };
-        
-        const transportLabel = (call) => {
-            const t = call.transport;
-            const lookupNames = () => (call.withWho || []).map(id => {
-                const sep = id.indexOf('_');
-                if(sep < 0) return '';
-                const type = id.substring(0, sep);
-                const personId = id.substring(sep + 1);
-                const p = type === 'actor' ? allActors.find(a => a.id === personId) : allCrew.find(c => c.id === personId);
-                return p ? p.name : '';
-            }).filter(Boolean).join(', ');
-            if(t === 'own')         return 'Véhicule perso';
-            if(t === 'own-brings')  { const n = lookupNames(); return 'Véhic. perso + ' + (n || 'pers.'); }
-            if(t === 'with')        { const n = lookupNames(); return 'Avec ' + (n || '—'); }
-            if(t === 'taxi')        return 'Taxi';
-            if(t === 'public')      return 'Transp. en commun';
-            return '—';
-        };
-        
-        let y = margin;
-        const ensureSpace = (space) => {
-            if(y + space > pageHeight - margin - 8) {
-                doc.addPage();
-                y = margin;
-            }
-        };
-        
-        const drawSectionHeader = (title) => {
-            ensureSpace(8 + 3);
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(margin, y, usableWidth, 6, 'F');
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(9);
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.text(title.toUpperCase(), margin + 3, y + 4.2);
-            y += 6 + 2.5;
-        };
-        
-        const drawSubGroupHeader = (text) => {
-            ensureSpace(5);
-            doc.setFillColor(...PdfTheme.COLORS.BORDER_LIGHT);
-            doc.rect(margin, y, usableWidth, 4.5, 'F');
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(8);
-            doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
-            doc.text(text, margin + 2, y + 3.2);
-            y += 4.5 + 1;
-        };
-        
-        const drawTableRow = (cols, cells, opts = {}) => {
-            const rowH = opts.height || 5;
-            ensureSpace(rowH);
-            if(opts.fillRow) {
-                doc.setFillColor(...PdfTheme.COLORS.BG_LIGHTER);
-                doc.rect(margin, y, usableWidth, rowH, 'F');
-            }
-            doc.setFont('helvetica', opts.bold ? 'bold' : 'normal');
-            doc.setFontSize(opts.fontSize || 8.5);
-            doc.setTextColor(opts.color || 50, opts.color || 50, opts.color || 50);
-            cells.forEach((cell, i) => {
-                const col = cols[i];
-                let txt = String(cell || '');
-                while(doc.getTextWidth(txt) > col.w - 2 && txt.length > 3) {
-                    txt = txt.substring(0, txt.length - 2) + '…';
-                }
-                const tx = col.align === 'right' ? col.x + col.w - 1 : col.x + 1;
-                doc.text(txt, tx, y + rowH - 1.4, { align: col.align || 'left' });
-            });
-            if(opts.divider) {
-                doc.setDrawColor(...PdfTheme.COLORS.BORDER_LIGHT);
-                doc.setLineWidth(0.1);
-                doc.setLineDashPattern([0.5, 0.5], 0);
-                doc.line(margin, y + rowH, margin + usableWidth, y + rowH);
-                doc.setLineDashPattern([], 0);
-            }
-            y += rowH;
-        };
-        
-        const drawTextBlock = (text, opts = {}) => {
-            if(!text) return;
-            doc.setFont('helvetica', opts.italic ? 'italic' : 'normal');
-            doc.setFontSize(opts.fontSize || 8.5);
-            doc.setTextColor(opts.color || 60, opts.color || 60, opts.color || 60);
-            const lines = doc.splitTextToSize(String(text), usableWidth - 2);
-            lines.forEach(line => {
-                ensureSpace(4);
-                doc.text(line, margin + 1, y + 3);
-                y += 4;
-            });
-            y += 1;
-        };
-        
-        const sceneLabel = (s) => {
-            if(isSeries && s.episodeId) {
-                const ep = (state.data.episodes || []).find(e => e.id === s.episodeId);
-                if(ep) {
-                    const scenesInEp = allScenes.filter(x => x.episodeId === ep.id);
-                    return UI.formatSceneNumber(s, scenesInEp.indexOf(s));
-                }
-            }
-            return '#' + (allScenes.indexOf(s) + 1);
-        };
-        
-        // ========= EN-TÊTE EN BANDEAU GRIS (cohérent avec les autres sections) =========
-        ensureSpace(16);
-        doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-        doc.rect(margin, y, usableWidth, 9, 'F');
-        doc.setTextColor(...PdfTheme.COLORS.WHITE);
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'bold');
-        doc.text('PLANNING DE TOURNAGE', margin + 4, y + 6.2);
-        y += 12;
-        // Sous-titre discret avec le nombre de jours
-        doc.setFont('helvetica', 'italic');
-        doc.setFontSize(9.5);
-        doc.setTextColor(...PdfTheme.COLORS.TEXT_LIGHT);
-        doc.text(`${days.length} jour${days.length > 1 ? 's' : ''} de tournage`, margin, y + 4);
-        y += 10;
-        
-        drawSectionHeader('Sommaire');
-        const sumCols = [
-            { x: margin,       w: 8 },
-            { x: margin + 9,   w: 35 },
-            { x: margin + 45,  w: 38 },
-            { x: margin + 84,  w: 50 },
-            { x: margin + 135, w: usableWidth - 135 - 2, align: 'right' }
-        ];
-        drawTableRow(sumCols, ['#', 'Date', 'Nom', 'Lieu', 'Scènes'], { bold: true, fontSize: 8.5, fillRow: true });
-        days.forEach((d, i) => {
-            const startDate = d.startDate || d.date;
-            const dObj = startDate ? new Date(startDate) : null;
-            const dateStr = dObj && !isNaN(dObj)
-                ? dObj.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' })
-                : '—';
-            const dayName = d.name || `Jour ${d.dayNumber || (i + 1)}`;
-            const loc = d.location || d.locationRealName || '—';
-            const sc = (d.scenes || []).length;
-            drawTableRow(sumCols, [String(i + 1), dateStr, dayName, loc, `${sc} sc.`], { fontSize: 8.5, divider: true });
-        });
-        y += 4;
-        
-        // ========= UNE PAGE PAR JOUR =========
-        days.forEach((shootDay, dayIdx) => {
-            doc.addPage();
-            y = margin;
-            
-            const startDate = shootDay.startDate || shootDay.date;
-            const dateObj = startDate ? new Date(startDate) : null;
-            const dateStr = dateObj && !isNaN(dateObj)
-                ? dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-                : '(date non définie)';
-            const dayName = shootDay.name || `Jour ${shootDay.dayNumber || (dayIdx + 1)}`;
-            
-            // En-tête
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(0, 0, pageWidth, 18, 'F');
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(13);
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.text('FEUILLE DE SERVICE', margin, 8);
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(10);
-            doc.text(`${dayIdx + 1} / ${days.length}`, pageWidth - margin, 8, { align: 'right' });
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(11);
-            doc.text(`${dayName} — ${dateStr}`, margin, 14.5);
-            if(shootDay.validated) {
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(9);
-                doc.setTextColor(...PdfTheme.COLORS.STAT_GREEN);
-                doc.text('VALIDÉ', pageWidth - margin, 14.5, { align: 'right' });
-            }
-            y = 22;
-            
-            // LIEU
-            drawSectionHeader('Lieu de tournage');
-            const locName = shootDay.location || shootDay.locationRealName || '—';
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(10);
-            doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
-            ensureSpace(5);
-            doc.text(locName, margin + 1, y + 3.5);
-            y += 5;
-            if(shootDay.locationAddress) drawTextBlock('Adresse : ' + shootDay.locationAddress);
-            if(shootDay.contactName || shootDay.contactPhone) {
-                const cBits = [];
-                if(shootDay.contactName)  cBits.push('Contact : ' + shootDay.contactName);
-                if(shootDay.contactPhone) cBits.push('Tél : ' + shootDay.contactPhone);
-                drawTextBlock(cBits.join('   ·   '));
-            }
-            if(shootDay.locationNotes) {
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(8.5);
-                doc.setTextColor(...PdfTheme.COLORS.WARNING);
-                const accLines = doc.splitTextToSize('Accès : ' + shootDay.locationNotes, usableWidth - 2);
-                accLines.forEach(line => { ensureSpace(4); doc.text(line, margin + 1, y + 3); y += 4; });
-                y += 1;
-            }
-            if(shootDay.locationLat && shootDay.locationLng) {
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(7.5);
-                doc.setTextColor(...PdfTheme.COLORS.TEXT_LIGHT);
-                ensureSpace(4);
-                doc.text(`GPS : ${shootDay.locationLat}, ${shootDay.locationLng}`, margin + 1, y + 3);
-                y += 5;
-            }
-            
-            // HORAIRES
-            drawSectionHeader('Horaires généraux');
-            const horCols = [
-                { x: margin,                          w: usableWidth * 0.25 },
-                { x: margin + usableWidth * 0.25,     w: usableWidth * 0.25 },
-                { x: margin + usableWidth * 0.50,     w: usableWidth * 0.25 },
-                { x: margin + usableWidth * 0.75,     w: usableWidth * 0.25 }
-            ];
-            drawTableRow(horCols,
-                ['Convocation', shootDay.crewCall || '--:--', 'Prêt à tourner', shootDay.readyToShoot || '--:--'],
-                { bold: true, fontSize: 8.5, divider: true });
-            drawTableRow(horCols,
-                ['Déjeuner', `${shootDay.lunchStart || '--:--'} - ${shootDay.lunchEnd || '--:--'}`, 'Fin estimée', shootDay.estimatedWrap || '--:--'],
-                { bold: true, fontSize: 8.5, divider: true });
-            y += 2;
-            
-            // PROGRAMME
-            drawSectionHeader('Programme du jour');
-            const scenes = shootDay.scenes || [];
-            if(scenes.length === 0) {
-                drawTextBlock('Aucune scène planifiée pour ce jour.', { italic: true, color: 150 });
-            } else {
-                const scCols = [
-                    { x: margin,                          w: 18 },
-                    { x: margin + 18,                     w: 16 },
-                    { x: margin + 34,                     w: usableWidth - 34 - 50 - 18 },
-                    { x: margin + usableWidth - 50 - 18,  w: 32 },
-                    { x: margin + usableWidth - 36,       w: 16, align: 'right' },
-                    { x: margin + usableWidth - 20,       w: 20, align: 'right' }
-                ];
-                drawTableRow(scCols, ['Heure', 'N°', 'Scène', 'Personnages', 'Durée', 'Plans'],
-                    { bold: true, fontSize: 8, fillRow: true });
-                scenes.forEach(ref => {
-                    const sc = allScenes.find(s => s.id === ref.sceneId);
-                    if(!sc) return;
-                    const allShots = (state.data.shots || []).filter(s => s.sceneId === ref.sceneId || String(s.sceneId) === String(ref.sceneId));
-                    const totalShots = allShots.length;
-                    const selectedShots = ref.selectedShots || [];
-                    let shotsInfo = totalShots === 0 ? '—' : (selectedShots.length > 0 ? `${selectedShots.length}/${totalShots}` : `0/${totalShots}`);
-                    
-                    drawTableRow(scCols, [
-                        ref.startTime || '--:--',
-                        sceneLabel(sc),
-                        sc.title || '(sans titre)',
-                        sc.perso || '—',
-                        sc.time ? sc.time + ' min' : '—',
-                        shotsInfo
-                    ], { fontSize: 8, divider: true });
-                });
-            }
-            y += 2;
-            
-            // CONVOCATIONS (section optionnelle, contrôlée par opts.includeCallSheet)
-            if(opts.includeCallSheet !== false) {
-            drawSectionHeader('Convocations');
-            const callsAll = shootDay.callSheet || [];
-            if(callsAll.length === 0) {
-                drawTextBlock('Aucune convocation.', { italic: true, color: 150 });
-            } else {
-                const callCols = [
-                    { x: margin,                          w: usableWidth * 0.30 },
-                    { x: margin + usableWidth * 0.30,     w: usableWidth * 0.22 },
-                    { x: margin + usableWidth * 0.52,     w: usableWidth * 0.13 },
-                    { x: margin + usableWidth * 0.65,     w: usableWidth * 0.20 },
-                    { x: margin + usableWidth * 0.85,     w: usableWidth * 0.15 }
-                ];
-                
-                const actorCalls = callsAll.filter(c => c.type === 'actor');
-                const crewCalls = callsAll.filter(c => c.type === 'crew');
-                
-                if(actorCalls.length > 0) {
-                    drawTableRow(callCols, ['Nom', 'Rôle', 'Convoc.', 'Transport', 'Notes'],
-                        { bold: true, fontSize: 8, fillRow: true });
-                    
-                    actorGroups.forEach(grp => {
-                        const groupCalls = actorCalls.filter(call => {
-                            const actor = allActors.find(a => a.id === call.personId);
-                            return actor && actor.group_id === grp.id;
-                        });
-                        if(groupCalls.length === 0) return;
-                        drawSubGroupHeader('COMÉDIENS — ' + grp.name);
-                        groupCalls.forEach(call => {
-                            const person = allActors.find(a => a.id === call.personId);
-                            if(!person) return;
-                            const character = allCharacters.find(c => c.actor_id === person.id);
-                            const role = character ? character.name : 'Comédien·ne';
-                            drawTableRow(callCols, [
-                                person.name || '—',
-                                role,
-                                call.callTime || '--:--',
-                                transportLabel(call),
-                                call.notes || '—'
-                            ], { fontSize: 8, divider: true });
-                        });
-                    });
-                    
-                    const noGroupActorCalls = actorCalls.filter(call => {
-                        const actor = allActors.find(a => a.id === call.personId);
-                        return actor && (!actor.group_id || !actorGroups.find(g => g.id === actor.group_id));
-                    });
-                    if(noGroupActorCalls.length > 0) {
-                        drawSubGroupHeader('COMÉDIENS — Non classés');
-                        noGroupActorCalls.forEach(call => {
-                            const person = allActors.find(a => a.id === call.personId);
-                            if(!person) return;
-                            const character = allCharacters.find(c => c.actor_id === person.id);
-                            const role = character ? character.name : 'Comédien·ne';
-                            drawTableRow(callCols, [
-                                person.name || '—',
-                                role,
-                                call.callTime || '--:--',
-                                transportLabel(call),
-                                call.notes || '—'
-                            ], { fontSize: 8, divider: true });
-                        });
-                    }
-                }
-                
-                if(crewCalls.length > 0) {
-                    if(actorCalls.length === 0) {
-                        drawTableRow(callCols, ['Nom', 'Fonction', 'Convoc.', 'Transport', 'Notes'],
-                            { bold: true, fontSize: 8, fillRow: true });
-                    }
-                    
-                    crewGroupsAll.forEach(grp => {
-                        const groupCalls = crewCalls.filter(call => {
-                            const member = allCrew.find(c => c.id === call.personId);
-                            return member && member.group_id === grp.id;
-                        });
-                        if(groupCalls.length === 0) return;
-                        drawSubGroupHeader('ÉQUIPE — ' + grp.name);
-                        groupCalls.forEach(call => {
-                            const person = allCrew.find(c => c.id === call.personId);
-                            if(!person) return;
-                            drawTableRow(callCols, [
-                                person.name || '—',
-                                person.role || 'Technicien·ne',
-                                call.callTime || '--:--',
-                                transportLabel(call),
-                                call.notes || '—'
-                            ], { fontSize: 8, divider: true });
-                        });
-                    });
-                    
-                    const noGroupCrewCalls = crewCalls.filter(call => {
-                        const member = allCrew.find(c => c.id === call.personId);
-                        return member && (!member.group_id || !crewGroupsAll.find(g => g.id === member.group_id));
-                    });
-                    if(noGroupCrewCalls.length > 0) {
-                        drawSubGroupHeader('ÉQUIPE — Non classés');
-                        noGroupCrewCalls.forEach(call => {
-                            const person = allCrew.find(c => c.id === call.personId);
-                            if(!person) return;
-                            drawTableRow(callCols, [
-                                person.name || '—',
-                                person.role || 'Technicien·ne',
-                                call.callTime || '--:--',
-                                transportLabel(call),
-                                call.notes || '—'
-                            ], { fontSize: 8, divider: true });
-                        });
-                    }
-                }
-            }
-            y += 2;
-            } // fin if(opts.includeCallSheet !== false)
-            
-            // DÉPOUILLEMENT
-            const allCategories = {};
-            scenes.forEach(ref => {
-                const sc = allScenes.find(s => s.id === ref.sceneId);
-                if(sc && sc.breakdown) {
-                    Object.entries(sc.breakdown).forEach(([category, items]) => {
-                        if(Array.isArray(items) && items.length > 0) {
-                            if(!allCategories[category]) allCategories[category] = new Set();
-                            items.forEach(item => allCategories[category].add(item));
-                        }
-                    });
-                }
-            });
-            
-            const getResponsibleForCategory = (category) => {
-                const groupId = categoryToCrewGroup[category];
-                if(!groupId) return null;
-                const responsible = (shootDay.callSheet || []).find(call => {
-                    if(call.type !== 'crew') return false;
-                    const crew = allCrew.find(c => c.id === call.personId);
-                    return crew && crew.group_id === groupId;
-                });
-                if(responsible) {
-                    const crew = allCrew.find(c => c.id === responsible.personId);
-                    return crew ? crew.name : null;
-                }
-                return null;
-            };
-            
-            if(Object.keys(allCategories).length > 0) {
-                drawSectionHeader('Dépouillement / besoins');
-                Object.entries(allCategories).forEach(([cat, itemsSet]) => {
-                    const items = Array.from(itemsSet);
-                    const resp = getResponsibleForCategory(cat);
-                    ensureSpace(4);
-                    doc.setFont('helvetica', 'bold');
-                    doc.setFontSize(8.5);
-                    doc.setTextColor(...PdfTheme.COLORS.BANNER_DARK);
-                    const respText = resp ? '  (Responsable : ' + resp + ')' : '';
-                    doc.text(cat + respText, margin + 1, y + 3);
-                    y += 4;
-                    doc.setFont('helvetica', 'normal');
-                    doc.setFontSize(8);
-                    doc.setTextColor(...PdfTheme.COLORS.TEXT_BODY);
-                    const line = '• ' + items.join('   ·   ');
-                    const lines = doc.splitTextToSize(line, usableWidth - 4);
-                    lines.forEach(l => { ensureSpace(3.5); doc.text(l, margin + 3, y + 2.8); y += 3.5; });
-                    y += 1;
-                });
-            }
-            
-            // NOTES & MÉTÉO
-            const hasNotes = shootDay.notes || shootDay.customWeather;
-            if(hasNotes) {
-                drawSectionHeader('Notes & consignes');
-                if(shootDay.customWeather) {
-                    doc.setFont('helvetica', 'bold');
-                    doc.setFontSize(8.5);
-                    doc.setTextColor(...PdfTheme.COLORS.BANNER_DARK);
-                    ensureSpace(4);
-                    doc.text('Météo / consignes :', margin + 1, y + 3);
-                    y += 4;
-                    drawTextBlock(shootDay.customWeather, { fontSize: 8.5, color: 60 });
-                }
-                if(shootDay.notes) {
-                    doc.setFont('helvetica', 'bold');
-                    doc.setFontSize(8.5);
-                    doc.setTextColor(...PdfTheme.COLORS.BANNER_DARK);
-                    ensureSpace(4);
-                    doc.text('Notes générales :', margin + 1, y + 3);
-                    y += 4;
-                    drawTextBlock(shootDay.notes, { fontSize: 8.5, color: 60 });
-                }
-            }
-        });
-        
-        // Footer
-        if(typeof FichesPDF !== 'undefined' && FichesPDF._drawFooters) {
-            FichesPDF._drawFooters(doc, opts.includeCover, !!opts.returnBlob);
-        }
-        
-        // Sauvegarde
-        if(opts.returnBlob) return doc.output('blob');
-        const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
-            ? PdfTheme.filename('Planning')
-            : `${state.data.title || 'Projet'} - Planning - moteur.studio.pdf`;
-        doc.save(filename);
-        Utils.toast(`Planning PDF exporté (${days.length} jour${days.length > 1 ? 's' : ''}) !`, 'success');
-        if(typeof History !== 'undefined' && History.log) History.log('EXPORT', `Planning PDF généré (${days.length} jours)`);
-    }
+ // ===== EXPORT PDF PLANNING — délégué à PlanningExport =====
+    openExportModal: (...a) => PlanningExport.openExportModal(...a),
+    exportPlanningPDF: (...a) => PlanningExport.exportPlanningPDF(...a)
 };
   
 const Stats = {
@@ -68968,7 +69010,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, CrewExport, Planning, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, ProfileActualites, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
