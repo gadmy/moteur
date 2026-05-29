@@ -6996,7 +6996,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.9.5</p>
+      <p>vv4.9.6</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -38456,6 +38456,604 @@ const scenes = shootDay.scenes || [];
     }
   };
 
+  const PlanningFDS = {
+    currentFDSDay: null,
+    currentFDSMap: null,
+    generateFDS: () => {
+        // If editing, save first
+        Planning.saveShootDay();
+        
+        // Trouver le jour sauvegardé par son ID
+        const savedDay = state.data.shootingDays.find(sd => sd.id === Planning.editingDayId) 
+            || state.data.shootingDays.find(sd => sd.startDate === document.getElementById('edit-startDate').value);
+        if(!savedDay) {
+            Utils.toast('Jour de tournage non trouvé', 'error');
+            return;
+        }
+        
+        PlanningFDS.showFDS(savedDay);
+    },
+    
+    showFDS: async (shootDay) => {
+        PlanningFDS.currentFDSDay = shootDay;
+        
+        const modal = document.getElementById('fds-modal');
+        const content = document.getElementById('fdsContent');
+        
+        // Utiliser startDate au lieu de date
+        const shootDate = shootDay.startDate || shootDay.date;
+        const dateObj = new Date(shootDate);
+        const dateStr = dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        
+        // Afficher chargement
+        content.innerHTML = '<div style="text-align: center; padding: 40px;"><div class="spinner dark"></div><p>Chargement météo...</p></div>';
+        modal.classList.add('active');
+        
+        // Récupérer météo si coordonnées disponibles
+        let weatherHTML = '';
+        if(shootDay.locationLat && shootDay.locationLng && shootDate) {
+            const weather = await Weather.fetch(parseFloat(shootDay.locationLat), parseFloat(shootDay.locationLng), shootDate);
+            weatherHTML = Weather.renderCard(weather);
+        } else if(!shootDay.locationLat || !shootDay.locationLng) {
+            weatherHTML = '<p class="text-sec-italic">📍 Renseignez une adresse avec GPS pour voir la météo</p>';
+        }
+        
+        // Programme du jour avec scènes ET plans sélectionnés
+        let scenesHTML = '';
+        (shootDay.scenes || []).forEach(ref => {
+            const scene = state.data.scenes.find(s => s.id === ref.sceneId);
+            if(scene) {
+                const sceneIndex = state.data.scenes.findIndex(s => s.id === ref.sceneId) + 1;
+                const selectedShots = ref.selectedShots || [];
+                // Utiliser state.data.shots au lieu de storyboard
+                const allShots = state.data.shots?.filter(s => s.sceneId === ref.sceneId || String(s.sceneId) === String(ref.sceneId)) || [];
+                const totalShots = allShots.length;
+                
+                // Afficher les numéros des plans sélectionnés
+                let shotsInfo = '-';
+                if(totalShots > 0) {
+                    if(selectedShots.length > 0) {
+                        // Trier les plans par ordre
+                        const sortedShots = [...allShots].sort((a,b) => (a.order || 0) - (b.order || 0));
+                        // Récupérer les numéros des plans sélectionnés
+                        const shotNumbers = selectedShots.map(shotId => {
+                            const shotIndex = sortedShots.findIndex(s => s.id === shotId);
+                            return shotIndex >= 0 ? shotIndex + 1 : null;
+                        }).filter(Boolean).sort((a,b) => a-b);
+                        shotsInfo = `Plans: ${shotNumbers.join(', ')} (${selectedShots.length}/${totalShots})`;
+                    } else {
+                        shotsInfo = `0/${totalShots} plans`;
+                    }
+                }
+                
+                scenesHTML += `<tr>
+                    <td>${ref.startTime || '--:--'}</td>
+                    <td><strong>Sc.${sceneIndex}</strong> - ${Utils.escape(scene.title)}</td>
+                    <td>${Utils.escape(scene.perso || '-')}</td>
+                    <td>${scene.time || '-'} min</td>
+                    <td>${shotsInfo}</td>
+                </tr>`;
+            }
+        });
+        
+        // Convocations avec transport - groupées par catégorie
+        let callsheetHTML = '';
+        const actorCalls = (shootDay.callSheet || []).filter(c => c.type === 'actor');
+        const crewCalls = (shootDay.callSheet || []).filter(c => c.type === 'crew');
+        
+        // Fonction helper pour le transport
+        const getTransportInfo = (call) => {
+            let transportInfo = '';
+            if(call.transport === 'own') transportInfo = '🚗';
+            else if(call.transport === 'own-brings') {
+                const withNames = (call.withWho || []).map(id => {
+                    const [type, personId] = [id.substring(0, id.indexOf('_')), id.substring(id.indexOf('_') + 1)];
+                    const p = type === 'actor' ? state.data.actors.find(a => a.id === personId) : state.data.crew.find(c => c.id === personId);
+                    return p ? p.name : '';
+                }).filter(Boolean).join(', ');
+                transportInfo = withNames ? `🚗👥 ${withNames}` : '🚗👥';
+            }
+            else if(call.transport === 'with') {
+                const withNames = (call.withWho || []).map(id => {
+                    const [type, personId] = [id.substring(0, id.indexOf('_')), id.substring(id.indexOf('_') + 1)];
+                    const p = type === 'actor' ? state.data.actors.find(a => a.id === personId) : state.data.crew.find(c => c.id === personId);
+                    return p ? p.name : '';
+                }).filter(Boolean).join(', ');
+                transportInfo = withNames ? `→ ${withNames}` : '🚗→';
+            }
+            else if(call.transport === 'taxi') transportInfo = '🚕';
+            else if(call.transport === 'public') transportInfo = '🚇';
+            return transportInfo;
+        };
+        
+        // Comédiens groupés
+        if(actorCalls.length > 0) {
+            const actorGroups = state.data.groups.filter(g => g.type === 'actor');
+            
+            actorGroups.forEach(grp => {
+                const groupCalls = actorCalls.filter(call => {
+                    const actor = state.data.actors.find(a => a.id === call.personId);
+                    return actor && actor.group_id === grp.id;
+                });
+                
+                if(groupCalls.length > 0) {
+callsheetHTML += `<tr class="bg-base"><td colspan="5" class="th-primary">🎭 ${grp.name}</td></tr>`;
+                    groupCalls.forEach(call => {
+                        const person = state.data.actors.find(a => a.id === call.personId);
+                        if(person) {
+                            const character = state.data.characters.find(c => c.actor_id === person.id);
+                            const role = character ? character.name : 'Comédien(ne)';
+                            callsheetHTML += `<tr>
+                                <td>${Utils.escape(person.name)}</td>
+                                <td>${Utils.escape(role)}</td>
+                                <td><strong>${call.callTime || '--:--'}</strong></td>
+                                <td>${getTransportInfo(call)}</td>
+                                <td>${Utils.escape(call.notes || '-')}</td>
+                            </tr>`;
+                        }
+                    });
+                }
+            });
+            
+            // Comédiens sans groupe
+            const noGroupActors = actorCalls.filter(call => {
+                const actor = state.data.actors.find(a => a.id === call.personId);
+                return actor && (!actor.group_id || !actorGroups.find(g => g.id === actor.group_id));
+            });
+            
+            if(noGroupActors.length > 0) {
+                callsheetHTML += `<tr class="bg-base"><td colspan="5" class="th-primary">🎭 Comédiens</td></tr>`;
+                noGroupActors.forEach(call => {
+                    const person = state.data.actors.find(a => a.id === call.personId);
+                    if(person) {
+                        const character = state.data.characters.find(c => c.actor_id === person.id);
+                        const role = character ? character.name : 'Comédien(ne)';
+                        callsheetHTML += `<tr>
+                            <td>${Utils.escape(person.name)}</td>
+                            <td>${Utils.escape(role)}</td>
+                            <td><strong>${call.callTime || '--:--'}</strong></td>
+                            <td>${getTransportInfo(call)}</td>
+                            <td>${Utils.escape(call.notes || '-')}</td>
+                        </tr>`;
+                    }
+                });
+            }
+        }
+        
+        // Techniciens groupés par département
+        if(crewCalls.length > 0) {
+            const crewGroups = state.data.groups.filter(g => g.type === 'crew');
+            
+            crewGroups.forEach(grp => {
+                const groupCalls = crewCalls.filter(call => {
+                    const member = state.data.crew.find(c => c.id === call.personId);
+                    return member && member.group_id === grp.id;
+                });
+                
+                if(groupCalls.length > 0) {
+                    callsheetHTML += `<tr class="bg-base"><td colspan="5" class="th-primary">🎥 ${grp.name}</td></tr>`;
+                    groupCalls.forEach(call => {
+                        const person = state.data.crew.find(c => c.id === call.personId);
+                        if(person) {
+                            callsheetHTML += `<tr>
+                                <td>${Utils.escape(person.name)}</td>
+                                <td>${Utils.escape(person.role || 'Technicien')}</td>
+                                <td><strong>${call.callTime || '--:--'}</strong></td>
+                                <td>${getTransportInfo(call)}</td>
+                                <td>${Utils.escape(call.notes || '-')}</td>
+                            </tr>`;
+                        }
+                    });
+                }
+            });
+            
+            // Techniciens sans groupe
+            const noGroupCrew = crewCalls.filter(call => {
+                const member = state.data.crew.find(c => c.id === call.personId);
+                return member && (!member.group_id || !crewGroups.find(g => g.id === member.group_id));
+            });
+            
+            if(noGroupCrew.length > 0) {
+                callsheetHTML += `<tr class="bg-base"><td colspan="5" style="font-weight: bold; padding: 8px; color: var(--text-sec);">🎥 Autres techniciens</td></tr>`;
+                noGroupCrew.forEach(call => {
+                    const person = state.data.crew.find(c => c.id === call.personId);
+                    if(person) {
+                        callsheetHTML += `<tr>
+                            <td>${Utils.escape(person.name)}</td>
+                            <td>${Utils.escape(person.role || 'Technicien')}</td>
+                            <td><strong>${call.callTime || '--:--'}</strong></td>
+                            <td>${getTransportInfo(call)}</td>
+                            <td>${Utils.escape(call.notes || '-')}</td>
+                        </tr>`;
+                    }
+                });
+            }
+        }
+        
+        // Section lieu avec contact et notes d'accès
+        let locationHTML = `
+            <div class="fds-section">
+                <div class="fds-section-title">📍 LIEU DE TOURNAGE</div>
+                <p><strong>${Utils.escape(shootDay.location || shootDay.locationRealName || 'Non défini')}</strong></p>
+                <p>${Utils.escape(shootDay.locationAddress || '')}</p>`;
+        
+        // Contact et téléphone
+        if(shootDay.contactName || shootDay.contactPhone) {
+            locationHTML += `<p class="mt-10">👤 <strong>Contact :</strong> ${Utils.escape(shootDay.contactName || '')} ${shootDay.contactPhone ? '📞 ' + Utils.escape(shootDay.contactPhone) : ''}</p>`;
+        }
+        
+        // Notes d'accès
+        if(shootDay.locationNotes) {
+            locationHTML += `<p style="margin-top: 5px; padding: 10px; background: rgba(var(--warning-rgb), 0.1); border-radius: 6px;">📝 ${Utils.escape(shootDay.locationNotes)}</p>`;
+        }
+        
+        if(shootDay.locationLat && shootDay.locationLng) {
+            const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${shootDay.locationLat},${shootDay.locationLng}`;
+            locationHTML += `
+                <div id="fds-map-container" class="fds-map-container"></div>
+                <div class="fds-location-actions">
+                    <a href="${gmapsUrl}" target="_blank" class="fds-gmaps-btn">📍 Ouvrir dans Google Maps</a>
+                </div>
+                <p class="fds-gmaps-link-print" style="display: none; font-size: 10px; color: #666; word-break: break-all; margin-top: 5px;">🗺️ ${gmapsUrl}</p>`;
+        }
+        locationHTML += '</div>';
+    /* __FDS_SEG3__ */// Dépouillement (éléments nécessaires pour les scènes) - stocké dans scene.breakdown
+        // Avec les responsables par département
+        let breakdownHTML = '';
+        const allCategories = {};
+        (shootDay.scenes || []).forEach(ref => {
+            const scene = state.data.scenes.find(s => s.id === ref.sceneId);
+            if(scene && scene.breakdown) {
+                Object.entries(scene.breakdown).forEach(([category, items]) => {
+                    if(Array.isArray(items) && items.length > 0) {
+                        if(!allCategories[category]) allCategories[category] = [];
+                        items.forEach(item => {
+                            if(!allCategories[category].includes(item)) {
+                                allCategories[category].push(item);
+                            }
+                        });
+                    }
+                });
+            }
+        });
+        
+        // Mapping catégorie dépouillement -> groupe crew
+        const categoryToCrewGroup = {
+            'ACCESSOIRES': 'gc5', 'DECORS-LIEUX': 'gc5',
+            'COSTUMES': 'gc6',
+            'MAQUILLAGE-COIFFURE': 'gc7',
+            'VEHICULES': 'gc12', 'LOGISTIQUE': 'gc12',
+            'SON-MUSIQUE': 'gc4',
+            'LUMIERE': 'gc2',
+            'FIGURATION': 'gc9', 'ANIMAUX': 'gc9',
+            'EFFETS SPECIAUX (SFX)': 'gc16',
+            'EFFETS VISUELS (VFX)': 'gc13'
+        };
+        
+        // Trouver le responsable pour chaque catégorie
+        const getResponsibleForCategory = (category) => {
+            const groupId = categoryToCrewGroup[category];
+            if(!groupId) return null;
+            
+            // Chercher dans la callSheet du jour les techniciens de ce groupe
+            const responsible = (shootDay.callSheet || []).find(call => {
+                if(call.type !== 'crew') return false;
+                const crew = state.data.crew.find(c => c.id === call.personId);
+                return crew && crew.group_id === groupId;
+            });
+            
+            if(responsible) {
+                const crew = state.data.crew.find(c => c.id === responsible.personId);
+                return crew ? crew.name : null;
+            }
+            return null;
+        };
+        
+        if(Object.keys(allCategories).length > 0) {
+            breakdownHTML = `
+                <div class="fds-section">
+                    <div class="fds-section-title">📦 DÉPOUILLEMENT / BESOINS</div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">
+                        ${Object.entries(allCategories).map(([cat, items]) => {
+                            const responsible = getResponsibleForCategory(cat);
+                            const responsibleText = responsible ? ` (${Utils.escape(responsible)})` : '';
+                            return `
+                            <div style="padding: 10px; background: var(--card-bg); border-radius: 6px; border: 1px solid var(--border);">
+                                <strong>${Utils.escape(cat)}${responsibleText}</strong>
+                                <ul style="margin: 5px 0 0 15px; padding: 0;">
+                                    ${items.map(item => `<li>${Utils.escape(item)}</li>`).join('')}
+                                </ul>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>`;
+        } else {
+            breakdownHTML = `
+                <div class="fds-section">
+                    <div class="fds-section-title">📦 DÉPOUILLEMENT / BESOINS</div>
+                    <p class="text-sec-italic">Aucun élément de dépouillement pour les scènes sélectionnées</p>
+                </div>`;
+        }
+        
+        // Nom du tournage
+        const dayName = shootDay.name || `Jour ${shootDay.dayNumber || '?'}`;
+        
+        content.innerHTML = `
+            <div class="fds-preview" id="fds-print-content">
+                <div class="fds-header">
+                    <div class="fds-title">${Utils.escape(state.data.title)}</div>
+                    <div class="fds-subtitle">FEUILLE DE SERVICE</div>
+                    <div class="mt-10">
+                        <strong>${Utils.escape(dayName)}</strong> - ${dateStr}
+                    </div>
+                </div>
+                
+                <div class="fds-section">
+                    <div class="fds-section-title">🎬 PROGRAMME DU JOUR</div>
+                    <table class="fds-table">
+                        <thead>
+                            <tr><th>Heure</th><th>Scène</th><th>Personnages</th><th>Durée</th><th>Plans</th></tr>
+                        </thead>
+                        <tbody>
+                            ${scenesHTML || '<tr><td colspan="5" class="text-center">Aucune scène planifiée</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+                
+                ${locationHTML}
+                
+                <div class="fds-section">
+                    <div class="fds-section-title">⏰ HORAIRES GÉNÉRAUX</div>
+                    <table class="fds-table">
+                        <tr>
+                            <td><strong>Convocation équipe</strong></td>
+                            <td>${shootDay.crewCall || '--:--'}</td>
+                            <td><strong>Prêt à tourner</strong></td>
+                            <td>${shootDay.readyToShoot || '--:--'}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Pause déjeuner</strong></td>
+                            <td>${shootDay.lunchStart || '--:--'} - ${shootDay.lunchEnd || '--:--'}</td>
+                            <td><strong>Fin estimée</strong></td>
+                            <td>${shootDay.estimatedWrap || '--:--'}</td>
+ </tr>
+                    </table>
+                </div>
+                
+                <div class="fds-section">
+                    <div class="fds-section-title">📋 CONVOCATIONS</div>
+                    <table class="fds-table">
+                        <thead>
+                            <tr><th>Nom</th><th>Fonction</th><th>Convocation</th><th>Transport</th><th>Notes</th></tr>
+                        </thead>
+                        <tbody>
+                            ${callsheetHTML || '<tr><td colspan="5" class="text-center">Aucune convocation</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="fds-section">
+                    <div class="fds-section-title">🌤️ MÉTÉO PRÉVUE</div>
+                    ${weatherHTML}
+                </div>
+                
+                <div class="fds-section">
+                    <div class="fds-section-title">🌡️ MÉTÉO PERSONNALISÉE / CONSIGNES</div>
+                    <p style="white-space: pre-wrap;">${shootDay.customWeather ? Utils.escape(shootDay.customWeather) : '<span class="text-sec-italic">Vide</span>'}</p>
+                </div>
+                
+                <div class="fds-section">
+                    <div class="fds-section-title">📝 NOTES GÉNÉRALES</div>
+                    <p style="white-space: pre-wrap;">${shootDay.notes ? Utils.escape(shootDay.notes) : '<span class="text-sec-italic">Vide</span>'}</p>
+                </div>
+                
+                ${breakdownHTML}
+            </div>
+        `;
+        
+        // Initialiser la carte Leaflet
+        if(shootDay.locationLat && shootDay.locationLng) {
+            setTimeout(() => {
+                const mapContainer = document.getElementById('fds-map-container');
+                if(mapContainer && typeof L !== 'undefined') {
+                    const fdsMap = L.map(mapContainer, { zoomControl: true, attributionControl: false })
+                        .setView([parseFloat(shootDay.locationLat), parseFloat(shootDay.locationLng)], 15);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(fdsMap);
+                    L.marker([parseFloat(shootDay.locationLat), parseFloat(shootDay.locationLng)]).addTo(fdsMap)
+                        .bindPopup(`<strong>${Utils.escape(shootDay.location || 'Lieu')}</strong>`).openPopup();
+                    PlanningFDS.currentFDSMap = fdsMap;
+                }
+            }, 100);
+        }
+    },
+    
+    printFDS: () => {
+        const shootDay = PlanningFDS.currentFDSDay;
+        if(!shootDay) return;
+        
+        // Générer le nom du fichier
+        const projectTitle = state.data.title || 'Projet';
+        const dayName = shootDay.name || `J${shootDay.dayNumber || ''}`;
+        const dateStr = shootDay.startDate || shootDay.date || '';
+        const pdfTitle = `${projectTitle} - FDS ${dayName} - ${dateStr}`.replace(/[\/\\:*?"<>|]/g, '-');
+        
+        // Préparer le contenu avec le lien Google Maps en texte
+        let content = document.getElementById('fds-print-content').innerHTML;
+        
+        // Ajouter le lien Google Maps en texte visible pour l'impression
+        let gmapsTextHTML = '';
+        if(shootDay.locationLat && shootDay.locationLng) {
+            const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${shootDay.locationLat},${shootDay.locationLng}`;
+            gmapsTextHTML = `<p class="print-only-link" style="font-size: 10px; color: #666; word-break: break-all;">🗺️ Google Maps: ${gmapsUrl}</p>`;
+        }
+        
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>${Utils.escape(pdfTitle)}</title>
+                <style>
+                    body { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; margin: 20px; }
+                    .fds-header { text-align: center; border-bottom: 2px solid black; padding-bottom: 15px; margin-bottom: 15px; }
+                    .fds-title { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+                    .fds-subtitle { font-size: 14px; }
+                    .fds-section { margin-bottom: 15px; page-break-inside: avoid; }
+                    .fds-section-title { font-weight: bold; background: #eee; padding: 5px; margin-bottom: 10px; }
+.fds-gmaps-link-print { display: none; }
+@media print { .fds-gmaps-link-print { display: block !important; } .fds-map-container, .fds-location-actions { display: none !important; } }
+                    .fds-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+                    .fds-table th, .fds-table td { border: 1px solid #333; padding: 5px; text-align: left; }
+                    .fds-table th { background: #ddd; }
+                    .fds-weather-card { display: flex; gap: 15px; align-items: center; padding: 10px; background: #f0f7ff; border-radius: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+                    .fds-weather-icon { font-size: 2rem; }
+                    .fds-weather-temp { font-size: 1.5rem; font-weight: bold; }
+                    .fds-weather-row { display: flex; gap: 10px; flex-wrap: wrap; }
+                    .fds-weather-item { padding: 3px 8px; background: #e0e0e0; border-radius: 10px; font-size: 11px; }
+                    .fds-sun-times { display: flex; gap: 15px; font-size: 11px; margin-top: 5px; }
+                    .fds-map-container { display: none; }
+                    .fds-location-actions { display: none; }
+                    .fds-gmaps-btn { display: none; }
+                    .print-only-link { display: block; margin-top: 10px; }
+                    @media screen {
+                        .print-only-link { display: none; }
+                    }
+                    @page { margin: 15mm; }
+                </style>
+            </head>
+            <body>${content}${gmapsTextHTML}</body>
+            </html>
+        `);
+        printWindow.document.close();
+        
+        // Petit délai pour que le titre soit bien pris en compte
+        setTimeout(() => {
+            printWindow.print();
+        }, 100);
+    },
+    
+    sendFDS: async () => {
+        const shootDay = PlanningFDS.currentFDSDay;
+        if(!shootDay) {
+            Utils.toast('Aucune feuille de service chargée', 'error');
+return;
+        }
+        
+        const projectName = state.data.title || 'Projet';
+        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        const senderName = state.userProfile?.displayName || state.currentUser?.email?.split('@')[0] || 'La production';
+        
+        // Récupérer météo et lien GPS
+        let weatherInfo = '';
+        let gmapsLink = '';
+        if(shootDay.locationLat && shootDay.locationLng) {
+            gmapsLink = `\n🗺️ GPS : https://www.google.com/maps/search/?api=1&query=${shootDay.locationLat},${shootDay.locationLng}`;
+            const weather = await Weather.fetch(shootDay.locationLat, shootDay.locationLng, shootDay.date);
+            if(weather) {
+                weatherInfo = `\n\n🌤️ Météo : ${weather.icon} ${weather.description}, ${weather.tempMin}°C - ${weather.tempMax}°C`;
+                if(weather.precipitationProb > 30) weatherInfo += ` (${weather.precipitationProb}% pluie)`;
+                weatherInfo += `\n🌅 Soleil : ${weather.sunrise} - ${weather.sunset}`;
+            }
+        }
+        
+        // Collecter toutes les personnes à notifier
+        const recipients = [];
+        
+        // Parcourir la callSheet
+        if(shootDay.callSheet && shootDay.callSheet.length > 0) {
+            for(const call of shootDay.callSheet) {
+                let person = null;
+                
+                if(call.type === 'actor') {
+                    person = state.data.actors.find(a => a.id === call.personId);
+                } else if(call.type === 'crew') {
+                    person = state.data.crew.find(c => c.id === call.personId);
+                }
+                
+                if(person && person.email) {
+                    recipients.push({
+                        name: person.name || 'Inconnu',
+                        email: person.email,
+                        callTime: call.callTime || shootDay.crewCall || 'À confirmer',
+                        notes: call.notes || ''
+                    });
+                }
+            }
+        }
+        
+        if(recipients.length === 0) {
+            Utils.toast('Aucune personne avec email dans cette feuille de service', 'warning');
+            return;
+        }
+        
+        if(!await ConfirmModal.show({ title: 'Envoyer la feuille de service ?', message: `${recipients.length} destinataire(s) :\n\n${recipients.map(r => '• ' + r.name).join('\n')}`, icon: '📧', confirmText: 'Envoyer' })) {
+            return;
+        }
+        
+        let sent = 0;
+        let errors = 0;
+        
+        for(const recipient of recipients) {
+            const subject = `🎬 Feuille de Service J${shootDay.dayNumber} - ${projectName}`;
+            const content = `Bonjour ${recipient.name},
+
+Vous avez reçu une feuille de service pour le projet "${projectName}" :
+
+📅 Date : ${dateFormatted}
+🎬 Jour de tournage : J${shootDay.dayNumber}
+📍 Lieu : ${shootDay.location || 'À confirmer'}${shootDay.locationAddress ? '\n📌 Adresse : ' + shootDay.locationAddress : ''}${gmapsLink}${weatherInfo}
+
+⏰ Votre convocation : ${recipient.callTime}
+🎬 Prêt à tourner : ${shootDay.readyToShoot || 'À confirmer'}
+🍽️ Repas : ${shootDay.lunchStart || '?'} - ${shootDay.lunchEnd || '?'}
+🏁 Fin estimée : ${shootDay.estimatedWrap || 'À confirmer'}
+${recipient.notes ? '\n📝 Notes vous concernant : ' + recipient.notes : ''}
+${shootDay.notes ? '\n📋 Notes générales : ' + shootDay.notes : ''}
+
+Merci de confirmer votre présence.
+
+Cordialement,
+${senderName}
+${projectName}`;
+
+            try {
+                // Envoyer message interne
+                await Messages.send(recipient.email, {
+                    subject: subject,
+                    content: content,
+                    type: 'callsheet',
+                    projectId: state.currentProjectId,
+                    projectName: projectName,
+                    shootDayId: shootDay.id,
+                    date: shootDay.date
+                });
+                
+                // Envoyer email
+                await Messages.sendEmailPing(recipient.email, recipient.name, 'callsheet', {
+                    projectName: projectName,
+                    shootDate: dateFormatted,
+                    location: shootDay.location || 'À confirmer',
+                    callTime: recipient.callTime,
+                    senderName: senderName
+                });
+                
+                sent++;
+                // Convocation envoyée
+            } catch(e) {
+                console.error(`❌ Erreur envoi à ${recipient.name}:`, e);
+                errors++;
+            }
+        }
+        
+        if(sent > 0) {
+            Utils.toast(`${sent} convocation(s) envoyée(s) !`, 'success');
+        }
+        if(errors > 0) {
+            Utils.toast(`${errors} erreur(s) d'envoi`, 'warning');
+        }
+    },
+  };
+
   const Planning = {
     currentView: 'month',
     currentMode: 'calendar',
@@ -42276,600 +42874,15 @@ ${projectName}`;
         window.open(mailtoLink, '_blank');
     },
 	
-    generateFDS: () => {
-        // If editing, save first
-        Planning.saveShootDay();
-        
-        // Trouver le jour sauvegardé par son ID
-        const savedDay = state.data.shootingDays.find(sd => sd.id === Planning.editingDayId) 
-            || state.data.shootingDays.find(sd => sd.startDate === document.getElementById('edit-startDate').value);
-        if(!savedDay) {
-            Utils.toast('Jour de tournage non trouvé', 'error');
-            return;
-        }
-        
-        Planning.showFDS(savedDay);
-    },
-    
-    showFDS: async (shootDay) => {
-        Planning.currentFDSDay = shootDay;
-        
-        const modal = document.getElementById('fds-modal');
-        const content = document.getElementById('fdsContent');
-        
-        // Utiliser startDate au lieu de date
-        const shootDate = shootDay.startDate || shootDay.date;
-        const dateObj = new Date(shootDate);
-        const dateStr = dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        
-        // Afficher chargement
-        content.innerHTML = '<div style="text-align: center; padding: 40px;"><div class="spinner dark"></div><p>Chargement météo...</p></div>';
-        modal.classList.add('active');
-        
-        // Récupérer météo si coordonnées disponibles
-        let weatherHTML = '';
-        if(shootDay.locationLat && shootDay.locationLng && shootDate) {
-            const weather = await Weather.fetch(parseFloat(shootDay.locationLat), parseFloat(shootDay.locationLng), shootDate);
-            weatherHTML = Weather.renderCard(weather);
-        } else if(!shootDay.locationLat || !shootDay.locationLng) {
-            weatherHTML = '<p class="text-sec-italic">📍 Renseignez une adresse avec GPS pour voir la météo</p>';
-        }
-        
-        // Programme du jour avec scènes ET plans sélectionnés
-        let scenesHTML = '';
-        (shootDay.scenes || []).forEach(ref => {
-            const scene = state.data.scenes.find(s => s.id === ref.sceneId);
-            if(scene) {
-                const sceneIndex = state.data.scenes.findIndex(s => s.id === ref.sceneId) + 1;
-                const selectedShots = ref.selectedShots || [];
-                // Utiliser state.data.shots au lieu de storyboard
-                const allShots = state.data.shots?.filter(s => s.sceneId === ref.sceneId || String(s.sceneId) === String(ref.sceneId)) || [];
-                const totalShots = allShots.length;
-                
-                // Afficher les numéros des plans sélectionnés
-                let shotsInfo = '-';
-                if(totalShots > 0) {
-                    if(selectedShots.length > 0) {
-                        // Trier les plans par ordre
-                        const sortedShots = [...allShots].sort((a,b) => (a.order || 0) - (b.order || 0));
-                        // Récupérer les numéros des plans sélectionnés
-                        const shotNumbers = selectedShots.map(shotId => {
-                            const shotIndex = sortedShots.findIndex(s => s.id === shotId);
-                            return shotIndex >= 0 ? shotIndex + 1 : null;
-                        }).filter(Boolean).sort((a,b) => a-b);
-                        shotsInfo = `Plans: ${shotNumbers.join(', ')} (${selectedShots.length}/${totalShots})`;
-                    } else {
-                        shotsInfo = `0/${totalShots} plans`;
-                    }
-                }
-                
-                scenesHTML += `<tr>
-                    <td>${ref.startTime || '--:--'}</td>
-                    <td><strong>Sc.${sceneIndex}</strong> - ${Utils.escape(scene.title)}</td>
-                    <td>${Utils.escape(scene.perso || '-')}</td>
-                    <td>${scene.time || '-'} min</td>
-                    <td>${shotsInfo}</td>
-                </tr>`;
-            }
-        });
-        
-        // Convocations avec transport - groupées par catégorie
-        let callsheetHTML = '';
-        const actorCalls = (shootDay.callSheet || []).filter(c => c.type === 'actor');
-        const crewCalls = (shootDay.callSheet || []).filter(c => c.type === 'crew');
-        
-        // Fonction helper pour le transport
-        const getTransportInfo = (call) => {
-            let transportInfo = '';
-            if(call.transport === 'own') transportInfo = '🚗';
-            else if(call.transport === 'own-brings') {
-                const withNames = (call.withWho || []).map(id => {
-                    const [type, personId] = [id.substring(0, id.indexOf('_')), id.substring(id.indexOf('_') + 1)];
-                    const p = type === 'actor' ? state.data.actors.find(a => a.id === personId) : state.data.crew.find(c => c.id === personId);
-                    return p ? p.name : '';
-                }).filter(Boolean).join(', ');
-                transportInfo = withNames ? `🚗👥 ${withNames}` : '🚗👥';
-            }
-            else if(call.transport === 'with') {
-                const withNames = (call.withWho || []).map(id => {
-                    const [type, personId] = [id.substring(0, id.indexOf('_')), id.substring(id.indexOf('_') + 1)];
-                    const p = type === 'actor' ? state.data.actors.find(a => a.id === personId) : state.data.crew.find(c => c.id === personId);
-                    return p ? p.name : '';
-                }).filter(Boolean).join(', ');
-                transportInfo = withNames ? `→ ${withNames}` : '🚗→';
-            }
-            else if(call.transport === 'taxi') transportInfo = '🚕';
-            else if(call.transport === 'public') transportInfo = '🚇';
-            return transportInfo;
-        };
-        
-        // Comédiens groupés
-        if(actorCalls.length > 0) {
-            const actorGroups = state.data.groups.filter(g => g.type === 'actor');
-            
-            actorGroups.forEach(grp => {
-                const groupCalls = actorCalls.filter(call => {
-                    const actor = state.data.actors.find(a => a.id === call.personId);
-                    return actor && actor.group_id === grp.id;
-                });
-                
-                if(groupCalls.length > 0) {
-                    callsheetHTML += `<tr class="bg-base"><td colspan="5" class="th-primary">🎭 ${grp.name}</td></tr>`;
-                    groupCalls.forEach(call => {
-                        const person = state.data.actors.find(a => a.id === call.personId);
-                        if(person) {
-                            const character = state.data.characters.find(c => c.actor_id === person.id);
-                            const role = character ? character.name : 'Comédien(ne)';
-                            callsheetHTML += `<tr>
-                                <td>${Utils.escape(person.name)}</td>
-                                <td>${Utils.escape(role)}</td>
-                                <td><strong>${call.callTime || '--:--'}</strong></td>
-                                <td>${getTransportInfo(call)}</td>
-                                <td>${Utils.escape(call.notes || '-')}</td>
-                            </tr>`;
-                        }
-                    });
-                }
-            });
-            
-            // Comédiens sans groupe
-            const noGroupActors = actorCalls.filter(call => {
-                const actor = state.data.actors.find(a => a.id === call.personId);
-                return actor && (!actor.group_id || !actorGroups.find(g => g.id === actor.group_id));
-            });
-            
-            if(noGroupActors.length > 0) {
-                callsheetHTML += `<tr class="bg-base"><td colspan="5" class="th-primary">🎭 Comédiens</td></tr>`;
-                noGroupActors.forEach(call => {
-                    const person = state.data.actors.find(a => a.id === call.personId);
-                    if(person) {
-                        const character = state.data.characters.find(c => c.actor_id === person.id);
-                        const role = character ? character.name : 'Comédien(ne)';
-                        callsheetHTML += `<tr>
-                            <td>${Utils.escape(person.name)}</td>
-                            <td>${Utils.escape(role)}</td>
-                            <td><strong>${call.callTime || '--:--'}</strong></td>
-                            <td>${getTransportInfo(call)}</td>
-                            <td>${Utils.escape(call.notes || '-')}</td>
-                        </tr>`;
-                    }
-                });
-            }
-        }
-        
-        // Techniciens groupés par département
-        if(crewCalls.length > 0) {
-            const crewGroups = state.data.groups.filter(g => g.type === 'crew');
-            
-            crewGroups.forEach(grp => {
-                const groupCalls = crewCalls.filter(call => {
-                    const member = state.data.crew.find(c => c.id === call.personId);
-                    return member && member.group_id === grp.id;
-                });
-                
-                if(groupCalls.length > 0) {
-                    callsheetHTML += `<tr class="bg-base"><td colspan="5" class="th-primary">🎥 ${grp.name}</td></tr>`;
-                    groupCalls.forEach(call => {
-                        const person = state.data.crew.find(c => c.id === call.personId);
-                        if(person) {
-                            callsheetHTML += `<tr>
-                                <td>${Utils.escape(person.name)}</td>
-                                <td>${Utils.escape(person.role || 'Technicien')}</td>
-                                <td><strong>${call.callTime || '--:--'}</strong></td>
-                                <td>${getTransportInfo(call)}</td>
-                                <td>${Utils.escape(call.notes || '-')}</td>
-                            </tr>`;
-                        }
-                    });
-                }
-            });
-            
-            // Techniciens sans groupe
-            const noGroupCrew = crewCalls.filter(call => {
-                const member = state.data.crew.find(c => c.id === call.personId);
-                return member && (!member.group_id || !crewGroups.find(g => g.id === member.group_id));
-            });
-            
-            if(noGroupCrew.length > 0) {
-                callsheetHTML += `<tr class="bg-base"><td colspan="5" style="font-weight: bold; padding: 8px; color: var(--text-sec);">🎥 Autres techniciens</td></tr>`;
-                noGroupCrew.forEach(call => {
-                    const person = state.data.crew.find(c => c.id === call.personId);
-                    if(person) {
-                        callsheetHTML += `<tr>
-                            <td>${Utils.escape(person.name)}</td>
-                            <td>${Utils.escape(person.role || 'Technicien')}</td>
-                            <td><strong>${call.callTime || '--:--'}</strong></td>
-                            <td>${getTransportInfo(call)}</td>
-                            <td>${Utils.escape(call.notes || '-')}</td>
-                        </tr>`;
-                    }
-                });
-            }
-        }
-        
-        // Section lieu avec contact et notes d'accès
-        let locationHTML = `
-            <div class="fds-section">
-                <div class="fds-section-title">📍 LIEU DE TOURNAGE</div>
-                <p><strong>${Utils.escape(shootDay.location || shootDay.locationRealName || 'Non défini')}</strong></p>
-                <p>${Utils.escape(shootDay.locationAddress || '')}</p>`;
-        
-        // Contact et téléphone
-        if(shootDay.contactName || shootDay.contactPhone) {
-            locationHTML += `<p class="mt-10">👤 <strong>Contact :</strong> ${Utils.escape(shootDay.contactName || '')} ${shootDay.contactPhone ? '📞 ' + Utils.escape(shootDay.contactPhone) : ''}</p>`;
-        }
-        
-        // Notes d'accès
-        if(shootDay.locationNotes) {
-            locationHTML += `<p style="margin-top: 5px; padding: 10px; background: rgba(var(--warning-rgb), 0.1); border-radius: 6px;">📝 ${Utils.escape(shootDay.locationNotes)}</p>`;
-        }
-        
-        if(shootDay.locationLat && shootDay.locationLng) {
-            const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${shootDay.locationLat},${shootDay.locationLng}`;
-            locationHTML += `
-                <div id="fds-map-container" class="fds-map-container"></div>
-                <div class="fds-location-actions">
-                    <a href="${gmapsUrl}" target="_blank" class="fds-gmaps-btn">📍 Ouvrir dans Google Maps</a>
-                </div>
-                <p class="fds-gmaps-link-print" style="display: none; font-size: 10px; color: #666; word-break: break-all; margin-top: 5px;">🗺️ ${gmapsUrl}</p>`;
-        }
-        locationHTML += '</div>';
-        
-        // Dépouillement (éléments nécessaires pour les scènes) - stocké dans scene.breakdown
-        // Avec les responsables par département
-        let breakdownHTML = '';
-        const allCategories = {};
-        (shootDay.scenes || []).forEach(ref => {
-            const scene = state.data.scenes.find(s => s.id === ref.sceneId);
-            if(scene && scene.breakdown) {
-                Object.entries(scene.breakdown).forEach(([category, items]) => {
-                    if(Array.isArray(items) && items.length > 0) {
-                        if(!allCategories[category]) allCategories[category] = [];
-                        items.forEach(item => {
-                            if(!allCategories[category].includes(item)) {
-                                allCategories[category].push(item);
-                            }
-                        });
-                    }
-                });
-            }
-        });
-        
-        // Mapping catégorie dépouillement -> groupe crew
-        const categoryToCrewGroup = {
-            'ACCESSOIRES': 'gc5', 'DECORS-LIEUX': 'gc5',
-            'COSTUMES': 'gc6',
-            'MAQUILLAGE-COIFFURE': 'gc7',
-            'VEHICULES': 'gc12', 'LOGISTIQUE': 'gc12',
-            'SON-MUSIQUE': 'gc4',
-            'LUMIERE': 'gc2',
-            'FIGURATION': 'gc9', 'ANIMAUX': 'gc9',
-            'EFFETS SPECIAUX (SFX)': 'gc16',
-            'EFFETS VISUELS (VFX)': 'gc13'
-        };
-        
-        // Trouver le responsable pour chaque catégorie
-        const getResponsibleForCategory = (category) => {
-            const groupId = categoryToCrewGroup[category];
-            if(!groupId) return null;
-            
-            // Chercher dans la callSheet du jour les techniciens de ce groupe
-            const responsible = (shootDay.callSheet || []).find(call => {
-                if(call.type !== 'crew') return false;
-                const crew = state.data.crew.find(c => c.id === call.personId);
-                return crew && crew.group_id === groupId;
-            });
-            
-            if(responsible) {
-                const crew = state.data.crew.find(c => c.id === responsible.personId);
-                return crew ? crew.name : null;
-            }
-            return null;
-        };
-        
-        if(Object.keys(allCategories).length > 0) {
-            breakdownHTML = `
-                <div class="fds-section">
-                    <div class="fds-section-title">📦 DÉPOUILLEMENT / BESOINS</div>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">
-                        ${Object.entries(allCategories).map(([cat, items]) => {
-                            const responsible = getResponsibleForCategory(cat);
-                            const responsibleText = responsible ? ` (${Utils.escape(responsible)})` : '';
-                            return `
-                            <div style="padding: 10px; background: var(--card-bg); border-radius: 6px; border: 1px solid var(--border);">
-                                <strong>${Utils.escape(cat)}${responsibleText}</strong>
-                                <ul style="margin: 5px 0 0 15px; padding: 0;">
-                                    ${items.map(item => `<li>${Utils.escape(item)}</li>`).join('')}
-                                </ul>
-                            </div>`;
-                        }).join('')}
-                    </div>
-                </div>`;
-        } else {
-            breakdownHTML = `
-                <div class="fds-section">
-                    <div class="fds-section-title">📦 DÉPOUILLEMENT / BESOINS</div>
-                    <p class="text-sec-italic">Aucun élément de dépouillement pour les scènes sélectionnées</p>
-                </div>`;
-        }
-        
-        // Nom du tournage
-        const dayName = shootDay.name || `Jour ${shootDay.dayNumber || '?'}`;
-        
-        content.innerHTML = `
-            <div class="fds-preview" id="fds-print-content">
-                <div class="fds-header">
-                    <div class="fds-title">${Utils.escape(state.data.title)}</div>
-                    <div class="fds-subtitle">FEUILLE DE SERVICE</div>
-                    <div class="mt-10">
-                        <strong>${Utils.escape(dayName)}</strong> - ${dateStr}
-                    </div>
-                </div>
-                
-                <div class="fds-section">
-                    <div class="fds-section-title">🎬 PROGRAMME DU JOUR</div>
-                    <table class="fds-table">
-                        <thead>
-                            <tr><th>Heure</th><th>Scène</th><th>Personnages</th><th>Durée</th><th>Plans</th></tr>
-                        </thead>
-                        <tbody>
-                            ${scenesHTML || '<tr><td colspan="5" class="text-center">Aucune scène planifiée</td></tr>'}
-                        </tbody>
-                    </table>
-                </div>
-                
-                ${locationHTML}
-                
-                <div class="fds-section">
-                    <div class="fds-section-title">⏰ HORAIRES GÉNÉRAUX</div>
-                    <table class="fds-table">
-                        <tr>
-                            <td><strong>Convocation équipe</strong></td>
-                            <td>${shootDay.crewCall || '--:--'}</td>
-                            <td><strong>Prêt à tourner</strong></td>
-                            <td>${shootDay.readyToShoot || '--:--'}</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Pause déjeuner</strong></td>
-                            <td>${shootDay.lunchStart || '--:--'} - ${shootDay.lunchEnd || '--:--'}</td>
-                            <td><strong>Fin estimée</strong></td>
-                            <td>${shootDay.estimatedWrap || '--:--'}</td>
-                        </tr>
-                    </table>
-                </div>
-                
-                <div class="fds-section">
-                    <div class="fds-section-title">📋 CONVOCATIONS</div>
-                    <table class="fds-table">
-                        <thead>
-                            <tr><th>Nom</th><th>Fonction</th><th>Convocation</th><th>Transport</th><th>Notes</th></tr>
-                        </thead>
-                        <tbody>
-                            ${callsheetHTML || '<tr><td colspan="5" class="text-center">Aucune convocation</td></tr>'}
-                        </tbody>
-                    </table>
-                </div>
-                
-                <div class="fds-section">
-                    <div class="fds-section-title">🌤️ MÉTÉO PRÉVUE</div>
-                    ${weatherHTML}
-                </div>
-                
-                <div class="fds-section">
-                    <div class="fds-section-title">🌡️ MÉTÉO PERSONNALISÉE / CONSIGNES</div>
-                    <p style="white-space: pre-wrap;">${shootDay.customWeather ? Utils.escape(shootDay.customWeather) : '<span class="text-sec-italic">Vide</span>'}</p>
-                </div>
-                
-                <div class="fds-section">
-                    <div class="fds-section-title">📝 NOTES GÉNÉRALES</div>
-                    <p style="white-space: pre-wrap;">${shootDay.notes ? Utils.escape(shootDay.notes) : '<span class="text-sec-italic">Vide</span>'}</p>
-                </div>
-                
-                ${breakdownHTML}
-            </div>
-        `;
-        
-        // Initialiser la carte Leaflet
-        if(shootDay.locationLat && shootDay.locationLng) {
-            setTimeout(() => {
-                const mapContainer = document.getElementById('fds-map-container');
-                if(mapContainer && typeof L !== 'undefined') {
-                    const fdsMap = L.map(mapContainer, { zoomControl: true, attributionControl: false })
-                        .setView([parseFloat(shootDay.locationLat), parseFloat(shootDay.locationLng)], 15);
-                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(fdsMap);
-                    L.marker([parseFloat(shootDay.locationLat), parseFloat(shootDay.locationLng)]).addTo(fdsMap)
-                        .bindPopup(`<strong>${Utils.escape(shootDay.location || 'Lieu')}</strong>`).openPopup();
-                    Planning.currentFDSMap = fdsMap;
-                }
-            }, 100);
-        }
-    },
-    
-    printFDS: () => {
-        const shootDay = Planning.currentFDSDay;
-        if(!shootDay) return;
-        
-        // Générer le nom du fichier
-        const projectTitle = state.data.title || 'Projet';
-        const dayName = shootDay.name || `J${shootDay.dayNumber || ''}`;
-        const dateStr = shootDay.startDate || shootDay.date || '';
-        const pdfTitle = `${projectTitle} - FDS ${dayName} - ${dateStr}`.replace(/[\/\\:*?"<>|]/g, '-');
-        
-        // Préparer le contenu avec le lien Google Maps en texte
-        let content = document.getElementById('fds-print-content').innerHTML;
-        
-        // Ajouter le lien Google Maps en texte visible pour l'impression
-        let gmapsTextHTML = '';
-        if(shootDay.locationLat && shootDay.locationLng) {
-            const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${shootDay.locationLat},${shootDay.locationLng}`;
-            gmapsTextHTML = `<p class="print-only-link" style="font-size: 10px; color: #666; word-break: break-all;">🗺️ Google Maps: ${gmapsUrl}</p>`;
-        }
-        
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>${Utils.escape(pdfTitle)}</title>
-                <style>
-                    body { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; margin: 20px; }
-                    .fds-header { text-align: center; border-bottom: 2px solid black; padding-bottom: 15px; margin-bottom: 15px; }
-                    .fds-title { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
-                    .fds-subtitle { font-size: 14px; }
-                    .fds-section { margin-bottom: 15px; page-break-inside: avoid; }
-                    .fds-section-title { font-weight: bold; background: #eee; padding: 5px; margin-bottom: 10px; }
-.fds-gmaps-link-print { display: none; }
-@media print { .fds-gmaps-link-print { display: block !important; } .fds-map-container, .fds-location-actions { display: none !important; } }
-                    .fds-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-                    .fds-table th, .fds-table td { border: 1px solid #333; padding: 5px; text-align: left; }
-                    .fds-table th { background: #ddd; }
-                    .fds-weather-card { display: flex; gap: 15px; align-items: center; padding: 10px; background: #f0f7ff; border-radius: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-                    .fds-weather-icon { font-size: 2rem; }
-                    .fds-weather-temp { font-size: 1.5rem; font-weight: bold; }
-                    .fds-weather-row { display: flex; gap: 10px; flex-wrap: wrap; }
-                    .fds-weather-item { padding: 3px 8px; background: #e0e0e0; border-radius: 10px; font-size: 11px; }
-                    .fds-sun-times { display: flex; gap: 15px; font-size: 11px; margin-top: 5px; }
-                    .fds-map-container { display: none; }
-                    .fds-location-actions { display: none; }
-                    .fds-gmaps-btn { display: none; }
-                    .print-only-link { display: block; margin-top: 10px; }
-                    @media screen {
-                        .print-only-link { display: none; }
-                    }
-                    @page { margin: 15mm; }
-                </style>
-            </head>
-            <body>${content}${gmapsTextHTML}</body>
-            </html>
-        `);
-        printWindow.document.close();
-        
-        // Petit délai pour que le titre soit bien pris en compte
-        setTimeout(() => {
-            printWindow.print();
-        }, 100);
-    },
-    
-    sendFDS: async () => {
-        const shootDay = Planning.currentFDSDay;
-        if(!shootDay) {
-            Utils.toast('Aucune feuille de service chargée', 'error');
-            return;
-        }
-        
-        const projectName = state.data.title || 'Projet';
-        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        const senderName = state.userProfile?.displayName || state.currentUser?.email?.split('@')[0] || 'La production';
-        
-        // Récupérer météo et lien GPS
-        let weatherInfo = '';
-        let gmapsLink = '';
-        if(shootDay.locationLat && shootDay.locationLng) {
-            gmapsLink = `\n🗺️ GPS : https://www.google.com/maps/search/?api=1&query=${shootDay.locationLat},${shootDay.locationLng}`;
-            const weather = await Weather.fetch(shootDay.locationLat, shootDay.locationLng, shootDay.date);
-            if(weather) {
-                weatherInfo = `\n\n🌤️ Météo : ${weather.icon} ${weather.description}, ${weather.tempMin}°C - ${weather.tempMax}°C`;
-                if(weather.precipitationProb > 30) weatherInfo += ` (${weather.precipitationProb}% pluie)`;
-                weatherInfo += `\n🌅 Soleil : ${weather.sunrise} - ${weather.sunset}`;
-            }
-        }
-        
-        // Collecter toutes les personnes à notifier
-        const recipients = [];
-        
-        // Parcourir la callSheet
-        if(shootDay.callSheet && shootDay.callSheet.length > 0) {
-            for(const call of shootDay.callSheet) {
-                let person = null;
-                
-                if(call.type === 'actor') {
-                    person = state.data.actors.find(a => a.id === call.personId);
-                } else if(call.type === 'crew') {
-                    person = state.data.crew.find(c => c.id === call.personId);
-                }
-                
-                if(person && person.email) {
-                    recipients.push({
-                        name: person.name || 'Inconnu',
-                        email: person.email,
-                        callTime: call.callTime || shootDay.crewCall || 'À confirmer',
-                        notes: call.notes || ''
-                    });
-                }
-            }
-        }
-        
-        if(recipients.length === 0) {
-            Utils.toast('Aucune personne avec email dans cette feuille de service', 'warning');
-            return;
-        }
-        
-        if(!await ConfirmModal.show({ title: 'Envoyer la feuille de service ?', message: `${recipients.length} destinataire(s) :\n\n${recipients.map(r => '• ' + r.name).join('\n')}`, icon: '📧', confirmText: 'Envoyer' })) {
-            return;
-        }
-        
-        let sent = 0;
-        let errors = 0;
-        
-        for(const recipient of recipients) {
-            const subject = `🎬 Feuille de Service J${shootDay.dayNumber} - ${projectName}`;
-            const content = `Bonjour ${recipient.name},
-
-Vous avez reçu une feuille de service pour le projet "${projectName}" :
-
-📅 Date : ${dateFormatted}
-🎬 Jour de tournage : J${shootDay.dayNumber}
-📍 Lieu : ${shootDay.location || 'À confirmer'}${shootDay.locationAddress ? '\n📌 Adresse : ' + shootDay.locationAddress : ''}${gmapsLink}${weatherInfo}
-
-⏰ Votre convocation : ${recipient.callTime}
-🎬 Prêt à tourner : ${shootDay.readyToShoot || 'À confirmer'}
-🍽️ Repas : ${shootDay.lunchStart || '?'} - ${shootDay.lunchEnd || '?'}
-🏁 Fin estimée : ${shootDay.estimatedWrap || 'À confirmer'}
-${recipient.notes ? '\n📝 Notes vous concernant : ' + recipient.notes : ''}
-${shootDay.notes ? '\n📋 Notes générales : ' + shootDay.notes : ''}
-
-Merci de confirmer votre présence.
-
-Cordialement,
-${senderName}
-${projectName}`;
-
-            try {
-                // Envoyer message interne
-                await Messages.send(recipient.email, {
-                    subject: subject,
-                    content: content,
-                    type: 'callsheet',
-                    projectId: state.currentProjectId,
-                    projectName: projectName,
-                    shootDayId: shootDay.id,
-                    date: shootDay.date
-                });
-                
-                // Envoyer email
-                await Messages.sendEmailPing(recipient.email, recipient.name, 'callsheet', {
-                    projectName: projectName,
-                    shootDate: dateFormatted,
-                    location: shootDay.location || 'À confirmer',
-                    callTime: recipient.callTime,
-                    senderName: senderName
-                });
-                
-                sent++;
-                // Convocation envoyée
-            } catch(e) {
-                console.error(`❌ Erreur envoi à ${recipient.name}:`, e);
-                errors++;
-            }
-        }
-        
-        if(sent > 0) {
-            Utils.toast(`${sent} convocation(s) envoyée(s) !`, 'success');
-        }
-        if(errors > 0) {
-            Utils.toast(`${errors} erreur(s) d'envoi`, 'warning');
-        }
-    },
+    // ========== FEUILLE DE SERVICE (FDS) — délégué à PlanningFDS ==========
+    get currentFDSDay() { return PlanningFDS.currentFDSDay; },
+    set currentFDSDay(v) { PlanningFDS.currentFDSDay = v; },
+    get currentFDSMap() { return PlanningFDS.currentFDSMap; },
+    set currentFDSMap(v) { PlanningFDS.currentFDSMap = v; },
+    generateFDS: (...a) => PlanningFDS.generateFDS(...a),
+    showFDS: (...a) => PlanningFDS.showFDS(...a),
+    printFDS: (...a) => PlanningFDS.printFDS(...a),
+    sendFDS: (...a) => PlanningFDS.sendFDS(...a),
     
     // ========== CALENDRIER VISUEL V1.4.6 ==========
     availMonth: new Date().getMonth(),
@@ -69010,7 +69023,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, ProfileActualites, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, ProfileActualites, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
