@@ -6996,7 +6996,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.9.6</p>
+      <p>vv4.9.7</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -38697,7 +38697,7 @@ callsheetHTML += `<tr class="bg-base"><td colspan="5" class="th-primary">🎭 ${
                 <p class="fds-gmaps-link-print" style="display: none; font-size: 10px; color: #666; word-break: break-all; margin-top: 5px;">🗺️ ${gmapsUrl}</p>`;
         }
         locationHTML += '</div>';
-    /* __FDS_SEG3__ */// Dépouillement (éléments nécessaires pour les scènes) - stocké dans scene.breakdown
+    // Dépouillement (éléments nécessaires pour les scènes) - stocké dans scene.breakdown
         // Avec les responsables par département
         let breakdownHTML = '';
         const allCategories = {};
@@ -39051,6 +39051,578 @@ ${projectName}`;
         if(errors > 0) {
             Utils.toast(`${errors} erreur(s) d'envoi`, 'warning');
         }
+    },
+  };
+
+  const PlanningCallSheets = {
+    closeCallSheets: () => {
+        document.getElementById('callsheets-modal').style.display = 'none';
+    },
+    
+    validateCallSheet: (dayId) => {
+        const day = state.data.shootingDays.find(d => d.id === dayId);
+        if(!day) return;
+        
+        day.validated = !day.validated;
+        Store.save();
+        Planning.openCallSheets(); // Rafraîchir la liste
+    },
+    
+    publishCallSheet: async (shootDay) => {
+        // Générer un token unique pour cette feuille
+        const token = 'fds_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11);
+        
+        const projectName = state.data.title || 'Projet';
+        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        
+        // Construire les données des scènes
+        const scenesData = (shootDay.scenes || []).map(ref => {
+            const scene = state.data.scenes.find(s => s.id === ref.sceneId);
+            return scene ? {
+                startTime: ref.startTime || '--:--',
+                title: scene.title || 'Scène sans titre',
+                perso: scene.perso || '',
+                decor: scene.decor || '',
+                time: scene.time || ''
+            } : null;
+        }).filter(s => s);
+        
+        // Construire les données des convoqués
+        const callSheetData = (shootDay.callSheet || []).map(call => {
+            let person = null;
+            if(call.type === 'actor') {
+                person = state.data.actors.find(a => a.id === call.personId);
+            } else if(call.type === 'crew') {
+                person = state.data.crew.find(c => c.id === call.personId);
+            }
+            return person ? {
+                name: person.name || 'Inconnu',
+                role: person.role || person.department || (call.type === 'actor' ? 'Comédien·ne' : 'Technicien·ne'),
+                callTime: call.callTime || shootDay.crewCall || '',
+                notes: call.notes || ''
+            } : null;
+        }).filter(c => c);
+        
+        // Données publiques de la feuille de service
+        const publicData = {
+            token: token,
+            projectName: projectName,
+            dayNumber: shootDay.dayNumber,
+            date: shootDay.date,
+            dateFormatted: dateFormatted,
+            location: shootDay.location || '',
+            locationAddress: shootDay.locationAddress || '',
+            contactName: shootDay.contactName || '',
+            contactPhone: shootDay.contactPhone || '',
+            locationNotes: shootDay.locationNotes || '',
+            crewCall: shootDay.crewCall || '',
+            readyToShoot: shootDay.readyToShoot || '',
+            lunchStart: shootDay.lunchStart || '',
+            lunchEnd: shootDay.lunchEnd || '',
+            estimatedWrap: shootDay.estimatedWrap || '',
+            notes: shootDay.notes || '',
+            customWeather: shootDay.customWeather || '',
+            scenes: scenesData,
+            callSheet: callSheetData,
+            createdAt: Date.now(),
+            createdBy: state.currentUser?.email || ''
+        };
+        
+        // Sauvegarder dans le projet (les callsheets publiques sont stockées dans data)
+        try {
+            if(!state.data.publicCallsheets) state.data.publicCallsheets = {};
+            state.data.publicCallsheets[token] = publicData;
+            await Store.save();
+            return token;
+        } catch(e) {
+            console.error('❌ Erreur publication feuille:', e);
+            return null;
+        }
+    },
+    
+    loadPublicCallSheet: async (token) => {
+        try {
+            // Chercher dans les données du projet actuel
+            const data = state.data?.publicCallsheets?.[token];
+            if(!data) {
+                document.getElementById('public-callsheet-content').innerHTML = '<p style="text-align:center; color:#c00;">❌ Feuille de service introuvable ou expirée.</p>';
+                return;
+            }
+            
+            // Générer le HTML de la feuille
+            let html = `
+                <div style="text-align:center; border-bottom:3px solid #333; padding-bottom:20px; margin-bottom:20px;">
+                    <h2 style="margin:0; font-size:1.8rem;">${Utils.escape(data.projectName)}</h2>
+                    <p style="font-size:1.3rem; margin:10px 0;">FEUILLE DE SERVICE - JOUR ${data.dayNumber}</p>
+                    <p style="font-size:1.1rem; color:#666;">${Utils.escape(data.dateFormatted)}</p>
+                </div>
+                
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+                    <div style="background:#f5f5f5; padding:15px; border-radius:8px;">
+                        <h3 style="margin:0 0 10px; color:#333;">📍 Lieu</h3>
+                        <p style="margin:0; font-size:1.1rem; font-weight:bold;">${Utils.escape(data.location) || 'À confirmer'}</p>
+                        ${data.locationAddress ? `<p style="margin:5px 0 0; color:#666;">${Utils.escape(data.locationAddress)}</p>` : ''}
+                        ${data.contactName || data.contactPhone ? `<p style="margin:10px 0 0; padding-top:10px; border-top:1px solid #ddd;"><strong>👤 Contact sur place:</strong> ${Utils.escape(data.contactName) || ''} ${data.contactPhone ? '📞 ' + Utils.escape(data.contactPhone) : ''}</p>` : ''}
+                        ${data.locationNotes ? `<p style="margin:5px 0 0; color:#666; font-style:italic;">📝 ${Utils.escape(data.locationNotes)}</p>` : ''}
+                    </div>
+                    <div style="background:#f5f5f5; padding:15px; border-radius:8px;">
+                        <h3 style="margin:0 0 10px; color:#333;">⏰ Horaires</h3>
+                        <p class="m-0"><strong>Convocation équipe:</strong> ${Utils.escape(data.crewCall) || 'À confirmer'}</p>
+                        <p style="margin:5px 0;"><strong>Prêt à tourner:</strong> ${Utils.escape(data.readyToShoot) || 'À confirmer'}</p>
+                        <p style="margin:5px 0;"><strong>Repas:</strong> ${Utils.escape(data.lunchStart) || '?'} - ${Utils.escape(data.lunchEnd) || '?'}</p>
+<p style="margin:5px 0 0;"><strong>Fin estimée:</strong> ${Utils.escape(data.estimatedWrap) || 'À confirmer'}</p>
+                    </div>
+                </div>`;
+            
+            // Scènes
+            if(data.scenes && data.scenes.length > 0) {
+                html += `
+                    <div class="mb-20">
+                        <h3 style="background:#333; color:white; padding:10px; margin:0;">🎬 Scènes Prévues</h3>
+                        <table style="width:100%; border-collapse:collapse;">
+                            <thead>
+                                <tr style="background:#eee;">
+                                    <th class="td-bordered">Heure</th>
+                                    <th class="td-bordered">Scène</th>
+                                    <th class="td-bordered">Personnages</th>
+                                    <th class="td-bordered">Décor</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.scenes.map(s => `
+                                    <tr>
+                                        <td class="td-bordered-simple">${Utils.escape(s.startTime)}</td>
+                                        <td class="td-bordered-simple">${Utils.escape(s.title)}</td>
+                                        <td class="td-bordered-simple">${Utils.escape(s.perso)}</td>
+                                        <td class="td-bordered-simple">${Utils.escape(s.decor)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>`;
+            }
+            
+            // Équipe convoquée
+            if(data.callSheet && data.callSheet.length > 0) {
+                html += `
+                    <div class="mb-20">
+                        <h3 style="background:#333; color:white; padding:10px; margin:0;">👥 Équipe Convoquée</h3>
+                        <table style="width:100%; border-collapse:collapse;">
+                            <thead>
+                                <tr style="background:#eee;">
+                                    <th class="td-bordered">Nom</th>
+                                    <th class="td-bordered">Fonction</th>
+                                    <th class="td-bordered">Convocation</th>
+                                    <th class="td-bordered">Notes</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.callSheet.map(c => `
+                                    <tr>
+                                        <td style="padding:10px; border:1px solid #ddd; font-weight:bold;">${Utils.escape(c.name)}</td>
+                                        <td class="td-bordered-simple">${Utils.escape(c.role)}</td>
+                                        <td class="td-bordered-simple">${Utils.escape(c.callTime)}</td>
+                                        <td class="td-bordered-simple">${Utils.escape(c.notes)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>`;
+            }
+            
+            // Notes
+            if(data.notes) {
+                html += `
+                    <div style="background:#fff3cd; padding:15px; border-radius:8px; margin-bottom:20px;">
+                        <h3 style="margin:0 0 10px; color:#856404;">📋 Notes</h3>
+                        <p style="margin:0; white-space:pre-wrap;">${Utils.escape(data.notes)}</p>
+                    </div>`;
+            }
+            
+            if(data.customWeather) {
+                html += `
+                    <div style="background:#d1ecf1; padding:15px; border-radius:8px;">
+                        <h3 style="margin:0 0 10px; color:#0c5460;">🌤️ Météo / Conditions</h3>
+                        <p style="margin:0; white-space:pre-wrap;">${Utils.escape(data.customWeather)}</p>
+                    </div>`;
+            }
+            
+            document.getElementById('public-callsheet-content').innerHTML = html;
+            document.getElementById('public-callsheet-modal').style.display = 'block';
+            
+        } catch(e) {
+            console.error('Erreur chargement feuille publique:', e);
+            document.getElementById('public-callsheet-content').innerHTML = '<p style="text-align:center; color:#c00;">❌ Erreur lors du chargement.</p>';
+        }
+    },
+    
+    sendCallSheet: async (dayId) => {
+        const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
+        if(!shootDay) {
+            Utils.toast('Jour de tournage introuvable', 'error');
+            return;
+        }
+        
+        const projectName = state.data.title || 'Projet';
+        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        const senderName = state.userProfile?.displayName || state.currentUser?.email?.split('@')[0] || 'La production';
+        const appUrl = 'https://moteur.studio'; // URL de l'application
+        
+        // Construire la liste des scènes
+        let scenesText = '';
+        if(shootDay.scenes && shootDay.scenes.length > 0) {
+            scenesText = '\n\n🎬 SCÈNES PRÉVUES :\n';
+            shootDay.scenes.forEach(ref => {
+                const scene = state.data.scenes.find(s => s.id === ref.sceneId);
+                if(scene) {
+                    scenesText += `• ${ref.startTime || '--:--'} - ${scene.title || 'Scène sans titre'}`;
+                    if(scene.perso) scenesText += ` (${scene.perso})`;
+                    if(scene.decor) scenesText += ` - ${scene.decor}`;
+                    scenesText += '\n';
+                }
+            });
+        }
+        
+        // Collecter toutes les personnes à notifier
+        const recipients = [];
+    if(shootDay.callSheet && shootDay.callSheet.length > 0) {
+            for(const call of shootDay.callSheet) {
+                let person = null;
+                
+                if(call.type === 'actor') {
+                    person = state.data.actors.find(a => a.id === call.personId);
+                } else if(call.type === 'crew') {
+                    person = state.data.crew.find(c => c.id === call.personId);
+                }
+                
+                if(person && person.email) {
+                    recipients.push({
+                        name: person.name || 'Inconnu',
+                        email: person.email,
+                        callTime: call.callTime || shootDay.crewCall || 'À confirmer',
+                        notes: call.notes || ''
+                    });
+                }
+            }
+        }
+        
+        if(recipients.length === 0) {
+            Utils.toast('Aucune personne avec email dans cette feuille de service', 'warning');
+            return;
+        }
+        
+        if(!await ConfirmModal.show({ title: `Envoyer la feuille de service J${shootDay.dayNumber} ?`, message: `${recipients.length} destinataire(s) :\n\n${recipients.map(r => '• ' + r.name).join('\n')}`, icon: '📧', confirmText: 'Envoyer' })) {
+            return;
+        }
+        
+        // Publier la feuille de service pour générer le lien
+        Utils.toast('Publication de la feuille de service...', 'info');
+        const token = await PlanningCallSheets.publishCallSheet(shootDay);
+        if(!token) {
+            Utils.toast('Erreur lors de la publication', 'error');
+            return;
+        }
+        
+        const publicLink = window.location.origin + window.location.pathname + '?callsheet=' + token;
+        
+        let sent = 0;
+        let errors = 0;
+        
+        for(const recipient of recipients) {
+            const subject = `🎬 Feuille de Service J${shootDay.dayNumber} - ${projectName}`;
+            const content = `Bonjour ${recipient.name},
+
+Vous avez reçu une feuille de service pour le projet "${projectName}".
+
+══════════════════════════════════
+📅 JOUR ${shootDay.dayNumber} - ${dateFormatted.toUpperCase()}
+══════════════════════════════════
+
+📍 Lieu : ${shootDay.location || 'À confirmer'}${shootDay.locationAddress ? '\n📌 Adresse : ' + shootDay.locationAddress : ''}${shootDay.contactName || shootDay.contactPhone ? '\n👤 Contact sur place : ' + (shootDay.contactName || '') + (shootDay.contactPhone ? ' 📞 ' + shootDay.contactPhone : '') : ''}${shootDay.locationNotes ? '\n📝 Accès : ' + shootDay.locationNotes : ''}
+
+⏰ HORAIRES :
+- Votre convocation : ${recipient.callTime}
+- Prêt à tourner : ${shootDay.readyToShoot || 'À confirmer'}
+- Repas : ${shootDay.lunchStart || '?'} - ${shootDay.lunchEnd || '?'}
+- Fin estimée : ${shootDay.estimatedWrap || 'À confirmer'}
+${scenesText}${recipient.notes ? '\n📝 NOTES VOUS CONCERNANT :\n' + recipient.notes : ''}${shootDay.notes ? '\n\n📋 NOTES GÉNÉRALES :\n' + shootDay.notes : ''}
+
+══════════════════════════════════
+🔗 VOIR LA FEUILLE DE SERVICE COMPLÈTE :
+Cliquez sur le lien ci-dessous pour voir et imprimer votre feuille de service :
+
+👉 ${publicLink}
+══════════════════════════════════
+
+Merci de confirmer votre présence en répondant à ce message.
+
+Cordialement,
+${senderName}
+${projectName}`;
+
+            try {
+                // Envoyer message interne
+                await Messages.send(recipient.email, {
+                    subject: subject,
+                    content: content,
+                    type: 'callsheet',
+                    projectId: state.currentProjectId,
+                    projectName: projectName,
+                    shootDayId: shootDay.id,
+                    date: shootDay.date
+                });
+                
+                // Envoyer email avec lien public
+                await Messages.sendEmailPing(recipient.email, recipient.name, 'callsheet', {
+                    projectName: projectName,
+                    shootDate: dateFormatted,
+                    location: shootDay.location || 'À confirmer',
+                    callTime: recipient.callTime,
+                    senderName: senderName,
+                    publicLink: publicLink
+                });
+                
+                sent++;
+            } catch(e) {
+                console.error(`❌ Erreur envoi à ${recipient.name}:`, e);
+                errors++;
+            }
+        }
+        
+        if(sent > 0) {
+            Utils.toast(`✅ ${sent} convocation(s) envoyée(s) !`, 'success');
+        }
+        if(errors > 0) {
+            Utils.toast(`⚠️ ${errors} erreur(s) d'envoi`, 'warning');
+        }
+    },
+    
+    printCallSheet: (dayId) => {
+        const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
+    if(!shootDay) return;
+        
+        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        const projectTitle = document.getElementById('projectTitle')?.value || 'Projet';
+        
+        let printContent = `
+            <html>
+            <head>
+                <title>Feuille de Service - Jour ${shootDay.dayNumber}</title>
+                <style>
+                    body { font-family: Arial, sans-serif; padding: 20px; }
+                    h1 { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; }
+                    h2 { color: #333; margin-top: 25px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+                    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
+                    .info-item { padding: 8px; background: #f5f5f5; border-radius: 4px; }
+                    .info-label { font-weight: bold; color: #666; }
+                    table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+                    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+                    th { background: #f0f0f0; }
+                    .scene-item { padding: 10px; margin: 5px 0; background: #f9f9f9; border-left: 3px solid #2b6ef6; }
+                </style>
+            </head>
+            <body>
+                <h1>📋 FEUILLE DE SERVICE</h1>
+                <div style="text-align:center; margin-bottom:20px;">
+                    <strong style="font-size:1.2rem;">${projectTitle}</strong><br>
+                    <span>Jour ${shootDay.dayNumber} - ${dateFormatted}</span>
+                </div>
+                
+                <h2>📍 Lieu de Tournage</h2>
+                <div class="info-grid">
+                    <div class="info-item"><span class="info-label">Lieu:</span> ${shootDay.location || 'Non défini'}</div>
+                    <div class="info-item"><span class="info-label">Adresse:</span> ${shootDay.locationAddress || 'Non définie'}</div>
+                </div>
+                
+                <h2>⏰ Horaires</h2>
+                <div class="info-grid">
+                    <div class="info-item"><span class="info-label">Convocation équipe:</span> ${shootDay.crewCall || '--:--'}</div>
+                    <div class="info-item"><span class="info-label">Prêt à tourner:</span> ${shootDay.readyToShoot || '--:--'}</div>
+                    <div class="info-item"><span class="info-label">Pause déjeuner:</span> ${shootDay.lunchStart || '--:--'} - ${shootDay.lunchEnd || '--:--'}</div>
+                    <div class="info-item"><span class="info-label">Fin estimée:</span> ${shootDay.estimatedWrap || '--:--'}</div>
+                </div>
+                
+                <h2>🎬 Scènes à Tourner</h2>`;
+        
+        if(shootDay.scenes && shootDay.scenes.length > 0) {
+            shootDay.scenes.forEach(sceneRef => {
+                const scene = state.data.scenes.find(s => s.id === sceneRef.sceneId);
+                if(scene) {
+                    printContent += `<div class="scene-item">
+                        <strong>${scene.title}</strong><br>
+                        <span class="text-muted">Personnages: ${scene.perso || 'N/A'}</span><br>
+                        <span class="text-muted">Heure prévue: ${sceneRef.startTime || 'Non définie'}</span>
+                    </div>`;
+                }
+            });
+        } else {
+            printContent += '<p style="color:#999;">Aucune scène planifiée</p>';
+        }
+        
+        printContent += '<h2>👥 Convocations</h2>';
+        
+        if(shootDay.callSheet && shootDay.callSheet.length > 0) {
+            printContent += `<table>
+                <thead><tr><th>Nom</th><th>Fonction</th><th>Convocation</th><th>Notes</th></tr></thead>
+                <tbody>`;
+            
+            shootDay.callSheet.forEach(call => {
+                let person = null;
+                let role = '';
+                if(call.type === 'actor') {
+                    person = state.data.actors.find(a => a.id === call.personId);
+                    role = 'Comédien(ne)';
+                } else {
+                    person = state.data.crew.find(c => c.id === call.personId);
+                    role = person?.role || 'Technicien';
+                }
+                if(person) {
+                    printContent += `<tr>
+                        <td>${person.name}</td>
+                        <td>${role}</td>
+                        <td>${call.callTime || '--:--'}</td>
+                        <td>${call.notes || ''}</td>
+                    </tr>`;
+                }
+            });
+            
+            printContent += '</tbody></table>';
+        } else {
+            printContent += '<p style="color:#999;">Aucune convocation</p>';
+        }
+        
+        // Section "À prévoir" basée sur le dépouillement
+        const scenesIds = (shootDay.scenes || []).map(ref => ref.sceneId);
+        if(scenesIds.length > 0 && shootDay.callSheet && shootDay.callSheet.length > 0) {
+            let breakdownByPerson = [];
+            
+            shootDay.callSheet.forEach(call => {
+                if(call.type !== 'crew') return;
+                
+                const member = state.data.crew.find(c => c.id === call.personId);
+                if(!member || !member.group_id) return;
+                
+                const items = Planning.getBreakdownItemsForPerson(member, scenesIds);
+                if(items.length > 0) {
+                    const groupInfo = state.data.groups.find(g => g.id === member.group_id);
+                    breakdownByPerson.push({
+                        name: member.name,
+                        department: groupInfo ? groupInfo.name : 'Non classé',
+                        items: items
+                    });
+                }
+            });
+            
+            if(breakdownByPerson.length > 0) {
+    printContent += '<h2>📦 À Prévoir par Département</h2>';
+                
+                // Regrouper par département
+                const byDepartment = {};
+                breakdownByPerson.forEach(person => {
+                    if(!byDepartment[person.department]) {
+                        byDepartment[person.department] = { names: [], items: [] };
+                    }
+                    byDepartment[person.department].names.push(person.name);
+                    person.items.forEach(item => {
+                        // Éviter les doublons
+                        const exists = byDepartment[person.department].items.some(
+                            i => i.item === item.item && i.sceneNum === item.sceneNum
+                        );
+                        if(!exists) {
+                            byDepartment[person.department].items.push(item);
+                        }
+                    });
+                });
+                
+                // Afficher par département
+                Object.keys(byDepartment).forEach(dept => {
+                    const data = byDepartment[dept];
+                    const namesStr = data.names.join(', ');
+                    
+                    printContent += `<div style="margin-bottom: 15px; padding: 10px; background: #f9f9f9; border-radius: 6px; border-left: 3px solid #ff9800;">
+                        <strong>${dept}</strong> <span class="text-muted">(${namesStr})</span>
+                        <ul style="margin: 10px 0 0 20px; padding: 0;">`;
+                    
+                    data.items.forEach(item => {
+                        printContent += `<li>${item.item} <span class="text-muted">(Sc.${item.sceneNum})</span></li>`;
+                    });
+                    
+                    printContent += '</ul></div>';
+                });
+            }
+        }
+        
+        if(shootDay.notes) {
+            printContent += `<h2>📝 Notes</h2><p>${shootDay.notes}</p>`;
+        }
+        
+        printContent += '</body></html>';
+        
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(printContent);
+        printWindow.document.close();
+        printWindow.print();
+    },
+	
+	sendCallSheetEmail: (dayId) => {
+        const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
+        if(!shootDay) return;
+        
+        // Collecter les emails des convoqués
+        const emails = [];
+        
+        if(shootDay.callSheet && shootDay.callSheet.length > 0) {
+            shootDay.callSheet.forEach(call => {
+                let person = null;
+                if(call.type === 'actor') {
+                    person = state.data.actors.find(a => a.id === call.personId);
+                } else if(call.type === 'crew') {
+                    person = state.data.crew.find(c => c.id === call.personId);
+                }
+                if(person && person.email) {
+                    emails.push(person.email);
+                }
+            });
+        }
+        
+        // Construire le contenu de l'email
+        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        
+        let body = `FEUILLE DE SERVICE - JOUR ${shootDay.dayNumber}%0D%0A`;
+        body += `Date: ${dateFormatted}%0D%0A`;
+        body += `Lieu: ${shootDay.location || 'Non défini'}%0D%0A`;
+        if(shootDay.locationAddress) body += `Adresse: ${shootDay.locationAddress}%0D%0A`;
+        body += `%0D%0A`;
+        body += `HORAIRES:%0D%0A`;
+        body += `- Convocation équipe: ${shootDay.crewCall || '--:--'}%0D%0A`;
+        body += `- Prêt à tourner: ${shootDay.readyToShoot || '--:--'}%0D%0A`;
+        body += `- Pause déjeuner: ${shootDay.lunchStart || '--:--'} - ${shootDay.lunchEnd || '--:--'}%0D%0A`;
+        body += `- Fin estimée: ${shootDay.estimatedWrap || '--:--'}%0D%0A`;
+        body += `%0D%0A`;
+        
+        if(shootDay.scenes && shootDay.scenes.length > 0) {
+            body += `SCENES A TOURNER:%0D%0A`;
+            shootDay.scenes.forEach(sceneRef => {
+                const scene = state.data.scenes.find(s => s.id === sceneRef.sceneId);
+                if(scene) {
+                    body += `- ${scene.title}%0D%0A`;
+                }
+            });
+            body += `%0D%0A`;
+        }
+        
+        if(shootDay.notes) {
+            body += `NOTES:%0D%0A${shootDay.notes}%0D%0A`;
+        }
+        
+        const subject = `Feuille de service - Jour ${shootDay.dayNumber} - ${dateFormatted}`;
+        const mailtoLink = `mailto:${emails.join(',')}?subject=${encodeURIComponent(subject)}&body=${body}`;
+        
+        if(emails.length === 0) {
+            Utils.toast('Aucun email trouvé parmi les personnes convoquées. Ajoutez les emails dans les fiches Comédiens et Équipe.', 'warning');
+        }
+        
+        window.open(mailtoLink, '_blank');
     },
   };
 
@@ -42303,576 +42875,13 @@ options += `<option value="${scene.id}">#${idx + 1} - ${Utils.escape(scene.title
         modal.style.display = 'flex';
     },
     
-    closeCallSheets: () => {
-        document.getElementById('callsheets-modal').style.display = 'none';
-    },
-    
-    validateCallSheet: (dayId) => {
-        const day = state.data.shootingDays.find(d => d.id === dayId);
-        if(!day) return;
-        
-        day.validated = !day.validated;
-        Store.save();
-        Planning.openCallSheets(); // Rafraîchir la liste
-    },
-    
-    publishCallSheet: async (shootDay) => {
-        // Générer un token unique pour cette feuille
-        const token = 'fds_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11);
-        
-        const projectName = state.data.title || 'Projet';
-        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        
-        // Construire les données des scènes
-        const scenesData = (shootDay.scenes || []).map(ref => {
-            const scene = state.data.scenes.find(s => s.id === ref.sceneId);
-            return scene ? {
-                startTime: ref.startTime || '--:--',
-                title: scene.title || 'Scène sans titre',
-                perso: scene.perso || '',
-                decor: scene.decor || '',
-                time: scene.time || ''
-            } : null;
-        }).filter(s => s);
-        
-        // Construire les données des convoqués
-        const callSheetData = (shootDay.callSheet || []).map(call => {
-            let person = null;
-            if(call.type === 'actor') {
-                person = state.data.actors.find(a => a.id === call.personId);
-            } else if(call.type === 'crew') {
-                person = state.data.crew.find(c => c.id === call.personId);
-            }
-            return person ? {
-                name: person.name || 'Inconnu',
-                role: person.role || person.department || (call.type === 'actor' ? 'Comédien·ne' : 'Technicien·ne'),
-                callTime: call.callTime || shootDay.crewCall || '',
-                notes: call.notes || ''
-            } : null;
-        }).filter(c => c);
-        
-        // Données publiques de la feuille de service
-        const publicData = {
-            token: token,
-            projectName: projectName,
-            dayNumber: shootDay.dayNumber,
-            date: shootDay.date,
-            dateFormatted: dateFormatted,
-            location: shootDay.location || '',
-            locationAddress: shootDay.locationAddress || '',
-            contactName: shootDay.contactName || '',
-            contactPhone: shootDay.contactPhone || '',
-            locationNotes: shootDay.locationNotes || '',
-            crewCall: shootDay.crewCall || '',
-            readyToShoot: shootDay.readyToShoot || '',
-            lunchStart: shootDay.lunchStart || '',
-            lunchEnd: shootDay.lunchEnd || '',
-            estimatedWrap: shootDay.estimatedWrap || '',
-            notes: shootDay.notes || '',
-            customWeather: shootDay.customWeather || '',
-            scenes: scenesData,
-            callSheet: callSheetData,
-            createdAt: Date.now(),
-            createdBy: state.currentUser?.email || ''
-        };
-        
-        // Sauvegarder dans le projet (les callsheets publiques sont stockées dans data)
-        try {
-            if(!state.data.publicCallsheets) state.data.publicCallsheets = {};
-            state.data.publicCallsheets[token] = publicData;
-            await Store.save();
-            return token;
-        } catch(e) {
-            console.error('❌ Erreur publication feuille:', e);
-            return null;
-        }
-    },
-    
-    loadPublicCallSheet: async (token) => {
-        try {
-            // Chercher dans les données du projet actuel
-            const data = state.data?.publicCallsheets?.[token];
-            if(!data) {
-                document.getElementById('public-callsheet-content').innerHTML = '<p style="text-align:center; color:#c00;">❌ Feuille de service introuvable ou expirée.</p>';
-                return;
-            }
-            
-            // Générer le HTML de la feuille
-            let html = `
-                <div style="text-align:center; border-bottom:3px solid #333; padding-bottom:20px; margin-bottom:20px;">
-                    <h2 style="margin:0; font-size:1.8rem;">${Utils.escape(data.projectName)}</h2>
-                    <p style="font-size:1.3rem; margin:10px 0;">FEUILLE DE SERVICE - JOUR ${data.dayNumber}</p>
-                    <p style="font-size:1.1rem; color:#666;">${Utils.escape(data.dateFormatted)}</p>
-                </div>
-                
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
-                    <div style="background:#f5f5f5; padding:15px; border-radius:8px;">
-                        <h3 style="margin:0 0 10px; color:#333;">📍 Lieu</h3>
-                        <p style="margin:0; font-size:1.1rem; font-weight:bold;">${Utils.escape(data.location) || 'À confirmer'}</p>
-                        ${data.locationAddress ? `<p style="margin:5px 0 0; color:#666;">${Utils.escape(data.locationAddress)}</p>` : ''}
-                        ${data.contactName || data.contactPhone ? `<p style="margin:10px 0 0; padding-top:10px; border-top:1px solid #ddd;"><strong>👤 Contact sur place:</strong> ${Utils.escape(data.contactName) || ''} ${data.contactPhone ? '📞 ' + Utils.escape(data.contactPhone) : ''}</p>` : ''}
-                        ${data.locationNotes ? `<p style="margin:5px 0 0; color:#666; font-style:italic;">📝 ${Utils.escape(data.locationNotes)}</p>` : ''}
-                    </div>
-                    <div style="background:#f5f5f5; padding:15px; border-radius:8px;">
-                        <h3 style="margin:0 0 10px; color:#333;">⏰ Horaires</h3>
-                        <p class="m-0"><strong>Convocation équipe:</strong> ${Utils.escape(data.crewCall) || 'À confirmer'}</p>
-                        <p style="margin:5px 0;"><strong>Prêt à tourner:</strong> ${Utils.escape(data.readyToShoot) || 'À confirmer'}</p>
-                        <p style="margin:5px 0;"><strong>Repas:</strong> ${Utils.escape(data.lunchStart) || '?'} - ${Utils.escape(data.lunchEnd) || '?'}</p>
-                        <p style="margin:5px 0 0;"><strong>Fin estimée:</strong> ${Utils.escape(data.estimatedWrap) || 'À confirmer'}</p>
-                    </div>
-                </div>`;
-            
-            // Scènes
-            if(data.scenes && data.scenes.length > 0) {
-                html += `
-                    <div class="mb-20">
-                        <h3 style="background:#333; color:white; padding:10px; margin:0;">🎬 Scènes Prévues</h3>
-                        <table style="width:100%; border-collapse:collapse;">
-                            <thead>
-                                <tr style="background:#eee;">
-                                    <th class="td-bordered">Heure</th>
-                                    <th class="td-bordered">Scène</th>
-                                    <th class="td-bordered">Personnages</th>
-                                    <th class="td-bordered">Décor</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${data.scenes.map(s => `
-                                    <tr>
-                                        <td class="td-bordered-simple">${Utils.escape(s.startTime)}</td>
-                                        <td class="td-bordered-simple">${Utils.escape(s.title)}</td>
-                                        <td class="td-bordered-simple">${Utils.escape(s.perso)}</td>
-                                        <td class="td-bordered-simple">${Utils.escape(s.decor)}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>`;
-            }
-            
-            // Équipe convoquée
-            if(data.callSheet && data.callSheet.length > 0) {
-                html += `
-                    <div class="mb-20">
-                        <h3 style="background:#333; color:white; padding:10px; margin:0;">👥 Équipe Convoquée</h3>
-                        <table style="width:100%; border-collapse:collapse;">
-                            <thead>
-                                <tr style="background:#eee;">
-                                    <th class="td-bordered">Nom</th>
-                                    <th class="td-bordered">Fonction</th>
-                                    <th class="td-bordered">Convocation</th>
-                                    <th class="td-bordered">Notes</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${data.callSheet.map(c => `
-                                    <tr>
-                                        <td style="padding:10px; border:1px solid #ddd; font-weight:bold;">${Utils.escape(c.name)}</td>
-                                        <td class="td-bordered-simple">${Utils.escape(c.role)}</td>
-                                        <td class="td-bordered-simple">${Utils.escape(c.callTime)}</td>
-                                        <td class="td-bordered-simple">${Utils.escape(c.notes)}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>`;
-            }
-            
-            // Notes
-            if(data.notes) {
-                html += `
-                    <div style="background:#fff3cd; padding:15px; border-radius:8px; margin-bottom:20px;">
-                        <h3 style="margin:0 0 10px; color:#856404;">📋 Notes</h3>
-                        <p style="margin:0; white-space:pre-wrap;">${Utils.escape(data.notes)}</p>
-                    </div>`;
-            }
-            
-            if(data.customWeather) {
-                html += `
-                    <div style="background:#d1ecf1; padding:15px; border-radius:8px;">
-                        <h3 style="margin:0 0 10px; color:#0c5460;">🌤️ Météo / Conditions</h3>
-                        <p style="margin:0; white-space:pre-wrap;">${Utils.escape(data.customWeather)}</p>
-                    </div>`;
-            }
-            
-            document.getElementById('public-callsheet-content').innerHTML = html;
-            document.getElementById('public-callsheet-modal').style.display = 'block';
-            
-        } catch(e) {
-            console.error('Erreur chargement feuille publique:', e);
-            document.getElementById('public-callsheet-content').innerHTML = '<p style="text-align:center; color:#c00;">❌ Erreur lors du chargement.</p>';
-        }
-    },
-    
-    sendCallSheet: async (dayId) => {
-        const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
-        if(!shootDay) {
-            Utils.toast('Jour de tournage introuvable', 'error');
-            return;
-        }
-        
-        const projectName = state.data.title || 'Projet';
-        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        const senderName = state.userProfile?.displayName || state.currentUser?.email?.split('@')[0] || 'La production';
-        const appUrl = 'https://moteur.studio'; // URL de l'application
-        
-        // Construire la liste des scènes
-        let scenesText = '';
-        if(shootDay.scenes && shootDay.scenes.length > 0) {
-            scenesText = '\n\n🎬 SCÈNES PRÉVUES :\n';
-            shootDay.scenes.forEach(ref => {
-                const scene = state.data.scenes.find(s => s.id === ref.sceneId);
-                if(scene) {
-                    scenesText += `• ${ref.startTime || '--:--'} - ${scene.title || 'Scène sans titre'}`;
-                    if(scene.perso) scenesText += ` (${scene.perso})`;
-                    if(scene.decor) scenesText += ` - ${scene.decor}`;
-                    scenesText += '\n';
-                }
-            });
-        }
-        
-        // Collecter toutes les personnes à notifier
-        const recipients = [];
-        
-        if(shootDay.callSheet && shootDay.callSheet.length > 0) {
-            for(const call of shootDay.callSheet) {
-                let person = null;
-                
-                if(call.type === 'actor') {
-                    person = state.data.actors.find(a => a.id === call.personId);
-                } else if(call.type === 'crew') {
-                    person = state.data.crew.find(c => c.id === call.personId);
-                }
-                
-                if(person && person.email) {
-                    recipients.push({
-                        name: person.name || 'Inconnu',
-                        email: person.email,
-                        callTime: call.callTime || shootDay.crewCall || 'À confirmer',
-                        notes: call.notes || ''
-                    });
-                }
-            }
-        }
-        
-        if(recipients.length === 0) {
-            Utils.toast('Aucune personne avec email dans cette feuille de service', 'warning');
-            return;
-        }
-        
-        if(!await ConfirmModal.show({ title: `Envoyer la feuille de service J${shootDay.dayNumber} ?`, message: `${recipients.length} destinataire(s) :\n\n${recipients.map(r => '• ' + r.name).join('\n')}`, icon: '📧', confirmText: 'Envoyer' })) {
-            return;
-        }
-        
-        // Publier la feuille de service pour générer le lien
-        Utils.toast('Publication de la feuille de service...', 'info');
-        const token = await Planning.publishCallSheet(shootDay);
-        if(!token) {
-            Utils.toast('Erreur lors de la publication', 'error');
-            return;
-        }
-        
-        const publicLink = window.location.origin + window.location.pathname + '?callsheet=' + token;
-        
-        let sent = 0;
-        let errors = 0;
-        
-        for(const recipient of recipients) {
-            const subject = `🎬 Feuille de Service J${shootDay.dayNumber} - ${projectName}`;
-            const content = `Bonjour ${recipient.name},
-
-Vous avez reçu une feuille de service pour le projet "${projectName}".
-
-══════════════════════════════════
-📅 JOUR ${shootDay.dayNumber} - ${dateFormatted.toUpperCase()}
-══════════════════════════════════
-
-📍 Lieu : ${shootDay.location || 'À confirmer'}${shootDay.locationAddress ? '\n📌 Adresse : ' + shootDay.locationAddress : ''}${shootDay.contactName || shootDay.contactPhone ? '\n👤 Contact sur place : ' + (shootDay.contactName || '') + (shootDay.contactPhone ? ' 📞 ' + shootDay.contactPhone : '') : ''}${shootDay.locationNotes ? '\n📝 Accès : ' + shootDay.locationNotes : ''}
-
-⏰ HORAIRES :
-- Votre convocation : ${recipient.callTime}
-- Prêt à tourner : ${shootDay.readyToShoot || 'À confirmer'}
-- Repas : ${shootDay.lunchStart || '?'} - ${shootDay.lunchEnd || '?'}
-- Fin estimée : ${shootDay.estimatedWrap || 'À confirmer'}
-${scenesText}${recipient.notes ? '\n📝 NOTES VOUS CONCERNANT :\n' + recipient.notes : ''}${shootDay.notes ? '\n\n📋 NOTES GÉNÉRALES :\n' + shootDay.notes : ''}
-
-══════════════════════════════════
-🔗 VOIR LA FEUILLE DE SERVICE COMPLÈTE :
-Cliquez sur le lien ci-dessous pour voir et imprimer votre feuille de service :
-
-👉 ${publicLink}
-══════════════════════════════════
-
-Merci de confirmer votre présence en répondant à ce message.
-
-Cordialement,
-${senderName}
-${projectName}`;
-
-            try {
-                // Envoyer message interne
-                await Messages.send(recipient.email, {
-                    subject: subject,
-                    content: content,
-                    type: 'callsheet',
-                    projectId: state.currentProjectId,
-                    projectName: projectName,
-                    shootDayId: shootDay.id,
-                    date: shootDay.date
-                });
-                
-                // Envoyer email avec lien public
-                await Messages.sendEmailPing(recipient.email, recipient.name, 'callsheet', {
-                    projectName: projectName,
-                    shootDate: dateFormatted,
-                    location: shootDay.location || 'À confirmer',
-                    callTime: recipient.callTime,
-                    senderName: senderName,
-                    publicLink: publicLink
-                });
-                
-                sent++;
-            } catch(e) {
-                console.error(`❌ Erreur envoi à ${recipient.name}:`, e);
-                errors++;
-            }
-        }
-        
-        if(sent > 0) {
-            Utils.toast(`✅ ${sent} convocation(s) envoyée(s) !`, 'success');
-        }
-        if(errors > 0) {
-            Utils.toast(`⚠️ ${errors} erreur(s) d'envoi`, 'warning');
-        }
-    },
-    
-    printCallSheet: (dayId) => {
-        const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
-        if(!shootDay) return;
-        
-        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        const projectTitle = document.getElementById('projectTitle')?.value || 'Projet';
-        
-        let printContent = `
-            <html>
-            <head>
-                <title>Feuille de Service - Jour ${shootDay.dayNumber}</title>
-                <style>
-                    body { font-family: Arial, sans-serif; padding: 20px; }
-                    h1 { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; }
-                    h2 { color: #333; margin-top: 25px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
-                    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
-                    .info-item { padding: 8px; background: #f5f5f5; border-radius: 4px; }
-                    .info-label { font-weight: bold; color: #666; }
-                    table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-                    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-                    th { background: #f0f0f0; }
-                    .scene-item { padding: 10px; margin: 5px 0; background: #f9f9f9; border-left: 3px solid #2b6ef6; }
-                </style>
-            </head>
-            <body>
-                <h1>📋 FEUILLE DE SERVICE</h1>
-                <div style="text-align:center; margin-bottom:20px;">
-                    <strong style="font-size:1.2rem;">${projectTitle}</strong><br>
-                    <span>Jour ${shootDay.dayNumber} - ${dateFormatted}</span>
-                </div>
-                
-                <h2>📍 Lieu de Tournage</h2>
-                <div class="info-grid">
-                    <div class="info-item"><span class="info-label">Lieu:</span> ${shootDay.location || 'Non défini'}</div>
-                    <div class="info-item"><span class="info-label">Adresse:</span> ${shootDay.locationAddress || 'Non définie'}</div>
-                </div>
-                
-                <h2>⏰ Horaires</h2>
-                <div class="info-grid">
-                    <div class="info-item"><span class="info-label">Convocation équipe:</span> ${shootDay.crewCall || '--:--'}</div>
-                    <div class="info-item"><span class="info-label">Prêt à tourner:</span> ${shootDay.readyToShoot || '--:--'}</div>
-                    <div class="info-item"><span class="info-label">Pause déjeuner:</span> ${shootDay.lunchStart || '--:--'} - ${shootDay.lunchEnd || '--:--'}</div>
-                    <div class="info-item"><span class="info-label">Fin estimée:</span> ${shootDay.estimatedWrap || '--:--'}</div>
-                </div>
-                
-                <h2>🎬 Scènes à Tourner</h2>`;
-        
-        if(shootDay.scenes && shootDay.scenes.length > 0) {
-            shootDay.scenes.forEach(sceneRef => {
-                const scene = state.data.scenes.find(s => s.id === sceneRef.sceneId);
-                if(scene) {
-                    printContent += `<div class="scene-item">
-                        <strong>${scene.title}</strong><br>
-                        <span class="text-muted">Personnages: ${scene.perso || 'N/A'}</span><br>
-                        <span class="text-muted">Heure prévue: ${sceneRef.startTime || 'Non définie'}</span>
-                    </div>`;
-                }
-            });
-        } else {
-            printContent += '<p style="color:#999;">Aucune scène planifiée</p>';
-        }
-        
-        printContent += '<h2>👥 Convocations</h2>';
-        
-        if(shootDay.callSheet && shootDay.callSheet.length > 0) {
-            printContent += `<table>
-                <thead><tr><th>Nom</th><th>Fonction</th><th>Convocation</th><th>Notes</th></tr></thead>
-                <tbody>`;
-            
-            shootDay.callSheet.forEach(call => {
-                let person = null;
-                let role = '';
-                if(call.type === 'actor') {
-                    person = state.data.actors.find(a => a.id === call.personId);
-                    role = 'Comédien(ne)';
-                } else {
-                    person = state.data.crew.find(c => c.id === call.personId);
-                    role = person?.role || 'Technicien';
-                }
-                if(person) {
-                    printContent += `<tr>
-                        <td>${person.name}</td>
-                        <td>${role}</td>
-                        <td>${call.callTime || '--:--'}</td>
-                        <td>${call.notes || ''}</td>
-                    </tr>`;
-                }
-            });
-            
-            printContent += '</tbody></table>';
-        } else {
-            printContent += '<p style="color:#999;">Aucune convocation</p>';
-        }
-        
-        // Section "À prévoir" basée sur le dépouillement
-        const scenesIds = (shootDay.scenes || []).map(ref => ref.sceneId);
-        if(scenesIds.length > 0 && shootDay.callSheet && shootDay.callSheet.length > 0) {
-            let breakdownByPerson = [];
-            
-            shootDay.callSheet.forEach(call => {
-                if(call.type !== 'crew') return;
-                
-                const member = state.data.crew.find(c => c.id === call.personId);
-                if(!member || !member.group_id) return;
-                
-                const items = Planning.getBreakdownItemsForPerson(member, scenesIds);
-                if(items.length > 0) {
-                    const groupInfo = state.data.groups.find(g => g.id === member.group_id);
-                    breakdownByPerson.push({
-                        name: member.name,
-                        department: groupInfo ? groupInfo.name : 'Non classé',
-                        items: items
-                    });
-                }
-            });
-            
-            if(breakdownByPerson.length > 0) {
-                printContent += '<h2>📦 À Prévoir par Département</h2>';
-                
-                // Regrouper par département
-                const byDepartment = {};
-                breakdownByPerson.forEach(person => {
-                    if(!byDepartment[person.department]) {
-                        byDepartment[person.department] = { names: [], items: [] };
-                    }
-                    byDepartment[person.department].names.push(person.name);
-                    person.items.forEach(item => {
-                        // Éviter les doublons
-                        const exists = byDepartment[person.department].items.some(
-                            i => i.item === item.item && i.sceneNum === item.sceneNum
-                        );
-                        if(!exists) {
-                            byDepartment[person.department].items.push(item);
-                        }
-                    });
-                });
-                
-                // Afficher par département
-                Object.keys(byDepartment).forEach(dept => {
-                    const data = byDepartment[dept];
-                    const namesStr = data.names.join(', ');
-                    
-                    printContent += `<div style="margin-bottom: 15px; padding: 10px; background: #f9f9f9; border-radius: 6px; border-left: 3px solid #ff9800;">
-                        <strong>${dept}</strong> <span class="text-muted">(${namesStr})</span>
-                        <ul style="margin: 10px 0 0 20px; padding: 0;">`;
-                    
-                    data.items.forEach(item => {
-                        printContent += `<li>${item.item} <span class="text-muted">(Sc.${item.sceneNum})</span></li>`;
-                    });
-                    
-                    printContent += '</ul></div>';
-                });
-            }
-        }
-        
-        if(shootDay.notes) {
-            printContent += `<h2>📝 Notes</h2><p>${shootDay.notes}</p>`;
-        }
-        
-        printContent += '</body></html>';
-        
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(printContent);
-        printWindow.document.close();
-        printWindow.print();
-    },
-	
-	sendCallSheetEmail: (dayId) => {
-        const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
-        if(!shootDay) return;
-        
-        // Collecter les emails des convoqués
-        const emails = [];
-        
-        if(shootDay.callSheet && shootDay.callSheet.length > 0) {
-            shootDay.callSheet.forEach(call => {
-                let person = null;
-                if(call.type === 'actor') {
-                    person = state.data.actors.find(a => a.id === call.personId);
-                } else if(call.type === 'crew') {
-                    person = state.data.crew.find(c => c.id === call.personId);
-                }
-                if(person && person.email) {
-                    emails.push(person.email);
-                }
-            });
-        }
-        
-        // Construire le contenu de l'email
-        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        
-        let body = `FEUILLE DE SERVICE - JOUR ${shootDay.dayNumber}%0D%0A`;
-        body += `Date: ${dateFormatted}%0D%0A`;
-        body += `Lieu: ${shootDay.location || 'Non défini'}%0D%0A`;
-        if(shootDay.locationAddress) body += `Adresse: ${shootDay.locationAddress}%0D%0A`;
-        body += `%0D%0A`;
-        body += `HORAIRES:%0D%0A`;
-        body += `- Convocation équipe: ${shootDay.crewCall || '--:--'}%0D%0A`;
-        body += `- Prêt à tourner: ${shootDay.readyToShoot || '--:--'}%0D%0A`;
-        body += `- Pause déjeuner: ${shootDay.lunchStart || '--:--'} - ${shootDay.lunchEnd || '--:--'}%0D%0A`;
-        body += `- Fin estimée: ${shootDay.estimatedWrap || '--:--'}%0D%0A`;
-        body += `%0D%0A`;
-        
-        if(shootDay.scenes && shootDay.scenes.length > 0) {
-            body += `SCENES A TOURNER:%0D%0A`;
-            shootDay.scenes.forEach(sceneRef => {
-                const scene = state.data.scenes.find(s => s.id === sceneRef.sceneId);
-                if(scene) {
-                    body += `- ${scene.title}%0D%0A`;
-                }
-            });
-            body += `%0D%0A`;
-        }
-        
-        if(shootDay.notes) {
-            body += `NOTES:%0D%0A${shootDay.notes}%0D%0A`;
-        }
-        
-        const subject = `Feuille de service - Jour ${shootDay.dayNumber} - ${dateFormatted}`;
-        const mailtoLink = `mailto:${emails.join(',')}?subject=${encodeURIComponent(subject)}&body=${body}`;
-        
-        if(emails.length === 0) {
-            Utils.toast('Aucun email trouvé parmi les personnes convoquées. Ajoutez les emails dans les fiches Comédiens et Équipe.', 'warning');
-        }
-        
-        window.open(mailtoLink, '_blank');
-    },
+    // ========== FEUILLES DE SERVICE / CONVOCATIONS — délégué à PlanningCallSheets ==========
+    closeCallSheets: (...a) => PlanningCallSheets.closeCallSheets(...a),
+    validateCallSheet: (...a) => PlanningCallSheets.validateCallSheet(...a),
+    publishCallSheet: (...a) => PlanningCallSheets.publishCallSheet(...a),
+    loadPublicCallSheet: (...a) => PlanningCallSheets.loadPublicCallSheet(...a),
+    sendCallSheet: (...a) => PlanningCallSheets.sendCallSheet(...a),
+    printCallSheet: (...a) => PlanningCallSheets.printCallSheet(...a),
 	
     // ========== FEUILLE DE SERVICE (FDS) — délégué à PlanningFDS ==========
     get currentFDSDay() { return PlanningFDS.currentFDSDay; },
@@ -69023,7 +69032,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, ProfileActualites, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, ProfileActualites, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, Expenses, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
