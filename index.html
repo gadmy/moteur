@@ -26,6 +26,43 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 HISTORIQUE DES VERSIONS
 ================================================================================
+v502 — Organisation DrawingEditor + déduplication Courses (1 Juin 2026)
+
+================================================================================
+MODULARISATION — module DrawingEditor (~1890 l)
+Module canvas (état fortement couplé) organisé en 7 sections internes, sans
+éclatement ni extraction (pas d'export propre, même logique que BeatBoard) :
+État / Ouverture, canvas & couleurs / Images & calques / Dessin /
+Objets placés & interactions / Outils, calques & historique / Sauvegarde & rendu.
+
+DÉDUPLICATION — module Courses (glossaire de notions)
+Audit des clés dupliquées via parseur AST (acorn) sur tout le fichier :
+3 vraies clés en double trouvées (override silencieux), toutes dans les données
+du glossaire. Nettoyées :
+- 'surround-51' : copie strictement identique supprimée.
+- Ancienne section morte 'pre-production' / 'post-production' supprimée (la
+  version active et complète des phases de production est conservée).
+Aucune perte d'affichage (les entrées supprimées étaient déjà masquées).
+Vérification post-nettoyage : 0 vrai doublon restant dans le fichier (seules
+subsistent les paires get/set légitimes des forwarders de migration).
+
+================================================================================
+
+v501 — Modularisation MoodBoard (1 Juin 2026)
+
+================================================================================
+MODULARISATION — module MoodBoard (~2560 l)
+- Nettoyage : doublon de la méthode startRotate supprimé (deux définitions
+  strictement identiques).
+- Extraction du sous-module MoodBoardExport (exportPNG + exportPDF, ~440 l).
+  Le cœur conserve 2 délégations ; MoodBoardExport ajouté au return global.
+- Cœur (~2100 l) organisé en 6 sections internes — l'état canvas est trop
+  couplé pour un éclatement sain (même logique que BeatBoard) :
+  État / Init, canvas & viewport / Planches (CRUD) / Éléments /
+  Panneaux & menus / Dessin, texte, formes & fichiers.
+
+================================================================================
+
 v500 — Modularisation Expenses & Planning + passage au versioning entier + fix Budget (1 Juin 2026)
 
 ================================================================================
@@ -7028,7 +7065,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv501</p>
+      <p>vv503</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -18259,6 +18296,156 @@ openBoardPrintEpisodeChooser: () => {
         
         Utils.toast('Ordre et couleurs réinitialisés', 'success');
     },
+initCategoriesDragDrop: () => {
+      const nav = document.getElementById('tabsCategories');
+      if(!nav) return;
+      
+      let draggedCat = null;
+      
+      nav.querySelectorAll('.tab-category').forEach(cat => {
+          cat.addEventListener('dragstart', (e) => {
+              draggedCat = cat;
+              cat.classList.add('dragging');
+              e.dataTransfer.effectAllowed = 'move';
+          });
+          
+          cat.addEventListener('dragend', () => {
+              cat.classList.remove('dragging');
+              nav.querySelectorAll('.tab-category').forEach(c => c.classList.remove('drag-over'));
+              draggedCat = null;
+              UI.saveCategoriesOrder();
+          });
+          
+          cat.addEventListener('dragover', (e) => {
+              e.preventDefault();
+              if(draggedCat && draggedCat !== cat) {
+                  cat.classList.add('drag-over');
+              }
+          });
+          
+          cat.addEventListener('dragleave', () => {
+              cat.classList.remove('drag-over');
+          });
+          
+          cat.addEventListener('drop', (e) => {
+              e.preventDefault();
+              cat.classList.remove('drag-over');
+              if(draggedCat && draggedCat !== cat) {
+                  const allCats = [...nav.querySelectorAll('.tab-category')];
+                  const draggedIdx = allCats.indexOf(draggedCat);
+                  const targetIdx = allCats.indexOf(cat);
+                  
+                  if(draggedIdx < targetIdx) {
+                      cat.after(draggedCat);
+                  } else {
+                      cat.before(draggedCat);
+                  }
+              }
+          });
+      });
+  },
+  
+  saveCategoriesOrder: () => {
+      const nav = document.getElementById('tabsCategories');
+      if(!nav) return;
+      const order = [...nav.querySelectorAll('.tab-category')].map(c => c.dataset.category);
+      if(!state.data.uiConfig) state.data.uiConfig = { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [], hiddenCategories: [] };
+      state.data.uiConfig.categoriesOrder = order;
+      Store.save();
+  },
+  
+  loadCategoriesOrder: () => {
+      const uiConfig = state.data?.uiConfig || {};
+      const order = uiConfig.categoriesOrder || [];
+      if(order.length > 0) {
+          const nav = document.getElementById('tabsCategories');
+          if(!nav) return;
+          const toggle = document.getElementById('hiddenCategoriesToggle');
+          order.forEach(catName => {
+              const cat = nav.querySelector(`.tab-category[data-category="${catName}"]`);
+              if(cat) nav.insertBefore(cat, toggle);
+          });
+      }
+  },
+  
+  loadCategoryTabsOrder: () => {
+      const uiConfig = state.data?.uiConfig || {};
+      const savedOrder = uiConfig.categoryTabsOrder || {};
+      const savedLabels = uiConfig.categoryLabelsCustom || {};
+      
+      // Restaurer l'ordre des sous-onglets pour chaque catégorie
+      Object.keys(savedOrder).forEach(category => {
+          if(savedOrder[category] && savedOrder[category].length > 0) {
+              UI.categoryTabs[category] = savedOrder[category];
+          }
+      });
+      
+      // Restaurer les labels personnalisés (pour les onglets déplacés)
+      Object.keys(savedLabels).forEach(category => {
+          if(savedLabels[category]) {
+              UI.categoryLabels[category] = { ...UI.categoryLabels[category], ...savedLabels[category] };
+          }
+      });
+  },
+  
+	initTabsDragDrop: () => {
+      const nav = document.getElementById('tabsNav');
+      if(!nav) return;
+      
+      let draggedTab = null;
+      
+      nav.querySelectorAll('.tab-btn').forEach(tab => {
+          tab.addEventListener('dragstart', (e) => {
+              draggedTab = tab;
+              tab.classList.add('dragging');
+              e.dataTransfer.effectAllowed = 'move';
+          });
+          
+          tab.addEventListener('dragend', () => {
+              tab.classList.remove('dragging');
+              nav.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('drag-over'));
+              draggedTab = null;
+              UI.updateTabNumbers();
+          });
+          
+          tab.addEventListener('dragover', (e) => {
+              e.preventDefault();
+              if(draggedTab && draggedTab !== tab) {
+                  tab.classList.add('drag-over');
+              }
+          });
+          
+          tab.addEventListener('dragleave', () => {
+              tab.classList.remove('drag-over');
+          });
+          
+          tab.addEventListener('drop', (e) => {
+              e.preventDefault();
+              tab.classList.remove('drag-over');
+              if(draggedTab && draggedTab !== tab) {
+                  const allTabs = [...nav.querySelectorAll('.tab-btn')];
+                  const draggedIdx = allTabs.indexOf(draggedTab);
+                  const targetIdx = allTabs.indexOf(tab);
+                  
+                  if(draggedIdx < targetIdx) {
+                      tab.after(draggedTab);
+                  } else {
+                      tab.before(draggedTab);
+                  }
+              }
+          });
+      });
+  },
+  
+  updateTabNumbers: () => {
+      const nav = document.getElementById('tabsNav');
+      if(!nav) return;
+      
+      nav.querySelectorAll('.tab-btn').forEach((tab, idx) => {
+          const text = tab.textContent.replace(/^\d+\.\s*/, '');
+          tab.textContent = `${idx + 1}. ${text}`;
+      });
+  },
   };
 
   const UIDashboard = {
@@ -19697,6 +19884,7 @@ openBoardPrintEpisodeChooser: () => {
   };
 
   const UI = {
+	// ===================== ÉTAT & CALENDRIER DE DISPONIBILITÉS =====================
 	renderAvailabilityCalendar: (containerId, personType, personIdx) => {
       const container = document.getElementById(containerId);
       if(!container) return;
@@ -19895,6 +20083,7 @@ openBoardPrintEpisodeChooser: () => {
       document.removeEventListener('mouseup', UI.endCalendarDrag);
   },
 	
+	// ===================== PERMISSIONS, VERROUS & DÉLÉGATIONS ONGLETS =====================
 	applyTabPermissions: () => {
         if(state.currentRole === 'owner') {
             // Le propriétaire voit tout
@@ -19933,156 +20122,12 @@ const tabToSection = {
         });
     },
 	
-	initCategoriesDragDrop: () => {
-      const nav = document.getElementById('tabsCategories');
-      if(!nav) return;
-      
-      let draggedCat = null;
-      
-      nav.querySelectorAll('.tab-category').forEach(cat => {
-          cat.addEventListener('dragstart', (e) => {
-              draggedCat = cat;
-              cat.classList.add('dragging');
-              e.dataTransfer.effectAllowed = 'move';
-          });
-          
-          cat.addEventListener('dragend', () => {
-              cat.classList.remove('dragging');
-              nav.querySelectorAll('.tab-category').forEach(c => c.classList.remove('drag-over'));
-              draggedCat = null;
-              UI.saveCategoriesOrder();
-          });
-          
-          cat.addEventListener('dragover', (e) => {
-              e.preventDefault();
-              if(draggedCat && draggedCat !== cat) {
-                  cat.classList.add('drag-over');
-              }
-          });
-          
-          cat.addEventListener('dragleave', () => {
-              cat.classList.remove('drag-over');
-          });
-          
-          cat.addEventListener('drop', (e) => {
-              e.preventDefault();
-              cat.classList.remove('drag-over');
-              if(draggedCat && draggedCat !== cat) {
-                  const allCats = [...nav.querySelectorAll('.tab-category')];
-                  const draggedIdx = allCats.indexOf(draggedCat);
-                  const targetIdx = allCats.indexOf(cat);
-                  
-                  if(draggedIdx < targetIdx) {
-                      cat.after(draggedCat);
-                  } else {
-                      cat.before(draggedCat);
-                  }
-              }
-          });
-      });
-  },
-  
-  saveCategoriesOrder: () => {
-      const nav = document.getElementById('tabsCategories');
-      if(!nav) return;
-      const order = [...nav.querySelectorAll('.tab-category')].map(c => c.dataset.category);
-      if(!state.data.uiConfig) state.data.uiConfig = { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [], hiddenCategories: [] };
-      state.data.uiConfig.categoriesOrder = order;
-      Store.save();
-  },
-  
-  loadCategoriesOrder: () => {
-      const uiConfig = state.data?.uiConfig || {};
-      const order = uiConfig.categoriesOrder || [];
-      if(order.length > 0) {
-          const nav = document.getElementById('tabsCategories');
-          if(!nav) return;
-          const toggle = document.getElementById('hiddenCategoriesToggle');
-          order.forEach(catName => {
-              const cat = nav.querySelector(`.tab-category[data-category="${catName}"]`);
-              if(cat) nav.insertBefore(cat, toggle);
-          });
-      }
-  },
-  
-  loadCategoryTabsOrder: () => {
-      const uiConfig = state.data?.uiConfig || {};
-      const savedOrder = uiConfig.categoryTabsOrder || {};
-      const savedLabels = uiConfig.categoryLabelsCustom || {};
-      
-      // Restaurer l'ordre des sous-onglets pour chaque catégorie
-      Object.keys(savedOrder).forEach(category => {
-          if(savedOrder[category] && savedOrder[category].length > 0) {
-              UI.categoryTabs[category] = savedOrder[category];
-          }
-      });
-      
-      // Restaurer les labels personnalisés (pour les onglets déplacés)
-      Object.keys(savedLabels).forEach(category => {
-          if(savedLabels[category]) {
-              UI.categoryLabels[category] = { ...UI.categoryLabels[category], ...savedLabels[category] };
-          }
-      });
-  },
-  
-	initTabsDragDrop: () => {
-      const nav = document.getElementById('tabsNav');
-      if(!nav) return;
-      
-      let draggedTab = null;
-      
-      nav.querySelectorAll('.tab-btn').forEach(tab => {
-          tab.addEventListener('dragstart', (e) => {
-              draggedTab = tab;
-              tab.classList.add('dragging');
-              e.dataTransfer.effectAllowed = 'move';
-          });
-          
-          tab.addEventListener('dragend', () => {
-              tab.classList.remove('dragging');
-              nav.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('drag-over'));
-              draggedTab = null;
-              UI.updateTabNumbers();
-          });
-          
-          tab.addEventListener('dragover', (e) => {
-              e.preventDefault();
-              if(draggedTab && draggedTab !== tab) {
-                  tab.classList.add('drag-over');
-              }
-          });
-          
-          tab.addEventListener('dragleave', () => {
-              tab.classList.remove('drag-over');
-          });
-          
-          tab.addEventListener('drop', (e) => {
-              e.preventDefault();
-              tab.classList.remove('drag-over');
-              if(draggedTab && draggedTab !== tab) {
-                  const allTabs = [...nav.querySelectorAll('.tab-btn')];
-                  const draggedIdx = allTabs.indexOf(draggedTab);
-                  const targetIdx = allTabs.indexOf(tab);
-                  
-                  if(draggedIdx < targetIdx) {
-                      tab.after(draggedTab);
-                  } else {
-                      tab.before(draggedTab);
-                  }
-              }
-          });
-      });
-  },
-  
-  updateTabNumbers: () => {
-      const nav = document.getElementById('tabsNav');
-      if(!nav) return;
-      
-      nav.querySelectorAll('.tab-btn').forEach((tab, idx) => {
-          const text = tab.textContent.replace(/^\d+\.\s*/, '');
-          tab.textContent = `${idx + 1}. ${text}`;
-      });
-  },
+	initCategoriesDragDrop: (...a) => UICategories.initCategoriesDragDrop(...a),
+    saveCategoriesOrder: (...a) => UICategories.saveCategoriesOrder(...a),
+    loadCategoriesOrder: (...a) => UICategories.loadCategoriesOrder(...a),
+    loadCategoryTabsOrder: (...a) => UICategories.loadCategoryTabsOrder(...a),
+    initTabsDragDrop: (...a) => UICategories.initTabsDragDrop(...a),
+    updateTabNumbers: (...a) => UICategories.updateTabNumbers(...a),
 	
 	  applyLocks: () => {
         document.querySelectorAll('.script-row').forEach(row => {
@@ -20144,6 +20189,7 @@ const tabToSection = {
       // ============================================================
       // ===== VUES : bascule d'affichage & lancement éditeur =====
       // ============================================================
+      // ===================== VUES, MODES & TABLEAU DE BORD =====================
       hideAllViews: () => {
           document.getElementById('landing-view').style.display = 'none';
           document.getElementById('dashboard-view').style.display = 'none';
@@ -20328,6 +20374,7 @@ const tabToSection = {
       // ============================================================
       // ===== NAVIGATION ONGLETS (cœur) =====
       // ============================================================
+      // ===================== NAVIGATION ONGLETS & STATUTS DE SCÈNES =====================
       switchTab: (tabName) => { 
     // Persister pour F5
     try { NavMemory.setTab(UI.currentCategory || null, tabName); } catch(e) {}
@@ -20536,6 +20583,7 @@ const tabToSection = {
           });
       },
       
+      // ===================== RENDU, MODALES & DIVERS =====================
       renderBoard: () => { 
           els.boardList.innerHTML = ''; 
           const isView = state.currentRole === 'viewer'; 
@@ -27720,6 +27768,7 @@ if(hasContent) {
 };
 
 const DrawingEditor = {
+    // ===================== ÉTAT =====================
     currentShotId: null,
     currentKind: 'original',  // Phase 1 Storyboard : zone éditée ('original'|'lighting'|'camera'|'actors')
     moodboardCallback: null,
@@ -27744,6 +27793,7 @@ const DrawingEditor = {
     recentColors: [],
     eyedropperActive: false,
     
+    // ===================== OUVERTURE, CANVAS & COULEURS =====================
     toggleTransparent: (checked) => {
         DrawingEditor.transparentBg = checked;
         DrawingEditor.redraw();
@@ -28180,6 +28230,7 @@ const DrawingEditor = {
     // - Crée un nouveau calque (taille canvas) en bas de la pile (unshift)
     // - Y dessine l'image compressée centrée + ratio préservé (letterbox transparent autour)
     // - Le calque actif courant n'est PAS changé (on continue à dessiner dans son calque)
+    // ===================== IMAGES & CALQUES =====================
     insertImageAsBackgroundLayer: () => {
         if(!DrawingEditor.currentShotId || !DrawingEditor.currentKind) {
             Utils.toast('Aucune zone active', 'error');
@@ -28508,6 +28559,7 @@ const DrawingEditor = {
         });
     },
     
+    // ===================== DESSIN =====================
     startDrawing: (e) => {
         // Phase 3C v3 Storyboard : ignorer le clic droit (géré par handleContextMenu pour les poignées)
         if(e.button && e.button !== 0) return;
@@ -28785,6 +28837,7 @@ const DrawingEditor = {
     
     // Phase 3B Storyboard : remplit la palette d'objets selon le kind courant
     // Affiche les objets de la catégorie correspondante + ceux de la catégorie 'machinery' (commune)
+    // ===================== OBJETS PLACÉS & INTERACTIONS =====================
     renderObjectsPalette: () => {
         const palette = document.getElementById('objectsPalette');
         const placedList = document.getElementById('objectsPlacedList');
@@ -29279,6 +29332,7 @@ const DrawingEditor = {
         return -1;
     },
     
+    // ===================== OUTILS, CALQUES & HISTORIQUE =====================
     setTool: (tool) => {
         DrawingEditor.currentTool = tool;
         document.querySelectorAll('.drawing-sidebar .brush-btn').forEach(btn => btn.classList.remove('active'));
@@ -29445,6 +29499,7 @@ const DrawingEditor = {
         DrawingEditor.renderLayers();
     },
     
+    // ===================== SAUVEGARDE & RENDU =====================
     save: async () => {
         if(!DrawingEditor.currentShotId) return;
         
@@ -39565,67 +39620,6 @@ ${projectName}`;
         printWindow.document.write(printContent);
         printWindow.document.close();
         printWindow.print();
-    },
-	
-	sendCallSheetEmail: (dayId) => {
-        const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
-        if(!shootDay) return;
-        
-        // Collecter les emails des convoqués
-        const emails = [];
-        
-        if(shootDay.callSheet && shootDay.callSheet.length > 0) {
-            shootDay.callSheet.forEach(call => {
-                let person = null;
-                if(call.type === 'actor') {
-                    person = state.data.actors.find(a => a.id === call.personId);
-                } else if(call.type === 'crew') {
-                    person = state.data.crew.find(c => c.id === call.personId);
-                }
-                if(person && person.email) {
-                    emails.push(person.email);
-                }
-            });
-        }
-        
-        // Construire le contenu de l'email
-        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        
-        let body = `FEUILLE DE SERVICE - JOUR ${shootDay.dayNumber}%0D%0A`;
-        body += `Date: ${dateFormatted}%0D%0A`;
-        body += `Lieu: ${shootDay.location || 'Non défini'}%0D%0A`;
-        if(shootDay.locationAddress) body += `Adresse: ${shootDay.locationAddress}%0D%0A`;
-        body += `%0D%0A`;
-        body += `HORAIRES:%0D%0A`;
-        body += `- Convocation équipe: ${shootDay.crewCall || '--:--'}%0D%0A`;
-        body += `- Prêt à tourner: ${shootDay.readyToShoot || '--:--'}%0D%0A`;
-        body += `- Pause déjeuner: ${shootDay.lunchStart || '--:--'} - ${shootDay.lunchEnd || '--:--'}%0D%0A`;
-        body += `- Fin estimée: ${shootDay.estimatedWrap || '--:--'}%0D%0A`;
-        body += `%0D%0A`;
-        
-        if(shootDay.scenes && shootDay.scenes.length > 0) {
-            body += `SCENES A TOURNER:%0D%0A`;
-            shootDay.scenes.forEach(sceneRef => {
-                const scene = state.data.scenes.find(s => s.id === sceneRef.sceneId);
-                if(scene) {
-                    body += `- ${scene.title}%0D%0A`;
-                }
-            });
-            body += `%0D%0A`;
-        }
-        
-        if(shootDay.notes) {
-            body += `NOTES:%0D%0A${shootDay.notes}%0D%0A`;
-        }
-        
-        const subject = `Feuille de service - Jour ${shootDay.dayNumber} - ${dateFormatted}`;
-        const mailtoLink = `mailto:${emails.join(',')}?subject=${encodeURIComponent(subject)}&body=${body}`;
-        
-        if(emails.length === 0) {
-            Utils.toast('Aucun email trouvé parmi les personnes convoquées. Ajoutez les emails dans les fiches Comédiens et Équipe.', 'warning');
-        }
-        
-        window.open(mailtoLink, '_blank');
     },
   };
 
@@ -60692,13 +60686,6 @@ const Courses = {
             <p>Permet de <strong>placer les sons dans l'espace</strong> autour du spectateur pour une immersion totale.</p>`,
             example: 'Standard depuis Toy Story (1995) et Saving Private Ryan.'
         },
-        'surround-51': {
-            title: '5.1 Surround',
-            description: `<p>Format audio standard du cinéma avec 6 canaux : 5 enceintes + 1 caisson de basses (LFE).</p>
-            <p>Configuration : Gauche, Centre, Droite (devant) + Surround Gauche, Surround Droite (arrière) + Subwoofer.</p>
-            <p>Permet de <strong>placer les sons dans l'espace</strong> autour du spectateur pour une immersion totale.</p>`,
-            example: 'Standard depuis Toy Story (1995) et Saving Private Ryan.'
-        },
         'meta-diegetique': {
             title: 'Son méta-diégétique',
             description: `<p>Son subjectif représentant l'intériorité d'un personnage : pensées, souvenirs, hallucinations.</p>
@@ -60885,21 +60872,6 @@ const Courses = {
             <p>Le personnage commence avec une <strong>croyance limitante</strong> (Lie) née d'une <strong>blessure</strong> (Ghost), et doit découvrir la <strong>vérité</strong> (Truth).</p>
             <p>Ce qu'il VEUT (désir) ≠ ce dont il a BESOIN. Le film réconcilie souvent les deux.</p>`,
             example: 'Scrooge dans A Christmas Carol, Carl dans Là-Haut.'
-        },
-        // === PRODUCTION - ÉTAPES ===
-        'pre-production': {
-            title: 'Pré-production',
-            description: `<p>Phase de préparation entre le développement du projet et le tournage. Dure généralement 8-12 semaines.</p>
-            <p>Comprend : casting, repérages, découpage technique, storyboard, constitution de l'équipe, planning, budget détaillé.</p>
-            <p>Une <strong>bonne préparation</strong> est la clé d'un tournage réussi. "Chaque euro investi en prépa en économise dix en tournage."</p>`,
-            example: '8-12 semaines de prépa pour un long-métrage standard.'
-        },
-        'post-production': {
-            title: 'Post-production',
-            description: `<p>Phase finale après le tournage : montage, étalonnage, VFX, sound design, mixage, mastering.</p>
-            <p>Peut durer de quelques semaines (court-métrage) à plus d'un an (blockbuster avec VFX lourds).</p>
-            <p>Le film se "réécrit" souvent au montage. C'est là que naît le rythme et l'émotion finale.</p>`,
-            example: 'Avatar 2 : plus de 3 ans de post-production.'
         },
         // === PRODUCTION - DOCUMENTS ===
         'feuille-service': {
