@@ -26,6 +26,38 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 HISTORIQUE DES VERSIONS
 ================================================================================
+v500 — Modularisation Expenses & Planning + passage au versioning entier + fix Budget (1 Juin 2026)
+
+================================================================================
+NUMÉROTATION
+Abandon du schéma vX.X.X au profit d'un entier simple. Cette version = v500.
+Les trous de numérotation sont normaux et assumés.
+
+MODULARISATION — module Expenses (2641 l) éclaté en 4 sous-modules
+- ExpensesExport : exportPDF + exportExcel (CSV)
+- ExpensesSalaries : calcul / rendu / génération des salaires
+  (doublon "render" supprimé au passage)
+- ExpensesBudget : budget, TVA, managers, paramètres financiers (19 méthodes)
+- ExpensesCRUD : CRUD dépenses, modale, pièces jointes (18 méthodes)
+Le cœur Expenses (~480 l) délègue vers les sous-modules et conserve l'état,
+les constantes CNC, les helpers et l'orchestration (init / render / filtres).
+Organisé en 5 sections internes : État & config / Catégories CNC, TVA &
+migration / Helpers / Init, mode & rendu / Rappels & infos manquantes.
+
+MODULARISATION — module Planning organisé en 6 sections internes
+État & config / Plan de travail & kanban / Vues calendrier (mois, semaine,
+jour) / CRUD jours de tournage / Adresse & carte / Sélecteurs de disponibilités.
+
+FIX — Budget : restauration de 4 méthodes du cœur Expenses
+Lors de l'éclatement d'Expenses, saveBudgetSimple, populateCategories,
+populateDepartments et populateManager avaient été supprimées par erreur (ni
+déplacées vers un sous-module, ni déléguées), provoquant l'erreur
+"Expenses.populateCategories is not a function" à l'ouverture de l'onglet
+Budget. Les 4 méthodes ont été restaurées à l'identique depuis une version
+de référence antérieure (v4.8.2).
+
+================================================================================
+
 v4.8.1 — Modularisation Phases A & B + UX collaboratif + fixes (28 Mai 2026)
 
 ================================================================================
@@ -6996,7 +7028,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv4.5.3</p>
+      <p>vv501</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -23578,6 +23610,7 @@ const ColorWheel = {
 };
 
 const MoodBoard = {
+    // ===================== ÉTAT =====================
     currentBoardId: null,
     selectedElementId: null,
     zoom: 1,
@@ -23592,6 +23625,7 @@ const MoodBoard = {
     dragOffsetX: 0,
     dragOffsetY: 0,
     
+    // ===================== INIT, CANVAS & VIEWPORT =====================
     init: () => {
         MoodBoard.renderBoardsList();
         MoodBoard.setupCanvasEvents();
@@ -23751,6 +23785,7 @@ const MoodBoard = {
     
     // ===== GESTION DES PLANCHES =====
     
+    // ===================== PLANCHES (CRUD) =====================
     createBoard: async () => {
         // Créer une modale personnalisée avec nom + liaison
         return new Promise((resolve) => {
@@ -23995,6 +24030,7 @@ const MoodBoard = {
     
     // ===== GESTION DES ÉLÉMENTS =====
     
+    // ===================== ÉLÉMENTS =====================
     addImageFromFile: (file, x, y) => {
         const boardId = MoodBoard.currentBoardId;
         if(!boardId) {
@@ -24401,46 +24437,6 @@ const MoodBoard = {
         e.preventDefault();
     },
     
-    startRotate: (elementId, e) => {
-        const board = MoodBoard.getCurrentBoard();
-        const element = board?.elements.find(el => el.id === elementId);
-        if(!element) return;
-        
-        const domEl = document.getElementById('mb-el-' + elementId);
-        if(!domEl) return;
-        
-        const rect = domEl.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
-        
-        const startAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX) * 180 / Math.PI;
-        const startRotation = element.rotation || 0;
-        
-        const onMouseMove = (e) => {
-            const currentAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX) * 180 / Math.PI;
-            let newRotation = startRotation + (currentAngle - startAngle);
-            
-            // Snap à 15° si Shift est pressé
-            if(e.shiftKey) {
-                newRotation = Math.round(newRotation / 15) * 15;
-            }
-            
-            element.rotation = newRotation;
-            domEl.style.transform = `rotate(${newRotation}deg)`;
-        };
-        
-        const onMouseUp = () => {
-            board.modifiedAt = Date.now();
-            Store.save();
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
-        };
-        
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
-        e.preventDefault();
-    },
-    
     startDrag: (elementId, e) => {
         const board = MoodBoard.getCurrentBoard();
         const element = board?.elements.find(el => el.id === elementId);
@@ -24775,6 +24771,7 @@ const MoodBoard = {
     
     // ===== PANNEAU D'INFO =====
     
+    // ===================== PANNEAUX & MENUS =====================
     toggleInfoPanel: () => {
         const panel = document.getElementById('moodboardInfoPanel');
         if(panel) {
@@ -25097,6 +25094,7 @@ const MoodBoard = {
     
     // ===== OUTILS DU MENU RADIAL =====
     
+    // ===================== DESSIN, TEXTE, FORMES & FICHIERS =====================
     editDrawing: (element) => {
         const board = MoodBoard.getCurrentBoard();
         if(!board || !element) return;
@@ -25692,6 +25690,11 @@ const MoodBoard = {
         });
     },
     
+    exportPNG: (...a) => MoodBoardExport.exportPNG(...a),
+    exportPDF: (...a) => MoodBoardExport.exportPDF(...a),
+};
+
+const MoodBoardExport = {
     exportPNG: async () => {
         const board = MoodBoard.getCurrentBoard();
         if(!board) {
@@ -69219,7 +69222,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, Storyboard, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, ProfileActualites, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, UniverseBrothers, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, ProfileActualites, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, UniverseBrothers, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
