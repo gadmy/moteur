@@ -52090,6 +52090,156 @@ const Expenses = {
         }
     },
     
+    saveBudgetSimple: () => {
+        const value = parseFloat(document.getElementById('expenses-budget-simple')?.value) || 0;
+        if(!state.data.budget) state.data.budget = {};
+        state.data.budget.total = value;
+        
+        // Synchroniser avec le champ avancé
+        const advancedInput = document.getElementById('expenses-budget-total');
+        if(advancedInput) advancedInput.value = value;
+        
+        Store.save();
+        Expenses.updateSummary();
+    },
+    
+    // Remplit les selects avec les catégories CNC
+    populateCategories: () => {
+        const categories = Expenses.CNC_CATEGORIES;
+        
+        // Remplir les selects de catégorie
+        const selects = ['expense-category', 'expenses-filter-dept'];
+        selects.forEach(id => {
+            const select = document.getElementById(id);
+            if(!select) return;
+            
+            const firstOption = select.querySelector('option');
+            select.innerHTML = '';
+            if(firstOption) select.appendChild(firstOption);
+            
+            categories.forEach(cat => {
+                const opt = document.createElement('option');
+                opt.value = cat.id;
+                opt.textContent = `${cat.icon} ${cat.code}. ${cat.name}`;
+                select.appendChild(opt);
+            });
+        });
+        
+        // Liste des catégories CNC dans la sidebar
+        const catList = document.getElementById('expenses-dept-list');
+        if(catList) {
+            catList.innerHTML = '';
+            const currency = state.data.budget?.currency || '€';
+            const expenses = state.data.expenses || [];
+            const previsionnel = state.data.budget?.previsionnel || {};
+            const vatMode = state.data.budget?.vatMode || 'HT';
+            const thresholds = state.data.budget?.alertThresholds || { warning: 80, danger: 100 };
+            
+            categories.forEach(cat => {
+                const budget = previsionnel[cat.id]?.[vatMode === 'HT' ? 'budgetHT' : 'budgetTTC'] || 0;
+                const catManager = state.data.budget?.deptManagers?.[cat.id];
+                
+                // Trouver le nom du responsable
+                let managerName = '';
+                if(catManager?.email) {
+                    const person = Expenses.findPersonByEmail(catManager.email);
+                    managerName = person?.name || catManager.email.split('@')[0];
+                }
+                
+                // Calculer les dépenses pour cette catégorie
+                const catExpenses = expenses.filter(e => e.category === cat.id || e.department === cat.id);
+                const spent = catExpenses
+                    .filter(e => e.status === 'approved' || e.status === 'done')
+                    .reduce((sum, e) => sum + (vatMode === 'HT' ? (e.amountHT || e.amount || 0) : (e.amountTTC || e.amount || 0)), 0);
+                
+                const countPending = catExpenses.filter(e => e.status === 'pending').length;
+                const countApproved = catExpenses.filter(e => e.status === 'approved' || e.status === 'done').length;
+                const countMissingRate = catExpenses.filter(e => e.salaryMissingRate).length;
+                
+                // Calculer le pourcentage et l'état d'alerte
+                const percent = budget > 0 ? Math.round((spent / budget) * 100) : 0;
+                const alertState = percent >= thresholds.danger ? 'danger' : percent >= thresholds.warning ? 'warning' : 'ok';
+                
+                // Badges
+                let badges = '';
+                if(countMissingRate > 0) badges += `<span class="dept-badge red" title="Tarif manquant">${countMissingRate}</span>`;
+                if(countPending > 0) badges += `<span class="dept-badge yellow" title="En attente">${countPending}</span>`;
+                if(alertState === 'danger') badges += `<span class="dept-badge red" title="Budget dépassé !">🔴</span>`;
+                else if(alertState === 'warning') badges += `<span class="dept-badge orange" title="Attention budget">⚠️</span>`;
+                
+                // Barre de progression
+                const progressColor = alertState === 'danger' ? 'var(--danger)' : alertState === 'warning' ? '#f59e0b' : 'var(--success)';
+                const progressBar = budget > 0 ? `
+                    <div style="height:4px; background:var(--border); border-radius:2px; margin-top:4px; overflow:hidden;">
+                        <div style="height:100%; width:${Math.min(percent, 100)}%; background:${progressColor}; transition:width 0.3s;"></div>
+                    </div>
+                ` : '';
+                
+                const div = document.createElement('div');
+                div.className = 'expense-dept-item' + (Expenses.filterDept === cat.id ? ' active' : '');
+                div.innerHTML = `
+                    <div class="flex-1">
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <span class="dept-name">${cat.icon} ${cat.code}. ${cat.name}</span>
+                            <div class="dept-badges">${badges}</div>
+                        </div>
+                        ${budget > 0 ? `
+                            <div style="font-size:0.7rem; color:var(--text-sec);">
+                                Prévu: ${budget.toLocaleString()} ${currency} ${vatMode}
+                                ${percent > 0 ? `<span style="color:${progressColor}; font-weight:600;">(${percent}%)</span>` : ''}
+                            </div>
+                            ${progressBar}
+                        ` : ''}
+                        ${managerName ? `<div style="font-size:0.7rem; color:var(--primary); margin-top:2px;">👤 ${Utils.escape(managerName)}</div>` : ''}
+                    </div>
+                    <div style="text-align:right;">
+                        <span class="dept-amount" id="cat-total-${cat.id}" style="color:${alertState === 'danger' ? 'var(--danger)' : 'var(--text-main)'}">${spent.toLocaleString()} ${currency}</span>
+                        <button onclick="event.stopPropagation(); app.Expenses.editCategoryBudget('${cat.id}')" style="background:none; border:none; cursor:pointer; font-size:0.8rem; padding:2px 5px; margin-left:5px;" title="Paramètres de la catégorie">⚙️</button>
+                    </div>
+                `;
+                div.onclick = (e) => {
+                    if(e.target.tagName === 'BUTTON') return;
+                    Expenses.filterDept = Expenses.filterDept === cat.id ? '' : cat.id;
+                    const filterSelect = document.getElementById('expenses-filter-dept');
+                    if(filterSelect) filterSelect.value = Expenses.filterDept;
+                    Expenses.applyFilters();
+                    Expenses.populateCategories();
+                };
+                catList.appendChild(div);
+            });
+        }
+    },
+    
+    // Alias pour rétrocompatibilité
+    populateDepartments: () => {
+        Expenses.populateCategories();
+    },
+    
+    // Remplit le select du responsable budget
+    populateManager: () => {
+        const select = document.getElementById('expenses-manager');
+        if(!select) return;
+        
+        select.innerHTML = '<option value="">-- Choisir --</option>';
+        
+        // Ajouter les membres de l'équipe
+        if(state.data.crew) {
+            state.data.crew.forEach(member => {
+                if(member.email) {
+                    const opt = document.createElement('option');
+                    opt.value = member.email;
+                    opt.textContent = member.name + ' (' + (member.role || 'Équipe') + ')';
+                    select.appendChild(opt);
+                }
+            });
+        }
+        
+        // Sélectionner le manager actuel
+        if(state.data.budget?.manager) {
+            select.value = state.data.budget.manager;
+        }
+    },
+    
     // Budget, TVA, managers & paramètres financiers — délégué à ExpensesBudget
     loadBudget: (...a) => ExpensesBudget.loadBudget(...a),
     saveBudget: (...a) => ExpensesBudget.saveBudget(...a),
