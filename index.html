@@ -26,6 +26,28 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 HISTORIQUE DES VERSIONS
 ================================================================================
+v503 — Finalisation modularisation UI/onglets + suppression code mort (1 Juin 2026)
+
+================================================================================
+MODULARISATION — finalisation du module UI (onglets)
+Fin de l'éclatement de UI : les 6 méthodes d'ordre et de drag-drop des onglets
+et catégories (initCategoriesDragDrop, saveCategoriesOrder, loadCategoriesOrder,
+loadCategoryTabsOrder, initTabsDragDrop, updateTabNumbers), restées dans le cœur,
+ont été déplacées dans UICategories (avec délégations rétrocompatibles).
+UI est désormais entièrement éclaté : UIPrint, UIHidden, UICategories,
+UIDashboard, UITheme, UIData. Le cœur UI (~890 l) est balisé en 5 sections :
+Calendrier de disponibilités / Permissions, verrous & délégations onglets /
+Vues, modes & tableau de bord / Navigation onglets & statuts de scènes /
+Rendu, modales & divers.
+
+NETTOYAGE — code mort
+Analyse AST (acorn) du code mort sur tout le fichier : sur ~1700 méthodes, une
+seule jamais appelée nulle part — PlanningCallSheets.sendCallSheetEmail — a été
+supprimée. Les autres "suspects" sont des délégations orphelines (shims de
+rétrocompatibilité issus de la modularisation), conservées pour l'instant.
+
+================================================================================
+
 v502 — Organisation DrawingEditor + déduplication Courses (1 Juin 2026)
 
 ================================================================================
@@ -7065,7 +7087,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv503</p>
+      <p>vv504</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -20781,6 +20803,7 @@ const tabToSection = {
   };
   
  const Actions = {
+      // ===================== SCÈNES =====================
       openShareModal: () => { if(state.currentRole !== 'owner') return Utils.toast("Seul le propriétaire peut partager.", "warning"); els.shareModal.style.display = 'flex'; },
       
       // V62: NOUVELLE GESTION DES VERSIONS
@@ -21140,6 +21163,7 @@ const tabToSection = {
           }
       },
       
+      // ===================== SYNCHRONISATION PERSONNAGES & LIEUX =====================
       syncCharacters: () => { const found = new Set(); state.data.scenes.forEach(s => { if(!s.perso) return; s.perso.split(/[,;]|\bet\b/i).map(n=>n.trim()).filter(n=>n.length).forEach(n=>found.add(n)); }); found.forEach(name => { if(!state.data.characters.find(c => c.name.toLowerCase() === name.toLowerCase())) state.data.characters.push({ name: name, bio: "", group_id: "", gender: "" }); }); },
       syncLocations: () => { const found = new Set(); state.data.scenes.forEach(s => { const parts = s.title.match(/^[^\.]+\.\s*(.+?)\s*-/); if(parts && parts[1]) found.add(parts[1].trim().toUpperCase()); }); found.forEach(locName => { if(!state.data.locations.find(l => l.name === locName)) state.data.locations.push({ name: locName, desc: "", group_id: "" }); }); },
       
@@ -21213,6 +21237,7 @@ const tabToSection = {
               Utils.toast(`${orphans.length} personnage(s) supprimé(s)`, 'success');
           }
       },
+      // ===================== DONNÉES & GROUPES =====================
       updateDataItem: (type, idx, val) => { if(state.data[type][idx]) { const key = (type === 'characters' || type === 'actors') ? 'bio' : 'desc'; state.data[type][idx][key] = val; Store.saveDebounced(); } },
       deleteDataItem: async (type, idx) => { 
           if(await ConfirmModal.confirmDelete("Cet élément sera supprimé.")) { 
@@ -21382,6 +21407,7 @@ const tabToSection = {
     },
       changeGroup: (type, idx, gid) => { state.data[type][idx].group_id = gid; Store.save(); if(type==='characters') UI.renderDataTab(type, els.charContainer); else if(type==='actors') UI.renderDataTab(type, els.actorContainer); else UI.renderDataTab(type, els.locContainer); },
       // Vérifie si un profil public existe pour cet email et propose de le lier
+      // ===================== LIAISON PROFILS PUBLICS =====================
       checkAndLinkPublicProfile: async (email, type, idx) => {
           if(!email || !email.includes('@')) return false;
           
@@ -21703,6 +21729,7 @@ const tabToSection = {
               Utils.notifyImpact('chars', 'breakdown', 'lié');
           }
       },
+      // ===================== ACTEURS =====================
       addActor: async () => { 
           if(state.currentRole !== 'owner' && !Permissions.canEdit('comediens')) {
               Utils.toast('Vous n\'avez pas la permission d\'ajouter des comédiens.', 'error');
@@ -21860,6 +21887,7 @@ const tabToSection = {
       },
       
       // === DÉCORS (locations) ===
+      // ===================== LIEUX =====================
       updateLocationMeta: (idx, field, value) => {
           if(state.data.locations[idx]) {
               state.data.locations[idx][field] = value;
@@ -21963,6 +21991,7 @@ const tabToSection = {
           }
       },
       
+      // ===================== NOTIFICATIONS & TAGS =====================
       notifyNewProfile: async (person, type) => {
           try {
               const projectTitle = document.getElementById('projectTitle')?.value || 'Un projet';
@@ -22040,6 +22069,22 @@ const tabToSection = {
       setTag: (tagId) => { const s = state.data.scenes.find(x => x.id === state.contextSceneId); if(s) { s.tag_id = tagId; Store.save(); UI.renderBoard(); UI.renderScript(); } els.tagCtxMenu.style.display = 'none'; },
       openTagModal: () => { els.tagCtxMenu.style.display='none'; els.tagModal.style.display='flex'; document.getElementById('tag-new-name').value=''; },
       saveNewTag: () => { const name = document.getElementById('tag-new-name').value.trim(); const color = document.getElementById('tag-new-color').value; if(!name) return Utils.toast("Nom requis", "warning"); const newTag = { id: 't'+Date.now(), name: name, color: color }; state.data.tags.push(newTag); Store.save(); Actions.setTag(newTag.id); els.tagModal.style.display='none'; },
+      // ===================== EXPORT PDF (délégué à ActionsExport) =====================
+      openExportModal: (...a) => ActionsExport.openExportModal(...a),
+      expToggleAll: (...a) => ActionsExport.expToggleAll(...a),
+      expToggleAllCovers: (...a) => ActionsExport.expToggleAllCovers(...a),
+      expToggleMerged: (...a) => ActionsExport.expToggleMerged(...a),
+      get _expDefaultOrder() { return ActionsExport._expDefaultOrder; },
+      get _EXP_ORDER_STORAGE_KEY() { return ActionsExport._EXP_ORDER_STORAGE_KEY; },
+      _expReadOrderFromDOM: (...a) => ActionsExport._expReadOrderFromDOM(...a),
+      expSaveOrder: (...a) => ActionsExport.expSaveOrder(...a),
+      expRestoreOrder: (...a) => ActionsExport.expRestoreOrder(...a),
+      expResetOrder: (...a) => ActionsExport.expResetOrder(...a),
+      expSetupDragAndDrop: (...a) => ActionsExport.expSetupDragAndDrop(...a),
+      confirmExportPDF: (...a) => ActionsExport.confirmExportPDF(...a),
+  };
+
+  const ActionsExport = {
       // ============================================================
       // ===== EXPORT PDF UNIVERSEL [Phase D] =====
       // ============================================================
@@ -69194,7 +69239,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, ProfileActualites, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, UniverseBrothers, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, ProfileActualites, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, UniverseBrothers, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
