@@ -26,6 +26,32 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 HISTORIQUE DES VERSIONS
 ================================================================================
+v506 — Modularisation Admin/Contracts + balisage Messages/Contacts + nettoyage bannières (1 Juin 2026)
+
+================================================================================
+MODULARISATION
+- Admin : extraction du sous-module AdminEmail (campagnes emails — updateEmailFilter,
+  showRecipientsList, loadEmailTemplate, previewEmail, sendEmails ; ~290 l).
+  emailRecipients reste dans le cœur (lu/écrit via Admin.emailRecipients).
+  Cœur Admin balisé en 7 sections.
+- Contracts : extraction du sous-module ContractsTemplates (generateContractHTML +
+  generateBenevoleHTML, ~435 l de génération HTML quasi pure). 2 délégations dans le
+  cœur. Cœur Contracts balisé en 4 sections.
+- Messages (~830 l) : balisé en 6 sections (module cohérent, état partagé → pas
+  d'éclatage).
+- Contacts (~745 l) : balisé en 5 sections (annuaire / mes contacts / sauvegarde /
+  import).
+
+NETTOYAGE
+- Bannières en double : d'anciens bandeaux (styles court/encadré) coexistaient avec
+  les nouveaux dans 9 endroits (UI, MoodBoard, Actions, Admin). Les redondants ont
+  été retirés — un seul bandeau par section. Audit de balisage désormais fiable
+  (détecte tous les styles de bandeaux).
+- Commentaire orphelin remis au-dessus de sa vraie méthode dans Messages
+  (sendEmailPing).
+
+================================================================================
+
 v505 — Modularisation Storyboard (extraction StoryboardExport + balisage) (1 Juin 2026)
 
 ================================================================================
@@ -7119,7 +7145,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv506</p>
+      <p>vv507</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -13907,6 +13933,7 @@ crewRoles: {
   // ========== SESSION MANAGER ==========
   // Gère la session unique par compte (multi-onglets OK, multi-ordinateurs bloqué)
   const SessionManager = {
+      // ===================== ÉTAT =====================
       sessionToken: null,
       tabId: null,
       channel: null,
@@ -13914,6 +13941,7 @@ crewRoles: {
       isLeaderTab: false,
       missedChecks: 0,           // compteur de tolérance avant kick (anti faux-positif)
       
+      // ===================== INIT & CANAL INTER-ONGLETS =====================
       init: () => {
           // Générer un ID unique pour cet onglet
           SessionManager.tabId = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
@@ -14046,6 +14074,7 @@ crewRoles: {
       // Démarrer le suivi de session (MAX_SESSIONS sessions actives max par user)
       // Multi-onglets du même navigateur = 1 seule session (token partagé via localStorage)
       // Au-delà de MAX_SESSIONS, la plus ancienne est supprimée → kick au prochain heartbeat
+      // ===================== VÉRIFICATION & DÉCONNEXION =====================
       startSessionCheck: async (userId) => {
           SessionManager.currentUserId = userId;
           
@@ -14583,6 +14612,7 @@ showDashboard: async () => {
   // Gestion des plans et limites d'utilisation
   // ========== PRICING - Modèle à l'usage ==========
   const Pricing = {
+      // ===================== CONFIG & ABONNEMENT =====================
       // Configuration
       config: {
           trialDurationHours: 48,
@@ -14627,6 +14657,7 @@ showDashboard: async () => {
       
       // Compter les collaborateurs d'un projet
       // Un collaborateur = une fiche acteur OU technicien (pas par email unique)
+      // ===================== CALCUL DES PRIX =====================
       countCollaborators: (projectData) => {
           if(!projectData) return 0;
           
@@ -14704,6 +14735,7 @@ showDashboard: async () => {
       },
       
       // Afficher la modale d'abonnement
+      // ===================== MODALES & WIDGETS =====================
       showSubscribeModal: (reason) => {
           const modal = document.createElement('div');
           modal.id = 'subscribe-modal';
@@ -23405,6 +23437,7 @@ const tabToSection = {
 
 // ============ MOOD BOARD MODULE ============
 const ColorWheel = {
+    // ===================== ÉTAT & HARMONIES =====================
     canvas: null,
     ctx: null,
     size: 280,
@@ -23432,6 +23465,7 @@ const ColorWheel = {
     
     existingName: null,
     
+    // ===================== OUVERTURE & ROUE =====================
     hexToHsl: (hex) => {
         // Convertir hex en RGB puis HSL
         let r = 0, g = 0, b = 0;
@@ -23625,6 +23659,7 @@ const ColorWheel = {
         ColorWheel.updateMarkers();
     },
     
+    // ===================== COULEURS & RENDU =====================
     generateColors: () => {
         const h = ColorWheel.harmony;
         const harmonyData = ColorWheel.harmonies[h];
@@ -46749,6 +46784,7 @@ const MoteurArchive = {
 };
 
   const Importer = {
+      // ===================== ÉTAT & PARSING =====================
       rawLines: [],
       marginMap: {}, 
       steps: [
@@ -46805,6 +46841,7 @@ const MoteurArchive = {
           } catch (err) { console.error(err); Utils.toast("Erreur PDF : " + err.message, "error"); location.reload(); }
       },
 
+      // ===================== ASSISTANT VISUEL =====================
       startVisualWizard: () => {
           els.visualWizard.style.display = 'flex';
           Importer.marginMap = {};
@@ -46964,6 +47001,7 @@ const MoteurArchive = {
       
       cancel: () => { els.visualWizard.style.display = 'none'; UI.renderDashboard(); },
 
+      // ===================== IMPORT FINAL =====================
       finishImport: () => {
           els.visualWizard.style.display = 'none';
           const newData = Store.getEmpty();
@@ -47937,6 +47975,7 @@ const ContractsTemplates = {
 
 // ========== NOTIFICATIONS ==========
 const Notifications = {
+    // ===================== ÉTAT & INIT =====================
     unreadCount: 0,
     items: [],
     listenerAttached: false,
@@ -48018,6 +48057,7 @@ const Notifications = {
     },
     
     // Rendre la liste
+    // ===================== LISTE & RENDU =====================
     renderList: () => {
         const list = document.getElementById('notif-list');
         if(!list) return;
@@ -48113,6 +48153,7 @@ const Notifications = {
     },
     
     // Envoyer une notification à un utilisateur
+    // ===================== ENVOI & RÔLES =====================
     send: async (toEmail, type, message, projectId = null) => {
         const notif = {
             user_email: toEmail.toLowerCase(),
@@ -52873,6 +52914,7 @@ const Expenses = {
 
 // --- MODULE MATCHING ENGINE ---
 const MatchingEngine = {
+    // ===================== ÉTAT & POIDS =====================
     // Poids des critères (sur 100 points total)
     weights: {
         gender: 20,
@@ -52896,7 +52938,8 @@ const MatchingEngine = {
     selectedProfile: null,
     matchedProjects: [],
     
-    // Initialiser le sélecteur de profils
+    // ===================== SÉLECTION & RECHERCHE =====================
+	    // Initialiser le sélecteur de profils
     initProfileSelector: () => {
         const select = document.getElementById('universe-my-profile');
         if(!select) return;
@@ -52968,9 +53011,10 @@ const MatchingEngine = {
         Utils.toast(`${MatchingEngine.matchedProjects.length} projets trouvés !`, 'success');
     },
     
-    // Calculer le score de compatibilité
-    calculateScore: (profile, project) => {
-        let totalScore = 0;
+    // ===================== SÉLECTION & RECHERCHE =====================
+	    // Calculer le score de compatibilité
+    initProfileSelector: () => {
+        const select = document.getElementById('universe-my-profile');
         let maxPossible = 0;
         const details = {};
         const profileType = profile.type; // 'actor' ou 'crew'
@@ -53386,8 +53430,9 @@ const MatchingEngine = {
         
         return null;
     },
-    
-    // Afficher les résultats sur la carte
+
+    // ===================== AFFICHAGE & OUVERTURE =====================
+	    // Afficher les résultats sur la carte
     displayResults: () => {
         if(!Universe.map) return;
         
@@ -59011,6 +59056,7 @@ const Messages = {
 
 // --- MODULE INVITATIONS V84 ---
 const Invitations = {
+    // ===================== VÉRIFICATION & PROFILS =====================
     // Vérifie si l'email existe déjà dans Firebase
     checkEmail: async (email) => {
         const statusEl = document.getElementById('share-email-status');
@@ -59104,6 +59150,7 @@ const Invitations = {
         }
     },
     
+    // ===================== ENVOI D'INVITATION =====================
     sendInvitation: async () => {
         // Vérifier si l'email est dans la whitelist
         const email = document.getElementById('share-email')?.value?.trim()?.toLowerCase();
@@ -59335,7 +59382,8 @@ ${window.location.origin}${window.location.pathname}
         window.open(`mailto:${toEmail}?subject=${subject}&body=${body}`, '_blank');
     },
 
-    // Vérifie les invitations en attente à la connexion
+    // ===================== INVITATIONS EN ATTENTE =====================
+	    // Vérifie les invitations en attente à la connexion
     checkPendingInvitations: async () => {
         if(!state.currentUser) return;
         
@@ -59402,6 +59450,7 @@ ${window.location.origin}${window.location.pathname}
 
   // === MODULE TUTORIEL & AIDE CONTEXTUELLE ===
   const Tutorial = {
+    // ===================== DONNÉES (sections & aides) =====================
     sections: [
       {
         id: 'intro',
@@ -59805,6 +59854,7 @@ ${window.location.origin}${window.location.pathname}
     
     currentSection: 'intro',
     
+    // ===================== AFFICHAGE & AIDE =====================
     open: () => {
       const overlay = document.getElementById('tuto-modal-overlay');
       overlay.classList.add('show');
@@ -62465,6 +62515,7 @@ const Editor = {
 
 // ==================== MODULE FORUM COMMUNAUTAIRE ====================
 const Forum = {
+    // ===================== ÉTAT & CATÉGORIES =====================
     currentCategory: 'general',
     currentSort: 'recent',
     threads: [],
@@ -62496,6 +62547,7 @@ const Forum = {
         retours_design: { icon: '🎨', name: '🎨 Design/Thèmes', desc: 'Design et thèmes', parent: 'retours' }
     },
     
+    // ===================== NAVIGATION & CHARGEMENT =====================
     open: () => {
         UI.hideAllViews();
         document.getElementById('forum-view').classList.add('active');
@@ -62601,6 +62653,7 @@ const Forum = {
         `).join('');
     },
     
+    // ===================== VOTES & FILS =====================
     vote: async (threadId, value) => {
         if(!state.currentUser) return;
         
@@ -62791,6 +62844,7 @@ const Forum = {
         }
     },
     
+    // ===================== MODALE FIL & RÉPONSES =====================
     showThreadModal: (thread, replies) => {
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
@@ -62897,6 +62951,7 @@ const Forum = {
 
 // ==================== MODULE MUR SOCIAL (FEED) ====================
 const Feed = {
+    // ===================== ÉTAT & AFFICHAGE =====================
     posts: [],
     
     open: () => {
@@ -63016,6 +63071,7 @@ const Feed = {
         }).join('');
     },
     
+    // ===================== PUBLICATION & IMAGES =====================
     publish: async () => {
         const contentEl = document.getElementById('feed-post-text');
         const content = contentEl.innerHTML.trim();
@@ -63102,6 +63158,7 @@ const Feed = {
         document.getElementById('feed-image-input').value = '';
     },
     
+    // ===================== LIKES & COMMENTAIRES =====================
     toggleLike: async (postId) => {
         if(!state.currentUser) return;
         
@@ -64045,6 +64102,7 @@ const Seasons = {
 };
 
 const Episodes = {
+    // ===================== SAISONS & ÉPISODES =====================
     
     // S7 : bascule de saison
     // Change la saison active, met à jour les dropdowns et rafraîchit toutes les vues
