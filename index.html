@@ -26,7 +26,14 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 HISTORIQUE DES VERSIONS
 ================================================================================
-v514 — Dashboard : la carte d'un projet disparaît immédiatement après suppression (rafraîchissement de la liste qui manquait) + Profils Publics : correction de l'enregistrement qui échouait silencieusement à partir de 3 profils (description physique, galerie photo, langues, sports) — cause = trigger Supabase "LIMIT_3_PROFILES" déclenché à tort sur la mise à jour d'un profil existant (l'upsert exécute le trigger BEFORE INSERT avant de détecter le conflit d'id) ; trigger corrigé pour exclure la ligne en cours (id <> NEW.id), et faux message « Profil sauvegardé » supprimé en cas d'erreur (le vrai message d'erreur s'affiche désormais) + Feuille de service : export PDF aligné sur l'aperçu écran (carte météo en grille avec dégradé + sous-classes, fonds colorés imprimés via print-color-adjust) (2 Juin 2026)
+v514 (2 Juin 2026)
+  - Dashboard : la carte d'un projet disparaît immédiatement après suppression (rafraîchissement de la liste qui manquait).
+  - Profils Publics : correction de l'enregistrement qui échouait silencieusement à partir de 3 profils (description physique, galerie photo, langues, sports).
+    Cause = trigger Supabase "LIMIT_3_PROFILES" déclenché à tort lors de l'upsert d'un profil existant (le trigger BEFORE INSERT se lance avant la détection du conflit d'id).
+    Corrigé côté Supabase : décompte excluant la ligne en cours (id <> NEW.id), + faux message « Profil sauvegardé » supprimé en cas d'erreur (le vrai message s'affiche désormais).
+  - Feuille de service : export PDF aligné sur l'aperçu écran (carte météo en grille avec dégradé + sous-classes, fonds colorés imprimés via print-color-adjust).
+  - Storyboard : la colonne des plans s'aligne sur la hauteur de la scène sélectionnée (plus besoin de remonter) + recalcul auto au redimensionnement.
+  - Scénario : 2e clic sur "Storyboard" ou "Commentaires" referme le panneau ouvert (bascule).
 v513 — Cohérence pages de garde sur 7 exports onglet (Synopsis, Scénario, Planning, Stats, Personnages, Acteurs, Lieux) alignés sur le Dossier global + refonte "Mes Profils Publics" : galerie de profils en cercles photo (nom + fonction + projets liés avec rôle propriétaire/invité),
  formulaire affiché seulement au clic + fix compteur de caractères du synopsis qui affichait 0 à l'ouverture du projet (recalcul immédiat désormais) (2 Juin 2026)
 v512 — Séquencier : export PDF enrichi (statut, tag, perso, n° formaté) + choix des saisons + suppression du bouton "Imprimer/PDF" redondant (2 Juin 2026)
@@ -7303,7 +7310,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv514</p>
+      <p>vv515</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -15396,11 +15403,14 @@ showDashboard: async () => {
               .on('presence', { event: 'sync' }, () => {
                   const presenceState = state.presenceChannel.presenceState();
                   els.presenceList.innerHTML = '';
+                  const seen = new Set();
                   
                   Object.keys(presenceState).forEach(key => {
                       const users = presenceState[key];
                       users.forEach(u => {
                           const userEmail = u.email || key;
+                          if(seen.has(userEmail)) return;
+                          seen.add(userEmail);
                           const initials = Utils.getInitials(userEmail);
                           const bg = Utils.getColor(userEmail);
                           const wrapper = document.createElement('div');
@@ -15439,7 +15449,6 @@ showDashboard: async () => {
                           }
                           tooltip.innerHTML = tooltipHtml;
                           wrapper.appendChild(tooltip);
-                          els.presenceList.innerHTML = '';
                           els.presenceList.appendChild(wrapper);
                       });
                   });
@@ -60227,6 +60236,8 @@ ${window.location.origin}${window.location.pathname}
     currentSceneId: null,
     
     open: (sceneId) => {
+        const _panel = document.getElementById('storyboard-preview-panel');
+        if(_panel.classList.contains('open') && StoryboardPreview.currentSceneId === sceneId) { StoryboardPreview.close(); return; }
         StoryboardPreview.currentSceneId = sceneId;
         const scene = state.data.scenes.find(s => s.id === sceneId);
         document.getElementById('storyboard-preview-title').textContent = scene ? `Storyboard - ${scene.title}` : 'Storyboard';
@@ -60272,6 +60283,8 @@ const Comments = {
     currentSceneId: null,
     
     open: (sceneId) => {
+        const _panel = document.getElementById('comments-panel');
+        if(_panel.classList.contains('open') && Comments.currentSceneId === sceneId) { Comments.close(); return; }
         Comments.currentSceneId = sceneId;
         const scene = state.data.scenes.find(s => s.id === sceneId);
         const sceneIndex = state.data.scenes.findIndex(s => s.id === sceneId) + 1;
