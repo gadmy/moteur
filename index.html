@@ -26,6 +26,7 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 HISTORIQUE DES VERSIONS
 ================================================================================
+v512 — Séquencier : export PDF enrichi (statut, tag, perso, n° formaté) + choix des saisons + suppression du bouton "Imprimer/PDF" redondant (2 Juin 2026)
 v511 — Axe 1 (suite) : déduplications CSS (états actifs, flex, tab-close, curseur) + conflit empty-state (2 Juin 2026)
 
 ================================================================================
@@ -7288,7 +7289,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv511</p>
+      <p>vv512</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10188,8 +10189,7 @@ body.presentation-mode .presentation-bar {
                     <strong>RÉSUMÉ LONG</strong>
                     <p id="boardLongDisplay" class="pre-wrap"></p>
                 </div>
-                <hr>
-                <button onclick="app.UI.printBoard()" style="width:100%;padding:10px;background:var(--primary);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:10px;">📄 Imprimer / PDF</button>
+                 <hr>
                 <div style="font-size:0.8rem; color:var(--text-sec); margin-top:20px">Astuce: Clic-droit sur une carte pour gérer les Tags/Couleurs.</div>
                 </div><!-- fin sequencer-options -->
                 <div id="beatboard-options" class="d-none">
@@ -69258,6 +69258,49 @@ const Weather = {
           viewport.style.top = (-BeatBoard.panY * scale / BeatBoard.zoom) + 'px';
       },
       
+      // [Lot 2] Sélecteur de saisons pour l'export PDF du séquencier (séries)
+      _chooseSequencerSeasons: (onConfirm) => {
+          const seasons = (state.data.seasons || []).slice().sort((a,b) => (a.number||0) - (b.number||0));
+          const episodes = state.data.episodes || [];
+          if(seasons.length === 0) { onConfirm(null); return; }
+          const currentEp = episodes.find(e => e.id === state.currentEpisodeId);
+          const currentSeasonId = currentEp ? currentEp.seasonId : null;
+          const items = seasons.map(s => {
+              const sNum = String(s.number).padStart(2, '0');
+              const epCount = episodes.filter(e => e.seasonId === s.id).length;
+              const checked = s.id === currentSeasonId ? 'checked' : '';
+              const sTitle = s.title ? ' — ' + Utils.escape(s.title) : '';
+              return `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()"><td style="width:24px;padding:6px;"><input type="checkbox" class="seqexpchk" value="${s.id}" ${checked} onclick="event.stopPropagation()"></td><td style="padding:6px;">Saison ${sNum}${sTitle} <span style="color:var(--text-sec);font-size:0.8rem;">(${epCount} ép.)</span></td></tr>`;
+          }).join('');
+          const overlay = document.createElement('div');
+          overlay.className = 'confirm-modal-overlay';
+          overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:420px;padding:20px;">
+              <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">📄 Export PDF du séquencier</div>
+              <div style="text-align:left;font-size:0.85rem;color:var(--text-sec);margin-bottom:8px;">Saisons à inclure :</div>
+              <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;"><table style="width:100%;border-collapse:collapse;">${items}</table></div>
+              <div style="display:flex;gap:6px;margin-bottom:14px;">
+                  <button type="button" id="seqexp-all" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);border-radius:5px;background:transparent;cursor:pointer;">Tout</button>
+                  <button type="button" id="seqexp-none" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);border-radius:5px;background:transparent;cursor:pointer;">Aucun</button>
+              </div>
+              <div style="display:flex;gap:8px;justify-content:flex-end;">
+                  <button class="confirm-modal-btn cancel" id="seqexp-cancel" style="margin:0;">Annuler</button>
+                  <button class="confirm-modal-btn confirm" id="seqexp-ok" style="margin:0;">Exporter</button>
+              </div>
+          </div>`;
+          document.body.appendChild(overlay);
+          overlay.querySelector('#seqexp-all').onclick = () => overlay.querySelectorAll('.seqexpchk').forEach(cb => cb.checked = true);
+          overlay.querySelector('#seqexp-none').onclick = () => overlay.querySelectorAll('.seqexpchk').forEach(cb => cb.checked = false);
+          overlay.querySelector('#seqexp-cancel').onclick = () => overlay.remove();
+          overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+          overlay.querySelector('#seqexp-ok').onclick = () => {
+              const seasonIds = Array.from(overlay.querySelectorAll('.seqexpchk:checked')).map(cb => cb.value);
+              if(seasonIds.length === 0) { Utils.toast('Aucune saison sélectionnée', 'warning'); return; }
+              const epIds = episodes.filter(e => seasonIds.includes(e.seasonId)).map(e => e.id);
+              overlay.remove();
+              onConfirm(epIds);
+          };
+      },
+      
       // [Phase C.5.4] Export PDF du Séquencier (PAS le BeatBoard)
       exportSequencerPDF: (opts = {}) => {
           const { jsPDF } = window.jspdf;
@@ -69266,9 +69309,24 @@ const Weather = {
           const pageHeight = doc.internal.pageSize.getHeight();
           const margin = 15;
           
-          const scenes = state.data.scenes || [];
-          const episodes = state.data.episodes || [];
-          const seasons = state.data.seasons || [];
+          let scenes = state.data.scenes || [];
+          let episodes = state.data.episodes || [];
+          let seasons = state.data.seasons || [];
+          
+          // [Lot 2] Choix des saisons/épisodes (séries, export interactif uniquement)
+          if(state.currentProjectType === 'series' && opts.episodeIds === undefined && !opts.returnBlob && seasons.length > 0 && scenes.length > 0) {
+              BeatBoard._chooseSequencerSeasons((epIds) => {
+                  BeatBoard.exportSequencerPDF({ ...opts, episodeIds: epIds || [] });
+              });
+              return;
+          }
+          if(Array.isArray(opts.episodeIds)) {
+              const _epSet = new Set(opts.episodeIds);
+              episodes = episodes.filter(e => _epSet.has(e.id));
+              const _keepSea = new Set(episodes.map(e => e.seasonId));
+              seasons = seasons.filter(s => _keepSea.has(s.id));
+              scenes = scenes.filter(s => _epSet.has(s.episodeId));
+          }
           
           if(scenes.length === 0) {
               Utils.toast('Aucune scène à exporter', 'warning');
@@ -69295,27 +69353,56 @@ const Weather = {
           
           // Helper : afficher une scène (1 ligne par scène, compacte)
           const renderScene = (scene, sceneIdx) => {
-              if(y > pageHeight - 18) { doc.addPage(); y = margin; }
+              if(y > pageHeight - 24) { doc.addPage(); y = margin; }
               
-              // Numéro + titre
-              const sceneNumber = `${sceneIdx + 1}.`;
+              // Numéro (formaté) + titre
+              const sceneNumber = UI.formatSceneNumber(scene, sceneIdx);
               doc.setFont('helvetica', 'bold');
               doc.setFontSize(9);
               doc.setTextColor(...PdfTheme.COLORS.BANNER_BLUE);
               doc.text(sceneNumber, margin, y);
+              const _numW = Math.max(10, doc.getTextWidth(sceneNumber) + 3);
               
-              const titleStr = PdfTheme.cleanText(scene.title || 'Sans titre').substring(0, 65);
+              const titleStr = PdfTheme.cleanText(scene.title || 'Sans titre').substring(0, 58);
               doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
-              doc.text(titleStr, margin + 10, y);
+              doc.text(titleStr, margin + _numW, y);
               
-              // Durée à droite
+              // Durée + statut à droite
+              doc.setFont('helvetica', 'normal');
+              doc.setFontSize(8);
+              let _rightX = pageWidth - margin;
               if(scene.time) {
-                  doc.setFont('helvetica', 'normal');
-                  doc.setFontSize(8);
                   doc.setTextColor(...PdfTheme.COLORS.TEXT_LIGHT);
-                  doc.text(PdfTheme.cleanText(`${scene.time} min`), pageWidth - margin, y, { align: 'right' });
+                  const _dur = PdfTheme.cleanText(`${scene.time} min`);
+                  doc.text(_dur, _rightX, y, { align: 'right' });
+                  _rightX -= (doc.getTextWidth(_dur) + 4);
               }
+              const _isFinal = scene.isFinal === true;
+              doc.setTextColor(...(_isFinal ? PdfTheme.COLORS.SUCCESS : PdfTheme.COLORS.TEXT_MUTED));
+              doc.text(_isFinal ? 'FINALE' : 'BROUILLON', _rightX, y, { align: 'right' });
               y += 5;
+              // Ligne méta : tag (pastille couleur + nom) + perso
+              const _tag = (state.data.tags || []).find(t => t.id === scene.tag_id);
+              const _perso = scene.perso ? PdfTheme.cleanText(scene.perso).substring(0, 70) : '';
+              if((_tag && _tag.name) || _perso) {
+                  let _mx = margin + _numW;
+                  doc.setFontSize(8);
+                  if(_tag && _tag.name) {
+                      const _rgb = (_tag.color && _tag.color !== 'transparent' && typeof ColorWheel !== 'undefined' && ColorWheel.hexToRgb) ? ColorWheel.hexToRgb(_tag.color) : null;
+                      if(_rgb) { doc.setFillColor(_rgb.r, _rgb.g, _rgb.b); doc.circle(_mx + 1, y - 1, 1.2, 'F'); _mx += 5; }
+                      doc.setFont('helvetica', 'normal');
+                      doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
+                      const _tn = PdfTheme.cleanText(_tag.name);
+                      doc.text(_tn, _mx, y);
+                      _mx += doc.getTextWidth(_tn) + 5;
+                  }
+                  if(_perso) {
+                      doc.setFont('helvetica', 'italic');
+                      doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
+                      doc.text(_perso, _mx, y);
+                  }
+                  y += 5;
+              }
               
               // Résumé si présent
               if(scene.resume) {
