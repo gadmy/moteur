@@ -26,6 +26,7 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 HISTORIQUE DES VERSIONS
 ================================================================================
+v514 — Dashboard : la carte d'un projet disparaît immédiatement après suppression (rafraîchissement de la liste qui manquait) + Profils Publics : correction de l'enregistrement qui échouait silencieusement à partir de 3 profils (description physique, galerie photo, langues, sports) — cause = trigger Supabase "LIMIT_3_PROFILES" déclenché à tort sur la mise à jour d'un profil existant (l'upsert exécute le trigger BEFORE INSERT avant de détecter le conflit d'id) ; trigger corrigé pour exclure la ligne en cours (id <> NEW.id), et faux message « Profil sauvegardé » supprimé en cas d'erreur (le vrai message d'erreur s'affiche désormais) + Feuille de service : export PDF aligné sur l'aperçu écran (carte météo en grille avec dégradé + sous-classes, fonds colorés imprimés via print-color-adjust) (2 Juin 2026)
 v513 — Cohérence pages de garde sur 7 exports onglet (Synopsis, Scénario, Planning, Stats, Personnages, Acteurs, Lieux) alignés sur le Dossier global + refonte "Mes Profils Publics" : galerie de profils en cercles photo (nom + fonction + projets liés avec rôle propriétaire/invité),
  formulaire affiché seulement au clic + fix compteur de caractères du synopsis qui affichait 0 à l'ouverture du projet (recalcul immédiat désormais) (2 Juin 2026)
 v512 — Séquencier : export PDF enrichi (statut, tag, perso, n° formaté) + choix des saisons + suppression du bouton "Imprimer/PDF" redondant (2 Juin 2026)
@@ -26453,6 +26454,16 @@ const Storyboard = {
         Storyboard.renderScenesList();
         document.getElementById('sbNoScene').style.display = 'flex';
         document.getElementById('sbShotsContainer').style.display = 'none';
+        // Recalcul auto de l'alignement des plans au redimensionnement (lié une seule fois)
+        if(!Storyboard._resizeBound) {
+            Storyboard._resizeBound = true;
+            window.addEventListener('resize', () => {
+                clearTimeout(Storyboard._resizeTimer);
+                Storyboard._resizeTimer = setTimeout(() => {
+                    if(Storyboard.currentSceneId) Storyboard.alignShotsToScene();
+                }, 150);
+            });
+        }
     },
     
     renderScenesList: () => {
@@ -26505,6 +26516,21 @@ const Storyboard = {
         document.getElementById('sbNoScene').style.display = 'none';
         document.getElementById('sbShotsContainer').style.display = 'block';
         Storyboard.renderShots();
+        Storyboard.alignShotsToScene();
+    },
+
+    // Aligne le haut de la colonne des plans sur la scène sélectionnée
+    // (évite de devoir remonter quand on choisit une scène en bas de liste)
+    alignShotsToScene: () => {
+        const list = document.getElementById('sbScenesList');
+        const shots = document.getElementById('sbShotsContainer');
+        if(!list || !shots) return;
+        const active = list.querySelector('.sb-scene-item.active');
+        if(!active) { shots.style.marginTop = '0'; return; }
+        const col = shots.parentElement;
+        const padTop = parseFloat(getComputedStyle(col).paddingTop) || 0;
+        const offset = active.getBoundingClientRect().top - col.getBoundingClientRect().top - padTop;
+        shots.style.marginTop = Math.max(0, offset) + 'px';
     },
     
     renderShots: () => {
