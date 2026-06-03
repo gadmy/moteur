@@ -7310,7 +7310,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv516</p>
+      <p>vv515</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -12060,9 +12060,21 @@ const app = (function(){
                           detectSessionInUrl: true,
                           persistSession: true,
                           autoRefreshToken: !isFileProtocol,
-                          // Verrou "no-op" : désactive navigator.locks (Web Locks), qui fait
-                          // pendre signInWithPassword à l'infini sous Safari/WebKit (Orion, etc.).
-                          lock: async (name, acquireTimeout, fn) => await fn()
+                          // Verrou d'auth avec timeout : sérialise les opérations entre onglets
+                          // (évite la course "refresh token already used" qui casse les sessions multi-onglets),
+                          // mais abandonne après 5 s si le verrou est orphelin (évite le hang infini WebKit/Safari).
+                          lock: async (name, acquireTimeout, fn) => {
+                              const lm = (typeof navigator !== 'undefined') ? navigator.locks : null;
+                              if (!lm || typeof lm.request !== 'function') return await fn();
+                              const controller = new AbortController();
+                              const timer = setTimeout(() => { try { controller.abort(); } catch(_) {} }, 5000);
+                              try {
+                                  return await lm.request(name, { signal: controller.signal }, async () => { clearTimeout(timer); return await fn(); });
+                              } catch (e) {
+                                  clearTimeout(timer);
+                                  return await fn();
+                              }
+                          }
                       },
                       global: {
                           headers: { 'x-application-name': 'moteur' }
@@ -14243,9 +14255,6 @@ crewRoles: {
       // ===================== VÉRIFICATION & DÉCONNEXION =====================
       startSessionCheck: async (userId) => {
           SessionManager.currentUserId = userId;
-          // Session unique DÉSACTIVÉE (option A) : on s'appuie uniquement sur l'auth Supabase.
-          // Plus de table active_sessions, plus de heartbeat, plus de kick. Le code ci-dessous est neutralisé.
-          return true;
           
           // Token partagé entre onglets du même navigateur via localStorage
           let browserToken = localStorage.getItem('moteur_browser_token');
@@ -14463,6 +14472,8 @@ crewRoles: {
               if(savedDesign && savedDesign !== 'classic') document.body.classList.add('design-' + savedDesign);
               setTimeout(() => { const sel = document.getElementById('design-selector'); if(sel && savedDesign) sel.value = savedDesign; }, 100);
           } catch(e) { /* Navigation privée - localStorage indisponible */ } 
+          // Initialiser le gestionnaire de session
+          SessionManager.init();
           
           // Fix file:// : limiter les refresh tokens pour éviter les boucles
           if(window.location.protocol === 'file:') {
@@ -14520,7 +14531,7 @@ crewRoles: {
                       return;
                   }
                   // Vérifier la session unique
-                  const sessionOk = true;
+                  const sessionOk = await SessionManager.startSessionCheck(session.user.id);
                   if(sessionOk) {
                       Auth.showDashboard(); 
                   }
@@ -14532,6 +14543,7 @@ crewRoles: {
                       return;
                   }
                   state.currentUser = null; 
+                  SessionManager.cleanup();
                   Auth.showAuth(); 
               } 
           });
@@ -14652,20 +14664,13 @@ showDashboard: async () => {
           btn.classList.add('btn-loading');
           els.loginError.style.display = 'none';
           
-          let data, error;
-          try {
-              const _res = await Promise.race([
-                  supabase.auth.signInWithPassword({ email: email, password: pass }),
-                  new Promise((_, rej) => setTimeout(() => rej(new Error('TIMEOUT')), 15000))
-              ]);
-              data = _res.data; error = _res.error;
-          } catch(e) {
-              error = { message: (e && e.message === 'TIMEOUT') ? 'TIMEOUT' : ('Erreur réseau : ' + ((e && e.message) || 'inconnue')) };
-          }
+          const { data, error } = await supabase.auth.signInWithPassword({
+              email: email,
+              password: pass
+          });
           
           if (error) {
-             let message = error.message;
-              if (message === 'TIMEOUT') message = "Connexion expirée (15 s) : le serveur d'authentification n'a pas répondu. Réessaie, et ouvre la console (F12) + l'onglet Réseau.";
+              let message = error.message;
               if (message.includes('Invalid login')) message = "Email ou mot de passe incorrect.";
               if (message.includes('Email not confirmed')) message = "Veuillez valider votre email avant de vous connecter.";
               els.loginError.innerText = message;
@@ -14774,11 +14779,9 @@ showDashboard: async () => {
           }
       },
       logout: async () => { 
-         NavMemory.clear(); // Vraie déconnexion : on oublie tout
+          NavMemory.clear(); // Vraie déconnexion : on oublie tout
           ActiveProfile.clear();
-          try { await supabase.auth.signOut(); } catch(_) {}
-          // Purge la session locale (storageKey custom) pour éviter une reconnexion auto au reload
-          try { Object.keys(localStorage).filter(k => k.startsWith('moteur-auth-token')).forEach(k => localStorage.removeItem(k)); } catch(_) {}
+          await supabase.auth.signOut();
           location.reload();
       }
   };
@@ -15579,6 +15582,11 @@ showDashboard: async () => {
           
           // Marquer que la sauvegarde est terminée
           state.savingInProgress = false;
+          
+          // Notifier les autres onglets de la modification
+          if(typeof SessionManager !== 'undefined') {
+              SessionManager.notifyDataUpdate();
+          }
           
           // Verrou anti-concurrence : si une demande de save a eu lieu pendant qu'on sauvegardait,
           // on relance maintenant pour ne pas perdre la modif
@@ -69674,7 +69682,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, ProfileActualites, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, UniverseBrothers, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, ContractsTemplates, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, AdminEmail, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, ProfileActualites, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, UniverseBrothers, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, ContractsTemplates, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, AdminEmail, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
