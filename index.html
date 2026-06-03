@@ -23,9 +23,17 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
-
+v517 (3 Juin 2026)
+  - Sécurité RLS : la lecture des projets est restreinte au propriétaire, aux membres invités et à l'admin plateforme (policy SELECT « Projects viewable » via la fonction can_view_project). Comble le trou « using(true) » qui laissait tout utilisateur connecté lire n'importe quel projet.
+  - Univers : les projets publics sont désormais chargés via une fonction RPC get_public_projects qui n'expose que la fiche publique (publicProjectData) — jamais le projet entier (casting, planning, budget, scénario).
+  - Effet : une personne non invitée ne peut plus accéder au projet d'autrui, et un membre révoqué perd immédiatement l'accès en lecture.
+v516 (3 Juin 2026)
 HISTORIQUE DES VERSIONS
-================================================================================
+  - « Gérer les accès » refondu en 3 onglets : Comédien·nes, Équipe technique, Invités.
+  - Onglet Invités : liste les personnes invitées au projet (hors casting et équipe) avec leur matrice de permissions par section, nom de profil résolu depuis user_profiles, et bouton Révoquer.
+  - Bouton « Révoquer » désormais présent dans les trois onglets, affiché uniquement en face des personnes ayant réellement un accès ; révocation par email (retire l'accès au projet, sans toucher au rôle créatif dans le casting).
+  - Sécurité : le propriétaire ne peut pas se révoquer lui-même (bouton masqué sur sa propre ligne). La propriété reste ancrée à owner_email, indépendante du casting et des accès — supprimer son profil d'acteur ne fait pas perdre le projet.
+  - Tableau de permissions : suppression des icônes d'en-tête et recentrage du texte vertical (Synopsis, Scénario…) sur ses colonnes.
 v514 (2 Juin 2026)
   - Dashboard : la carte d'un projet disparaît immédiatement après suppression (rafraîchissement de la liste qui manquait).
   - Profils Publics : correction de l'enregistrement qui échouait silencieusement à partir de 3 profils (description physique, galerie photo, langues, sports).
@@ -7309,7 +7317,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv516</p>
+      <p>vv518</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -15244,6 +15252,38 @@ showDashboard: async () => {
       }, 1000)
   };
 
+  // LockDomains — carte domaine -> clés state.data (verrous collaboratifs, sauvegarde partielle, merge sélectif).
+  // Un domaine = les onglets qui écrivent une ou plusieurs clés communes (cf. audit interconnexions).
+  const LockDomains = {
+      defs: {
+          scenes:       { label: 'Scènes',       keys: ['scenes','seasons','episodes','tags','groups','scriptMeta','scriptReports'], tabs: ['script','breakdown','board','seasons','episodes','scriptreport'] },
+          casting:      { label: 'Casting',      keys: ['characters','actors'],                                                       tabs: ['chars','actors'] },
+          planning:     { label: 'Planning',     keys: ['shootingDays','workplanOverrides','publicCallsheets'],                       tabs: ['planning'] },
+          budget:       { label: 'Budget',       keys: ['budget','expenses'],                                                         tabs: ['expenses'] },
+          crew:         { label: 'Équipe',       keys: ['crew'],                                                                      tabs: ['crew'] },
+          locations:    { label: 'Lieux',        keys: ['locations'],                                                                 tabs: ['locs'] },
+          resources:    { label: 'Ressources',   keys: ['resources'],                                                                 tabs: ['resources'] },
+          storyboard:   { label: 'Storyboard',   keys: ['shots'],                                                                     tabs: ['storyboard'] },
+          moodboard:    { label: 'Moodboard',    keys: ['moodboards'],                                                                tabs: ['moodboard'] },
+          synopsis:     { label: 'Synopsis',     keys: ['synopsis','synopsisShort','synopsisLong'],                                   tabs: ['synopsis'] },
+          presentation: { label: 'Présentation', keys: ['presentation','titlePage','publicProjectData','isPublicProject'],           tabs: ['presentation','titlepage'] },
+          comments:     { label: 'Commentaires', keys: ['comments'],                                                                  tabs: [] }
+      },
+      forTab: (tabName) => {
+          for(const id in LockDomains.defs) {
+              if(LockDomains.defs[id].tabs.includes(tabName)) return id;
+          }
+          return null;
+      },
+      forKey: (key) => {
+          for(const id in LockDomains.defs) {
+              if(LockDomains.defs[id].keys.includes(key)) return id;
+          }
+          return null;
+      },
+      keysOf: (id) => (LockDomains.defs[id] && LockDomains.defs[id].keys) || []
+  };
+
   // StoreLocks — sous-module B.1.3 : verrous d'édition de scènes en collaboratif (Supabase Realtime Broadcast)
   const StoreLocks = {
       initLocks: (id) => { 
@@ -15373,7 +15413,17 @@ showDashboard: async () => {
                   (payload) => {
                       const val = payload.new.data;
                       if(!val) return;
-                      state.data = { ...state.data, ...val };
+                      // Phase 0 : merge sélectif — n'écrase pas une clé modifiée localement et non encore sauvegardée
+                      const base_ = state.savedBaseline;
+                      if(base_) {
+                          for(const k in val) {
+                              if(JSON.stringify(state.data[k]) !== JSON.stringify(base_[k])) continue; // modif locale en cours : on protège
+                              state.data[k] = val[k];
+                              base_[k] = JSON.parse(JSON.stringify(val[k]));
+                          }
+                      } else {
+                          state.data = { ...state.data, ...val };
+                      }
                       if(document.activeElement !== els.title) els.title.value = state.data.title;
                       Synopsis.renderTree('synopsis');
                       Synopsis.renderTree('short');
@@ -15512,6 +15562,23 @@ showDashboard: async () => {
           
           const id = state.currentProjectId; 
           
+          // Phase 0 : sauvegarde partielle — on ne pousse que les clés modifiées depuis la baseline.
+          // Repli sur écriture complète si pas de baseline (ex. juste après import).
+          const saveBase = state.savedBaseline;
+          let savePatch = null;
+          if(saveBase) {
+              savePatch = {};
+              for(const k in cleanData) {
+                  if(JSON.stringify(cleanData[k]) !== JSON.stringify(saveBase[k])) savePatch[k] = cleanData[k];
+              }
+              if(Object.keys(savePatch).length === 0) {
+                  // Rien n'a changé : pas d'écriture inutile
+                  state.savingInProgress = false;
+                  if(state.pendingSave) { state.pendingSave = false; StoreSave.save(); }
+                  return;
+              }
+          } 
+          
           // Tentatives avec retry exponentiel : 1ère immédiate, puis attente 1s, puis 3s
           // Une erreur réseau / 5xx / timeout déclenche un retry. Une erreur métier (RLS, schéma) ne retry pas.
           const maxAttempts = 3;
@@ -15530,14 +15597,22 @@ showDashboard: async () => {
               }
               
               try {
-                  const { error } = await supabase
-                      .from('projects')
-                      .update({ 
-                          data: cleanData,
-                          title: state.data.title,
-                          updated_at: new Date().toISOString()
-                      })
-                      .eq('id', id);
+                  let error;
+                  if(savePatch) {
+                      // Écriture partielle côté serveur (merge jsonb) : ne touche que les clés modifiées
+                      const res = await supabase.rpc('patch_project_data', { p_id: id, p_patch: savePatch });
+                      error = res.error;
+                  } else {
+                      const res = await supabase
+                          .from('projects')
+                          .update({ 
+                              data: cleanData,
+                              title: state.data.title,
+                              updated_at: new Date().toISOString()
+                          })
+                          .eq('id', id);
+                      error = res.error;
+                  }
                   
                   if(!error) { success = true; break; }
                   
@@ -15588,6 +15663,9 @@ showDashboard: async () => {
                   syncIndicator.title = '';
               }, 2000);
           }
+          
+          // Phase 0 : la baseline reflète désormais l'état persisté
+          state.savedBaseline = JSON.parse(JSON.stringify(cleanData));
           
           // Marquer que la sauvegarde est terminée
           state.savingInProgress = false;
@@ -16305,6 +16383,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               }
               
               state.data = safeData; state.currentProjectId = id;
+              state.savedBaseline = JSON.parse(JSON.stringify(safeData)); // Phase 0 : état de référence pour sauvegarde partielle / merge sélectif
               state.currentProjectType = project.project_type || 'film'; // S3.4
               state.statsFilter = { scope: 'all', seasonId: null, episodeId: null }; // Stats: filtre de scope par défaut
               NavMemory.setProject(id); // Persistance pour F5
@@ -57927,15 +58006,12 @@ hoverCard: null,
             // Charger les projets publics depuis la table projects
             try {
                 const { data: projects, error: projError } = await supabase
-                    .from('projects')
-                    .select('id, title, data, owner_email')
-                    .limit(500);
+                    .rpc('get_public_projects');
                 
                 if(!projError && projects) {
                     projects.forEach(proj => {
-                        const d = proj.data || {};
-                        if(d.isPublicProject && d.publicProjectData) {
-                            const pubData = d.publicProjectData;
+                        const pubData = proj.public_data;
+                        if(pubData) {
                             Universe.allProjects.push({
                                 ...pubData,
                                 id: proj.id,
