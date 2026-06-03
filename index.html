@@ -7064,6 +7064,18 @@ body.presentation-mode .presentation-bar {
 .td-padded { padding:12px 10px; text-align:left; font-size:0.85rem; }
 .flex-wrap-center { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; }
 .hub-nav-btn { background:var(--panel-bg); color:var(--text-main); border:1px solid var(--border); padding:10px 15px; border-radius:6px; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:6px; }
+  /* Phase 2 : verrous d'édition par domaine */
+  .tab-content.is-domain-locked input,
+  .tab-content.is-domain-locked textarea,
+  .tab-content.is-domain-locked select,
+  .tab-content.is-domain-locked button,
+  .tab-content.is-domain-locked [contenteditable],
+  .tab-content.is-domain-locked .script-editor-box { pointer-events: none; opacity: .65; }
+  .tab-content.is-domain-locked .dlock-banner,
+  .tab-content.is-domain-locked .dlock-banner button { pointer-events: auto; opacity: 1; }
+  .dlock-banner { background: rgba(217,119,6,.16); border: 1px solid rgba(217,119,6,.45); color: #c77f0a; padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; }
+  .dlock-badge { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; margin-left: 4px; vertical-align: middle; }
+  .dlock-ava { display: inline-flex; width: 16px; height: 16px; border-radius: 50%; background: #c0392b; color: #fff; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; }
 </style>
 </head>
 <body>
@@ -15284,6 +15296,170 @@ showDashboard: async () => {
       keysOf: (id) => (LockDomains.defs[id] && LockDomains.defs[id].keys) || []
   };
 
+  // LockManager — Phase 2 : verrous d'édition PAR DOMAINE (table project_locks, autorité serveur + temps réel).
+  const LockManager = {
+      heartbeatTimer: null,
+      lastEditAt: 0,
+      currentDomain: null,
+      channel: null,
+      ORDER: ['presentation','synopsis','board','titlepage','script','storyboard','chars','actors','locs','resources','crew','breakdown','stats','planning','expenses','chat'],
+
+      init: (projectId) => {
+          if(window.location.protocol === 'file:') return;
+          state.domainLocks = {};
+          LockManager.currentDomain = null;
+          // étiqueter les boutons d'onglet pour cibler les badges
+          document.querySelectorAll('.tab-btn').forEach((b,i) => { if(LockManager.ORDER[i]) b.dataset.tab = LockManager.ORDER[i]; });
+          LockManager.refresh(projectId);
+          if(LockManager.channel) supabase.removeChannel(LockManager.channel);
+          LockManager.channel = supabase
+              .channel('dlocks_' + projectId)
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'project_locks', filter: 'project_id=eq.' + projectId }, () => {
+                  LockManager.refresh(projectId);
+              })
+              .subscribe();
+          document.addEventListener('input', LockManager._onInput, true);
+          document.addEventListener('change', LockManager._onInput, true);
+          if(LockManager.heartbeatTimer) clearInterval(LockManager.heartbeatTimer);
+          LockManager.heartbeatTimer = setInterval(LockManager._tick, 60000);
+      },
+
+      refresh: async (projectId) => {
+          try {
+              const { data } = await supabase.from('project_locks').select('*').eq('project_id', projectId);
+              const map = {};
+              (data || []).forEach(l => { map[l.lock_key] = l; });
+              state.domainLocks = map;
+              LockManager.applyUI();
+          } catch(e) {}
+      },
+
+      _mine: (lock) => !!(lock && state.currentUser && lock.holder_uid === state.currentUser.uid),
+      _who: (lock) => (lock && (lock.holder_name || (lock.holder_email||'').split('@')[0])) || '?',
+
+      _onInput: (e) => {
+          const active = document.querySelector('.tab-content.active');
+          if(!active || !active.contains(e.target)) return;
+          if(state.currentRole === 'viewer') return;
+          const tabName = active.id.replace('tab-','');
+          const domain = LockDomains.forTab(tabName);
+          if(!domain) return;
+          LockManager.lastEditAt = Date.now();
+          const cur = (state.domainLocks||{})[domain];
+          if(LockManager._mine(cur)) return;
+          // prise optimiste pour ne pas spammer le RPC à chaque frappe
+          state.domainLocks = state.domainLocks || {};
+          state.domainLocks[domain] = { lock_key: domain, holder_uid: state.currentUser.uid, holder_email: state.currentUser.email, holder_name: (state.currentUser.email||'').split('@')[0], _optimistic: true };
+          LockManager.acquire(domain);
+      },
+
+      acquire: async (domain) => {
+          if(!state.currentProjectId || !state.currentUser) return false;
+          try {
+              const { data, error } = await supabase.rpc('lock_acquire', {
+                  p_id: state.currentProjectId, p_key: domain,
+                  p_uid: state.currentUser.uid, p_name: (state.currentUser.email||'').split('@')[0]
+              });
+              if(error) return false;
+              const lock = data;
+              state.domainLocks = state.domainLocks || {};
+              if(lock) state.domainLocks[domain] = lock;
+              const got = LockManager._mine(lock);
+              if(!got && lock) {
+                  Utils.toast('« ' + (LockDomains.defs[domain] ? LockDomains.defs[domain].label : domain) + ' » est en cours d\'édition par ' + LockManager._who(lock), 'warning', 5000);
+                  await LockManager._revertDomain(domain);
+              }
+              LockManager.applyUI();
+              return got;
+          } catch(e) { return false; }
+      },
+
+      // En cas de perte de course : on jette la modif locale du domaine (rechargée depuis le serveur).
+      _revertDomain: async (domain) => {
+          try {
+              const { data } = await supabase.from('projects').select('data').eq('id', state.currentProjectId).maybeSingle();
+              if(!data || !data.data) return;
+              LockDomains.keysOf(domain).forEach(k => {
+                  state.data[k] = data.data[k];
+                  if(state.savedBaseline) state.savedBaseline[k] = JSON.parse(JSON.stringify(data.data[k] === undefined ? null : data.data[k]));
+              });
+              if(UI && UI.renderAll) UI.renderAll();
+          } catch(e) {}
+      },
+
+      release: async (domain) => {
+          if(!domain || !state.currentProjectId || !state.currentUser) return;
+          const cur = (state.domainLocks||{})[domain];
+          if(!LockManager._mine(cur)) return;
+          try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: domain, p_uid: state.currentUser.uid }); } catch(e) {}
+          if(state.domainLocks) delete state.domainLocks[domain];
+          LockManager.applyUI();
+      },
+
+      onTabEnter: (tabName) => {
+          const newDomain = LockDomains.forTab(tabName);
+          if(LockManager.currentDomain && LockManager.currentDomain !== newDomain) {
+              LockManager.release(LockManager.currentDomain);
+          }
+          LockManager.currentDomain = newDomain;
+          LockManager.applyUI();
+      },
+
+      applyUI: () => {
+          document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
+              const d = LockDomains.forTab(btn.dataset.tab);
+              const lock = d ? (state.domainLocks||{})[d] : null;
+              const byOther = lock && !LockManager._mine(lock);
+              const old = btn.querySelector('.dlock-badge');
+              if(old) old.remove();
+              if(byOther) {
+                  const who = LockManager._who(lock);
+                  const badge = document.createElement('span');
+                  badge.className = 'dlock-badge';
+                  badge.title = "En cours d'édition par " + who;
+                  badge.innerHTML = '🚧<span class="dlock-ava">' + ((who[0]||'?').toUpperCase()) + '</span>';
+                  btn.appendChild(badge);
+              }
+          });
+          const active = document.querySelector('.tab-content.active');
+          if(!active) return;
+          const tabName = active.id.replace('tab-','');
+          const d = LockDomains.forTab(tabName);
+          const lock = d ? (state.domainLocks||{})[d] : null;
+          const byOther = lock && !LockManager._mine(lock);
+          active.classList.toggle('is-domain-locked', !!byOther);
+          const oldB = active.querySelector('.dlock-banner');
+          if(oldB) oldB.remove();
+          if(byOther) {
+              const banner = document.createElement('div');
+              banner.className = 'dlock-banner';
+              banner.innerHTML = "🚧 En cours d'édition par <strong>" + LockManager._who(lock) + "</strong> — lecture seule.";
+              active.prepend(banner);
+          }
+      },
+
+      _tick: () => {
+          const dom = LockManager.currentDomain;
+          if(dom && LockManager._mine((state.domainLocks||{})[dom])) {
+              if(Date.now() - LockManager.lastEditAt > 180000) { LockManager.release(dom); return; }
+              supabase.rpc('lock_heartbeat', { p_id: state.currentProjectId, p_key: dom, p_uid: state.currentUser.uid }).catch(()=>{});
+          }
+      },
+
+      cleanup: async () => {
+          document.removeEventListener('input', LockManager._onInput, true);
+          document.removeEventListener('change', LockManager._onInput, true);
+          if(LockManager.heartbeatTimer) { clearInterval(LockManager.heartbeatTimer); LockManager.heartbeatTimer = null; }
+          const mine = Object.keys(state.domainLocks||{}).filter(k => LockManager._mine(state.domainLocks[k]));
+          for(const k of mine) {
+              try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: k, p_uid: state.currentUser.uid }); } catch(e) {}
+          }
+          if(LockManager.channel) { supabase.removeChannel(LockManager.channel); LockManager.channel = null; }
+          state.domainLocks = {};
+          LockManager.currentDomain = null;
+      }
+  };
+
   // StoreLocks — sous-module B.1.3 : verrous d'édition de scènes en collaboratif (Supabase Realtime Broadcast)
   const StoreLocks = {
       initLocks: (id) => { 
@@ -16388,7 +16564,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               state.statsFilter = { scope: 'all', seasonId: null, episodeId: null }; // Stats: filtre de scope par défaut
               NavMemory.setProject(id); // Persistance pour F5
               LoadingScreen.setProgress(95);
-              UI.launchEditor(); Store.startRealtimeListener(id); Store.initPresence(id); Store.initLocks(id);
+              UI.launchEditor(); Store.startRealtimeListener(id); Store.initPresence(id); Store.initLocks(id); LockManager.init(id);
               // S7.1 : forcer la sauvegarde si migration saisons effectuée
               if(needsMigrationSave) setTimeout(() => Store.save(), 1000);
               LoadingScreen.hide();
@@ -18843,6 +19019,7 @@ initCategoriesDragDrop: () => {
         if(typeof Chat !== 'undefined') Chat.cleanup();
         // Nettoyer les locks de scène
         if(typeof Store !== 'undefined' && Store.cleanupLocks) await Store.cleanupLocks();
+        if(typeof LockManager !== 'undefined') await LockManager.cleanup();
         const accountType = state.userProfile?.accountType || 'producer';
         const typeLabel = accountType === 'actor' ? '🎭 Comédien.ne' : (accountType === 'crew' ? '🎥 Technicien.ne' : '🎬 Réalisateur');
         document.getElementById('user-welcome').innerText = typeLabel + " • " + (state.currentUser ? state.currentUser.email : ""); 
@@ -20805,6 +20982,7 @@ const tabToSection = {
           if(tabName === 'chat') Chat.init();
           if(tabName === 'expenses') Expenses.init();
           if(tabName === 'presentation') Presentation.init();
+          if(typeof LockManager !== 'undefined') LockManager.onTabEnter(tabName);
       },
       
       // ============================================================
