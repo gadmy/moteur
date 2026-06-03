@@ -15297,19 +15297,18 @@ showDashboard: async () => {
   };
 
   // LockManager — Phase 2 : verrous d'édition PAR DOMAINE (table project_locks, autorité serveur + temps réel).
-  const LockManager = {
+const LockManager = {
       heartbeatTimer: null,
-      lastEditAt: 0,
       currentDomain: null,
+      pendingDomain: null,
       channel: null,
-      suppressUntil: 0,
       ORDER: ['presentation','synopsis','board','titlepage','script','storyboard','chars','actors','locs','resources','crew','breakdown','stats','planning','expenses','chat'],
 
       init: (projectId) => {
           if(window.location.protocol === 'file:') return;
           state.domainLocks = {};
           LockManager.currentDomain = null;
-          // étiqueter les boutons d'onglet pour cibler les badges
+          LockManager.pendingDomain = null;
           document.querySelectorAll('.tab-btn').forEach((b,i) => { if(LockManager.ORDER[i]) b.dataset.tab = LockManager.ORDER[i]; });
           LockManager.refresh(projectId);
           if(LockManager.channel) supabase.removeChannel(LockManager.channel);
@@ -15330,80 +15329,36 @@ showDashboard: async () => {
               (data || []).forEach(l => { map[l.lock_key] = l; });
               state.domainLocks = map;
               LockManager.applyUI();
+              const d = LockManager.currentDomain;
+              if(d && state.currentRole !== 'viewer' && !map[d]) LockManager.acquire(d);
           } catch(e) {}
       },
 
       _mine: (lock) => !!(lock && state.currentUser && lock.holder_uid === state.currentUser.uid),
       _who: (lock) => (lock && (lock.holder_name || (lock.holder_email||'').split('@')[0])) || '?',
 
-      _onInput: (e) => {
-          const active = document.querySelector('.tab-content.active');
-          if(!active || !active.contains(e.target)) return;
-          if(state.currentRole === 'viewer') return;
-          const tabName = active.id.replace('tab-','');
-          const domain = LockDomains.forTab(tabName);
-          if(!domain) return;
-          LockManager.lastEditAt = Date.now();
-          const cur = (state.domainLocks||{})[domain];
-          if(LockManager._mine(cur)) return;
-          // prise optimiste pour ne pas spammer le RPC à chaque frappe
-          state.domainLocks = state.domainLocks || {};
-          state.domainLocks[domain] = { lock_key: domain, holder_uid: state.currentUser.uid, holder_email: state.currentUser.email, holder_name: (state.currentUser.email||'').split('@')[0], _optimistic: true };
-          LockManager.acquire(domain);
+      _editable: (domain) => {
+          if(!domain || !LockDomains.defs[domain] || LockDomains.defs[domain].tabs.length === 0) return true;
+          return LockManager._mine((state.domainLocks||{})[domain]);
       },
 
       acquire: async (domain) => {
-          if(!state.currentProjectId || !state.currentUser) return false;
+          if(!domain || !state.currentProjectId || !state.currentUser || state.currentRole === 'viewer') return false;
+          LockManager.pendingDomain = domain;
+          LockManager.applyUI();
           try {
               const { data, error } = await supabase.rpc('lock_acquire', {
                   p_id: state.currentProjectId, p_key: domain,
                   p_uid: state.currentUser.uid, p_name: (state.currentUser.email||'').split('@')[0]
               });
-              if(error) return false;
-              const lock = data;
+              LockManager.pendingDomain = null;
+              if(error) { LockManager.applyUI(); return false; }
               state.domainLocks = state.domainLocks || {};
-              if(lock) state.domainLocks[domain] = lock;
-              const got = LockManager._mine(lock);
-              if(!got && lock) {
-                  Utils.toast('« ' + (LockDomains.defs[domain] ? LockDomains.defs[domain].label : domain) + ' » est en cours d\'édition par ' + LockManager._who(lock), 'warning', 5000);
-                  await LockManager._revertDomain(domain);
-              }
+              if(data) state.domainLocks[domain] = data;
+              if(LockManager.currentDomain !== domain && LockManager._mine(data)) { LockManager.release(domain); return false; }
               LockManager.applyUI();
-              return got;
-          } catch(e) { return false; }
-      },
-
-      ensureForKeys: async (changedKeys) => {
-          const denied = [];
-          if(Date.now() < LockManager.suppressUntil) return denied;
-          if(state.currentRole === 'viewer') return denied;
-          const domains = [];
-          (changedKeys||[]).forEach(k => {
-              const d = LockDomains.forKey(k);
-              if(d && LockDomains.defs[d] && LockDomains.defs[d].tabs.length > 0 && domains.indexOf(d) === -1) domains.push(d);
-          });
-          for(const d of domains) {
-              LockManager.lastEditAt = Date.now();
-              if(LockManager.currentDomain == null) LockManager.currentDomain = d;
-              const cur = (state.domainLocks||{})[d];
-              if(LockManager._mine(cur)) continue;
-              const got = await LockManager.acquire(d);
-              if(!got) denied.push(d);
-          }
-          return denied;
-      },
-
-      // En cas de perte de course : on jette la modif locale du domaine (rechargée depuis le serveur).
-      _revertDomain: async (domain) => {
-          try {
-              const { data } = await supabase.from('projects').select('data').eq('id', state.currentProjectId).maybeSingle();
-              if(!data || !data.data) return;
-              LockDomains.keysOf(domain).forEach(k => {
-                  state.data[k] = data.data[k];
-                  if(state.savedBaseline) state.savedBaseline[k] = JSON.parse(JSON.stringify(data.data[k] === undefined ? null : data.data[k]));
-              });
-              if(UI && UI.renderAll) UI.renderAll();
-          } catch(e) {}
+              return LockManager._mine(data);
+          } catch(e) { LockManager.pendingDomain = null; LockManager.applyUI(); return false; }
       },
 
       release: async (domain) => {
@@ -15421,8 +15376,8 @@ showDashboard: async () => {
               LockManager.release(LockManager.currentDomain);
           }
           LockManager.currentDomain = newDomain;
-          LockManager.suppressUntil = Date.now() + 2000;
           LockManager.applyUI();
+          if(newDomain && state.currentRole !== 'viewer') LockManager.acquire(newDomain);
       },
 
       applyUI: () => {
@@ -15436,7 +15391,7 @@ showDashboard: async () => {
                   const who = LockManager._who(lock);
                   const badge = document.createElement('span');
                   badge.className = 'dlock-badge';
-                  badge.title = "En cours d'édition par " + who;
+                  badge.title = 'En travaux — ' + who;
                   badge.innerHTML = '🚧<span class="dlock-ava">' + ((who[0]||'?').toUpperCase()) + '</span>';
                   btn.appendChild(badge);
               }
@@ -15445,15 +15400,16 @@ showDashboard: async () => {
           if(!active) return;
           const tabName = active.id.replace('tab-','');
           const d = LockDomains.forTab(tabName);
-          const lock = d ? (state.domainLocks||{})[d] : null;
-          const byOther = lock && !LockManager._mine(lock);
-          active.classList.toggle('is-domain-locked', !!byOther);
+          const editable = LockManager._editable(d);
+          active.classList.toggle('is-domain-locked', !editable);
           const oldB = active.querySelector('.dlock-banner');
           if(oldB) oldB.remove();
-          if(byOther) {
+          if(!editable) {
+              const lock = d ? (state.domainLocks||{})[d] : null;
               const banner = document.createElement('div');
               banner.className = 'dlock-banner';
-              banner.innerHTML = "🚧 En cours d'édition par <strong>" + LockManager._who(lock) + "</strong> — lecture seule.";
+              if(lock && !LockManager._mine(lock)) banner.innerHTML = '🚧 En travaux par <strong>' + LockManager._who(lock) + '</strong> — lecture seule.';
+              else banner.innerHTML = '🔒 Verrouillage en cours…';
               active.prepend(banner);
           }
       },
@@ -15461,14 +15417,11 @@ showDashboard: async () => {
       _tick: () => {
           const dom = LockManager.currentDomain;
           if(dom && LockManager._mine((state.domainLocks||{})[dom])) {
-              if(Date.now() - LockManager.lastEditAt > 180000) { LockManager.release(dom); return; }
               supabase.rpc('lock_heartbeat', { p_id: state.currentProjectId, p_key: dom, p_uid: state.currentUser.uid }).catch(()=>{});
           }
       },
 
       cleanup: async () => {
-          document.removeEventListener('input', LockManager._onInput, true);
-          document.removeEventListener('change', LockManager._onInput, true);
           if(LockManager.heartbeatTimer) { clearInterval(LockManager.heartbeatTimer); LockManager.heartbeatTimer = null; }
           const mine = Object.keys(state.domainLocks||{}).filter(k => LockManager._mine(state.domainLocks[k]));
           for(const k of mine) {
@@ -15477,6 +15430,7 @@ showDashboard: async () => {
           if(LockManager.channel) { supabase.removeChannel(LockManager.channel); LockManager.channel = null; }
           state.domainLocks = {};
           LockManager.currentDomain = null;
+          LockManager.pendingDomain = null;
       }
   };
 
@@ -15776,22 +15730,6 @@ showDashboard: async () => {
                   return;
               }
           } 
-          
-          // Phase 2 : réclamer les verrous des domaines réellement modifiés ; annuler les modifs d'un domaine tenu par autrui.
-          if(savePatch && typeof LockManager !== 'undefined' && LockManager.ensureForKeys) {
-              const deniedDomains = await LockManager.ensureForKeys(Object.keys(savePatch));
-              if(deniedDomains && deniedDomains.length) {
-                  for(const dd of deniedDomains) {
-                      LockDomains.keysOf(dd).forEach(k => { delete savePatch[k]; });
-                      await LockManager._revertDomain(dd);
-                  }
-                  if(Object.keys(savePatch).length === 0) {
-                      state.savingInProgress = false;
-                      if(state.pendingSave) { state.pendingSave = false; StoreSave.save(); }
-                      return;
-                  }
-              }
-          }
           
           // Tentatives avec retry exponentiel : 1ère immédiate, puis attente 1s, puis 3s
           // Une erreur réseau / 5xx / timeout déclenche un retry. Une erreur métier (RLS, schéma) ne retry pas.
