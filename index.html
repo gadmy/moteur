@@ -3542,7 +3542,6 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
       background: var(--bg);
       box-sizing: border-box;
       border-right: 1px solid var(--border);
-      border-left: 1px solid var(--border);
       text-align: center;
   }
   .permissions-table th.rotated-header .rotated-header-emoji {
@@ -3562,7 +3561,7 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
   }
   .permissions-table th.rotated-header .rotated-header-inner {
       position: absolute;
-      top: 30px;          /* Juste sous l'emoji */
+      top: 8px;
       bottom: 4px;
       left: 0;
       right: 0;
@@ -36665,16 +36664,12 @@ const Permissions = {
     // ===== LOGIQUE D'ACCÈS (calcul des droits) =====
     // ============================================================
     // Obtenir les permissions d'un membre du projet
-    renderInvitesTable: async () => {
+    renderInvitesTable: async (members, accessEmails) => {
         const div = document.getElementById('perm-invites-table');
         if(!div) return;
         div.innerHTML = '<p style="color:var(--text-sec); font-style:italic;">Chargement…</p>';
         try {
-            const { data: members, error } = await supabase
-                .from('project_members')
-                .select('id, email, profile_id, role')
-                .eq('project_id', state.currentProjectId);
-            if(error) throw error;
+            members = members || [];
             const myEmail = (state.currentUser?.email || '').toLowerCase();
             const actorEmails = new Set((state.data.actors || []).map(a => (a.email || '').toLowerCase()).filter(Boolean));
             const crewEmails = new Set((state.data.crew || []).map(c => (c.email || '').toLowerCase()).filter(Boolean));
@@ -36701,22 +36696,22 @@ const Permissions = {
                 photo: null,
                 _memberId: m.id
             }));
-            div.innerHTML = Permissions.buildTable(inviteMembers, 'invite', { revoke: true });
+            div.innerHTML = Permissions.buildTable(inviteMembers, 'invite', { revoke: true, accessEmails: accessEmails || new Set(inviteMembers.map(m => (m.email || '').toLowerCase())) });
         } catch(e) {
             console.error('renderInvitesTable:', e);
             div.innerHTML = '<p style="color:var(--danger,#dc2626);">Erreur de chargement des invités.</p>';
         }
     },
 
-    revokeInvite: async (memberId, email) => {
+    revokeAccess: async (email) => {
         if(state.currentRole !== 'owner') { Utils.toast('Seul le propriétaire peut révoquer un accès.', 'error'); return; }
         const ok = await ConfirmModal.show({ title: 'Révoquer cet accès ?', message: `${email} n'aura plus accès à ce projet.`, icon: '🚫', dangerous: true, confirmText: 'Révoquer' });
         if(!ok) return;
-        const { error } = await supabase.from('project_members').delete().eq('id', memberId);
+        const { error } = await supabase.from('project_members').delete().eq('project_id', state.currentProjectId).eq('email', email);
         if(error) { console.error(error); Utils.toast('Erreur lors de la révocation.', 'error'); return; }
         if(typeof History !== 'undefined' && History.log) History.log('SHARE', 'Accès révoqué : ' + email);
         Utils.toast(`${email} n'a plus accès au projet.`, 'success');
-        Permissions.renderInvitesTable();
+        Permissions.renderTables();
     },
 
     getForMember: (member, type) => {
@@ -36862,14 +36857,22 @@ const Permissions = {
         });
     },
     
-    renderTables: () => {
+    renderTables: async () => {
+        let _members = [];
+        try {
+            const { data } = await supabase.from('project_members').select('id, email, profile_id, role').eq('project_id', state.currentProjectId);
+            _members = data || [];
+        } catch(e) { console.error('renderTables members:', e); }
+        const _accessEmails = new Set(_members.map(m => (m.email || '').toLowerCase()).filter(Boolean));
+        const _opts = { revoke: true, accessEmails: _accessEmails };
+
         // Table des comédiens
         const actorsDiv = document.getElementById('perm-actors-table');
         if(actorsDiv) {
             if(!state.data.actors || state.data.actors.length === 0) {
                 actorsDiv.innerHTML = '<p style="color:var(--text-sec); font-style:italic;">Aucun comédien dans le projet</p>';
             } else {
-                actorsDiv.innerHTML = Permissions.buildTable(state.data.actors, 'actor');
+                actorsDiv.innerHTML = Permissions.buildTable(state.data.actors, 'actor', _opts);
             }
         }
         
@@ -36879,12 +36882,12 @@ const Permissions = {
             if(!state.data.crew || state.data.crew.length === 0) {
                 crewDiv.innerHTML = '<p style="color:var(--text-sec); font-style:italic;">Aucun technicien dans le projet</p>';
             } else {
-                crewDiv.innerHTML = Permissions.buildTable(state.data.crew, 'crew');
+                crewDiv.innerHTML = Permissions.buildTable(state.data.crew, 'crew', _opts);
             }
         }
 
         // Table des invités (asynchrone : project_members)
-        Permissions.renderInvitesTable();
+        Permissions.renderInvitesTable(_members, _accessEmails);
     },
     
     buildTable: (members, type, options = {}) => {
@@ -36903,7 +36906,7 @@ const Permissions = {
                         const text = match ? match[2] : label;
                         return `<th class="rotated-header" title="${Utils.escape(label)}">
                             <span class="rotated-header-inner">
-                                ${emoji ? `<span class="rotated-header-emoji">${emoji}</span>` : ''}${Utils.escape(text)}
+                                ${Utils.escape(text)}
                             </span>
                         </th>`;
                     }).join('')}
@@ -36950,7 +36953,7 @@ const Permissions = {
                         </select>
                     </td>
                 `).join('')}
-                ${options.revoke && member._memberId ? `<td style="text-align:center; vertical-align:middle;"><button onclick="app.Permissions.revokeInvite('${member._memberId}', '${Utils.escape(member.email || '')}')" style="padding:4px 10px; background:var(--danger,#dc2626); color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:0.8rem;">Révoquer</button></td>` : ''}
+                ${options.revoke ? `<td style="text-align:center; vertical-align:middle;">${ (member.email && options.accessEmails && options.accessEmails.has((member.email || '').toLowerCase())) ? `<button onclick="app.Permissions.revokeAccess('${Utils.escape(member.email)}')" style="padding:4px 10px; background:var(--danger,#dc2626); color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:0.8rem;">Révoquer</button>` : '' }</td>` : ''}
             </tr>`;
         });
         
