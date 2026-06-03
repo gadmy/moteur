@@ -7310,7 +7310,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv515</p>
+      <p>vv516</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -36665,6 +36665,60 @@ const Permissions = {
     // ===== LOGIQUE D'ACCÈS (calcul des droits) =====
     // ============================================================
     // Obtenir les permissions d'un membre du projet
+    renderInvitesTable: async () => {
+        const div = document.getElementById('perm-invites-table');
+        if(!div) return;
+        div.innerHTML = '<p style="color:var(--text-sec); font-style:italic;">Chargement…</p>';
+        try {
+            const { data: members, error } = await supabase
+                .from('project_members')
+                .select('id, email, profile_id, role')
+                .eq('project_id', state.currentProjectId);
+            if(error) throw error;
+            const myEmail = (state.currentUser?.email || '').toLowerCase();
+            const actorEmails = new Set((state.data.actors || []).map(a => (a.email || '').toLowerCase()).filter(Boolean));
+            const crewEmails = new Set((state.data.crew || []).map(c => (c.email || '').toLowerCase()).filter(Boolean));
+            const pure = (members || []).filter(m => {
+                const e = (m.email || '').toLowerCase();
+                if(!e || m.role === 'owner' || e === myEmail) return false;
+                if(actorEmails.has(e) || crewEmails.has(e)) return false;
+                return true;
+            });
+            if(pure.length === 0) {
+                div.innerHTML = '<p style="color:var(--text-sec); font-style:italic;">Aucun invité. Utilise « Partager » pour inviter une personne.</p>';
+                return;
+            }
+            const profileIds = [...new Set(pure.map(m => m.profile_id).filter(Boolean))];
+            const nameById = {};
+            if(profileIds.length > 0) {
+                const { data: profs } = await supabase.from('user_profiles').select('id, name').in('id', profileIds);
+                (profs || []).forEach(p => { nameById[p.id] = p.name || ''; });
+            }
+            const inviteMembers = pure.map(m => ({
+                email: m.email,
+                name: nameById[m.profile_id] || m.email,
+                role: m.role === 'editor' ? 'Invité · Éditeur' : 'Invité · Lecture',
+                photo: null,
+                _memberId: m.id
+            }));
+            div.innerHTML = Permissions.buildTable(inviteMembers, 'invite', { revoke: true });
+        } catch(e) {
+            console.error('renderInvitesTable:', e);
+            div.innerHTML = '<p style="color:var(--danger,#dc2626);">Erreur de chargement des invités.</p>';
+        }
+    },
+
+    revokeInvite: async (memberId, email) => {
+        if(state.currentRole !== 'owner') { Utils.toast('Seul le propriétaire peut révoquer un accès.', 'error'); return; }
+        const ok = await ConfirmModal.show({ title: 'Révoquer cet accès ?', message: `${email} n'aura plus accès à ce projet.`, icon: '🚫', dangerous: true, confirmText: 'Révoquer' });
+        if(!ok) return;
+        const { error } = await supabase.from('project_members').delete().eq('id', memberId);
+        if(error) { console.error(error); Utils.toast('Erreur lors de la révocation.', 'error'); return; }
+        if(typeof History !== 'undefined' && History.log) History.log('SHARE', 'Accès révoqué : ' + email);
+        Utils.toast(`${email} n'a plus accès au projet.`, 'success');
+        Permissions.renderInvitesTable();
+    },
+
     getForMember: (member, type) => {
         // type = 'actor' ou 'crew'
         if(type === 'actor') {
@@ -36759,14 +36813,22 @@ const Permissions = {
                         Définissez les permissions pour chaque membre du projet. Les permissions par défaut sont basées sur le rôle de chacun.
                     </p>
                     
-                    <div class="permissions-section">
-                        <h3>🎭 Comédien.nes</h3>
+                    <div class="perm-tabs" style="display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:16px;">
+                        <button id="perm-tabbtn-actors" onclick="app.Permissions.switchTab('actors')" style="padding:10px 16px; background:none; border:none; border-bottom:3px solid var(--primary); color:var(--text-main); font-weight:600; cursor:pointer; font-size:0.95rem;">🎭 Comédien·nes</button>
+                        <button id="perm-tabbtn-crew" onclick="app.Permissions.switchTab('crew')" style="padding:10px 16px; background:none; border:none; border-bottom:3px solid transparent; color:var(--text-sec); font-weight:400; cursor:pointer; font-size:0.95rem;">🎥 Équipe technique</button>
+                        <button id="perm-tabbtn-invites" onclick="app.Permissions.switchTab('invites')" style="padding:10px 16px; background:none; border:none; border-bottom:3px solid transparent; color:var(--text-sec); font-weight:400; cursor:pointer; font-size:0.95rem;">📨 Invités</button>
+                    </div>
+
+                    <div class="perm-tab-pane" id="perm-tab-actors">
                         <div id="perm-actors-table"></div>
                     </div>
                     
-                    <div class="permissions-section">
-                        <h3>🎥 Équipe technique</h3>
+                    <div class="perm-tab-pane" id="perm-tab-crew" style="display:none;">
                         <div id="perm-crew-table"></div>
+                    </div>
+
+                    <div class="perm-tab-pane" id="perm-tab-invites" style="display:none;">
+                        <div id="perm-invites-table"><p style="color:var(--text-sec); font-style:italic;">(Liste des invités — à venir)</p></div>
                     </div>
                     
                     <div style="margin-top:20px; padding-top:20px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px;">
@@ -36784,6 +36846,20 @@ const Permissions = {
     closeModal: () => {
         const modal = document.getElementById('permissions-modal');
         if(modal) modal.remove();
+    },
+
+    switchTab: (tab) => {
+        ['actors','crew','invites'].forEach(t => {
+            const pane = document.getElementById('perm-tab-' + t);
+            if(pane) pane.style.display = (t === tab) ? '' : 'none';
+            const btn = document.getElementById('perm-tabbtn-' + t);
+            if(btn) {
+                const active = (t === tab);
+                btn.style.borderBottom = active ? '3px solid var(--primary)' : '3px solid transparent';
+                btn.style.color = active ? 'var(--text-main)' : 'var(--text-sec)';
+                btn.style.fontWeight = active ? '600' : '400';
+            }
+        });
     },
     
     renderTables: () => {
@@ -36806,9 +36882,12 @@ const Permissions = {
                 crewDiv.innerHTML = Permissions.buildTable(state.data.crew, 'crew');
             }
         }
+
+        // Table des invités (asynchrone : project_members)
+        Permissions.renderInvitesTable();
     },
     
-    buildTable: (members, type) => {
+    buildTable: (members, type, options = {}) => {
         const sections = CONFIG.permissionSections;
         
         let html = `<div style="overflow-x:auto; padding-top: 10px;"><table class="permissions-table">
@@ -36828,6 +36907,7 @@ const Permissions = {
                             </span>
                         </th>`;
                     }).join('')}
+                    ${options.revoke ? '<th style="height:140px; vertical-align:bottom;">Action</th>' : ''}
                 </tr>
             </thead>
             <tbody>`;
@@ -36870,6 +36950,7 @@ const Permissions = {
                         </select>
                     </td>
                 `).join('')}
+                ${options.revoke && member._memberId ? `<td style="text-align:center; vertical-align:middle;"><button onclick="app.Permissions.revokeInvite('${member._memberId}', '${Utils.escape(member.email || '')}')" style="padding:4px 10px; background:var(--danger,#dc2626); color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:0.8rem;">Révoquer</button></td>` : ''}
             </tr>`;
         });
         
