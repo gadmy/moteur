@@ -15302,6 +15302,7 @@ showDashboard: async () => {
       lastEditAt: 0,
       currentDomain: null,
       channel: null,
+      suppressUntil: 0,
       ORDER: ['presentation','synopsis','board','titlepage','script','storyboard','chars','actors','locs','resources','crew','breakdown','stats','planning','expenses','chat'],
 
       init: (projectId) => {
@@ -15318,8 +15319,6 @@ showDashboard: async () => {
                   LockManager.refresh(projectId);
               })
               .subscribe();
-          document.addEventListener('input', LockManager._onInput, true);
-          document.addEventListener('change', LockManager._onInput, true);
           if(LockManager.heartbeatTimer) clearInterval(LockManager.heartbeatTimer);
           LockManager.heartbeatTimer = setInterval(LockManager._tick, 60000);
       },
@@ -15374,6 +15373,26 @@ showDashboard: async () => {
           } catch(e) { return false; }
       },
 
+      ensureForKeys: async (changedKeys) => {
+          const denied = [];
+          if(Date.now() < LockManager.suppressUntil) return denied;
+          if(state.currentRole === 'viewer') return denied;
+          const domains = [];
+          (changedKeys||[]).forEach(k => {
+              const d = LockDomains.forKey(k);
+              if(d && LockDomains.defs[d] && LockDomains.defs[d].tabs.length > 0 && domains.indexOf(d) === -1) domains.push(d);
+          });
+          for(const d of domains) {
+              LockManager.lastEditAt = Date.now();
+              if(LockManager.currentDomain == null) LockManager.currentDomain = d;
+              const cur = (state.domainLocks||{})[d];
+              if(LockManager._mine(cur)) continue;
+              const got = await LockManager.acquire(d);
+              if(!got) denied.push(d);
+          }
+          return denied;
+      },
+
       // En cas de perte de course : on jette la modif locale du domaine (rechargée depuis le serveur).
       _revertDomain: async (domain) => {
           try {
@@ -15402,6 +15421,7 @@ showDashboard: async () => {
               LockManager.release(LockManager.currentDomain);
           }
           LockManager.currentDomain = newDomain;
+          LockManager.suppressUntil = Date.now() + 2000;
           LockManager.applyUI();
       },
 
@@ -15511,6 +15531,7 @@ showDashboard: async () => {
       },
       
       acquireLock: async (sceneId) => { 
+          return; // Phase 2 : remplacé par LockManager (verrou par domaine)
           if(state.currentRole === 'viewer') return; 
           
           const existingLock = state.activeLocks[sceneId];
@@ -15537,6 +15558,7 @@ showDashboard: async () => {
       },
       
       releaseLock: async (sceneId) => { 
+          return; // Phase 2 : remplacé par LockManager
           if(state.currentRole === 'viewer') return; 
           const lock = state.activeLocks[sceneId]; 
           if(lock && lock.uid === state.currentUser.uid) { 
@@ -15754,6 +15776,22 @@ showDashboard: async () => {
                   return;
               }
           } 
+          
+          // Phase 2 : réclamer les verrous des domaines réellement modifiés ; annuler les modifs d'un domaine tenu par autrui.
+          if(savePatch && typeof LockManager !== 'undefined' && LockManager.ensureForKeys) {
+              const deniedDomains = await LockManager.ensureForKeys(Object.keys(savePatch));
+              if(deniedDomains && deniedDomains.length) {
+                  for(const dd of deniedDomains) {
+                      LockDomains.keysOf(dd).forEach(k => { delete savePatch[k]; });
+                      await LockManager._revertDomain(dd);
+                  }
+                  if(Object.keys(savePatch).length === 0) {
+                      state.savingInProgress = false;
+                      if(state.pendingSave) { state.pendingSave = false; StoreSave.save(); }
+                      return;
+                  }
+              }
+          }
           
           // Tentatives avec retry exponentiel : 1ère immédiate, puis attente 1s, puis 3s
           // Une erreur réseau / 5xx / timeout déclenche un retry. Une erreur métier (RLS, schéma) ne retry pas.
