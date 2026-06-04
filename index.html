@@ -14551,6 +14551,10 @@ crewRoles: {
           supabase.auth.onAuthStateChange(async (event, session) => { 
               if (session && session.user) { 
                   state.currentUser = session.user;
+                  // uid/email posés IMMÉDIATEMENT (avant tout await) : les verrous en dépendent à tout instant
+                  state.currentUser.email = session.user.email.toLowerCase();
+                  state.currentUser.uid = session.user.id;
+                  state.currentUser.emailVerified = session.user.email_confirmed_at !== null;
                   
                   // Authentifier la connexion temps réel (sinon Realtime ne délivre ni présence ni changements)
                   try { if(session.access_token) supabase.realtime.setAuth(session.access_token); } catch(_) {}
@@ -14561,9 +14565,6 @@ crewRoles: {
                           await supabase.from('user_logins').insert({ user_email: session.user.email.toLowerCase() });
                       } catch(e) { console.log('Login log error:', e); }
                   }
-                  state.currentUser.email = session.user.email.toLowerCase();
-                  state.currentUser.uid = session.user.id;
-                  state.currentUser.emailVerified = session.user.email_confirmed_at !== null;
                   // Ne pas rediriger si déjà dans un projet ou sur le dashboard
                   if(els.appView.style.display === 'flex' || els.dashboardView.style.display === 'flex') {
                       return;
@@ -15358,7 +15359,8 @@ const LockManager = {
           } catch(e) {}
       },
 
-      _mine: (lock) => !!(lock && state.currentUser && lock.holder_uid === state.currentUser.uid),
+      _uid: () => (state.currentUser && (state.currentUser.uid || state.currentUser.id)) || null,
+      _mine: (lock) => !!(lock && lock.holder_uid && lock.holder_uid === LockManager._uid()),
       _who: (lock) => (lock && (lock.holder_name || (lock.holder_email||'').split('@')[0])) || '?',
 
       held: {},
@@ -15540,7 +15542,7 @@ const LockManager = {
           try {
               const { data, error } = await supabase.rpc('lock_acquire', {
                   p_id: state.currentProjectId, p_key: domain,
-                  p_uid: state.currentUser.uid, p_name: (state.currentUser.email||'').split('@')[0]
+                  p_uid: LockManager._uid(), p_name: (state.currentUser.email||'').split('@')[0]
               });
               LockManager.pendingDomain = null;
               if(error) { console.warn('[Lock] acquire erreur', domain, error.message); LockManager.applyUI(); return false; }
@@ -15561,7 +15563,7 @@ const LockManager = {
           const cur = (state.domainLocks||{})[domain];
           if(!LockManager._mine(cur) && !LockManager.held[domain]) return;
           delete LockManager.held[domain];
-          try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: domain, p_uid: state.currentUser.uid }); } catch(e) {}
+          try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: domain, p_uid: LockManager._uid() }); } catch(e) {}
           if(state.domainLocks) delete state.domainLocks[domain];
           LockManager.applyUI();
       },
@@ -15653,7 +15655,7 @@ const LockManager = {
           }
           const dom = LockManager.currentDomain;
           if(dom && LockManager._mine((state.domainLocks||{})[dom])) {
-              try { await supabase.rpc('lock_heartbeat', { p_id: state.currentProjectId, p_key: dom, p_uid: state.currentUser.uid }); } catch(e) {}
+              try { await supabase.rpc('lock_heartbeat', { p_id: state.currentProjectId, p_key: dom, p_uid: LockManager._uid() }); } catch(e) {}
           }
       },
 
@@ -15670,7 +15672,7 @@ const LockManager = {
           const mineSet = new Set(Object.keys(LockManager.held||{}));
           Object.keys(state.domainLocks||{}).forEach(k => { if(LockManager._mine(state.domainLocks[k])) mineSet.add(k); });
           for(const k of mineSet) {
-              try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: k, p_uid: state.currentUser.uid }); } catch(e) {}
+              try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: k, p_uid: LockManager._uid() }); } catch(e) {}
           }
           LockManager.held = {};
           if(LockManager.channel) { supabase.removeChannel(LockManager.channel); LockManager.channel = null; }
@@ -15724,7 +15726,7 @@ const LockManager = {
               const held = (typeof LockManager !== 'undefined' && LockManager.held) ? Object.keys(LockManager.held) : [];
               held.forEach(k => {
                   fetch(url + '/rest/v1/rpc/lock_release', { method: 'POST', headers: H, keepalive: true,
-                      body: JSON.stringify({ p_id: state.currentProjectId, p_key: k, p_uid: state.currentUser && state.currentUser.uid }) });
+                      body: JSON.stringify({ p_id: state.currentProjectId, p_key: k, p_uid: LockManager._uid() }) });
               });
               fetch(url + '/rest/v1/rpc/presence_leave', { method: 'POST', headers: H, keepalive: true, body: '{}' });
           } catch(e) {}
