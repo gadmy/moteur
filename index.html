@@ -7086,6 +7086,16 @@ body.presentation-mode .presentation-bar {
   .tab-content.is-domain-locked .dlock-banner,
   .tab-content.is-domain-locked .dlock-banner button { pointer-events: auto; opacity: 1; }
   .dlock-banner { background: rgba(217,119,6,.16); border: 1px solid rgba(217,119,6,.45); color: #c77f0a; padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; }
+  .miniview { position: fixed; bottom: 20px; right: 20px; width: 360px; max-width: calc(100vw - 40px); max-height: 480px; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.3); z-index: 10005; display: flex; flex-direction: column; overflow: hidden; }
+  .miniview-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--bg); }
+  .miniview-title { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .miniview-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .miniview-btn { border: 1px solid var(--border); background: transparent; color: inherit; border-radius: 6px; padding: 3px 8px; cursor: pointer; font-size: 12px; }
+  .miniview-btn:hover { background: var(--panel-bg); }
+  .miniview-body { overflow-y: auto; padding: 10px 12px; font-size: 13px; }
+  .miniview-msg { padding: 8px 10px; border-radius: 8px; background: var(--bg); margin-bottom: 8px; word-break: break-word; }
+  .miniview-msg.unread { border-left: 3px solid var(--primary, #2B6EF6); }
+  .miniview-msg-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; opacity: .75; margin-bottom: 3px; }
   .dlock-badge { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; margin-left: 4px; vertical-align: middle; }
   .dlock-ava { display: inline-flex; width: 16px; height: 16px; border-radius: 50%; background: #c0392b; color: #fff; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; }
   .tab-subbtn.dlock-occupied, .tab-btn.dlock-occupied, .tab-category.dlock-occupied { position: relative; }
@@ -7349,7 +7359,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv520</p>
+      <p>vv521</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -36745,6 +36755,58 @@ const Chat = {
             .subscribe();
     },
     
+    // Insère une notification 'chat' pour chaque membre du canal (alimente cloche + toasts temps réel).
+    _notifyRecipients: async (project, message) => {
+        try {
+            const channelId = Chat.currentChannel;
+            const data = project.data || {};
+            const me = (state.currentUser && state.currentUser.email || '').toLowerCase();
+            const channel = Chat.channels.find(c => c.id === channelId);
+            const chName = channel ? channel.name.replace((channel.icon || '') + ' ', '') : channelId;
+            // Candidats : proprio + permissions personnalisées + comédiens + équipe
+            const candidates = new Set();
+            const ownerEmail = (project.owner_email || '').toLowerCase();
+            if(ownerEmail) candidates.add(ownerEmail);
+            Object.keys(data.memberPermissions || {}).forEach(k => candidates.add(k.replace(/,/g, '.').toLowerCase()));
+            (data.actors || []).forEach(a => { if(a.email) candidates.add(a.email.toLowerCase()); });
+            (data.crew || []).forEach(c => { if(c.email) candidates.add(c.email.toLowerCase()); });
+            candidates.delete(me);
+            // Filtrer par accès au canal (même logique que canAccessChannel, évaluée pour chaque membre)
+            const recipients = [];
+            for(const email of candidates) {
+                if(recipients.length >= 25) break; // garde-fou volume
+                if(email === ownerEmail) { recipients.push(email); continue; }
+                if(channel && channel.type === 'custom') {
+                    if((channel.members || []).includes(Utils.sanitizeEmail(email))) recipients.push(email);
+                    continue;
+                }
+                const san = Utils.sanitizeEmail(email);
+                let perms = (data.memberPermissions || {})[san] || null;
+                if(!perms) {
+                    const actorM = (data.actors || []).find(a => (a.email || '').toLowerCase() === email);
+                    if(actorM) perms = Permissions.getForMember(actorM, 'actor');
+                }
+                if(!perms) {
+                    const crewM = (data.crew || []).find(c => (c.email || '').toLowerCase() === email);
+                    if(crewM) perms = Permissions.getForMember(crewM, 'crew');
+                }
+                if(perms && perms['chat_' + channelId] === 'write') recipients.push(email);
+            }
+            if(recipients.length === 0) return;
+            const extrait = (message.text || '').slice(0, 80);
+            const rows = recipients.map(email => ({
+                user_email: email,
+                type: 'chat',
+                title: '💬 Tchat',
+                message: (message.senderName || '?') + ' dans #' + chName + (project.title ? ' (' + project.title + ')' : '') + ' : ' + extrait,
+                link: state.currentProjectId + '|' + channelId,
+                read: false
+            }));
+            const { error } = await supabase.from('notifications').insert(rows);
+            if(error) console.warn('[Chat] notif erreur', error.message);
+        } catch(e) { console.warn('[Chat] notif erreur', e); }
+    },
+
     renderMessages: (messages) => {
         const container = document.getElementById('chat-messages-container');
         const userEmail = state.currentUser?.email;
@@ -36807,7 +36869,7 @@ const Chat = {
             // Charger les données actuelles du projet
             const { data: project } = await supabase
                 .from('projects')
-                .select('data')
+                .select('data, owner_email, title')
                 .eq('id', state.currentProjectId)
                 .maybeSingle();
             
@@ -36830,6 +36892,7 @@ const Chat = {
                 
                 // Rafraîchir l'affichage
                 Chat.renderMessages(project.data.chatMessages[Chat.currentChannel]);
+                Chat._notifyRecipients(project, message); // pings (sans await : ne bloque pas l'envoi)
             }
             input.value = '';
         } catch(e) {
@@ -48814,6 +48877,74 @@ const ContractsTemplates = {
 };
 
 // ========== NOTIFICATIONS ==========
+// MiniView — petite fenêtre flottante de consultation (tchat / messagerie) sans quitter son travail.
+const MiniView = {
+    el: null,
+    close: () => { if(MiniView.el) { MiniView.el.remove(); MiniView.el = null; } },
+
+    _frame: (title, onOpenFull) => {
+        MiniView.close();
+        const w = document.createElement('div');
+        w.className = 'miniview';
+        const head = document.createElement('div');
+        head.className = 'miniview-head';
+        const h = document.createElement('div'); h.className = 'miniview-title'; h.textContent = title;
+        const actions = document.createElement('div'); actions.className = 'miniview-actions';
+        const full = document.createElement('button'); full.className = 'miniview-btn'; full.textContent = '⛶ Ouvrir en grand';
+        full.onclick = () => { MiniView.close(); onOpenFull(); };
+        const x = document.createElement('button'); x.className = 'miniview-btn'; x.textContent = '✖';
+        x.onclick = MiniView.close;
+        actions.appendChild(full); actions.appendChild(x);
+        head.appendChild(h); head.appendChild(actions);
+        const body = document.createElement('div'); body.className = 'miniview-body';
+        body.innerHTML = '<div style="padding:20px;text-align:center;opacity:.6;">Chargement…</div>';
+        w.appendChild(head); w.appendChild(body);
+        document.body.appendChild(w);
+        MiniView.el = w;
+        return body;
+    },
+
+    openChat: async (projectId, channelId) => {
+        const body = MiniView._frame('💬 Tchat', async () => {
+            if(state.currentProjectId !== projectId) { try { await Store.loadProject(projectId); } catch(e) {} }
+            setTimeout(() => { try { UI.switchTab('chat'); Chat.selectChannel(channelId); } catch(e) {} }, 400);
+        });
+        try {
+            const { data: project } = await supabase.from('projects').select('data, title').eq('id', projectId).maybeSingle();
+            if(!MiniView.el) return;
+            const sys = { general: 'Général', chefs: 'Chefs de poste', technique: 'Technique', comediens: 'Comédiens' };
+            const custom = ((project && project.data && project.data.chatChannels) || []).find(c => c.id === channelId);
+            const chName = sys[channelId] || (custom && custom.name) || channelId;
+            const titleEl = MiniView.el.querySelector('.miniview-title');
+            if(titleEl) titleEl.textContent = '💬 #' + chName + (project && project.title ? ' — ' + project.title : '');
+            const msgs = ((project && project.data && project.data.chatMessages && project.data.chatMessages[channelId]) || []).slice(-30);
+            if(msgs.length === 0) { body.innerHTML = '<div style="padding:20px;text-align:center;opacity:.6;">Aucun message</div>'; return; }
+            body.innerHTML = msgs.map(m => {
+                const when = m.timestamp ? new Date(m.timestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+                return '<div class="miniview-msg"><div class="miniview-msg-meta"><strong>' + Utils.escape(m.senderName || m.senderEmail || '?') + '</strong> <span>' + when + '</span></div><div>' + Utils.escape(m.text || '') + '</div></div>';
+            }).join('');
+            body.scrollTop = body.scrollHeight;
+        } catch(e) { body.innerHTML = '<div style="padding:20px;text-align:center;opacity:.6;">Impossible de charger le tchat.</div>'; }
+    },
+
+    openMessages: async () => {
+        const body = MiniView._frame('📬 Messagerie', () => {
+            try { app.PublicProfile.open(); setTimeout(() => app.PublicProfile.showTab('messages'), 100); } catch(e) {}
+        });
+        try {
+            const me = (state.currentUser && state.currentUser.email || '').toLowerCase();
+            const { data } = await supabase.from('messages').select('from_name, from_email, subject, content, created_at, read').eq('to_email', me).order('created_at', { ascending: false }).limit(10);
+            if(!MiniView.el) return;
+            const rows = data || [];
+            if(rows.length === 0) { body.innerHTML = '<div style="padding:20px;text-align:center;opacity:.6;">Aucun message reçu</div>'; return; }
+            body.innerHTML = rows.map(m => {
+                const when = m.created_at ? new Date(m.created_at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+                return '<div class="miniview-msg' + (m.read ? '' : ' unread') + '"><div class="miniview-msg-meta"><strong>' + Utils.escape(m.from_name || m.from_email || '?') + '</strong> <span>' + when + '</span></div>' + (m.subject ? '<div class="fw-600">' + Utils.escape(m.subject) + '</div>' : '') + '<div>' + Utils.escape((m.content || '').slice(0, 300)) + '</div></div>';
+            }).join('');
+        } catch(e) { body.innerHTML = '<div style="padding:20px;text-align:center;opacity:.6;">Impossible de charger la messagerie.</div>'; }
+    }
+};
+
 const Notifications = {
     // ===================== ÉTAT & INIT =====================
     unreadCount: 0,
@@ -48849,6 +48980,7 @@ const Notifications = {
                 Notifications.unreadCount = Notifications.items.filter(n => !n.read).length;
                 Notifications.updateBadge();
                 Notifications.renderList();
+                Notifications._announce();
             }
         };
         
@@ -48867,6 +48999,52 @@ const Notifications = {
         Notifications.listenerAttached = true;
     },
     
+    // ——— Pings temps réel (toasts cliquables -> MiniView) ———
+    _known: null,
+    _announce: () => {
+        const first = !Notifications._known;
+        if(first) Notifications._known = new Set();
+        const fresh = [];
+        Notifications.items.forEach(n => {
+            if(Notifications._known.has(n.id)) return;
+            Notifications._known.add(n.id);
+            if(first) return; // chargement initial : pas de toasts rétroactifs
+            if(n.read) return;
+            if(Date.now() - n.timestamp > 120000) return; // trop vieux
+            if(n.type !== 'chat' && n.type !== 'message') return;
+            fresh.push(n);
+        });
+        fresh.slice(0, 3).forEach(n => Notifications._liveToast(n));
+    },
+    _liveToast: (n) => {
+        // Déjà sous les yeux ? (même canal de tchat ouvert) -> pas de toast
+        if(n.type === 'chat') {
+            const parts = String(n.link || '').split('|');
+            const chatActive = document.getElementById('tab-chat') && document.getElementById('tab-chat').classList.contains('active');
+            if(state.currentProjectId === parts[0] && chatActive && Chat.currentChannel === parts[1]) return;
+        }
+        const container = document.getElementById('toast-container');
+        if(!container) return;
+        const t = document.createElement('div');
+        t.className = 'toast info notif-live-toast';
+        const icon = document.createElement('span'); icon.className = 'toast-icon'; icon.textContent = n.type === 'chat' ? '💬' : '📬';
+        const msg = document.createElement('span'); msg.className = 'toast-message';
+        msg.textContent = n.message || (n.type === 'chat' ? 'Nouveau message de tchat' : 'Nouveau message');
+        msg.style.cursor = 'pointer'; icon.style.cursor = 'pointer';
+        const openIt = () => {
+            t.remove();
+            Notifications.markAsRead(n.id);
+            if(n.type === 'chat') { const p = String(n.link || '').split('|'); MiniView.openChat(p[0], p[1] || 'general'); }
+            else MiniView.openMessages();
+        };
+        msg.onclick = openIt; icon.onclick = openIt;
+        const close = document.createElement('button'); close.className = 'toast-close'; close.textContent = '✖';
+        close.onclick = () => t.remove();
+        t.appendChild(icon); t.appendChild(msg); t.appendChild(close);
+        container.appendChild(t);
+        setTimeout(() => { if(t.parentElement) t.remove(); }, 12000);
+    },
+
     // Mettre à jour le badge
     updateBadge: () => {
         const badge = document.getElementById('notif-badge');
@@ -48958,7 +49136,12 @@ const Notifications = {
             Store.loadProject(projectId);
         } else if(type === 'message') {
             Notifications.closePanel();
-            // Ouvrir les messages si nécessaire
+            MiniView.openMessages();
+        } else if(type === 'chat') {
+            Notifications.closePanel();
+            const found = Notifications.items.find(n => n.id === notifId) || {};
+            const parts = String(found.link || '').split('|');
+            if(parts[0]) MiniView.openChat(parts[0], parts[1] || 'general');
         }
     },
     
