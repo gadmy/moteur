@@ -7102,6 +7102,9 @@ body.presentation-mode .presentation-bar {
   .facet-visible-toggle { display: none; align-items: center; gap: 5px; font-size: 0.72rem; color: var(--text-sec); margin-top: 6px; cursor: pointer; }
   .map-profile-marker { position: relative; }
   .marker-facet-badges { position: absolute; top: -10px; right: -8px; z-index: 5; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; padding: 1px 4px; font-size: 10px; line-height: 1.4; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+  #pm-facet-pager { display: none; align-items: center; gap: 8px; justify-content: center; margin: 6px 0; }
+  .pm-facet-arrow { border: 1px solid var(--border); background: var(--bg); color: inherit; border-radius: 6px; width: 24px; height: 24px; cursor: pointer; font-size: 14px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+  .pm-facet-arrow:hover { border-color: var(--primary); color: var(--primary); }
   .dlock-badge { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; margin-left: 4px; vertical-align: middle; }
   .dlock-ava { display: inline-flex; width: 16px; height: 16px; border-radius: 50%; background: #c0392b; color: #fff; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; }
   .tab-subbtn.dlock-occupied, .tab-btn.dlock-occupied, .tab-category.dlock-occupied { position: relative; }
@@ -57095,14 +57098,30 @@ const UniverseProfileModal = {
         return !hiddenArray.includes(section);
     },
     
-    openProfileModal: async (profile) => {
-        // Déterminer les casquettes visibles (multi-facettes)
+    // Pager de casquettes : feuilleter les facettes d'un même profil dans la modale
+    _pagerProfile: null,
+    _pagerFacet: null,
+    switchFacet: (dir) => {
+        const p = UniverseProfileModal._pagerProfile;
+        if(!p) return;
+        const vf = p.visibleFacets || [];
+        if(vf.length < 2) return;
+        const i = Math.max(0, vf.indexOf(UniverseProfileModal._pagerFacet));
+        const next = vf[(i + dir + vf.length) % vf.length];
+        UniverseProfileModal.openProfileModal(p, next);
+    },
+
+    openProfileModal: async (profile, facetView) => {
+        // Casquette affichée : celle demandée par le pager, sinon la première visible
         const vf = profile.visibleFacets || (PublicProfile._typeToFacet(profile.type) ? [PublicProfile._typeToFacet(profile.type)] : []);
+        const cur = (facetView && vf.includes(facetView)) ? facetView : (vf[0] || null);
+        UniverseProfileModal._pagerProfile = profile;
+        UniverseProfileModal._pagerFacet = cur;
         const isProject = profile.type === 'project';
-        const isActor = vf.includes('actor');
-        const isCrew = vf.includes('crew');
-        const isAssociation = vf.includes('asso');
-        const isEnterprise = vf.includes('ent');
+        const isActor = cur === 'actor';
+        const isCrew = cur === 'crew';
+        const isAssociation = cur === 'asso';
+        const isEnterprise = cur === 'ent';
         // Charger les données complètes depuis Supabase si nécessaire
         let fullProfile = profile;
         if(!isProject) {
@@ -57162,6 +57181,34 @@ const UniverseProfileModal = {
         else if(isAssociation) roleText = fullProfile.assoType || extraData.assoType || 'Association';
         else if(isEnterprise) roleText = fullProfile.entType || extraData.entType || 'Entreprise';
         document.getElementById('pm-role').textContent = roleText;
+        
+        // Pager ‹ › entre les casquettes du profil
+        let pager = document.getElementById('pm-facet-pager');
+        if(!pager) {
+            pager = document.createElement('div');
+            pager.id = 'pm-facet-pager';
+            const roleEl = document.getElementById('pm-role');
+            if(roleEl && roleEl.parentElement) roleEl.parentElement.insertBefore(pager, roleEl.nextSibling);
+        }
+        if(!isProject && vf.length > 1) {
+            const FACET_ICONS = { actor: '🎭', crew: '🎥', asso: '🏛️', ent: '🏢' };
+            pager.innerHTML = '';
+            pager.style.display = 'flex';
+            const mkArrow = (txt, dir) => {
+                const b = document.createElement('button');
+                b.type = 'button'; b.className = 'pm-facet-arrow'; b.textContent = txt;
+                b.onclick = () => UniverseProfileModal.switchFacet(dir);
+                return b;
+            };
+            const lab = document.createElement('span');
+            lab.style.cssText = 'font-size:12px;opacity:.8;';
+            lab.textContent = (FACET_ICONS[cur] || '') + ' ' + (vf.indexOf(cur) + 1) + '/' + vf.length;
+            pager.appendChild(mkArrow('‹', -1));
+            pager.appendChild(lab);
+            pager.appendChild(mkArrow('›', 1));
+        } else {
+            pager.style.display = 'none';
+        }
         
         // Ville
         const city = fullProfile.city || fullProfile.location || '';
