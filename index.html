@@ -15367,10 +15367,9 @@ const LockManager = {
               // Un verrou tenu par quelqu'un d'autre = quelqu'un travaille → pas seul (même si la présence est en retard)
               const locks = state.domainLocks || {};
               for(const k in locks) { if(locks[k] && !LockManager._mine(locks[k])) return false; }
-              if(!state.presenceChannel || typeof state.presenceChannel.presenceState !== 'function') return false;
-              const ps = state.presenceChannel.presenceState();
-              const emails = new Set();
-              Object.keys(ps).forEach(k => (ps[k]||[]).forEach(u => emails.add((((u && u.email) || k) + '').toLowerCase())));
+              const rows = (state.dbPresence || []).filter(r => r.project_id === state.currentProjectId);
+              const emails = new Set(rows.map(r => (r.user_email || '').toLowerCase()));
+              emails.add(((state.currentUser && state.currentUser.email) || '').toLowerCase());
               return emails.size <= 1;
           } catch(e) { return false; }
       },
@@ -15662,6 +15661,47 @@ const LockManager = {
       }
   };
 
+  // DBPresence — présence par base de données (heartbeat) : fiable même si Realtime Presence est muet.
+  const DBPresence = {
+      timer: null,
+      channel: null,
+      where: null, // id du projet courant, ou null = dashboard
+
+      start: (pid) => {
+          if(window.location.protocol === 'file:') return;
+          if(!state.currentUser) return;
+          DBPresence.where = pid || null;
+          DBPresence.beat();
+          if(!DBPresence.timer) DBPresence.timer = setInterval(DBPresence.beat, 50000);
+          if(!DBPresence.channel) {
+              DBPresence.channel = supabase.channel('db_presence')
+                  .on('postgres_changes', { event: '*', schema: 'public', table: 'user_presence' }, () => { DBPresence.fetch(); })
+                  .subscribe();
+          }
+      },
+
+      beat: async () => {
+          if(!state.currentUser) return;
+          try {
+              await supabase.rpc('presence_beat', { p_project: DBPresence.where, p_name: (state.currentUser.email||'').split('@')[0] });
+          } catch(e) {}
+          DBPresence.fetch();
+      },
+
+      fetch: async () => {
+          try {
+              const { data, error } = await supabase.from('user_presence').select('*');
+              if(error) return;
+              const now = Date.now();
+              state.dbPresence = (data || []).filter(r => r.heartbeat_at && (now - new Date(r.heartbeat_at).getTime()) < 120000);
+              console.log('[DBP] présence:', (state.dbPresence||[]).map(r => (r.user_email||'') + '→' + (r.project_id||'dashboard')).join(' | ') || 'personne');
+              try { if(state._renderPresenceNow) state._renderPresenceNow(); } catch(e) {}
+              try { if(typeof GlobalPresence !== 'undefined') GlobalPresence.renderBadges(); } catch(e) {}
+              try { if(typeof LockManager !== 'undefined' && state.currentProjectId) LockManager.onPresenceChange(); } catch(e) {}
+          } catch(e) {}
+      }
+  };
+
   // GlobalPresence — présence globale : qui est dans quel projet (badges sur les cartes du dashboard).
   const GlobalPresence = {
       channel: null,
@@ -15694,16 +15734,15 @@ const LockManager = {
 
       renderBadges: () => {
           const cards = document.querySelectorAll('.project-card[data-project-id]');
-          if(!cards.length || !GlobalPresence.channel || typeof GlobalPresence.channel.presenceState !== 'function') return;
-          const ps = GlobalPresence.channel.presenceState();
+          if(!cards.length) return;
           const me = ((state.currentUser && state.currentUser.email) || '').toLowerCase();
           const byProject = {};
-          Object.keys(ps).forEach(k => (ps[k]||[]).forEach(u => {
-              const em = (((u && u.email) || k) + '').toLowerCase();
-              const pid = u && u.projectId;
+          (state.dbPresence || []).forEach(r => {
+              const em = (r.user_email || '').toLowerCase();
+              const pid = r.project_id;
               if(!pid || em === me) return;
               (byProject[pid] = byProject[pid] || []).push(em);
-          }));
+          });
           console.log('[GP] présents par projet:', JSON.stringify(byProject));
           cards.forEach(card => {
               const old = card.querySelector('.gp-badges');
@@ -15914,7 +15953,10 @@ const LockManager = {
           });
           
           const renderPresenceNow = () => {
-                  const presenceState = state.presenceChannel.presenceState();
+                  const presenceState = {};
+                  (state.dbPresence || []).forEach(r => {
+                      if(r.project_id === state.currentProjectId) presenceState[r.user_email] = [{ email: r.user_email }];
+                  });
                   console.log('[Presence] sync — clés présentes:', Object.keys(presenceState));
                   // Verrous d'abord : ne doit JAMAIS être bloqué par le rendu des avatars
                   try { if(typeof LockManager !== 'undefined' && LockManager.onPresenceChange) LockManager.onPresenceChange(); } catch(e) {}
@@ -16843,7 +16885,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               state.statsFilter = { scope: 'all', seasonId: null, episodeId: null }; // Stats: filtre de scope par défaut
               NavMemory.setProject(id); // Persistance pour F5
               LoadingScreen.setProgress(95);
-              UI.launchEditor(); Store.startRealtimeListener(id); Store.initPresence(id); Store.initLocks(id); LockManager.init(id); if(typeof GlobalPresence !== 'undefined') { GlobalPresence.init(); GlobalPresence.setProject(id); }
+              UI.launchEditor(); Store.startRealtimeListener(id); Store.initPresence(id); Store.initLocks(id); LockManager.init(id); if(typeof GlobalPresence !== 'undefined') { GlobalPresence.init(); GlobalPresence.setProject(id); } if(typeof DBPresence !== 'undefined') DBPresence.start(id);
               // S7.1 : forcer la sauvegarde si migration saisons effectuée
               if(needsMigrationSave) setTimeout(() => Store.save(), 1000);
               LoadingScreen.hide();
@@ -19264,6 +19306,7 @@ initCategoriesDragDrop: () => {
         els.authView.style.display = 'none'; 
         els.dashboardView.style.display = 'flex';
         if(typeof GlobalPresence !== 'undefined') { GlobalPresence.init(); GlobalPresence.setProject(null); }
+        if(typeof DBPresence !== 'undefined') DBPresence.start(null);
         
         // Restauration du projet après F5 (capture AVANT de nettoyer NavMemory)
         const _lastProjectId = NavMemory.getProject();
