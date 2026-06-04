@@ -35807,6 +35807,45 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
     claimProfile: (...a) => ProfileClaims.claimProfile(...a),
     rejectClaim: (...a) => ProfileClaims.rejectClaim(...a),
     
+    // ===== Facettes : 1 personne, 4 casquettes (comédien / technicien / asso / entreprise) =====
+    FACET_KEYS: ['actor', 'crew', 'asso', 'ent'],
+
+    _facetDefaults: () => ({
+        actor: { enabled: false, visible: true },
+        crew:  { enabled: false, visible: true },
+        asso:  { enabled: false, visible: true, hqAddress: '', hqLatitude: null, hqLongitude: null },
+        ent:   { enabled: false, visible: true, hqAddress: '', hqLatitude: null, hqLongitude: null }
+    }),
+
+    _typeToFacet: (t) => (t === 'actor' ? 'actor' : t === 'crew' ? 'crew' : t === 'association' ? 'asso' : t === 'enterprise' ? 'ent' : null),
+    _facetToType: (k) => (k === 'actor' ? 'actor' : k === 'crew' ? 'crew' : k === 'asso' ? 'association' : k === 'ent' ? 'enterprise' : ''),
+
+    // Charge data.facets si présent, sinon migration douce depuis profile_type (anciens profils)
+    _normalizeFacets: (saved, row) => {
+        const f = PublicProfile._facetDefaults();
+        if(saved && typeof saved === 'object') {
+            PublicProfile.FACET_KEYS.forEach(k => { if(saved[k]) Object.assign(f[k], saved[k]); });
+            return f;
+        }
+        const k = PublicProfile._typeToFacet(row && row.profile_type);
+        if(k) { f[k].enabled = true; f[k].visible = (row.is_public !== false); }
+        return f;
+    },
+
+    // À la sauvegarde : les facettes suivent (au minimum) le type courant du formulaire
+    _syncFacetsWithType: (profile) => {
+        const f = PublicProfile._normalizeFacets(profile.facets, { profile_type: profile.type, is_public: true });
+        const k = PublicProfile._typeToFacet(profile.type);
+        if(k) f[k].enabled = true;
+        return f;
+    },
+
+    // Première facette active (compatibilité avec l'ancien profile_type)
+    firstEnabledFacet: (profile) => {
+        const f = (profile && profile.facets) || {};
+        return PublicProfile.FACET_KEYS.find(k => f[k] && f[k].enabled) || null;
+    },
+
     loadProfiles: async () => {
         const email = state.currentUser.email.toLowerCase();
         
@@ -35853,6 +35892,7 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
                         availabilityText: userProfile.availability || '',
                         is_public: userProfile.is_public,
                         profileComplete: userProfile.is_public,
+                        facets: PublicProfile._normalizeFacets(extraData.facets, userProfile),
                         // Commun
                         address: extraData.address || '',
                         hideAddress: extraData.hideAddress || false,
@@ -36026,6 +36066,8 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
                 is_public: true,
                 updated_at: new Date().toISOString(),
                 data: {
+                    // Facettes (1 personne, 4 casquettes)
+                    facets: PublicProfile._syncFacetsWithType(profile),
                     // Commun
                     address: profile.address || '',
                     hideAddress: profile.hideAddress || false,
