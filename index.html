@@ -23,6 +23,14 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v519 (4 Juin 2026)
+  - Édition collaborative : verrous par domaine d'onglet, arbitrés par le serveur (table project_locks + RPC lock_acquire / lock_heartbeat / lock_release). Un onglet devient éditable quand le verrou est confirmé ; pour les autres il passe « En travaux » en lecture seule, avec pastille (initiale du détenteur) sur les sous-onglets et les catégories.
+  - Sauvegarde partielle par clés (RPC patch_project_data) et fusion sélective à la réception Realtime : deux personnes travaillant sur des domaines différents ne s'écrasent plus.
+  - Présence par base de données (table user_presence + battement 50 s + Realtime), en remplacement de Supabase Realtime Presence, muet sur ce projet : avatars des connectés dans l'en-tête du projet (grossissement au survol) et pastilles « qui est sur quel projet » sur les cartes du dashboard.
+  - Mode solo : seul sur un projet, aucun verrou ni bandeau ; le verrouillage s'active automatiquement à l'arrivée d'une deuxième personne.
+  - Aperçu au survol : survoler un onglet affiche son contenu réel en lecture seule sans toucher aux verrous (bandeau « Aperçu ») ; survoler une catégorie déroule ses sous-onglets ; le clic reste la navigation réelle avec verrouillage.
+  - Exclusion d'inactivité : à plusieurs, 3 minutes sans activité déclenchent la sauvegarde puis le retour au tableau de bord, verrous libérés.
+  - Nettoyage : ancien verrouillage par scène supprimé (module StoreLocks retiré, ~140 lignes), canaux Realtime Presence retirés, logs de diagnostic supprimés.
 v517 (3 Juin 2026)
   - Sécurité RLS : la lecture des projets est restreinte au propriétaire, aux membres invités et à l'admin plateforme (policy SELECT « Projects viewable » via la fonction can_view_project). Comble le trou « using(true) » qui laissait tout utilisateur connecté lire n'importe quel projet.
   - Univers : les projets publics sont désormais chargés via une fonction RPC get_public_projects qui n'expose que la fiche publique (publicProjectData) — jamais le projet entier (casting, planning, budget, scénario).
@@ -397,8 +405,8 @@ Réparations : R7 (auto-réparation HTML legacy Tab/Enter dans blocs remplis),
 R8 (restauration toggleScriptBd).
 
 PHASE B — Modularisation des autres gros modules
-- B.1 Store : éclaté en 5 sous-modules (StoreMigrations, StoreUpdates,
-  StoreLocks, StoreRealtime, StoreSave). Store reste le cœur (cycle de vie projet)
+- B.1 Store : éclaté en sous-modules (StoreMigrations, StoreUpdates,
+  StoreRealtime, StoreSave). Store reste le cœur (cycle de vie projet)
   et délègue. Anomalies d'indentation (4-espaces, tab) corrigées au passage.
 - B.2 BeatBoard : organisé en 7 sections internes (état canvas trop couplé pour
   un éclatement sain).
@@ -12563,9 +12571,7 @@ crewRoles: {
       })(), 
       dbListener: null, 
       presenceRef: null, 
-      locksListener: null, 
-      locksChannel: null,
-      activeLocks: {}, 
+      locksListener: null,  
       contextSceneId: null,
       contacts: { actors: [], crew: [] },
       userProfile: null
@@ -15531,7 +15537,6 @@ const LockManager = {
               state.domainLocks = state.domainLocks || {};
               if(lock) state.domainLocks[domain] = lock;
               const got = LockManager._mine(lock);
-              console.log('[Lock] acquire', domain, '| détenteur:', lock && lock.holder_email, '| uid verrou:', lock && lock.holder_uid, '| mon uid:', state.currentUser.uid, '| à moi:', got);
               if(got) LockManager.held[domain] = true;
               if(LockManager.currentDomain !== domain && got) { LockManager.release(domain); return false; }
               LockManager.applyUI();
@@ -15694,7 +15699,6 @@ const LockManager = {
               if(error) return;
               const now = Date.now();
               state.dbPresence = (data || []).filter(r => r.heartbeat_at && (now - new Date(r.heartbeat_at).getTime()) < 120000);
-              console.log('[DBP] présence:', (state.dbPresence||[]).map(r => (r.user_email||'') + '→' + (r.project_id||'dashboard')).join(' | ') || 'personne');
               try { if(state._renderPresenceNow) state._renderPresenceNow(); } catch(e) {}
               try { if(typeof GlobalPresence !== 'undefined') GlobalPresence.renderBadges(); } catch(e) {}
               try { if(typeof LockManager !== 'undefined' && state.currentProjectId) LockManager.onPresenceChange(); } catch(e) {}
@@ -15702,36 +15706,8 @@ const LockManager = {
       }
   };
 
-  // GlobalPresence — présence globale : qui est dans quel projet (badges sur les cartes du dashboard).
+  // GlobalPresence — badges « qui est dans quel projet » sur les cartes du dashboard (source : table user_presence via DBPresence).
   const GlobalPresence = {
-      channel: null,
-      ready: false,
-
-      init: () => {
-          if(window.location.protocol === 'file:') return;
-          if(!state.currentUser || !state.currentUser.email) return;
-          if(GlobalPresence.channel) { GlobalPresence.renderBadges(); return; }
-          const email = state.currentUser.email;
-          GlobalPresence.channel = supabase.channel('presence_global', { config: { presence: { key: email } } });
-          const gpRender = () => { try { GlobalPresence.renderBadges(); } catch(e) {} };
-          GlobalPresence.channel
-              .on('presence', { event: 'sync' }, gpRender)
-              .on('presence', { event: 'join' }, gpRender)
-              .on('presence', { event: 'leave' }, gpRender)
-              .subscribe(async (status) => {
-                  if(status === 'SUBSCRIBED') {
-                      GlobalPresence.ready = true;
-                      try { await GlobalPresence.channel.track({ email: email, projectId: state.currentProjectId || null }); } catch(e) {}
-                      setTimeout(gpRender, 800);
-                  }
-              });
-      },
-
-      setProject: async (pid) => {
-          if(!GlobalPresence.channel || !GlobalPresence.ready || !state.currentUser) return;
-          try { await GlobalPresence.channel.track({ email: state.currentUser.email, projectId: pid || null }); } catch(e) {}
-      },
-
       renderBadges: () => {
           const cards = document.querySelectorAll('.project-card[data-project-id]');
           if(!cards.length) return;
@@ -15743,7 +15719,6 @@ const LockManager = {
               if(!pid || em === me) return;
               (byProject[pid] = byProject[pid] || []).push(em);
           });
-          console.log('[GP] présents par projet:', JSON.stringify(byProject));
           cards.forEach(card => {
               const old = card.querySelector('.gp-badges');
               if(old) old.remove();
@@ -15764,121 +15739,7 @@ const LockManager = {
       }
   };
 
-  // StoreLocks — sous-module B.1.3 : verrous d'édition de scènes en collaboratif (Supabase Realtime Broadcast)
-  const StoreLocks = {
-      initLocks: (id) => { 
-          // Pas de locks en mode fichier local
-          if(window.location.protocol === 'file:') return;
-          // Supabase Realtime Broadcast pour synchroniser les locks entre collaborateurs
-          if(state.locksChannel) {
-              supabase.removeChannel(state.locksChannel);
-          }
-          
-          state.activeLocks = {};
-          
-          state.locksChannel = supabase.channel('locks_' + id);
-          
-          // Écouter les changements de locks des autres utilisateurs
-          state.locksChannel
-              .on('broadcast', { event: 'lock_acquired' }, (payload) => {
-                  const { sceneId, lock } = payload.payload;
-                  state.activeLocks[sceneId] = lock;
-                  UI.applyLocks();
-              })
-              .on('broadcast', { event: 'lock_released' }, (payload) => {
-                  const { sceneId } = payload.payload;
-                  delete state.activeLocks[sceneId];
-                  UI.applyLocks();
-              })
-              .on('presence', { event: 'leave' }, (payload) => {
-                  // Nettoyer les locks de l'utilisateur qui part
-                  const leftUserIds = payload.leftPresences?.map(p => p.uid) || [];
-                  let changed = false;
-                  Object.keys(state.activeLocks).forEach(sceneId => {
-                      if(leftUserIds.includes(state.activeLocks[sceneId]?.uid)) {
-                          delete state.activeLocks[sceneId];
-                          changed = true;
-                      }
-                  });
-                  if(changed) UI.applyLocks();
-              })
-              .subscribe(async (status) => {
-                  if(status === 'SUBSCRIBED') {
-                      await state.locksChannel.track({ 
-                          uid: state.currentUser.uid, 
-                          email: state.currentUser.email 
-                      });
-                  }
-              });
-          
-          UI.applyLocks();
-      },
-      
-      acquireLock: async (sceneId) => { 
-          return; // Phase 2 : remplacé par LockManager (verrou par domaine)
-          if(state.currentRole === 'viewer') return; 
-          
-          const existingLock = state.activeLocks[sceneId];
-          if (existingLock && existingLock.uid !== state.currentUser.uid) {
-              Utils.toast(`Scène déjà éditée par ${existingLock.user.split('@')[0]}`, 'warning');
-              return;
-          }
-          
-          const lock = { 
-              user: state.currentUser.email, 
-              uid: state.currentUser.uid, 
-              timestamp: Date.now() 
-          };
-          state.activeLocks[sceneId] = lock;
-          
-          if(state.locksChannel) {
-              await state.locksChannel.send({
-                  type: 'broadcast',
-                  event: 'lock_acquired',
-                  payload: { sceneId, lock }
-              });
-          }
-          UI.applyLocks();
-      },
-      
-      releaseLock: async (sceneId) => { 
-          return; // Phase 2 : remplacé par LockManager
-          if(state.currentRole === 'viewer') return; 
-          const lock = state.activeLocks[sceneId]; 
-          if(lock && lock.uid === state.currentUser.uid) { 
-              delete state.activeLocks[sceneId];
-              
-              if(state.locksChannel) {
-                  await state.locksChannel.send({
-                      type: 'broadcast',
-                      event: 'lock_released',
-                      payload: { sceneId }
-                  });
-              }
-              UI.applyLocks();
-          } 
-      },
-      
-      cleanupLocks: async () => {
-          if(state.locksChannel) {
-              const myLocks = Object.keys(state.activeLocks).filter(
-                  sceneId => state.activeLocks[sceneId]?.uid === state.currentUser?.uid
-              );
-              for(const sceneId of myLocks) {
-                  await state.locksChannel.send({
-                      type: 'broadcast',
-                      event: 'lock_released',
-                      payload: { sceneId }
-                  });
-              }
-              supabase.removeChannel(state.locksChannel);
-              state.locksChannel = null;
-          }
-          state.activeLocks = {};
-      }
-  };
-
-  // StoreRealtime — sous-module B.1.4 : écoute temps réel Supabase (DB changes, presence) + chargement
+    // StoreRealtime — sous-module B.1.4 : écoute temps réel Supabase (DB changes, presence) + chargement
   const StoreRealtime = {
       startRealtimeListener: (id) => {
           // Pas de realtime en mode fichier local
@@ -15941,23 +15802,12 @@ const LockManager = {
       initPresence: (id) => { 
           // Pas de presence en mode fichier local
           if(window.location.protocol === 'file:') return;
-          // Supabase Realtime Presence
-          const email = state.currentUser.email;
-          
-          if(state.presenceChannel) {
-              supabase.removeChannel(state.presenceChannel);
-          }
-          
-          state.presenceChannel = supabase.channel('presence_' + id, {
-              config: { presence: { key: email } }
-          });
-          
+          // La présence vient de la table user_presence (module DBPresence) ; ici on définit seulement le rendu des avatars de l'en-tête.
           const renderPresenceNow = () => {
                   const presenceState = {};
                   (state.dbPresence || []).forEach(r => {
                       if(r.project_id === state.currentProjectId) presenceState[r.user_email] = [{ email: r.user_email }];
                   });
-                  console.log('[Presence] sync — clés présentes:', Object.keys(presenceState));
                   // Verrous d'abord : ne doit JAMAIS être bloqué par le rendu des avatars
                   try { if(typeof LockManager !== 'undefined' && LockManager.onPresenceChange) LockManager.onPresenceChange(); } catch(e) {}
                   try {
@@ -16013,22 +15863,10 @@ const LockManager = {
                           els.presenceList.appendChild(wrapper);
                       });
                   });
-                  console.log('[Presence] avatars rendus:', seen.size);
                   } catch(e) { console.warn('[Presence] rendu avatars échoué:', e); }
           };
           state._renderPresenceNow = renderPresenceNow;
-          state.presenceChannel
-              .on('presence', { event: 'sync' }, renderPresenceNow)
-              .on('presence', { event: 'join' }, renderPresenceNow)
-              .on('presence', { event: 'leave' }, renderPresenceNow)
-              .subscribe(async (status) => {
-                  console.log('[Presence] statut canal présence:', status);
-                  if (status === 'SUBSCRIBED') {
-                      await state.presenceChannel.track({ email: email, time: Date.now() });
-                      console.log('[Presence] track envoyé pour', email);
-                      setTimeout(() => { try { renderPresenceNow(); } catch(e) {} }, 800);
-                  }
-              });
+          renderPresenceNow();
       }
   };
 
@@ -16216,9 +16054,9 @@ const LockManager = {
 
   // ====================================================================
   // Store — module CŒUR : cycle de vie projet (création/chargement/suppression/dashboard).
-  // Sous-modules spécialisés (B.1) : StoreMigrations, StoreUpdates, StoreLocks,
+  // Sous-modules spécialisés (B.1) : StoreMigrations, StoreUpdates,
   // StoreRealtime, StoreSave. Store conserve des délégations rétrocompatibles vers eux,
-  // donc le reste du code continue d'appeler Store.save(), Store.acquireLock(), etc.
+  // donc le reste du code continue d'appeler Store.save(), etc.
   // ====================================================================
   const Store = {
       // V62: Initialisation du tableau snapshots
@@ -16885,7 +16723,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               state.statsFilter = { scope: 'all', seasonId: null, episodeId: null }; // Stats: filtre de scope par défaut
               NavMemory.setProject(id); // Persistance pour F5
               LoadingScreen.setProgress(95);
-              UI.launchEditor(); Store.startRealtimeListener(id); Store.initPresence(id); Store.initLocks(id); LockManager.init(id); if(typeof GlobalPresence !== 'undefined') { GlobalPresence.init(); GlobalPresence.setProject(id); } if(typeof DBPresence !== 'undefined') DBPresence.start(id);
+              UI.launchEditor(); Store.startRealtimeListener(id); Store.initPresence(id); Store.initLocks(id); LockManager.init(id); if(typeof DBPresence !== 'undefined') DBPresence.start(id);
               // S7.1 : forcer la sauvegarde si migration saisons effectuée
               if(needsMigrationSave) setTimeout(() => Store.save(), 1000);
               LoadingScreen.hide();
@@ -16900,11 +16738,6 @@ CONFIG.crewGroups.forEach(defaultGrp => {
       // ========== HELPERS IDENTITÉ (B.1.1 → StoreMigrations) ==========
       getPersonInfo: (email) => StoreMigrations.getPersonInfo(email),
       getUserRoleInfo: (email) => StoreMigrations.getUserRoleInfo(email),
-      // ========== VERROUS COLLABORATIFS (B.1.3 → StoreLocks) ==========
-      initLocks: (id) => StoreLocks.initLocks(id),
-      acquireLock: (sceneId) => StoreLocks.acquireLock(sceneId),
-      releaseLock: (sceneId) => StoreLocks.releaseLock(sceneId),
-      cleanupLocks: () => StoreLocks.cleanupLocks(),
 	  
       // ========== UPDATES CIBLÉS DEBOUNCED (B.1.2 → StoreUpdates) ==========
       updateScene: (sceneId, content) => StoreUpdates.updateScene(sceneId, content),
@@ -19305,7 +19138,6 @@ initCategoriesDragDrop: () => {
         UI.hideAllViews();
         els.authView.style.display = 'none'; 
         els.dashboardView.style.display = 'flex';
-        if(typeof GlobalPresence !== 'undefined') { GlobalPresence.init(); GlobalPresence.setProject(null); }
         if(typeof DBPresence !== 'undefined') DBPresence.start(null);
         
         // Restauration du projet après F5 (capture AVANT de nettoyer NavMemory)
@@ -19609,7 +19441,7 @@ initCategoriesDragDrop: () => {
                 els.projectList.appendChild(card); 
             });
         }
-        if(typeof GlobalPresence !== 'undefined') { try { GlobalPresence.init(); } catch(e) {} }
+        if(typeof GlobalPresence !== 'undefined') { try { GlobalPresence.renderBadges(); } catch(e) {} }
     },
   };
 
@@ -20986,14 +20818,7 @@ const tabToSection = {
     updateTabNumbers: (...a) => UICategories.updateTabNumbers(...a),
 	
 	  applyLocks: () => {
-        document.querySelectorAll('.script-row').forEach(row => {
-            const sid = row.dataset.id;
-            const lock = state.activeLocks[sid];
-            const editor = row.querySelector('.script-editor-box');
-            const overlay = row.querySelector('.lock-overlay');
-            if(lock && lock.uid !== state.currentUser.uid) { row.classList.add('is-locked'); editor.contentEditable = "false"; overlay.innerText = `🔒 Modifié par ${lock.user.split('@')[0]}`; } 
-            else { row.classList.remove('is-locked'); if(state.currentRole !== 'viewer') editor.contentEditable = "true"; }
-        });
+        // Ancien verrouillage par scène supprimé (LockManager gère les verrous par domaine d'onglet)
     },
       // ===== THÈME / DESIGN / DROPDOWNS / NAV ONGLETS — délégué à UITheme =====
       get designs() { return UITheme.designs; },
@@ -21609,9 +21434,7 @@ const tabToSection = {
                   const editor = document.getElementById(`editor-${scene.id}`); const toolbar = document.getElementById('continuous-toolbar'); 
                   editor.addEventListener('input', () => { const s = state.data.scenes.find(x => x.id === scene.id); if(s) s.scriptContent = editor.innerHTML; ScriptEditor.checkAC(editor); Store.updateScene(scene.id, editor.innerHTML); }); 
                   ['keyup', 'mouseup', 'click'].forEach(evt => editor.addEventListener(evt, () => ScriptEditor.updateToolbar(editor, toolbar))); 
-                  editor.addEventListener('keydown', (e) => ScriptEditor.handleKeyContinuous(e, editor, scene.id, true)); 
-                  editor.addEventListener('focus', () => Store.acquireLock(scene.id)); 
-                  editor.addEventListener('blur', () => Store.releaseLock(scene.id)); 
+                  editor.addEventListener('keydown', (e) => ScriptEditor.handleKeyContinuous(e, editor, scene.id, true));  
               } 
           }); 
           UI.applyLocks(); 
@@ -31768,12 +31591,7 @@ const DrawingEditor = {
                               s.classList.toggle('active', s.dataset.sceneId == scene.id);
                           });
                       }
-                      Store.acquireLock(scene.id);
-                  });
-                  
-                  content.addEventListener('blur', () => {
-                      Store.releaseLock(scene.id);
-                  });
+                      });
                   
                   content.addEventListener('keydown', (e) => {
                       ScriptEditor.handleKeyContinuous(e, content, scene.id);
@@ -70354,7 +70172,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreLocks, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, ProfileActualites, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, UniverseBrothers, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, ContractsTemplates, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, AdminEmail, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, ProfileActualites, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, UniverseBrothers, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, ContractsTemplates, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Feed, Editor, Icons, Admin, AdminEmail, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
