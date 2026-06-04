@@ -7359,7 +7359,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv521</p>
+      <p>vv522</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -13984,11 +13984,13 @@ crewRoles: {
   // ============================================================
   const ActiveProfile = {
       KEY: 'moteur_active_profile_id',
+      MULTI: false, // mono-profil : un compte = un profil (sélecteur et bascule désactivés)
       _currentId: null,
       
       // Renvoie l'id du profil actif (localStorage ou premier profil si rien)
       getId: () => {
-          try { return localStorage.getItem(ActiveProfile.KEY); } catch(e) { return null; }
+          // Mono-profil : l'unique profil du compte fait foi (le localStorage n'est plus une source)
+          try { return (PublicProfile && PublicProfile.profiles && PublicProfile.profiles[0] && PublicProfile.profiles[0].id) || null; } catch(e) { return null; }
       },
       
       setId: (profileId) => {
@@ -14017,6 +14019,7 @@ crewRoles: {
       // Génère le HTML du bouton+menu à injecter
       // I5f fix: si on est dans un projet, ne montrer que les profils qui y sont membres
       buildSelectorHtml: async () => {
+          if(!ActiveProfile.MULTI) return ''; // mono-profil : pas de sélecteur de profil actif
           let profiles = PublicProfile?.profiles || [];
           if(profiles.length === 0) return '';
           
@@ -16213,9 +16216,7 @@ const LockManager = {
           if (memberError || !memberships) return [];
           
           // Filtrer par profil actif : garder les memberships où profile_id matche OU où profile_id est NULL (legacy)
-          const filteredMemberships = activeProfileId
-              ? memberships.filter(m => m.profile_id === activeProfileId || m.profile_id == null)
-              : memberships;
+          const filteredMemberships = memberships; // mono-profil : plus de filtre par profil
           
           if (filteredMemberships.length === 0) {
               // Fallback : projets dont je suis owner mais pas encore dans project_members
@@ -16226,9 +16227,7 @@ const LockManager = {
               
               if (!ownedProjects) return [];
               
-              const filtered = activeProfileId
-                  ? ownedProjects.filter(p => p.owner_profile_id === activeProfileId || p.owner_profile_id == null)
-                  : ownedProjects;
+              const filtered = ownedProjects; // mono-profil
               
               return filtered.map(p => ({ 
                   id: p.id, 
@@ -35187,11 +35186,10 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
             </div>`;
         });
         
-        if(PublicProfile.profiles.length < 3) {
+        if(PublicProfile.profiles.length < 1) {
             html += `<div class="profile-circle-card profile-circle-add" onclick="app.PublicProfile.createNewProfile()">
                 <div class="profile-circle-photo"><span class="profile-circle-ph">＋</span></div>
-                <div class="profile-circle-name">Nouveau profil</div>
-                <div class="profile-circle-fn">${PublicProfile.profiles.length}/3</div>
+                <div class="profile-circle-name">Créer mon profil</div>
             </div>`;
         }
         
@@ -35200,9 +35198,9 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
     
     // Crée un nouveau profil
     createNewProfile: () => {
-        // I2 : vérifier la limite de 3 profils
-        if(PublicProfile.profiles.length >= 3) {
-            Utils.toast('Limite de 3 profils atteinte. Supprimez un profil avant d\'en créer un nouveau.', 'warning', 5000);
+        // Mono-profil : un seul profil par compte
+        if(PublicProfile.profiles.length >= 1) {
+            Utils.toast('Un seul profil par compte. Modifiez votre profil existant depuis cette page.', 'warning', 5000);
             return;
         }
         
@@ -36116,7 +36114,7 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
             const {error: upErr} = await supabase.from('user_profiles').upsert({
                 id: profile.id,
                 owner_email: email,
-                email: profile.email || email,  // email public du profil, par défaut = email du compte
+                email: email,  // mono-profil : l'email du profil est toujours celui du compte
                 ...dataToSave
             }, { onConflict: 'id' });
             if(upErr) {
@@ -59338,16 +59336,8 @@ const Messages = {
             
             let query = supabase.from('messages').select('*');
             
-            if(activeProfileId) {
-                // Filtrer : messages envoyés AU profil actif OU depuis le profil actif
-                // (la syntaxe or() simple fonctionne bien dans PostgREST)
-                query = query.or(
-                    `to_profile_id.eq.${activeProfileId},from_profile_id.eq.${activeProfileId}`
-                );
-            } else {
-                // Aucun profil actif : fallback sur l'ancien comportement (par email)
-                query = query.or(`to_email.eq.${currentEmail},from_email.eq.${currentEmail}`);
-            }
+            // Mono-profil : un compte = un email = une boîte. Routage par email uniquement.
+            query = query.or(`to_email.eq.${currentEmail},from_email.eq.${currentEmail}`);
             
             const { data: messagesData } = await query.order('created_at', { ascending: false });
             const snap = { val: () => messagesData ? messagesData.reduce((acc, m) => { acc[m.id] = m; return acc; }, {}) : {} };
@@ -60708,14 +60698,14 @@ ${window.location.origin}${window.location.pathname}
         content: `
           <h3>Plusieurs identités, un seul compte</h3>
           <p>Tu peux créer <strong>jusqu'à 3 profils publics</strong> sur le même compte. C'est idéal si tu portes plusieurs casquettes dans le cinéma : réalisateur·ice qui joue aussi, technicien·ne qui gère sa propre boîte de prod, comédien·ne qui porte une association...</p>
-          <p><strong>Créer un nouveau profil :</strong> Va dans <em>Mes Profils Publics</em>, clique sur <em>+ Nouveau profil</em>. Le compteur N/3 t'indique combien il t'en reste à créer.</p>
+          <p><strong>Créer ton profil :</strong> Va dans <em>Mes Profils Publics</em>, clique sur <em>Créer mon profil</em>. Un seul profil par compte : il te représente partout (projets, messagerie, Univers).</p>
           
           <h3>Le sélecteur "Profil actif"</h3>
           <p>En haut à droite de toutes les pages, à côté du bouton Mode, tu trouves le <strong>sélecteur de profil actif</strong>. Il affiche le profil avec lequel tu interagis en ce moment. Clique dessus pour basculer d'un profil à l'autre.</p>
           <div class="tuto-tip"><strong>💡 Pourquoi c'est important :</strong> Le profil actif détermine tout ! Tes messages, tes projets, tes actualités... tout ce que tu vois et tout ce que tu envoies est lié au profil choisi à ce moment-là.</div>
           
           <h3>Qu'est-ce qui change selon le profil actif ?</h3>
-          <p><strong>💬 Messagerie :</strong> Tu ne vois que les messages reçus/envoyés par ce profil. Bascule pour voir la boîte de l'autre.</p>
+          <p><strong>💬 Messagerie :</strong> Ta boîte est liée à ton compte : tous tes messages reçus et envoyés au même endroit.</p>
           <p><strong>📁 Mes projets :</strong> Tu ne vois que les projets où ce profil est owner ou invité. Chaque profil a sa propre liste de projets.</p>
           <p><strong>📰 Actualités :</strong> Chaque profil publie et gère son propre fil.</p>
           <p><strong>✉️ Nouveaux messages :</strong> Quand tu écris à quelqu'un, le destinataire voit que ton profil X t'a contacté·e, pas "Guillaume en général".</p>
@@ -60778,7 +60768,7 @@ ${window.location.origin}${window.location.pathname}
           <p><strong>ℹ️ Infos :</strong> Notifications automatiques (scène modifiée, commentaire sur ton travail, etc.).</p>
           
           <h3>Filtrage automatique par profil</h3>
-          <p>Si tu as plusieurs profils (comédien + technicien par exemple), ta messagerie <strong>filtre automatiquement</strong> selon le profil actif choisi en haut à droite. Tu ne vois que les messages adressés à ce profil-là.</p>
+          <p>Ta messagerie est liée à ton compte : un seul profil, une seule boîte, tous tes échanges au même endroit.</p>
           <div class="tuto-tip"><strong>💡 Pour voir l'autre boîte :</strong> Bascule simplement de profil via le sélecteur en haut à droite. Les messages de l'autre profil apparaissent instantanément.</div>
           
           <h3>Envoyer un message</h3>
