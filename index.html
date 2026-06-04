@@ -7076,6 +7076,8 @@ body.presentation-mode .presentation-bar {
   .dlock-banner { background: rgba(217,119,6,.16); border: 1px solid rgba(217,119,6,.45); color: #c77f0a; padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; }
   .dlock-badge { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; margin-left: 4px; vertical-align: middle; }
   .dlock-ava { display: inline-flex; width: 16px; height: 16px; border-radius: 50%; background: #c0392b; color: #fff; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; }
+  .tab-subbtn.dlock-occupied, .tab-btn.dlock-occupied, .tab-category.dlock-occupied { position: relative; }
+  .dlock-avatar-tab { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: #c0392b; color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; opacity: .55; pointer-events: none; z-index: 3; }
 </style>
 </head>
 <body>
@@ -15381,29 +15383,42 @@ const LockManager = {
       },
 
       applyUI: () => {
-          document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
-              const d = LockDomains.forTab(btn.dataset.tab);
+          const lockFor = (tabName) => {
+              const d = LockDomains.forTab(tabName);
               const lock = d ? (state.domainLocks||{})[d] : null;
-              const byOther = lock && !LockManager._mine(lock);
-              const old = btn.querySelector('.dlock-badge');
-              if(old) old.remove();
-              if(byOther) {
+              return (lock && !LockManager._mine(lock)) ? lock : null;
+          };
+          const markBtn = (btn, lock) => {
+              const oldA = btn.querySelector('.dlock-avatar-tab'); if(oldA) oldA.remove();
+              const oldB = btn.querySelector('.dlock-badge'); if(oldB) oldB.remove();
+              btn.classList.toggle('dlock-occupied', !!lock);
+              if(lock) {
                   const who = LockManager._who(lock);
-                  const badge = document.createElement('span');
-                  badge.className = 'dlock-badge';
-                  badge.title = 'En travaux — ' + who;
-                  badge.innerHTML = '🚧<span class="dlock-ava">' + ((who[0]||'?').toUpperCase()) + '</span>';
-                  btn.appendChild(badge);
+                  const av = document.createElement('span');
+                  av.className = 'dlock-avatar-tab';
+                  av.title = 'En travaux — ' + who;
+                  av.textContent = (who[0]||'?').toUpperCase();
+                  btn.appendChild(av);
               }
+          };
+          // sous-onglets (mode catégories) + onglets plats
+          document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => markBtn(btn, lockFor(btn.dataset.tab)));
+          // onglets-catégories : occupé si un onglet de la catégorie est tenu par un autre
+          document.querySelectorAll('.tab-category[data-category]').forEach(cat => {
+              const tabs = (UI.categoryTabs && UI.categoryTabs[cat.dataset.category]) || [];
+              let lock = null;
+              for(const t of tabs) { const l = lockFor(t); if(l) { lock = l; break; } }
+              markBtn(cat, lock);
           });
+          // lecture seule + bandeau de l'onglet actif
           const active = document.querySelector('.tab-content.active');
           if(!active) return;
           const tabName = active.id.replace('tab-','');
           const d = LockDomains.forTab(tabName);
           const editable = LockManager._editable(d);
           active.classList.toggle('is-domain-locked', !editable);
-          const oldB = active.querySelector('.dlock-banner');
-          if(oldB) oldB.remove();
+          const oldBan = active.querySelector('.dlock-banner');
+          if(oldBan) oldBan.remove();
           if(!editable) {
               const lock = d ? (state.domainLocks||{})[d] : null;
               const banner = document.createElement('div');
@@ -15414,10 +15429,10 @@ const LockManager = {
           }
       },
 
-      _tick: () => {
+      _tick: async () => {
           const dom = LockManager.currentDomain;
           if(dom && LockManager._mine((state.domainLocks||{})[dom])) {
-              supabase.rpc('lock_heartbeat', { p_id: state.currentProjectId, p_key: dom, p_uid: state.currentUser.uid }).catch(()=>{});
+              try { await supabase.rpc('lock_heartbeat', { p_id: state.currentProjectId, p_key: dom, p_uid: state.currentUser.uid }); } catch(e) {}
           }
       },
 
