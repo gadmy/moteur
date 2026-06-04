@@ -15339,9 +15339,35 @@ const LockManager = {
       _mine: (lock) => !!(lock && state.currentUser && lock.holder_uid === state.currentUser.uid),
       _who: (lock) => (lock && (lock.holder_name || (lock.holder_email||'').split('@')[0])) || '?',
 
+      held: {},
+
+      // Suis-je seul(e) connecté(e) sur ce projet ? (présence Realtime ; en cas de doute → verrous actifs)
+      isAlone: () => {
+          try {
+              if(!state.presenceChannel || typeof state.presenceChannel.presenceState !== 'function') return false;
+              const ps = state.presenceChannel.presenceState();
+              const emails = new Set();
+              Object.keys(ps).forEach(k => (ps[k]||[]).forEach(u => emails.add((((u && u.email) || k) + '').toLowerCase())));
+              return emails.size <= 1;
+          } catch(e) { return false; }
+      },
+
+      // La présence a changé : quelqu'un arrive → je réclame mon onglet courant ; et on rafraîchit l'UI.
+      onPresenceChange: () => {
+          const d = LockManager.currentDomain;
+          if(!LockManager.isAlone() && d && state.currentRole !== 'viewer'
+             && !LockManager._mine((state.domainLocks||{})[d]) && !LockManager.held[d]) {
+              LockManager.acquire(d);
+          }
+          LockManager.applyUI();
+      },
+
       _editable: (domain) => {
           if(!domain || !LockDomains.defs[domain] || LockDomains.defs[domain].tabs.length === 0) return true;
-          return LockManager._mine((state.domainLocks||{})[domain]);
+          if(LockManager.isAlone()) return true; // seul(e) sur le projet : pas de verrous
+          const lock = (state.domainLocks||{})[domain];
+          if(lock) return LockManager._mine(lock);
+          return !!LockManager.held[domain]; // verrou acquis, ligne momentanément invisible
       },
 
       acquire: async (domain) => {
@@ -15354,19 +15380,25 @@ const LockManager = {
                   p_uid: state.currentUser.uid, p_name: (state.currentUser.email||'').split('@')[0]
               });
               LockManager.pendingDomain = null;
-              if(error) { LockManager.applyUI(); return false; }
+              if(error) { console.warn('[Lock] acquire erreur', domain, error.message); LockManager.applyUI(); return false; }
+              let lock = data;
+              if(Array.isArray(lock)) lock = lock[0] || null;
               state.domainLocks = state.domainLocks || {};
-              if(data) state.domainLocks[domain] = data;
-              if(LockManager.currentDomain !== domain && LockManager._mine(data)) { LockManager.release(domain); return false; }
+              if(lock) state.domainLocks[domain] = lock;
+              const got = LockManager._mine(lock);
+              console.log('[Lock] acquire', domain, '| détenteur:', lock && lock.holder_email, '| uid verrou:', lock && lock.holder_uid, '| mon uid:', state.currentUser.uid, '| à moi:', got);
+              if(got) LockManager.held[domain] = true;
+              if(LockManager.currentDomain !== domain && got) { LockManager.release(domain); return false; }
               LockManager.applyUI();
-              return LockManager._mine(data);
+              return got;
           } catch(e) { LockManager.pendingDomain = null; LockManager.applyUI(); return false; }
       },
 
       release: async (domain) => {
           if(!domain || !state.currentProjectId || !state.currentUser) return;
           const cur = (state.domainLocks||{})[domain];
-          if(!LockManager._mine(cur)) return;
+          if(!LockManager._mine(cur) && !LockManager.held[domain]) return;
+          delete LockManager.held[domain];
           try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: domain, p_uid: state.currentUser.uid }); } catch(e) {}
           if(state.domainLocks) delete state.domainLocks[domain];
           LockManager.applyUI();
@@ -15379,10 +15411,18 @@ const LockManager = {
           }
           LockManager.currentDomain = newDomain;
           LockManager.applyUI();
-          if(newDomain && state.currentRole !== 'viewer') LockManager.acquire(newDomain);
+          if(newDomain && state.currentRole !== 'viewer' && !LockManager.isAlone()) LockManager.acquire(newDomain);
       },
 
       applyUI: () => {
+          // Seul(e) sur le projet : aucun verrou affiché, tout reste éditable
+          if(LockManager.isAlone()) {
+              document.querySelectorAll('.dlock-avatar-tab, .dlock-badge, .dlock-banner').forEach(el => el.remove());
+              document.querySelectorAll('.dlock-occupied').forEach(el => el.classList.remove('dlock-occupied'));
+              const act = document.querySelector('.tab-content.active');
+              if(act) act.classList.remove('is-domain-locked');
+              return;
+          }
           const lockFor = (tabName) => {
               const d = LockDomains.forTab(tabName);
               const lock = d ? (state.domainLocks||{})[d] : null;
@@ -15438,10 +15478,12 @@ const LockManager = {
 
       cleanup: async () => {
           if(LockManager.heartbeatTimer) { clearInterval(LockManager.heartbeatTimer); LockManager.heartbeatTimer = null; }
-          const mine = Object.keys(state.domainLocks||{}).filter(k => LockManager._mine(state.domainLocks[k]));
-          for(const k of mine) {
+          const mineSet = new Set(Object.keys(LockManager.held||{}));
+          Object.keys(state.domainLocks||{}).forEach(k => { if(LockManager._mine(state.domainLocks[k])) mineSet.add(k); });
+          for(const k of mineSet) {
               try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: k, p_uid: state.currentUser.uid }); } catch(e) {}
           }
+          LockManager.held = {};
           if(LockManager.channel) { supabase.removeChannel(LockManager.channel); LockManager.channel = null; }
           state.domainLocks = {};
           LockManager.currentDomain = null;
@@ -15691,6 +15733,7 @@ const LockManager = {
                           els.presenceList.appendChild(wrapper);
                       });
                   });
+                  if(typeof LockManager !== 'undefined' && LockManager.onPresenceChange) LockManager.onPresenceChange();
               })
               .subscribe(async (status) => {
                   console.log('[Presence] statut canal présence:', status);
