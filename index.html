@@ -15320,6 +15320,9 @@ const LockManager = {
                   LockManager.refresh(projectId);
               })
               .subscribe();
+          LockManager.lastActivity = Date.now();
+          document.addEventListener('pointerdown', LockManager._activity, true);
+          document.addEventListener('keydown', LockManager._activity, true);
           if(LockManager.heartbeatTimer) clearInterval(LockManager.heartbeatTimer);
           LockManager.heartbeatTimer = setInterval(LockManager._tick, 60000);
       },
@@ -15340,10 +15343,15 @@ const LockManager = {
       _who: (lock) => (lock && (lock.holder_name || (lock.holder_email||'').split('@')[0])) || '?',
 
       held: {},
+      lastActivity: 0,
+      _activity: () => { LockManager.lastActivity = Date.now(); },
 
       // Suis-je seul(e) connecté(e) sur ce projet ? (présence Realtime ; en cas de doute → verrous actifs)
       isAlone: () => {
           try {
+              // Un verrou tenu par quelqu'un d'autre = quelqu'un travaille → pas seul (même si la présence est en retard)
+              const locks = state.domainLocks || {};
+              for(const k in locks) { if(locks[k] && !LockManager._mine(locks[k])) return false; }
               if(!state.presenceChannel || typeof state.presenceChannel.presenceState !== 'function') return false;
               const ps = state.presenceChannel.presenceState();
               const emails = new Set();
@@ -15470,6 +15478,18 @@ const LockManager = {
       },
 
       _tick: async () => {
+          // Filet de sécurité : réévaluer présence/verrous même si un événement s'est perdu
+          try { LockManager.onPresenceChange(); } catch(e) {}
+          // Exclusion après 3 min d'inactivité (uniquement à plusieurs) : sauvegarde + retour dashboard
+          if(state.currentProjectId && !LockManager.isAlone() && LockManager.lastActivity
+             && (Date.now() - LockManager.lastActivity > 180000)) {
+              LockManager.lastActivity = Date.now();
+              try { await StoreSave.save(); } catch(e) {}
+              Utils.toast('Inactif depuis 3 min : retour au tableau de bord (travail enregistré).', 'info', 6000);
+              NavMemory.setProject(null); NavMemory.setTab(null, null);
+              UI.showDashboard();
+              return;
+          }
           const dom = LockManager.currentDomain;
           if(dom && LockManager._mine((state.domainLocks||{})[dom])) {
               try { await supabase.rpc('lock_heartbeat', { p_id: state.currentProjectId, p_key: dom, p_uid: state.currentUser.uid }); } catch(e) {}
@@ -15477,6 +15497,8 @@ const LockManager = {
       },
 
       cleanup: async () => {
+          document.removeEventListener('pointerdown', LockManager._activity, true);
+          document.removeEventListener('keydown', LockManager._activity, true);
           if(LockManager.heartbeatTimer) { clearInterval(LockManager.heartbeatTimer); LockManager.heartbeatTimer = null; }
           const mineSet = new Set(Object.keys(LockManager.held||{}));
           Object.keys(state.domainLocks||{}).forEach(k => { if(LockManager._mine(state.domainLocks[k])) mineSet.add(k); });
@@ -15683,6 +15705,9 @@ const LockManager = {
               .on('presence', { event: 'sync' }, () => {
                   const presenceState = state.presenceChannel.presenceState();
                   console.log('[Presence] sync — clés présentes:', Object.keys(presenceState));
+                  // Verrous d'abord : ne doit JAMAIS être bloqué par le rendu des avatars
+                  try { if(typeof LockManager !== 'undefined' && LockManager.onPresenceChange) LockManager.onPresenceChange(); } catch(e) {}
+                  try {
                   els.presenceList.innerHTML = '';
                   const seen = new Set();
                   
@@ -15733,7 +15758,7 @@ const LockManager = {
                           els.presenceList.appendChild(wrapper);
                       });
                   });
-                  if(typeof LockManager !== 'undefined' && LockManager.onPresenceChange) LockManager.onPresenceChange();
+                  } catch(e) { console.warn('[Presence] rendu avatars échoué:', e); }
               })
               .subscribe(async (status) => {
                   console.log('[Presence] statut canal présence:', status);
