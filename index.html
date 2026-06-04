@@ -15621,6 +15621,8 @@ const LockManager = {
       _tick: async () => {
           // Filet de sécurité : réévaluer présence/verrous même si un événement s'est perdu
           try { LockManager.onPresenceChange(); } catch(e) {}
+          try { if(state._renderPresenceNow) state._renderPresenceNow(); } catch(e) {}
+          try { if(typeof GlobalPresence !== 'undefined') GlobalPresence.renderBadges(); } catch(e) {}
           // Exclusion après 3 min d'inactivité (uniquement à plusieurs) : sauvegarde + retour dashboard
           if(state.currentProjectId && !LockManager.isAlone() && LockManager.lastActivity
              && (Date.now() - LockManager.lastActivity > 180000)) {
@@ -15671,12 +15673,16 @@ const LockManager = {
           if(GlobalPresence.channel) { GlobalPresence.renderBadges(); return; }
           const email = state.currentUser.email;
           GlobalPresence.channel = supabase.channel('presence_global', { config: { presence: { key: email } } });
+          const gpRender = () => { try { GlobalPresence.renderBadges(); } catch(e) {} };
           GlobalPresence.channel
-              .on('presence', { event: 'sync' }, () => { try { GlobalPresence.renderBadges(); } catch(e) {} })
+              .on('presence', { event: 'sync' }, gpRender)
+              .on('presence', { event: 'join' }, gpRender)
+              .on('presence', { event: 'leave' }, gpRender)
               .subscribe(async (status) => {
                   if(status === 'SUBSCRIBED') {
                       GlobalPresence.ready = true;
                       try { await GlobalPresence.channel.track({ email: email, projectId: state.currentProjectId || null }); } catch(e) {}
+                      setTimeout(gpRender, 800);
                   }
               });
       },
@@ -15907,8 +15913,7 @@ const LockManager = {
               config: { presence: { key: email } }
           });
           
-          state.presenceChannel
-              .on('presence', { event: 'sync' }, () => {
+          const renderPresenceNow = () => {
                   const presenceState = state.presenceChannel.presenceState();
                   console.log('[Presence] sync — clés présentes:', Object.keys(presenceState));
                   // Verrous d'abord : ne doit JAMAIS être bloqué par le rendu des avatars
@@ -15968,12 +15973,18 @@ const LockManager = {
                   });
                   console.log('[Presence] avatars rendus:', seen.size);
                   } catch(e) { console.warn('[Presence] rendu avatars échoué:', e); }
-              })
+          };
+          state._renderPresenceNow = renderPresenceNow;
+          state.presenceChannel
+              .on('presence', { event: 'sync' }, renderPresenceNow)
+              .on('presence', { event: 'join' }, renderPresenceNow)
+              .on('presence', { event: 'leave' }, renderPresenceNow)
               .subscribe(async (status) => {
                   console.log('[Presence] statut canal présence:', status);
                   if (status === 'SUBSCRIBED') {
                       await state.presenceChannel.track({ email: email, time: Date.now() });
                       console.log('[Presence] track envoyé pour', email);
+                      setTimeout(() => { try { renderPresenceNow(); } catch(e) {} }, 800);
                   }
               });
       }
