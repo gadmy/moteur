@@ -15345,7 +15345,12 @@ const LockManager = {
           try {
               const { data } = await supabase.from('project_locks').select('*').eq('project_id', projectId);
               const map = {};
-              (data || []).forEach(l => { map[l.lock_key] = l; });
+              const nowR = Date.now();
+              (data || []).forEach(l => {
+                  // Verrou expiré (heartbeat > 3 min, ex. page fermée) : on l'ignore ; l'éboueur SQL le supprimera.
+                  if(l.heartbeat_at && (nowR - new Date(l.heartbeat_at).getTime()) > 180000) return;
+                  map[l.lock_key] = l;
+              });
               state.domainLocks = map;
               LockManager.applyUI();
               const d = LockManager.currentDomain;
@@ -15372,7 +15377,13 @@ const LockManager = {
           try {
               // Un verrou tenu par quelqu'un d'autre = quelqu'un travaille → pas seul (même si la présence est en retard)
               const locks = state.domainLocks || {};
-              for(const k in locks) { if(locks[k] && !LockManager._mine(locks[k])) return false; }
+              const nowA = Date.now();
+              for(const k in locks) {
+                  const l = locks[k];
+                  if(!l || LockManager._mine(l)) continue;
+                  if(l.heartbeat_at && (nowA - new Date(l.heartbeat_at).getTime()) > 180000) continue; // expiré
+                  return false;
+              }
               const rows = (state.dbPresence || []).filter(r => r.project_id === state.currentProjectId);
               const emails = new Set(rows.map(r => (r.user_email || '').toLowerCase()));
               emails.add(((state.currentUser && state.currentUser.email) || '').toLowerCase());
@@ -15516,7 +15527,8 @@ const LockManager = {
       _editable: (domain) => {
           if(!domain || !LockDomains.defs[domain] || LockDomains.defs[domain].tabs.length === 0) return true;
           if(LockManager.isAlone()) return true; // seul(e) sur le projet : pas de verrous
-          const lock = (state.domainLocks||{})[domain];
+          let lock = (state.domainLocks||{})[domain];
+          if(lock && !LockManager._mine(lock) && lock.heartbeat_at && (Date.now() - new Date(lock.heartbeat_at).getTime()) > 180000) lock = null; // expiré
           if(lock) return LockManager._mine(lock);
           return !!LockManager.held[domain]; // verrou acquis, ligne momentanément invisible
       },
@@ -15578,7 +15590,9 @@ const LockManager = {
           const lockFor = (tabName) => {
               const d = LockDomains.forTab(tabName);
               const lock = d ? (state.domainLocks||{})[d] : null;
-              return (lock && !LockManager._mine(lock)) ? lock : null;
+              if(!lock || LockManager._mine(lock)) return null;
+              if(lock.heartbeat_at && (Date.now() - new Date(lock.heartbeat_at).getTime()) > 180000) return null; // expiré
+              return lock;
           };
           const markBtn = (btn, lock) => {
               const oldA = btn.querySelector('.dlock-avatar-tab'); if(oldA) oldA.remove();
@@ -15671,6 +15685,7 @@ const LockManager = {
       timer: null,
       channel: null,
       where: null, // id du projet courant, ou null = dashboard
+      _byeBound: false,
 
       start: (pid) => {
           if(window.location.protocol === 'file:') return;
@@ -15678,6 +15693,10 @@ const LockManager = {
           DBPresence.where = pid || null;
           DBPresence.beat();
           if(!DBPresence.timer) DBPresence.timer = setInterval(DBPresence.beat, 50000);
+          if(!DBPresence._byeBound) {
+              DBPresence._byeBound = true;
+              window.addEventListener('pagehide', DBPresence._bye);
+          }
           if(!DBPresence.channel) {
               DBPresence.channel = supabase.channel('db_presence')
                   .on('postgres_changes', { event: '*', schema: 'public', table: 'user_presence' }, () => { DBPresence.fetch(); })
@@ -15687,10 +15706,28 @@ const LockManager = {
 
       beat: async () => {
           if(!state.currentUser) return;
+          try { const s = await supabase.auth.getSession(); state._jwt = s && s.data && s.data.session && s.data.session.access_token; } catch(e) {}
           try {
               await supabase.rpc('presence_beat', { p_project: DBPresence.where, p_name: (state.currentUser.email||'').split('@')[0] });
           } catch(e) {}
           DBPresence.fetch();
+      },
+
+      // Adieu propre à la fermeture de page : libère verrous + présence via fetch keepalive (survit au déchargement).
+      _bye: () => {
+          try {
+              const url = (typeof SUPABASE_URL !== 'undefined') ? SUPABASE_URL : null;
+              const key = (typeof SUPABASE_ANON_KEY !== 'undefined') ? SUPABASE_ANON_KEY : null;
+              const jwt = state._jwt;
+              if(!url || !key || !jwt) return;
+              const H = { 'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + jwt };
+              const held = (typeof LockManager !== 'undefined' && LockManager.held) ? Object.keys(LockManager.held) : [];
+              held.forEach(k => {
+                  fetch(url + '/rest/v1/rpc/lock_release', { method: 'POST', headers: H, keepalive: true,
+                      body: JSON.stringify({ p_id: state.currentProjectId, p_key: k, p_uid: state.currentUser && state.currentUser.uid }) });
+              });
+              fetch(url + '/rest/v1/rpc/presence_leave', { method: 'POST', headers: H, keepalive: true, body: '{}' });
+          } catch(e) {}
       },
 
       fetch: async () => {
