@@ -15353,9 +15353,19 @@ const LockManager = {
                   map[l.lock_key] = l;
               });
               state.domainLocks = map;
+              // Ping recu sur un de MES verrous : notifier (une seule fois par ping, et seulement s'il est frais)
+              for(const k in map) {
+                  const l = map[k];
+                  if(!LockManager._mine(l) || !l.ping_at) continue;
+                  const tp = new Date(l.ping_at).getTime();
+                  if(Date.now() - tp > 45000) continue; // ping trop vieux (rechargement de page...)
+                  if((LockManager._pingSeen[k]||0) >= tp) continue;
+                  LockManager._pingSeen[k] = tp;
+                  LockManager._pingToast(k, l.ping_by || 'Quelqu\'un');
+              }
               LockManager.applyUI();
               const d = LockManager.currentDomain;
-              if(d && state.currentRole !== 'viewer' && !map[d]) LockManager.acquire(d);
+              if(d && state.currentRole !== 'viewer' && !map[d] && !LockManager._yieldedRecently(d)) LockManager.acquire(d);
           } catch(e) {}
       },
 
@@ -15397,7 +15407,8 @@ const LockManager = {
       onPresenceChange: () => {
           const d = LockManager.currentDomain;
           if(!LockManager.isAlone() && d && state.currentRole !== 'viewer'
-             && !LockManager._mine((state.domainLocks||{})[d]) && !LockManager.held[d]) {
+             && !LockManager._mine((state.domainLocks||{})[d]) && !LockManager.held[d]
+             && !LockManager._yieldedRecently(d)) {
               LockManager.acquire(d);
           }
           LockManager.applyUI();
@@ -15568,6 +15579,59 @@ const LockManager = {
           LockManager.applyUI();
       },
 
+      // ——— Ping « demander la main » ———
+      _pingSent: {},   // domaine -> dernier ping envoyé (throttle 30 s)
+      _pingSeen: {},   // domaine -> dernier ping déjà notifié (côté détenteur)
+      yielded: {},     // domaine -> libération volontaire (pas de re-acquisition auto pendant 2 min)
+
+      _yieldedRecently: (domain) => ((Date.now() - ((LockManager.yielded||{})[domain] || 0)) < 120000),
+
+      ping: async (domain, who) => {
+          if(!domain || !state.currentProjectId || !state.currentUser) return;
+          const last = LockManager._pingSent[domain] || 0;
+          if(Date.now() - last < 30000) { Utils.toast('Demande déjà envoyée — laissez-lui un instant.', 'info'); return; }
+          LockManager._pingSent[domain] = Date.now();
+          try {
+              const { error } = await supabase.rpc('lock_ping', {
+                  p_id: state.currentProjectId, p_key: domain,
+                  p_name: (state.currentUser.email||'').split('@')[0]
+              });
+              if(error) { console.warn('[Lock] ping erreur', domain, error.message); Utils.toast('Demande impossible pour le moment.', 'error'); return; }
+              Utils.toast('Demande envoyée à ' + (who || 'la personne') + '.', 'success');
+          } catch(e) { Utils.toast('Demande impossible pour le moment.', 'error'); }
+      },
+
+      // Toast côté détenteur : « X aimerait travailler ici » + bouton Libérer
+      _pingToast: (domain, who) => {
+          const container = document.getElementById('toast-container');
+          if(!container) return;
+          const old = container.querySelector('.dlock-ping-toast'); if(old) old.remove();
+          const t = document.createElement('div');
+          t.className = 'toast warning dlock-ping-toast';
+          const icon = document.createElement('span'); icon.className = 'toast-icon'; icon.textContent = '✋';
+          const msg = document.createElement('span'); msg.className = 'toast-message';
+          msg.textContent = who + ' aimerait travailler sur cette section.';
+          const btn = document.createElement('button');
+          btn.textContent = 'Libérer';
+          btn.style.cssText = 'margin-left:8px;padding:4px 10px;border:none;border-radius:6px;background:#d97706;color:#fff;cursor:pointer;font-size:12px;flex-shrink:0;';
+          btn.onclick = () => { t.remove(); LockManager.yieldDomain(domain); };
+          const close = document.createElement('button');
+          close.className = 'toast-close'; close.textContent = '✖';
+          close.onclick = () => t.remove();
+          t.appendChild(icon); t.appendChild(msg); t.appendChild(btn); t.appendChild(close);
+          container.appendChild(t);
+          setTimeout(() => { if(t.parentElement) t.remove(); }, 20000);
+      },
+
+      // Libération volontaire : sauvegarde, relâche le verrou, sans le reprendre automatiquement (2 min).
+      yieldDomain: async (domain) => {
+          if(!domain) return;
+          LockManager.yielded[domain] = Date.now();
+          try { await StoreSave.save(); } catch(e) {}
+          await LockManager.release(domain);
+          Utils.toast('Section libérée — recliquez sur l\'onglet pour reprendre la main.', 'info', 5000);
+      },
+
       onTabEnter: (tabName) => {
           if(LockManager.previewMode) { LockManager.previewTab = tabName; return; }
           LockManager._previewEnd(true);
@@ -15576,6 +15640,7 @@ const LockManager = {
               LockManager.release(LockManager.currentDomain);
           }
           LockManager.currentDomain = newDomain;
+          if(newDomain) delete LockManager.yielded[newDomain]; // clic volontaire : reprise possible
           LockManager.applyUI();
           if(newDomain && state.currentRole !== 'viewer' && !LockManager.isAlone()) LockManager.acquire(newDomain);
       },
@@ -15632,8 +15697,22 @@ const LockManager = {
               const lock = d ? (state.domainLocks||{})[d] : null;
               const banner = document.createElement('div');
               banner.className = 'dlock-banner';
-              if(lock && !LockManager._mine(lock)) banner.innerHTML = '🚧 En travaux par <strong>' + LockManager._who(lock) + '</strong> — lecture seule.';
-              else banner.innerHTML = '🔒 Verrouillage en cours…';
+              if(lock && !LockManager._mine(lock)) {
+                  const who = LockManager._who(lock);
+                  banner.innerHTML = '🚧 En travaux par <strong></strong> — lecture seule. ';
+                  banner.querySelector('strong').textContent = who;
+                  if(state.currentRole !== 'viewer') {
+                      const askBtn = document.createElement('button');
+                      askBtn.textContent = '✋ Demander la main';
+                      askBtn.style.cssText = 'margin-left:6px;padding:3px 10px;border:1px solid rgba(217,119,6,.45);border-radius:6px;background:transparent;color:inherit;cursor:pointer;font-size:12px;';
+                      askBtn.onclick = () => LockManager.ping(d, who);
+                      banner.appendChild(askBtn);
+                  }
+              } else if(LockManager._yieldedRecently(d)) {
+                  banner.innerHTML = '✋ Vous avez libéré cette section — recliquez sur l\'onglet pour reprendre la main.';
+              } else {
+                  banner.innerHTML = '🔒 Verrouillage en cours…';
+              }
               active.prepend(banner);
           }
       },
@@ -15675,6 +15754,7 @@ const LockManager = {
               try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: k, p_uid: LockManager._uid() }); } catch(e) {}
           }
           LockManager.held = {};
+          LockManager._pingSent = {}; LockManager._pingSeen = {}; LockManager.yielded = {};
           if(LockManager.channel) { supabase.removeChannel(LockManager.channel); LockManager.channel = null; }
           state.domainLocks = {};
           LockManager.currentDomain = null;
