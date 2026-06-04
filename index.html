@@ -7078,6 +7078,12 @@ body.presentation-mode .presentation-bar {
   .dlock-ava { display: inline-flex; width: 16px; height: 16px; border-radius: 50%; background: #c0392b; color: #fff; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; }
   .tab-subbtn.dlock-occupied, .tab-btn.dlock-occupied, .tab-category.dlock-occupied { position: relative; }
   .dlock-avatar-tab { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: #c0392b; color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; opacity: .55; pointer-events: none; z-index: 3; }
+  .project-card { position: relative; }
+  .gp-badges { position: absolute; bottom: 6px; right: 8px; display: flex; gap: 3px; z-index: 2; }
+  .gp-avatar { width: 20px; height: 20px; border-radius: 50%; color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; border: 2px solid var(--panel-bg); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+  .tab-content.dlock-preview { outline: 2px dashed rgba(217,119,6,.5); outline-offset: -2px; }
+  .tab-content.dlock-preview input, .tab-content.dlock-preview textarea, .tab-content.dlock-preview select, .tab-content.dlock-preview button, .tab-content.dlock-preview [contenteditable] { pointer-events: none; }
+  .tab-content.dlock-preview .dlock-preview-banner { pointer-events: auto; }
 </style>
 </head>
 <body>
@@ -15323,6 +15329,8 @@ const LockManager = {
           LockManager.lastActivity = Date.now();
           document.addEventListener('pointerdown', LockManager._activity, true);
           document.addEventListener('keydown', LockManager._activity, true);
+          document.addEventListener('mouseover', LockManager._hoverIn, true);
+          document.addEventListener('mouseout', LockManager._hoverOut, true);
           if(LockManager.heartbeatTimer) clearInterval(LockManager.heartbeatTimer);
           LockManager.heartbeatTimer = setInterval(LockManager._tick, 60000);
       },
@@ -15345,6 +15353,10 @@ const LockManager = {
       held: {},
       lastActivity: 0,
       _activity: () => { LockManager.lastActivity = Date.now(); },
+      previewTimer: null,
+      previewTab: null,
+      previewPrev: null,
+      previewMode: false,
 
       // Suis-je seul(e) connecté(e) sur ce projet ? (présence Realtime ; en cas de doute → verrous actifs)
       isAlone: () => {
@@ -15368,6 +15380,69 @@ const LockManager = {
               LockManager.acquire(d);
           }
           LockManager.applyUI();
+      },
+
+      _hoverIn: (e) => {
+          if(!state.currentProjectId) return;
+          const t = e.target;
+          if(!t || !t.closest) return;
+          const btn = t.closest('.tab-subbtn[data-tab], .tab-btn[data-tab]');
+          if(!btn) return;
+          const tab = btn.dataset.tab;
+          const active = document.querySelector('.tab-content.active');
+          const curTab = active ? active.id.replace('tab-','') : null;
+          if(!tab || tab === curTab || tab === LockManager.previewTab) return;
+          clearTimeout(LockManager.previewTimer);
+          LockManager.previewTimer = setTimeout(() => LockManager._previewStart(tab), 450);
+      },
+
+      _hoverOut: (e) => {
+          const t = e.target;
+          if(!t || !t.closest) return;
+          const btn = t.closest('.tab-subbtn[data-tab], .tab-btn[data-tab]');
+          if(!btn) return;
+          const to = e.relatedTarget;
+          if(to && btn.contains(to)) return;
+          clearTimeout(LockManager.previewTimer);
+          LockManager._previewEnd();
+      },
+
+      // Aperçu au survol : vrai rendu via switchTab (le contenu se construit), mais SANS toucher aux verrous.
+      _previewStart: (tab) => {
+          const active = document.querySelector('.tab-content.active');
+          const curTab = active ? active.id.replace('tab-','') : null;
+          if(!curTab || curTab === tab) return;
+          LockManager.previewPrev = curTab;
+          LockManager.previewMode = true;
+          try { UI.switchTab(tab); } catch(e) {}
+          LockManager.previewMode = false;
+          if(LockManager.previewTab !== tab) { LockManager.previewPrev = null; return; } // aperçu refusé (permissions...)
+          const target = document.getElementById('tab-' + tab);
+          if(target) {
+              target.classList.add('dlock-preview');
+              const b = document.createElement('div');
+              b.className = 'dlock-banner dlock-preview-banner';
+              b.innerHTML = "👁 Aperçu — cliquez sur l'onglet pour y travailler.";
+              target.prepend(b);
+          }
+      },
+
+      _previewEnd: (noRestore) => {
+          clearTimeout(LockManager.previewTimer);
+          if(!LockManager.previewTab) return;
+          const tab = LockManager.previewTab;
+          const prev = LockManager.previewPrev;
+          LockManager.previewTab = null;
+          LockManager.previewPrev = null;
+          const target = document.getElementById('tab-' + tab);
+          if(target) {
+              target.classList.remove('dlock-preview');
+              const b = target.querySelector('.dlock-preview-banner');
+              if(b) b.remove();
+          }
+          if(!noRestore && prev) {
+              try { UI.switchTab(prev); } catch(e) {}
+          }
       },
 
       _editable: (domain) => {
@@ -15413,6 +15488,8 @@ const LockManager = {
       },
 
       onTabEnter: (tabName) => {
+          if(LockManager.previewMode) { LockManager.previewTab = tabName; return; }
+          LockManager._previewEnd(true);
           const newDomain = LockDomains.forTab(tabName);
           if(LockManager.currentDomain && LockManager.currentDomain !== newDomain) {
               LockManager.release(LockManager.currentDomain);
@@ -15459,6 +15536,7 @@ const LockManager = {
               markBtn(cat, lock);
           });
           // lecture seule + bandeau de l'onglet actif
+          if(LockManager.previewTab) return; // un aperçu est affiché : ne pas interférer
           const active = document.querySelector('.tab-content.active');
           if(!active) return;
           const tabName = active.id.replace('tab-','');
@@ -15497,8 +15575,11 @@ const LockManager = {
       },
 
       cleanup: async () => {
+          LockManager._previewEnd(true);
           document.removeEventListener('pointerdown', LockManager._activity, true);
           document.removeEventListener('keydown', LockManager._activity, true);
+          document.removeEventListener('mouseover', LockManager._hoverIn, true);
+          document.removeEventListener('mouseout', LockManager._hoverOut, true);
           if(LockManager.heartbeatTimer) { clearInterval(LockManager.heartbeatTimer); LockManager.heartbeatTimer = null; }
           const mineSet = new Set(Object.keys(LockManager.held||{}));
           Object.keys(state.domainLocks||{}).forEach(k => { if(LockManager._mine(state.domainLocks[k])) mineSet.add(k); });
@@ -15510,6 +15591,64 @@ const LockManager = {
           state.domainLocks = {};
           LockManager.currentDomain = null;
           LockManager.pendingDomain = null;
+      }
+  };
+
+  // GlobalPresence — présence globale : qui est dans quel projet (badges sur les cartes du dashboard).
+  const GlobalPresence = {
+      channel: null,
+      ready: false,
+
+      init: () => {
+          if(window.location.protocol === 'file:') return;
+          if(!state.currentUser || !state.currentUser.email) return;
+          if(GlobalPresence.channel) { GlobalPresence.renderBadges(); return; }
+          const email = state.currentUser.email;
+          GlobalPresence.channel = supabase.channel('presence_global', { config: { presence: { key: email } } });
+          GlobalPresence.channel
+              .on('presence', { event: 'sync' }, () => { try { GlobalPresence.renderBadges(); } catch(e) {} })
+              .subscribe(async (status) => {
+                  if(status === 'SUBSCRIBED') {
+                      GlobalPresence.ready = true;
+                      try { await GlobalPresence.channel.track({ email: email, projectId: state.currentProjectId || null }); } catch(e) {}
+                  }
+              });
+      },
+
+      setProject: async (pid) => {
+          if(!GlobalPresence.channel || !GlobalPresence.ready || !state.currentUser) return;
+          try { await GlobalPresence.channel.track({ email: state.currentUser.email, projectId: pid || null }); } catch(e) {}
+      },
+
+      renderBadges: () => {
+          const cards = document.querySelectorAll('.project-card[data-project-id]');
+          if(!cards.length || !GlobalPresence.channel || typeof GlobalPresence.channel.presenceState !== 'function') return;
+          const ps = GlobalPresence.channel.presenceState();
+          const me = ((state.currentUser && state.currentUser.email) || '').toLowerCase();
+          const byProject = {};
+          Object.keys(ps).forEach(k => (ps[k]||[]).forEach(u => {
+              const em = (((u && u.email) || k) + '').toLowerCase();
+              const pid = u && u.projectId;
+              if(!pid || em === me) return;
+              (byProject[pid] = byProject[pid] || []).push(em);
+          }));
+          cards.forEach(card => {
+              const old = card.querySelector('.gp-badges');
+              if(old) old.remove();
+              const emails = Array.from(new Set(byProject[card.dataset.projectId] || []));
+              if(!emails.length) return;
+              const wrap = document.createElement('div');
+              wrap.className = 'gp-badges';
+              wrap.title = 'En ce moment sur le projet : ' + emails.join(', ');
+              emails.slice(0, 3).forEach(em => {
+                  const a = document.createElement('span');
+                  a.className = 'gp-avatar';
+                  a.style.backgroundColor = (Utils.getColor ? Utils.getColor(em) : '#c0392b');
+                  a.textContent = (Utils.getInitials ? Utils.getInitials(em) : (em[0]||'?').toUpperCase());
+                  wrap.appendChild(a);
+              });
+              card.appendChild(wrap);
+          });
       }
   };
 
@@ -16623,7 +16762,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               state.statsFilter = { scope: 'all', seasonId: null, episodeId: null }; // Stats: filtre de scope par défaut
               NavMemory.setProject(id); // Persistance pour F5
               LoadingScreen.setProgress(95);
-              UI.launchEditor(); Store.startRealtimeListener(id); Store.initPresence(id); Store.initLocks(id); LockManager.init(id);
+              UI.launchEditor(); Store.startRealtimeListener(id); Store.initPresence(id); Store.initLocks(id); LockManager.init(id); if(typeof GlobalPresence !== 'undefined') { GlobalPresence.init(); GlobalPresence.setProject(id); }
               // S7.1 : forcer la sauvegarde si migration saisons effectuée
               if(needsMigrationSave) setTimeout(() => Store.save(), 1000);
               LoadingScreen.hide();
@@ -19043,6 +19182,7 @@ initCategoriesDragDrop: () => {
         UI.hideAllViews();
         els.authView.style.display = 'none'; 
         els.dashboardView.style.display = 'flex';
+        if(typeof GlobalPresence !== 'undefined') { GlobalPresence.init(); GlobalPresence.setProject(null); }
         
         // Restauration du projet après F5 (capture AVANT de nettoyer NavMemory)
         const _lastProjectId = NavMemory.getProject();
@@ -19345,6 +19485,7 @@ initCategoriesDragDrop: () => {
                 els.projectList.appendChild(card); 
             });
         }
+        if(typeof GlobalPresence !== 'undefined') { try { GlobalPresence.renderBadges(); } catch(e) {} }
     },
   };
 
