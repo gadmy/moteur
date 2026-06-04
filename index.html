@@ -15357,6 +15357,9 @@ const LockManager = {
       previewTab: null,
       previewPrev: null,
       previewMode: false,
+      catPreviewTimer: null,
+      catRestoreTimer: null,
+      catPreviewCat: null,
 
       // Suis-je seul(e) connecté(e) sur ce projet ? (présence Realtime ; en cas de doute → verrous actifs)
       isAlone: () => {
@@ -15386,6 +15389,17 @@ const LockManager = {
           if(!state.currentProjectId) return;
           const t = e.target;
           if(!t || !t.closest) return;
+          // Survol d'une catégorie : dérouler son sous-bandeau (sans naviguer)
+          const catBtn = t.closest('.tab-category[data-category]');
+          if(catBtn) {
+              clearTimeout(LockManager.catRestoreTimer);
+              const cat = catBtn.dataset.category;
+              clearTimeout(LockManager.catPreviewTimer);
+              LockManager.catPreviewTimer = setTimeout(() => LockManager._catPreview(cat), 300);
+              return;
+          }
+          // Souris dans le sous-bandeau : on garde le déroulé affiché
+          if(t.closest('#tabsSubnav')) clearTimeout(LockManager.catRestoreTimer);
           const btn = t.closest('.tab-subbtn[data-tab], .tab-btn[data-tab]');
           if(!btn) return;
           const tab = btn.dataset.tab;
@@ -15399,6 +15413,19 @@ const LockManager = {
       _hoverOut: (e) => {
           const t = e.target;
           if(!t || !t.closest) return;
+          // Sortie de la zone navigation (catégories + sous-bandeau) : restaurer le déroulé d'origine
+          const catBtn = t.closest('.tab-category[data-category]');
+          const inSubnav = t.closest('#tabsSubnav');
+          if(catBtn || inSubnav) {
+              const to = e.relatedTarget;
+              const stays = to && to.closest && (to.closest('.tab-category[data-category]') || to.closest('#tabsSubnav'));
+              if(!stays) {
+                  clearTimeout(LockManager.catPreviewTimer);
+                  clearTimeout(LockManager.catRestoreTimer);
+                  LockManager.catRestoreTimer = setTimeout(() => LockManager._catPreviewEnd(), 350);
+              }
+              if(catBtn) return;
+          }
           const btn = t.closest('.tab-subbtn[data-tab], .tab-btn[data-tab]');
           if(!btn) return;
           const to = e.relatedTarget;
@@ -15407,12 +15434,48 @@ const LockManager = {
           LockManager._previewEnd();
       },
 
+      // Rendu du sous-bandeau d'une catégorie (sans navigation, sans verrous)
+      _renderSubnav: (category, activeTab) => {
+          const subnav = document.getElementById('tabsSubnav');
+          if(!subnav || !UI.categoryTabs) return;
+          const tabs = UI.categoryTabs[category] || [];
+          const labels = UI.categoryLabels[category] || {};
+          let visibleTabs = tabs.filter(t => !(UI.hiddenTabs || []).includes(t));
+          if(state.currentProjectType !== 'series') visibleTabs = visibleTabs.filter(t => t !== 'episodes' && t !== 'seasons');
+          subnav.innerHTML = visibleTabs.map(tab => `<button class="tab-subbtn${tab === activeTab ? ' active' : ''}" data-tab="${tab}" onclick="app.UI.switchTab('${tab}')">${labels[tab] || tab}</button>`).join('');
+          subnav.dataset.category = category;
+      },
+
+      _catPreview: (cat) => {
+          if(!state.currentProjectId || !cat) return;
+          const subnav = document.getElementById('tabsSubnav');
+          if(!subnav || subnav.dataset.category === cat) return;
+          LockManager.catPreviewCat = cat;
+          LockManager._renderSubnav(cat, null);
+          subnav.classList.add('force-visible');
+          LockManager.applyUI();
+      },
+
+      _catPreviewEnd: () => {
+          if(!LockManager.catPreviewCat) return;
+          if(LockManager.previewTab) return; // un aperçu d'onglet pilote déjà la navigation
+          LockManager.catPreviewCat = null;
+          const cur = UI.currentCategory || (typeof UICategories !== 'undefined' && UICategories.currentCategory) || 'ecriture';
+          const active = document.querySelector('.tab-content.active');
+          LockManager._renderSubnav(cur, active ? active.id.replace('tab-','') : null);
+          const subnav = document.getElementById('tabsSubnav');
+          if(subnav) subnav.classList.remove('force-visible');
+          LockManager.applyUI();
+      },
+
       // Aperçu au survol : vrai rendu via switchTab (le contenu se construit), mais SANS toucher aux verrous.
       _previewStart: (tab) => {
           const active = document.querySelector('.tab-content.active');
           const curTab = active ? active.id.replace('tab-','') : null;
           if(!curTab || curTab === tab) return;
           LockManager.previewPrev = curTab;
+          LockManager.catPreviewCat = null;
+          clearTimeout(LockManager.catRestoreTimer);
           LockManager.previewMode = true;
           try { UI.switchTab(tab); } catch(e) {}
           LockManager.previewMode = false;
@@ -15576,6 +15639,9 @@ const LockManager = {
 
       cleanup: async () => {
           LockManager._previewEnd(true);
+          clearTimeout(LockManager.catPreviewTimer);
+          clearTimeout(LockManager.catRestoreTimer);
+          LockManager.catPreviewCat = null;
           document.removeEventListener('pointerdown', LockManager._activity, true);
           document.removeEventListener('keydown', LockManager._activity, true);
           document.removeEventListener('mouseover', LockManager._hoverIn, true);
