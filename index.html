@@ -7100,6 +7100,8 @@ body.presentation-mode .presentation-bar {
   .facet-tab { padding: 8px 16px; border: 1px solid var(--border); border-radius: 8px 8px 0 0; background: var(--bg); color: var(--text-sec); cursor: pointer; font-weight: 600; font-size: 0.85rem; }
   .facet-tab.active { background: var(--panel-bg); color: var(--primary); border-color: var(--primary); }
   .facet-visible-toggle { display: none; align-items: center; gap: 5px; font-size: 0.72rem; color: var(--text-sec); margin-top: 6px; cursor: pointer; }
+  .map-profile-marker { position: relative; }
+  .marker-facet-badges { position: absolute; top: -10px; right: -8px; z-index: 5; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; padding: 1px 4px; font-size: 10px; line-height: 1.4; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
   .dlock-badge { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; margin-left: 4px; vertical-align: middle; }
   .dlock-ava { display: inline-flex; width: 16px; height: 16px; border-radius: 50%; background: #c0392b; color: #fff; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; }
   .tab-subbtn.dlock-occupied, .tab-btn.dlock-occupied, .tab-category.dlock-occupied { position: relative; }
@@ -8736,6 +8738,7 @@ body.presentation-mode .presentation-bar {
                             <option value="">-- Type d'association * --</option>
                         </select>
                     </div>
+                    <input type="text" class="profile-input" id="profile-asso-hq" placeholder="📍 Adresse du siège (laissez vide si identique à votre adresse personnelle)">
                     <div class="profile-row">
                         <input type="text" class="profile-input" id="profile-asso-siret" placeholder="N° SIRET / RNA (optionnel)">
                         <input type="number" class="profile-input" id="profile-asso-members" placeholder="Nombre de membres">
@@ -8798,6 +8801,7 @@ body.presentation-mode .presentation-bar {
                             <option value="">-- Type d'entreprise * --</option>
                         </select>
                     </div>
+                    <input type="text" class="profile-input" id="profile-ent-hq" placeholder="📍 Adresse du siège (laissez vide si identique à votre adresse personnelle)">
                     <div class="profile-row">
                         <input type="text" class="profile-input" id="profile-ent-siret" placeholder="N° SIRET *">
                         <select class="profile-input" id="profile-ent-legal">
@@ -35445,6 +35449,8 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         // Association
         if(profile.type === 'association') {
             document.getElementById('profile-asso-name').value = profile.assoName || '';
+            const hqAsso = document.getElementById('profile-asso-hq');
+            if(hqAsso) hqAsso.value = (profile.facets && profile.facets.asso && profile.facets.asso.hqAddress) || '';
             document.getElementById('profile-asso-type').value = profile.assoType || '';
             document.getElementById('profile-asso-siret').value = profile.assoSiret || '';
             document.getElementById('profile-asso-members').value = profile.assoMembers || '';
@@ -35470,6 +35476,8 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         // Entreprise
         if(profile.type === 'enterprise') {
             document.getElementById('profile-ent-name').value = profile.entName || '';
+            const hqEnt = document.getElementById('profile-ent-hq');
+            if(hqEnt) hqEnt.value = (profile.facets && profile.facets.ent && profile.facets.ent.hqAddress) || '';
             document.getElementById('profile-ent-type').value = profile.entType || '';
             document.getElementById('profile-ent-siret').value = profile.entSiret || '';
             document.getElementById('profile-ent-legal').value = profile.entLegal || '';
@@ -35607,6 +35615,11 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         // Association
         if(profile.type === 'association') {
             profile.assoName = document.getElementById('profile-asso-name')?.value.trim() || '';
+            if(profile.facets && profile.facets.asso) {
+                const hq = document.getElementById('profile-asso-hq')?.value.trim() || '';
+                if(hq !== (profile.facets.asso.hqAddress || '')) { profile.facets.asso.hqLatitude = null; profile.facets.asso.hqLongitude = null; }
+                profile.facets.asso.hqAddress = hq;
+            }
             profile.assoType = document.getElementById('profile-asso-type')?.value || '';
             profile.assoSiret = document.getElementById('profile-asso-siret')?.value.trim() || '';
             profile.assoMembers = document.getElementById('profile-asso-members')?.value || '';
@@ -35635,6 +35648,11 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         // Entreprise
         if(profile.type === 'enterprise') {
             profile.entName = document.getElementById('profile-ent-name')?.value.trim() || '';
+            if(profile.facets && profile.facets.ent) {
+                const hq = document.getElementById('profile-ent-hq')?.value.trim() || '';
+                if(hq !== (profile.facets.ent.hqAddress || '')) { profile.facets.ent.hqLatitude = null; profile.facets.ent.hqLongitude = null; }
+                profile.facets.ent.hqAddress = hq;
+            }
             profile.entType = document.getElementById('profile-ent-type')?.value || '';
             profile.entSiret = document.getElementById('profile-ent-siret')?.value.trim() || '';
             profile.entLegal = document.getElementById('profile-ent-legal')?.value || '';
@@ -36088,6 +36106,16 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
                     }
                 } catch(e) {
                     console.warn('Fallback géocodage international échoué:', e);
+                }
+            }
+            // Sièges asso / entreprise : géocoder si renseignés et sans coordonnées
+            for(const fk of ['asso', 'ent']) {
+                const f = profile.facets && profile.facets[fk];
+                if(f && f.enabled && f.hqAddress && (f.hqLatitude == null || f.hqLongitude == null)) {
+                    try {
+                        const c = await PublicProfile.geocodeAddressInternational(f.hqAddress);
+                        if(c) { f.hqLatitude = c.lat; f.hqLongitude = c.lng; }
+                    } catch(e) { console.warn('Géocodage siège échoué (' + fk + '):', e); }
                 }
             }
             
@@ -56749,7 +56777,7 @@ const UniverseSearch = {
         
         // Filtrer par type
         if(type) {
-            results = results.filter(p => p.type === type || p.accountType === type);
+            results = results.filter(p => (p.visibleFacets || []).includes(PublicProfile._typeToFacet(type)) || p.type === type || p.accountType === type);
         }
         
         // Filtrer par ville
@@ -57068,12 +57096,13 @@ const UniverseProfileModal = {
     },
     
     openProfileModal: async (profile) => {
-        // Déterminer le type
+        // Déterminer les casquettes visibles (multi-facettes)
+        const vf = profile.visibleFacets || (PublicProfile._typeToFacet(profile.type) ? [PublicProfile._typeToFacet(profile.type)] : []);
         const isProject = profile.type === 'project';
-        const isActor = profile.type === 'actor';
-        const isCrew = profile.type === 'crew';
-        const isAssociation = profile.type === 'association';
-        const isEnterprise = profile.type === 'enterprise';
+        const isActor = vf.includes('actor');
+        const isCrew = vf.includes('crew');
+        const isAssociation = vf.includes('asso');
+        const isEnterprise = vf.includes('ent');
         // Charger les données complètes depuis Supabase si nécessaire
         let fullProfile = profile;
         if(!isProject) {
@@ -58071,11 +58100,12 @@ const UniverseMap = {
     
     // Créer un marqueur pour un profil
     createMapMarker: (profile, coords) => {
+        const vf = profile.visibleFacets || (PublicProfile._typeToFacet(profile.type) ? [PublicProfile._typeToFacet(profile.type)] : []);
         const isProject = profile.type === 'project';
-        const isActor = profile.type === 'actor';
-        const isCrew = profile.type === 'crew';
-        const isAssociation = profile.type === 'association';
-        const isEnterprise = profile.type === 'enterprise';
+        const isActor = vf.includes('actor');
+        const isCrew = vf.includes('crew');
+        const isAssociation = vf.includes('asso');
+        const isEnterprise = vf.includes('ent');
         
         let markerClass = 'map-profile-marker';
         if(isProject) markerClass += ' project-marker';
@@ -58085,11 +58115,14 @@ const UniverseMap = {
         else if(isEnterprise) markerClass += ' enterprise-marker';
         
         const photoUrl = profile.photoURL || profile.mainPhoto || '';
-        const defaultIcon = isProject ? '🎬' : (isActor ? '🎭' : '🎥');
+        const FACET_ICONS = { actor: '🎭', crew: '🎥', asso: '🏛️', ent: '🏢' };
+        const defaultIcon = isProject ? '🎬' : (FACET_ICONS[vf[0]] || '🎥');
         const name = profile.displayName || profile.title || profile.name || 'Sans nom';
+        const facetBadges = (!isProject && vf.length > 1) ? `<div class="marker-facet-badges">${vf.map(k => FACET_ICONS[k]).join('')}</div>` : '';
         
         const iconHtml = `
             <div class="${markerClass}">
+                ${facetBadges}
                 ${photoUrl ? `<img src="${photoUrl}" alt="${Utils.escape(name)}" onerror="this.parentElement.innerHTML='<div style=\\'width:100%;height:40px;display:flex;align-items:center;justify-content:center;background:var(--panel-bg);border-radius:6px;font-size:20px;\\'>${defaultIcon}</div>'">` : `<div style="width:100%;height:40px;display:flex;align-items:center;justify-content:center;background:var(--panel-bg);border-radius:6px;border:2px solid var(--primary);font-size:20px;">${defaultIcon}</div>`}
                 <div class="marker-label">${Utils.escape(name)}</div>
             </div>
@@ -58141,11 +58174,12 @@ const UniverseMap = {
     
     // Afficher la modale de profil (pour tous les profils)
     showProfileModal: async (profile) => {
+        const vf = profile.visibleFacets || (PublicProfile._typeToFacet(profile.type) ? [PublicProfile._typeToFacet(profile.type)] : []);
         const isProject = profile.type === 'project';
-        const isActor = profile.type === 'actor';
-        const isCrew = profile.type === 'crew';
-        const isAssociation = profile.type === 'association';
-        const isEnterprise = profile.type === 'enterprise';
+        const isActor = vf.includes('actor');
+        const isCrew = vf.includes('crew');
+        const isAssociation = vf.includes('asso');
+        const isEnterprise = vf.includes('ent');
         
         // Charger les données complètes depuis Supabase
         let fullProfile = profile;
@@ -58344,7 +58378,7 @@ const UniverseMap = {
             if(selectedType === 'project') {
                 profiles = [];
             } else {
-                profiles = profiles.filter(p => p.type === selectedType);
+                profiles = profiles.filter(p => (p.visibleFacets || []).includes(PublicProfile._typeToFacet(selectedType)) || p.type === selectedType);
                 projects = [];
             }
         }
@@ -58700,16 +58734,30 @@ hoverCard: null,
             if(!error && profiles) {
                 profiles.forEach(p => {
                     if(p.name) {
-                        const type = p.profile_type || 'crew';
                         const extraData = p.data || {};
-                        Universe.allProfiles.push({ 
+                        // Facettes : normalisation (filet pour les profils jamais resauvegardés)
+                        const facets = PublicProfile._normalizeFacets(extraData.facets, p);
+                        const visibleFacets = PublicProfile.FACET_KEYS.filter(k => facets[k].enabled && facets[k].visible !== false);
+                        if(visibleFacets.length === 0) return; // aucune casquette visible : absent de l'Univers
+                        const item = { 
                             ...p, 
                             ...extraData,
-                            type: type,
+                            facets: facets,
+                            visibleFacets: visibleFacets,
+                            type: PublicProfile._facetToType(visibleFacets[0]) || p.profile_type || 'crew',
                             hasVehicle: p.vehicle || false,
                             availabilityText: p.availability || '',
                             profileComplete: true 
-                        });
+                        };
+                        // Profil uniquement « moral » (asso/entreprise) avec siège géocodé : marqueur au siège
+                        if(!visibleFacets.includes('actor') && !visibleFacets.includes('crew')) {
+                            const hq = facets[visibleFacets[0]];
+                            if(hq && hq.hqLatitude != null && hq.hqLongitude != null) {
+                                item.latitude = hq.hqLatitude;
+                                item.longitude = hq.hqLongitude;
+                            }
+                        }
+                        Universe.allProfiles.push(item);
                     }
                 });
             }
