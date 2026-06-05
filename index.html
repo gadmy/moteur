@@ -7126,6 +7126,8 @@ body.presentation-mode .presentation-bar {
   /* Fonctions retirées des profils : calendrier de disponibilités et fil d'actualité */
   .profile-section[data-section="calendar"] { display: none !important; }
   .profile-section[data-section="actualite"] { display: none !important; }
+  /* Un seul interrupteur de visibilité par carte (👁 sur la casquette) : plus de réglage par section */
+  .visibility-toggles { display: none !important; }
   .map-profile-marker { position: relative; }
   .marker-facet-badges { position: absolute; top: -10px; right: -8px; z-index: 5; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; padding: 1px 4px; font-size: 10px; line-height: 1.4; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
   #pm-facet-pager { display: none; align-items: center; gap: 8px; justify-content: center; margin: 6px 0; }
@@ -8942,8 +8944,12 @@ body.presentation-mode .presentation-bar {
                     </label>
                     <textarea class="profile-input profile-textarea" id="profile-availability" placeholder="Vos disponibilités générales (ex: Disponible les weekends, Libre à partir de mars 2025...)"></textarea>
                     
+                    </div>
+        
+                <!-- Section Collaboration (toutes les fiches) -->
+                <div class="profile-section" id="profile-collab-section" data-section="collab">
+                    <h3><span class="section-title">🤝 Type de collaboration souhaitée</span></h3>
                     <div class="mt-15">
-                        <label class="label-bold-block-10">🤝 Type de collaboration acceptée</label>
                         <p class="text-sec-sm-mb10">Cochez les types de projets qui vous intéressent (plusieurs choix possibles)</p>
                         <div style="display: flex; gap: 15px; flex-wrap: wrap;">
                             <label style="display:flex; align-items:center; gap:8px; cursor:pointer; padding:10px 15px; border:2px solid #4CAF50; border-radius:20px; background:var(--bg);" id="label-collab-pro">
@@ -8990,12 +8996,10 @@ body.presentation-mode .presentation-bar {
                             <button type="button" class="visibility-btn" data-section="vehicle" data-scope="project" onclick="app.PublicProfile.toggleVisibility('vehicle', 'project')" title="Visibilité projet (équipe)">🎬 <span class="vis-icon">👁️</span></button>
                         </div>
                     </h3>
-                    <div class="profile-row">
-                        <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
-                            <input type="checkbox" id="profile-has-vehicle" onchange="document.getElementById('profile-vehicle-details').style.display = this.checked ? 'block' : 'none';">
-                            <span>Je possède un véhicule</span>
-                        </label>
-                    </div>
+                    <label class="flex-row-btn" style="margin-bottom: 10px;">
+                        <input type="checkbox" id="profile-has-vehicle" onchange="document.getElementById('profile-vehicle-details').style.display = this.checked ? 'block' : 'none';">
+                        🚗 Je possède un véhicule
+                    </label>
                     <div id="profile-vehicle-details" style="display:none; margin-top:15px; padding:20px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
                         <div class="profile-row">
                             <div>
@@ -9046,11 +9050,43 @@ body.presentation-mode .presentation-bar {
                     <div style="display: flex; gap: 20px; flex-wrap: wrap;">
                         <div style="flex: 1; min-width: 250px;">
                             <p class="text-sec-sm-mb10">
-                                Supprimer ce profil de l'Univers. Vos autres profils ne seront pas affectés.
+                                Remettre à zéro la carte affichée : tous ses champs sont effacés. Les autres casquettes ne sont pas touchées.
                             </p>
-                            <button onclick="app.PublicProfile.deleteCurrentProfile()" class="n8-badge-7">
-                                🗑️ Supprimer ce profil
-                            </button>
+                            <button onclick="app.PublicProfile.resetCurrentFacet()" class="n8-badge-7">
+                                🔄 Remettre à zéro cette carte
+                            </button>// Remet à zéro la casquette affichée (les autres fiches ne sont pas touchées)
+    resetCurrentFacet: async () => {
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        const facet = PublicProfile.currentFacetTab;
+        if(!profile || !facet) { Utils.toast('Aucune carte affichée.', 'info'); return; }
+        const label = (PublicProfile.FACET_LABELS[facet] || facet);
+        if(!await ConfirmModal.confirmDelete('Tous les champs de la carte ' + label + ' seront effacés. Les autres casquettes ne seront pas touchées.', 'Remettre à zéro cette carte ?')) return;
+        const zero = (v) => Array.isArray(v) ? [] : (typeof v === 'boolean' ? false : (v && typeof v === 'object' ? {} : ''));
+        // Champs basculés par fiche : on vide la fiche ET les plats affichés
+        PublicProfile._facetKeysFor(facet).forEach(k => {
+            const z = zero(profile[k]);
+            PublicProfile.setFacetField(profile, facet, k, z);
+            profile[k] = z;
+        });
+        // Champs spécifiques à la casquette (stockés à plat)
+        const SPEC = {
+            actor: ['height','weight','age','eyeColor','hairColor','hairLength','ethnicity','corpulence','sports','languages','sportsWithLevels','languagesWithLevels','actingStyles','galleryPhotos'],
+            crew:  ['department','cameras','lenses','lights','sounds','grips','makeups','otherEquipment','crewGalleryPhotos'],
+            asso:  ['assoName','assoType','assoSiret','assoYear','assoPresident','assoMembers','assoMission','assoActivities','assoServices','assoFacebook','assoInstagram','assoLinkedin','assoYoutube','assoEmail','assoPhone','assoWebsite','assoDemoreel'],
+            ent:   ['entName','entType','entSiret','entLegal','entYear','entEmployees','entDirector','entContact','entDescription','entServices','entEmail','entPhone','entWebsite','entVimeo','entImdb','entDemoreel']
+        };
+        (SPEC[facet] || []).forEach(k => { profile[k] = zero(profile[k]); });
+        // Siège (asso / entreprise)
+        if((facet === 'asso' || facet === 'ent') && profile.facets && profile.facets[facet]) {
+            profile.facets[facet].hqAddress = '';
+            profile.facets[facet].hqLatitude = null;
+            profile.facets[facet].hqLongitude = null;
+        }
+        PublicProfile.loadProfileToForm(profile);
+        Utils.toast('Carte ' + label + ' remise à zéro — pensez à Sauvegarder pour confirmer.', 'success', 5000);
+    },
+
+    deleteCurrentProfile: async () => {
                         </div>
                         <div style="flex: 1; min-width: 250px;">
                             <p class="text-sec-sm-mb10">
@@ -35831,25 +35867,28 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
     FACET_LABEL_IDS: { actor: 'profile-type-actor-label', crew: 'profile-type-crew-label', asso: 'profile-type-association-label', ent: 'profile-type-enterprise-label' },
     FACET_LABELS: { actor: '🎭 Comédien·ne', crew: '🎥 Technicien·ne', asso: '🏛️ Association', ent: '🏢 Entreprise' },
     FACET_SECTIONS: {
-        actor: ['profile-identity-section', 'profile-actor-section', 'profile-actor-physical-section', 'profile-actor-demoreel-section', 'profile-tarif-section', 'profile-vehicle-section'],
-        crew:  ['profile-identity-section', 'profile-crew-section', 'profile-crew-gallery-section', 'profile-crew-demoreel-section', 'profile-tarif-section', 'profile-vehicle-section'],
-        asso:  ['profile-association-section'],
-        ent:   ['profile-enterprise-section']
+        actor: ['profile-identity-section', 'profile-actor-section', 'profile-actor-physical-section', 'profile-actor-demoreel-section', 'profile-tarif-section', 'profile-collab-section', 'profile-vehicle-section'],
+        crew:  ['profile-identity-section', 'profile-crew-section', 'profile-crew-gallery-section', 'profile-crew-demoreel-section', 'profile-tarif-section', 'profile-collab-section', 'profile-vehicle-section'],
+        asso:  ['profile-association-section', 'profile-collab-section'],
+        ent:   ['profile-enterprise-section', 'profile-collab-section']
     },
 
     // Champs qui appartiennent à la FICHE (comédien/technicien), plus au profil commun
     FACET_SWAP_KEYS: ['name','photo','gender','phone','bio','address','city','latitude','longitude','hideAddress','hideAddressInProjects','contactEmail','dailyRate','rateCurrency','rateNegotiable','collabTypes','availabilityText','availabilityDates','unavailabilityDates','hasVehicle','vehicleType','vehiclePlate','vehicleSeats','vehicleTrunk','vehicleNotes','role','demoreel','experience'],
 
+    // Clés basculées par fiche : tout pour comédien/technicien, la collaboration seule pour asso/entreprise
+    _facetKeysFor: (facet) => (facet === 'actor' || facet === 'crew') ? PublicProfile.FACET_SWAP_KEYS : ['collabTypes'],
+
     // Range les valeurs « plates » courantes dans la fiche donnée
     _commitFlatToFacet: (profile, facet) => {
-        if(!profile || (facet !== 'actor' && facet !== 'crew')) return;
-        PublicProfile.FACET_SWAP_KEYS.forEach(k => PublicProfile.setFacetField(profile, facet, k, profile[k]));
+        if(!profile || !facet) return;
+        PublicProfile._facetKeysFor(facet).forEach(k => PublicProfile.setFacetField(profile, facet, k, profile[k]));
     },
 
     // Charge la fiche donnée dans les champs plats (avec héritage des anciennes valeurs communes)
     _loadFacetToFlat: (profile, facet) => {
-        if(!profile || (facet !== 'actor' && facet !== 'crew')) return;
-        PublicProfile.FACET_SWAP_KEYS.forEach(k => {
+        if(!profile || !facet) return;
+        PublicProfile._facetKeysFor(facet).forEach(k => {
             const v = PublicProfile.getFacetField(profile, facet, k);
             if(v !== undefined) profile[k] = v;
         });
@@ -35900,7 +35939,7 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
             PublicProfile._commitFlatToFacet(profile, prev); // plat -> fiche quittée
         }
         PublicProfile.currentFacetTab = k;
-        if(profile && (k === 'actor' || k === 'crew')) {
+        if(profile) {
             PublicProfile._loadFacetToFlat(profile, k);      // fiche ouverte -> plat (avec héritage)
             PublicProfile.loadProfileToForm(profile);        // plat -> champs (rafraîchit tout + onglets)
             return;
@@ -57258,9 +57297,8 @@ const UniverseSearch = {
 const UniverseProfileModal = {
     // Vérifie si une section est visible selon le contexte (public ou projet)
     isSectionVisible: (profile, section, context = 'public') => {
-        if(!profile) return true;
-        const hiddenArray = context === 'public' ? (profile.hiddenPublic || []) : (profile.hiddenProject || []);
-        return !hiddenArray.includes(section);
+        // Un seul interrupteur de visibilité par carte (👁 par casquette) : les masquages par section sont retirés
+        return true;
     },
     
     // Pager de casquettes : feuilleter les facettes d'un même profil dans la modale
