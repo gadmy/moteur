@@ -7105,6 +7105,7 @@ body.presentation-mode .presentation-bar {
   #pm-facet-pager { display: none; align-items: center; gap: 8px; justify-content: center; margin: 6px 0; }
   .pm-facet-arrow { border: 1px solid var(--border); background: var(--bg); color: inherit; border-radius: 6px; width: 24px; height: 24px; cursor: pointer; font-size: 14px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
   .pm-facet-arrow:hover { border-color: var(--primary); color: var(--primary); }
+  .tmp-hq-marker { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; background: var(--panel-bg); border: 1px solid var(--primary); border-radius: 14px; padding: 3px 9px; font-size: 12px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,.3); transform: translate(-6px, -100%); }
   .dlock-badge { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; margin-left: 4px; vertical-align: middle; }
   .dlock-ava { display: inline-flex; width: 16px; height: 16px; border-radius: 50%; background: #c0392b; color: #fff; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; }
   .tab-subbtn.dlock-occupied, .tab-btn.dlock-occupied, .tab-category.dlock-occupied { position: relative; }
@@ -7368,7 +7369,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv522</p>
+      <p>vv522.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -8150,7 +8151,7 @@ body.presentation-mode .presentation-bar {
                             <input type="checkbox" value="actor" id="profile-type-actor" onchange="app.PublicProfile.onProfileTypeChange()" class="d-none">
                             <span class="profile-type-icon">🎭</span>
                             <span class="profile-type-name">Comédien.ne</span>
-                            <span class="facet-visible-toggle" id="facet-visible-actor-label" onclick="event.stopPropagation()"><input type="checkbox" id="facet-visible-actor" checked onclick="event.stopPropagation()"> 👁 Visible dans l'Univers</span>
+                            <span class="facet-visible-toggle" id="facet-visible-actor-label" onclick="event.preventDefault(); event.stopPropagation(); const c = document.getElementById('facet-visible-actor'); c.checked = !c.checked;"><input type="checkbox" id="facet-visible-actor" checked tabindex="-1" style="pointer-events: none;"> 👁 Visible dans l'Univers</span>
                         </label>
                         <label class="profile-type-card" id="profile-type-crew-label">
                             <input type="checkbox" value="crew" id="profile-type-crew" onchange="app.PublicProfile.onProfileTypeChange()" class="d-none">
@@ -57101,6 +57102,13 @@ const UniverseProfileModal = {
     // Pager de casquettes : feuilleter les facettes d'un même profil dans la modale
     _pagerProfile: null,
     _pagerFacet: null,
+    _tmpHqMarker: null,
+    _clearHqMarker: () => {
+        if(UniverseProfileModal._tmpHqMarker && Universe.map) {
+            try { Universe.map.removeLayer(UniverseProfileModal._tmpHqMarker); } catch(e) {}
+        }
+        UniverseProfileModal._tmpHqMarker = null;
+    },
     switchFacet: (dir) => {
         const p = UniverseProfileModal._pagerProfile;
         if(!p) return;
@@ -57208,6 +57216,38 @@ const UniverseProfileModal = {
             pager.appendChild(mkArrow('›', 1));
         } else {
             pager.style.display = 'none';
+        }
+        
+        // Téléportation : au changement de casquette via le pager, voler vers l'adresse de la facette
+        if(facetView && Universe.map) {
+            try {
+                UniverseProfileModal._clearHqMarker();
+                let dest = null;
+                let isHq = false;
+                const fc = (profile.facets || {})[cur];
+                if((cur === 'asso' || cur === 'ent') && fc && fc.hqLatitude != null && fc.hqLongitude != null) {
+                    dest = [fc.hqLatitude, fc.hqLongitude]; // siège de l'asso / entreprise
+                    isHq = true;
+                } else if(profile.latitude != null && profile.longitude != null) {
+                    dest = [profile.latitude, profile.longitude]; // adresse de la personne
+                }
+                if(dest) {
+                    // Marqueur temporaire « 📍 Siège » tant qu'on regarde la casquette asso/entreprise
+                    if(isHq) {
+                        const hqName = (cur === 'asso' ? (profile.assoName || 'Siège') : (profile.entName || 'Siège'));
+                        const hqIcon = L.divIcon({
+                            className: '',
+                            html: '<div class="tmp-hq-marker">📍 <span>' + Utils.escape(hqName) + '</span></div>',
+                            iconSize: [10, 10],
+                            iconAnchor: [5, 10]
+                        });
+                        UniverseProfileModal._tmpHqMarker = L.marker(dest, { icon: hqIcon, interactive: false, zIndexOffset: 2000 }).addTo(Universe.map);
+                    }
+                    const center = Universe.map.getCenter();
+                    const moved = Math.abs(center.lat - dest[0]) > 0.0005 || Math.abs(center.lng - dest[1]) > 0.0005;
+                    if(moved) Universe.map.flyTo(dest, Math.max(Universe.map.getZoom(), 12));
+                }
+            } catch(e) {}
         }
         
         // Ville
@@ -57429,6 +57469,7 @@ const UniverseProfileModal = {
     
     // Ferme le modal
     closeProfileModal: () => {
+        UniverseProfileModal._clearHqMarker();
         document.getElementById('profile-modal-overlay').style.display = 'none';
         Universe.currentProfile = null;
     },
