@@ -7143,6 +7143,9 @@ body.presentation-mode .presentation-bar {
   .minichat-foot { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--border); background: var(--bg); }
   .minichat-input { flex: 1; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--input-bg, var(--panel-bg)); color: var(--text-main); font-size: 13px; }
   .minichat-send { border: none; background: var(--primary); color: white; border-radius: 8px; padding: 0 12px; cursor: pointer; font-size: 14px; }
+  .minichat-attach { border: 1px solid var(--border); background: transparent; color: var(--text-main); border-radius: 8px; padding: 0 10px; cursor: pointer; font-size: 14px; }
+  .minichat-attach:disabled { opacity: .5; cursor: wait; }
+  .minichat-file { color: var(--primary); text-decoration: underline; word-break: break-all; }
   .facet-tabs { display: flex; gap: 6px; margin-top: 14px; flex-wrap: wrap; }
   .facet-tab { padding: 8px 16px; border: 1px solid var(--border); border-radius: 8px 8px 0 0; background: var(--bg); color: var(--text-sec); cursor: pointer; font-weight: 600; font-size: 0.85rem; }
   .facet-tab.active { background: var(--panel-bg); color: var(--primary); border-color: var(--primary); }
@@ -15901,6 +15904,8 @@ const LockManager = {
       messages: [],
       MAX_MESSAGES: 50,
       MAX_AGE_MS: 50 * 60 * 1000,
+      BUCKET: 'minichat',
+      MAX_FILE_MB: 20,
       _gcTimer: null,
       _expanded: false,
       _unseen: 0,
@@ -15918,6 +15923,7 @@ const LockManager = {
               .on('broadcast', { event: 'msg' }, (p) => MiniChat._receive(p.payload))
               .subscribe();
           MiniChat._gcTimer = setInterval(MiniChat._tick, 30000);
+          MiniChat._cleanupOldFiles(); // ménage paresseux des fichiers > 24 h (sans await)
       },
 
       stop: () => {
@@ -16001,6 +16007,18 @@ const LockManager = {
           input.maxLength = 500;
           input.placeholder = 'Message éphémère...';
           input.addEventListener('keydown', (e) => { if(e.key === 'Enter') MiniChat.send(); });
+          const fileInput = document.createElement('input');
+          fileInput.type = 'file';
+          fileInput.id = 'minichat-file-input';
+          fileInput.style.display = 'none';
+          fileInput.addEventListener('change', MiniChat.sendFile);
+          const attach = document.createElement('button');
+          attach.type = 'button';
+          attach.className = 'minichat-attach';
+          attach.id = 'minichat-file-btn';
+          attach.textContent = '📎';
+          attach.title = 'Envoyer un fichier (max ' + MiniChat.MAX_FILE_MB + ' Mo, supprimé après 24 h)';
+          attach.addEventListener('click', () => fileInput.click());
           const send = document.createElement('button');
           send.type = 'button';
           send.className = 'minichat-send';
@@ -16008,6 +16026,8 @@ const LockManager = {
           send.title = 'Envoyer';
           send.addEventListener('click', MiniChat.send);
           foot.appendChild(input);
+          foot.appendChild(fileInput);
+          foot.appendChild(attach);
           foot.appendChild(send);
           panel.appendChild(head);
           panel.appendChild(body);
@@ -16031,8 +16051,14 @@ const LockManager = {
               div.className = 'minichat-msg' + ((m.senderEmail || '').toLowerCase() === me ? ' mine' : '');
               const t = new Date(m.ts);
               const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+              let content;
+              if(m.fileUrl) {
+                  content = '<a class="minichat-file" href="' + Utils.escape(m.fileUrl) + '" target="_blank" rel="noopener" download>📎 ' + Utils.escape(m.fileName || 'fichier') + '</a> <span class="minichat-msg-meta">' + MiniChat._fmtSize(m.fileSize || 0) + '</span>';
+              } else {
+                  content = Utils.escape(m.text || '');
+              }
               div.innerHTML = '<div class="minichat-msg-meta">' + Utils.escape(m.senderName || '?') + ' · ' + hh + '</div>'
-                            + '<div>' + Utils.escape(m.text || '') + '</div>';
+                            + '<div>' + content + '</div>';
               body.appendChild(div);
           });
           body.scrollTop = body.scrollHeight;
@@ -16053,6 +16079,56 @@ const LockManager = {
           // broadcast self:true -> notre propre message revient par le même canal (rendu unique)
           MiniChat.channel.send({ type: 'broadcast', event: 'msg', payload: msg });
           input.value = '';
+      },
+
+      // ===== Fichiers éphémères (bucket 'minichat', supprimés après 24 h) =====
+      sendFile: async (event) => {
+          const fileInput = event.target;
+          const file = fileInput.files && fileInput.files[0];
+          fileInput.value = '';
+          if(!file || !MiniChat.channel) return;
+          if(file.size > MiniChat.MAX_FILE_MB * 1024 * 1024) {
+              Utils.toast('Fichier trop volumineux (max ' + MiniChat.MAX_FILE_MB + ' Mo)', 'warning');
+              return;
+          }
+          const btn = document.getElementById('minichat-file-btn');
+          if(btn) { btn.disabled = true; btn.textContent = '⏳'; }
+          try {
+              const safeName = file.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-80);
+              const path = MiniChat.projectId + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '_' + safeName;
+              const { error } = await supabase.storage.from(MiniChat.BUCKET).upload(path, file, { upsert: false });
+              if(error) throw error;
+              const { data: urlData } = supabase.storage.from(MiniChat.BUCKET).getPublicUrl(path);
+              const msg = {
+                  id: 'mc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+                  fileName: file.name,
+                  fileUrl: urlData.publicUrl,
+                  fileSize: file.size,
+                  senderEmail: state.currentUser.email,
+                  senderName: (state.userProfile && (state.userProfile.name || state.userProfile.displayName)) || state.currentUser.email.split('@')[0],
+                  ts: Date.now()
+              };
+              MiniChat.channel.send({ type: 'broadcast', event: 'msg', payload: msg });
+          } catch(e) {
+              console.error('MiniChat fichier:', e);
+              Utils.toast('Échec de l\'envoi du fichier (le bucket \'minichat\' existe-t-il ?)', 'error');
+          }
+          if(btn) { btn.disabled = false; btn.textContent = '📎'; }
+      },
+
+      _fmtSize: (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' Mo' : Math.max(1, Math.round(b / 1024)) + ' Ko',
+
+      // Ménage paresseux : à l'ouverture du projet, supprime les fichiers de plus de 24 h
+      _cleanupOldFiles: async () => {
+          try {
+              const { data: files } = await supabase.storage.from(MiniChat.BUCKET).list(MiniChat.projectId, { limit: 100 });
+              if(!files || !files.length) return;
+              const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+              const olds = files
+                  .filter(f => f.created_at && new Date(f.created_at).getTime() < cutoff)
+                  .map(f => MiniChat.projectId + '/' + f.name);
+              if(olds.length) await supabase.storage.from(MiniChat.BUCKET).remove(olds);
+          } catch(e) {}
       },
 
       _receive: (m) => {
