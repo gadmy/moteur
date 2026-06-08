@@ -23,6 +23,12 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v524 (8 Juin 2026)
+  - Emails professionnels : migration d'EmailJS vers Brevo via une Edge Function Supabase « super-action » — clé d'API gardée secrète côté serveur, envois depuis contact@moteur.studio avec un gabarit maison (en-tête sombre, bouton d'action, pied de page), domaine authentifié (DKIM Brevo ; SPF/DMARC Infomaniak conservés). Fini le jeton OAuth Gmail à renouveler et la mention « sent via EmailJS » ; limite ~300 emails/jour.
+  - Tous les déclencheurs passent par Brevo : invitations (nouveau venu / membre existant), ajout depuis la recherche globale, demande de collaboration, revendication de fiche, feuilles de service et de convocation (date / lieu / heure structurés), relances (contrat, fiche incomplète) et campagnes admin.
+  - Mini-tchat éphémère : bulle en bas à gauche dans un projet (Realtime broadcast, partage de fichiers via le bucket minichat, purge automatique au-delà de 24 h) — conversation volatile, sans archivage.
+  - « Contacter » repensé en contact public : la fiche d'une personne et la fiche publique d'un projet affichent l'email et le téléphone que le porteur a CHOISI d'exposer (liens mailto: / tel:), sans envoi automatique ni messagerie interne. L'email de compte (routage privé) n'est jamais dévoilé.
+  - Notifications : bouton « 🗑 Effacer » (suppression de ses propres notifications) à la place de « Tout marquer lu » qui ne marchait pas, avec les policies RLS delete/update manquantes (ce qui répare aussi le marquage « lu ») ; la cloche in-app n'est envoyée que si le destinataire possède déjà un compte (sinon seul l'email externe part) ; toasts temps réel internes et liens tchat/messagerie retirés des notifications (préparation au retrait de la messagerie interne).
 v523 (5 Juin 2026)
   - Casquettes : modèle data.facets (comédien / technicien / association / entreprise), chaque casquette activable et « 👁 Visible dans l'Univers » indépendamment ; backfill SQL des profils existants ; helpers d'héritage getFacetField / setFacetField (migration douce : une fiche hérite des anciennes valeurs communes tant qu'elle n'est pas éditée).
   - Formulaire : 4 cartes casquettes cumulables (compactées) + barre d'onglets ; fiches comédien et technicien AUTONOMES — identité, tarif, disponibilités, véhicule, email de contact public par fiche, avec moteur d'échange au changement d'onglet et pré-remplissage par héritage. L'email de contact est purement décoratif : le routage interne reste UN COMPTE = UNE ADRESSE MAIL = UNE MESSAGERIE.
@@ -7422,7 +7428,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv524</p>
+      <p>vv525</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -7542,7 +7548,7 @@ body.presentation-mode .presentation-bar {
             <div class="notif-panel" id="notif-panel">
                 <div class="notif-header">
                     <h4>🔔 Notifications</h4>
-                    <button class="notif-mark-all" onclick="app.Notifications.markAllRead()">Tout marquer lu</button>
+                    <button class="notif-mark-all" onclick="app.Notifications.clearAll()">🗑 Effacer</button>
                 </div>
                 <div class="notif-list" id="notif-list">
                     <div class="notif-empty">Aucune notification</div>
@@ -8141,10 +8147,6 @@ body.presentation-mode .presentation-bar {
     <div class="public-profile-header">
         <div class="flex-row-center">
             <button onclick="app.PublicProfile.close()" class="btn btn--secondary btn--sm">⬅ Retour</button>
-            <div class="messages-tabs" style="margin:0; border:none; padding:0;">
-                <button class="messages-tab active" onclick="app.PublicProfile.showTab('profile')" id="profile-tab-btn">👤 Mes Profils</button>
-                <button class="messages-tab" onclick="app.PublicProfile.showTab('messages')" id="messages-tab-btn">📬 Messages <span class="badge d-none" id="messages-badge">0</span></button>
-            </div>
             <h1 id="profile-title">🎭 Mes Profils Publics</h1>
         </div>
         <div class="flex-row-gap10">
@@ -9110,29 +9112,6 @@ body.presentation-mode .presentation-bar {
         </div><!-- Fin current-profile-content -->
         </div><!-- Fin profile-content -->
         
-        <!-- Conteneur Messages -->
-        <div id="messages-content" class="d-none">
-            <div class="messages-section">
-                <div style="margin-bottom: 15px; padding: 15px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border);">
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <select id="messages-filter-type" onchange="app.Messages.applyFilters()" class="n8-input-9">
-                            <option value="">📋 Tous les types</option>
-                            <option value="invitation">🎬 Invitations</option>
-                            <option value="convocation">📅 Convocations</option>
-                            <option value="info">ℹ️ Informations</option>
-                        </select>
-                        <select id="messages-filter-status" onchange="app.Messages.applyFilters()" style="flex: 1; min-width: 120px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text-main);">
-                            <option value="">📨 Tous</option>
-                            <option value="unread">🔴 Non lus</option>
-                            <option value="read">✅ Lus</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="message-list" id="messages-list">
-                    <div class="message-empty">📭 Aucun message pour le moment.</div>
-                </div>
-            </div>
-        </div>
     </div>
   </div>
   
@@ -9285,25 +9264,6 @@ body.presentation-mode .presentation-bar {
         </div>
     </div>
 </div>
-
-<!-- Modal détail message -->
-  <div id="message-detail-modal" class="message-detail-modal d-none">
-    <div class="message-detail-box">
-        <div class="message-detail-header">
-            <h3 id="message-detail-title">Titre du message</h3>
-            <button onclick="app.Messages.closeDetail()" style="background:none; border:none; font-size:1.5rem; cursor:pointer;">✖</button>
-        </div>
-        <div class="message-detail-body">
-            <div class="message-detail-meta" id="message-detail-meta"></div>
-            <div class="message-detail-content" id="message-detail-content"></div>
-        </div>
-        <div id="message-detail-quick-actions" style="display:none; padding: 15px 20px; background: var(--bg); border-top: 1px solid var(--border);"></div>
-        <div class="message-detail-actions">
-            <button onclick="app.Messages.deleteMessage()" style="background:var(--danger); color:white; border:none; padding:8px 15px; border-radius:6px; cursor:pointer;">🗑️ Supprimer</button>
-            <button onclick="app.Messages.closeDetail()" class="btn btn--primary btn--sm">Fermer</button>
-        </div>
-    </div>
-  </div>
   
   <div id="contacts-view" class="contacts-view">
     <div class="contacts-header">
@@ -9685,7 +9645,6 @@ body.presentation-mode .presentation-bar {
      <div class="tab-btn" draggable="true" data-tab="planning" onclick="app.UI.switchTab('planning')"><span>14. PLANNING</span><button class="tab-close" onclick="event.stopPropagation(); app.UI.hideTab('planning')" title="Masquer cet onglet">×</button></div>
 <div class="tab-btn" draggable="true" data-tab="scriptreport" onclick="app.UI.switchTab('scriptreport')"><span>15. RAPPORT</span><button class="tab-close" onclick="event.stopPropagation(); app.UI.hideTab('scriptreport')" title="Masquer cet onglet">×</button></div>
 <div class="tab-btn" draggable="true" data-tab="expenses" onclick="app.UI.switchTab('expenses')"><span>16. DÉPENSES</span><button class="tab-close" onclick="event.stopPropagation(); app.UI.hideTab('expenses')" title="Masquer cet onglet">×</button></div>
-<div class="tab-btn" draggable="true" data-tab="chat" onclick="app.UI.switchTab('chat')"><span>17. CHAT</span><button class="tab-close" onclick="event.stopPropagation(); app.UI.hideTab('chat')" title="Masquer cet onglet">×</button></div>
 <div class="tab-btn-hidden-toggle d-none" id="hiddenTabsToggle" onclick="app.UI.toggleHiddenTabsMenu(event)">⊕ Masqués<span class="hidden-count" id="hiddenTabsCount">0</span></div>
 <div class="hidden-tabs-menu" id="hiddenTabsMenu"></div>
     </nav>
@@ -10993,55 +10952,6 @@ body.presentation-mode .presentation-bar {
               </div>
           </div>
       </div>
-
-<div id="tab-chat" class="tab-content">
-    <div style="display: flex; height: calc(100vh - 200px); gap: 20px; padding: 20px;">
-        <!-- Liste des canaux -->
-        <div style="width: 280px; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column;">
-            <div style="padding: 15px; border-bottom: 1px solid var(--border);">
-                <h3 class="m-0-fs1">💬 Canaux</h3>
-            </div>
-            <div id="chat-channels-list" style="flex: 1; overflow-y: auto; padding: 10px;"></div>
-            <div style="padding: 10px; border-top: 1px solid var(--border);">
-                <button onclick="app.Chat.createCustomChannel()" style="width: 100%; padding: 10px; background: var(--primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">➕ Nouveau groupe</button>
-            </div>
-        </div>
-        
-        <!-- Zone de chat principale -->
-        <div style="flex: 1; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column;">
-            <div id="chat-main-header" class="n8-flex-4">
-                <h3 class="m-0-fs1" id="chat-channel-title">📢 Sélectionnez un canal</h3>
-                <div>
-                    <button id="chat-members-btn" onclick="app.Chat.toggleMembersPanel()" style="padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; display: none;">👥 Membres</button>
-                </div>
-            </div>
-            <div id="chat-messages-container" style="flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px;">
-                <div class="chat-empty">
-                    <p class="fs-2-mb10">💬</p>
-                    <p>Sélectionnez un canal pour commencer à discuter</p>
-                </div>
-            </div>
-            <div id="chat-input-container" style="padding: 15px; border-top: 1px solid var(--border); display: none;">
-                <div class="flex-gap10">
-                    <input type="text" id="chat-message-input" class="chat-input" placeholder="Écrivez votre message..." data-allow-emojis="true" onkeypress="if(event.key === 'Enter') app.Chat.sendMessage()">
-                    <button onclick="app.Chat.sendMessage()" class="chat-send-btn">➤</button>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Panel des membres (caché par défaut) -->
-        <div id="chat-members-panel" style="width: 250px; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 12px; display: none; flex-direction: column;">
-            <div class="n8-flex-4">
-                <h3 class="m-0-fs1">👥 Membres</h3>
-                <button onclick="app.Chat.toggleMembersPanel()" style="background: none; border: none; font-size: 1.2rem; cursor: pointer;">✖</button>
-            </div>
-            <div id="chat-members-list" style="flex: 1; overflow-y: auto; padding: 10px;"></div>
-            <div id="chat-add-member-section" style="padding: 10px; border-top: 1px solid var(--border); display: none;">
-                <button onclick="app.Chat.showAddMemberModal()" style="width: 100%; padding: 8px; background: var(--success); color: white; border: none; border-radius: 6px; cursor: pointer;">➕ Ajouter un membre</button>
-            </div>
-        </div>
-    </div>
-</div>
 
 <div id="tab-planning" class="tab-content">
     <h1 class="print-only-title">PLANNING DE TOURNAGE</h1>
@@ -14168,11 +14078,6 @@ crewRoles: {
           const name = profile ? (profile.name || profile.assoName || profile.entName || 'Profil') : 'Profil';
           Utils.toast(`Profil actif : ${name}`, 'info', 2000);
           
-          // I4d: recharger la messagerie pour appliquer le filtre par nouveau profil actif
-          try {
-              if(typeof Messages?.load === 'function') Messages.load();
-          } catch(e) { /* silencieux */ }
-          
           // I5e: recharger la liste des projets (si la vue Mes Projets est ouverte)
           try {
               if(typeof UI?.renderProjectList === 'function') UI.renderProjectList();
@@ -15379,7 +15284,7 @@ const LockManager = {
       currentDomain: null,
       pendingDomain: null,
       channel: null,
-      ORDER: ['presentation','synopsis','board','titlepage','script','storyboard','chars','actors','locs','resources','crew','breakdown','stats','planning','expenses','chat'],
+      ORDER: ['presentation','synopsis','board','titlepage','script','storyboard','chars','actors','locs','resources','crew','breakdown','stats','planning','expenses'],
 
       init: (projectId) => {
           if(window.location.protocol === 'file:') return;
@@ -17250,7 +17155,6 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           'notification': { svg: 'ico-bell', emoji: '🔔', cat: 'social' },
           'community':    { svg: 'ico-globe', emoji: '🌐', cat: 'social' },
           'universe':     { svg: 'ico-globe', emoji: '🌍', cat: 'social' },
-          'chat':         { svg: 'ico-message', emoji: '💬', cat: 'social' },
           'collaboration':{ svg: 'ico-users', emoji: '🤝', cat: 'social' },
           // Aide
           'help':         { svg: 'ico-help', emoji: '❓', cat: 'help' },
@@ -18576,7 +18480,7 @@ openBoardPrintEpisodeChooser: () => {
         if(UIHidden.hiddenTabs.includes(tabName)) return;
         
         // Empêcher de masquer le dernier onglet visible
-        const allTabs = ['presentation', 'synopsis', 'board', 'titlepage', 'script', 'storyboard', 'chars', 'actors', 'locs', 'resources', 'crew', 'breakdown', 'stats', 'planning', 'expenses', 'chat'];
+        const allTabs = ['presentation', 'synopsis', 'board', 'titlepage', 'script', 'storyboard', 'chars', 'actors', 'locs', 'resources', 'crew', 'breakdown', 'stats', 'planning', 'expenses'];
         const visibleTabs = allTabs.filter(t => !UIHidden.hiddenTabs.includes(t) && t !== tabName);
         if(visibleTabs.length === 0) {
             Utils.toast('Impossible de masquer tous les onglets !', 'warning');
@@ -18713,7 +18617,7 @@ openBoardPrintEpisodeChooser: () => {
             'titlepage': 'Titre', 'script': 'Scénario', 'storyboard': 'Storyboard', 'chars': 'Personnages',
             'actors': 'Comédien.nes', 'locs': 'Décors', 'resources': 'Ressources', 'crew': 'Équipes',
             'breakdown': 'Dépouillement', 'stats': 'Statistiques', 'planning': 'Planning',
-            'scriptreport': 'Rapport', 'expenses': 'Dépenses', 'chat': 'Chat'
+            'scriptreport': 'Rapport', 'expenses': 'Dépenses'
         };
         
         const hasHiddenCategories = UIHidden.hiddenCategories.length > 0;
@@ -18815,7 +18719,7 @@ openBoardPrintEpisodeChooser: () => {
             'titlepage': '4. TITRE', 'script': '5. SCÉNARIO', 'moodboard': '6. MOOD BOARD', 'storyboard': '7. STORYBOARD', 'chars': '8. PERSONNAGES',
             'actors': '9. COMÉDIEN.NES', 'locs': '10. DÉCORS', 'resources': '11. RESSOURCES', 'crew': '12. ÉQUIPES',
             'breakdown': '13. DÉPOUILLEMENT', 'stats': '14. STATISTIQUES', 'planning': '15. PLANNING',
-            'expenses': '16. DÉPENSES', 'chat': '17. CHAT'
+            'expenses': '16. DÉPENSES'
         };
         
         // Masquer/afficher les onglets
@@ -19114,8 +19018,7 @@ openBoardPrintEpisodeChooser: () => {
             'breakdown': 'breakdown',
             'planning': 'planning',
             'expenses': 'depenses',
-            'budget': 'depenses',
-            'chat': 'collaboration'
+            'budget': 'depenses'
         };
         if(UICategories.currentTabTarget) {
             const tabName = UICategories.currentTabTarget.getAttribute('data-tab');
@@ -19349,7 +19252,7 @@ openBoardPrintEpisodeChooser: () => {
         const defaultOrder = [
             'presentation', 'synopsis', 'board', 'titlepage', 'script', 'storyboard', 
             'chars', 'actors', 'locs', 'resources', 'crew', 'breakdown', 
-            'stats', 'planning', 'expenses', 'chat'
+            'stats', 'planning', 'expenses'
         ];
         const tabs = Array.from(tabsNav.querySelectorAll('.tab-btn'));
         
@@ -19612,8 +19515,6 @@ initCategoriesDragDrop: () => {
             }, 500);
         }
         
-        // Nettoyer le chat
-        if(typeof Chat !== 'undefined') Chat.cleanup();
         // Nettoyer le mini-chat éphémère
         if(typeof MiniChat !== 'undefined') MiniChat.stop();
         // Nettoyer les locks de scène
@@ -21517,7 +21418,7 @@ const tabToSection = {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active')); 
     document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active')); 
     document.getElementById('tab-' + tabName).classList.add('active'); 
-    const idx = ['presentation', 'synopsis','board', 'titlepage', 'script', 'storyboard', 'chars', 'actors', 'locs', 'resources', 'crew', 'breakdown', 'stats', 'planning', 'expenses', 'chat'].indexOf(tabName); 
+    const idx = ['presentation', 'synopsis','board', 'titlepage', 'script', 'storyboard', 'chars', 'actors', 'locs', 'resources', 'crew', 'breakdown', 'stats', 'planning', 'expenses'].indexOf(tabName); 
     if(idx > -1) document.querySelectorAll('.tab-btn')[idx].classList.add('active');
     
     // Synchroniser avec le mode catégories si actif
@@ -21567,7 +21468,6 @@ const tabToSection = {
           if(tabName === 'storyboard') Storyboard.init();
           if(tabName === 'moodboard') MoodBoard.init();
           if(tabName === 'crew') { Actions.syncCrewFromPublicProfiles().then(() => UI.renderCrewTab()); }
-          if(tabName === 'chat') Chat.init();
           if(tabName === 'expenses') Expenses.init();
           if(tabName === 'presentation') Presentation.init();
           if(typeof LockManager !== 'undefined') LockManager.onTabEnter(tabName);
@@ -35217,9 +35117,6 @@ const ProfileGallery = {
         UI.hideAllViews();
         els.publicProfileView.classList.add('active');
         
-        // Charger les messages
-        Messages.load();
-        
         // Afficher l'onglet profil par défaut
         PublicProfile.showTab('profile');
         
@@ -35235,9 +35132,6 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         
         // Charger les profils à revendiquer
         await PublicProfile.loadPendingClaims();
-        
-        // Réinitialiser les filtres de messages maintenant que les profils sont chargés
-        Messages.initFilters();
         
         // Afficher les onglets de profils
         PublicProfile.renderProfileTabs();
@@ -36122,22 +36016,7 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
 	
     showTab: (tab) => {
         const profileContent = document.getElementById('profile-content');
-        const messagesContent = document.getElementById('messages-content');
-        const profileTabBtn = document.getElementById('profile-tab-btn');
-        const messagesTabBtn = document.getElementById('messages-tab-btn');
-        
-        if(tab === 'profile') {
-            profileContent.style.display = 'block';
-            messagesContent.style.display = 'none';
-            profileTabBtn.classList.add('active');
-            messagesTabBtn.classList.remove('active');
-        } else {
-            profileContent.style.display = 'none';
-            messagesContent.style.display = 'block';
-            profileTabBtn.classList.remove('active');
-            messagesTabBtn.classList.add('active');
-            Messages.render();
-        }
+        if(profileContent) profileContent.style.display = 'block';
     },
     
  // ===== REVENDICATION DE PROFIL (claims) — délégué à ProfileClaims =====
@@ -37092,671 +36971,6 @@ document.getElementById('profile-title').textContent = '🎭 Mes Profils Publics
         profile.collabTypes = collabTypes;
     },
     
-};
-
-const Chat = {
-    // ============================================================
-    // ===== ÉTAT & INITIALISATION =====
-    // ============================================================
-    currentChannel: null,
-    channels: [
-        { id: 'general', name: '📢 Général', icon: '📢', type: 'system', description: 'Tout le monde' },
-        { id: 'chefs', name: '💼 Chefs de poste', icon: '💼', type: 'system', description: 'Réal, Chefs de département' },
-        { id: 'technique', name: '🔧 Technique', icon: '🔧', type: 'system', description: 'Équipe technique' },
-        { id: 'comediens', name: '🎭 Comédiens', icon: '🎭', type: 'system', description: 'Comédiens du projet' }
-    ],
-    messagesListener: null,
-    
-    init: () => {
-        Chat.loadCustomChannels();
-        Chat.renderChannelsList();
-        
-        // Sélectionner le canal général par défaut
-        if(!Chat.currentChannel) {
-            Chat.selectChannel('general');
-        }
-    },
-    
-    loadCustomChannels: () => {
-        // Charger les canaux personnalisés depuis les données du projet
-        if(state.data.chatChannels) {
-            state.data.chatChannels.forEach(ch => {
-                if(!Chat.channels.find(c => c.id === ch.id)) {
-                    Chat.channels.push(ch);
-                }
-            });
-        }
-    },
-    
-    // ===== CHANNELS : liste & navigation =====
-    renderChannelsList: () => {
-        const container = document.getElementById('chat-channels-list');
-        if(!container) return;
-        
-        const userEmail = state.currentUser?.email;
-        const userPerms = Permissions.getCurrentUserPermissions();
-        
-        let html = '<div class="mb-15"><div style="font-size: 0.75rem; color: var(--text-sec); margin-bottom: 8px; text-transform: uppercase;">Canaux principaux</div>';
-        
-        // Canaux système
-        Chat.channels.filter(c => c.type === 'system').forEach(channel => {
-            // Vérifier accès
-            const hasAccess = Chat.canAccessChannel(channel.id);
-            if(!hasAccess && state.currentRole !== 'owner') return;
-            
-            const isActive = Chat.currentChannel === channel.id;
-            html += `
-                <div class="chat-channel-item ${isActive ? 'active' : ''}" onclick="app.Chat.selectChannel('${channel.id}')" style="padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 5px; background: ${isActive ? 'var(--primary)' : 'var(--bg)'}; color: ${isActive ? 'white' : 'var(--text-main)'};">
-                    <div class="fw-600">${channel.icon} ${channel.name.replace(channel.icon + ' ', '')}</div>
-                    <div style="font-size: 0.75rem; opacity: 0.7;">${channel.description}</div>
-                </div>
-            `;
-        });
-        html += '</div>';
-        
-        // Canaux personnalisés
-        const customChannels = Chat.channels.filter(c => c.type === 'custom');
-        if(customChannels.length > 0 || state.currentRole === 'owner') {
-            html += '<div><div style="font-size: 0.75rem; color: var(--text-sec); margin-bottom: 8px; text-transform: uppercase;">Groupes personnalisés</div>';
-            
-            customChannels.forEach(channel => {
-                // Vérifier si l'utilisateur est membre
-                const isMember = channel.members?.includes(Utils.sanitizeEmail(userEmail)) || state.currentRole === 'owner';
-                if(!isMember) return;
-                
-                const isActive = Chat.currentChannel === channel.id;
-                html += `
-                    <div class="chat-channel-item ${isActive ? 'active' : ''}" onclick="app.Chat.selectChannel('${channel.id}')" style="padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 5px; background: ${isActive ? 'var(--primary)' : 'var(--bg)'}; color: ${isActive ? 'white' : 'var(--text-main)'}; display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <div class="fw-600">${channel.icon || '💬'} ${Utils.escape(channel.name)}</div>
-                            <div style="font-size: 0.75rem; opacity: 0.7;">${channel.members?.length || 0} membre(s)</div>
-                        </div>
-                        ${state.currentRole === 'owner' ? `<button onclick="event.stopPropagation(); app.Chat.deleteChannel('${channel.id}')" style="background: none; border: none; cursor: pointer; opacity: 0.6;">🗑️</button>` : ''}
-                    </div>
-                `;
-            });
-            html += '</div>';
-        }
-        
-        container.innerHTML = html;
-    },
-    
-    canAccessChannel: (channelId) => {
-        if(state.currentRole === 'owner') return true;
-        
-        const userPerms = Permissions.getCurrentUserPermissions();
-        
-        switch(channelId) {
-            case 'general':
-                return userPerms.chat_general === 'write';
-            case 'chefs':
-                return userPerms.chat_chefs === 'write';
-            case 'technique':
-                return userPerms.chat_technique === 'write';
-            case 'comediens':
-                return userPerms.chat_comediens === 'write';
-            default:
-                // Canal personnalisé - vérifier si membre
-                const channel = Chat.channels.find(c => c.id === channelId);
-                if(channel && channel.members) {
-                    return channel.members.includes(Utils.sanitizeEmail(state.currentUser?.email));
-                }
-                return false;
-        }
-    },
-    
-    selectChannel: (channelId) => {
-        Chat.currentChannel = channelId;
-        Chat.renderChannelsList();
-        
-        const channel = Chat.channels.find(c => c.id === channelId);
-        if(!channel) return;
-        
-        // Mettre à jour le header
-        document.getElementById('chat-channel-title').textContent = `${channel.icon || '💬'} ${channel.name.replace(channel.icon + ' ', '')}`;
-        document.getElementById('chat-members-btn').style.display = 'inline-block';
-        document.getElementById('chat-input-container').style.display = 'block';
-        
-        // Charger les messages
-        Chat.loadMessages(channelId);
-        
-        // Charger les membres
-        Chat.loadMembers(channelId);
-    },
-    
-    // ===== MESSAGES : chargement, rendu, envoi =====
-    loadMessages: (channelId) => {
-        const container = document.getElementById('chat-messages-container');
-        container.innerHTML = '<div class="chat-empty">🔄 Chargement...</div>';
-        
-        // Détacher l'ancien listener
-        if(Chat.messagesListener) {
-            try { Chat.messagesListener.unsubscribe(); } catch(e) {}
-            Chat.messagesListener = null;
-        }
-        
-        // Écouter les messages en temps réel via Supabase
-        // Les messages du chat sont stockés dans le data du projet
-        const loadChatMessages = async () => {
-            try {
-                const { data: project } = await supabase
-                    .from('projects')
-                    .select('data')
-                    .eq('id', state.currentProjectId)
-                    .maybeSingle();
-                
-                const messages = project?.data?.chatMessages?.[channelId] || [];
-                Chat.renderMessages(messages);
-            } catch(error) {
-                console.error('Erreur chargement messages:', error);
-                Chat.renderMessages([]);
-            }
-        };
-        
-        loadChatMessages();
-        
-        // Écouter les changements en temps réel
-        Chat.messagesListener = supabase
-            .channel('chat_' + state.currentProjectId + '_' + channelId)
-            .on('postgres_changes', 
-                { event: 'UPDATE', schema: 'public', table: 'projects', filter: 'id=eq.' + state.currentProjectId },
-                (payload) => {
-                    const messages = payload.new.data?.chatMessages?.[channelId] || [];
-                    Chat.renderMessages(messages);
-                }
-            )
-            .subscribe();
-    },
-    
-    // Insère une notification 'chat' pour chaque membre du canal (alimente cloche + toasts temps réel).
-    _notifyRecipients: async (project, message) => {
-        try {
-            const channelId = Chat.currentChannel;
-            const data = project.data || {};
-            const me = (state.currentUser && state.currentUser.email || '').toLowerCase();
-            const channel = Chat.channels.find(c => c.id === channelId);
-            const chName = channel ? channel.name.replace((channel.icon || '') + ' ', '') : channelId;
-            // Candidats : proprio + permissions personnalisées + comédiens + équipe
-            const candidates = new Set();
-            const ownerEmail = (project.owner_email || '').toLowerCase();
-            if(ownerEmail) candidates.add(ownerEmail);
-            Object.keys(data.memberPermissions || {}).forEach(k => candidates.add(k.replace(/,/g, '.').toLowerCase()));
-            (data.actors || []).forEach(a => { if(a.email) candidates.add(a.email.toLowerCase()); });
-            (data.crew || []).forEach(c => { if(c.email) candidates.add(c.email.toLowerCase()); });
-            candidates.delete(me);
-            // Filtrer par accès au canal (même logique que canAccessChannel, évaluée pour chaque membre)
-            const recipients = [];
-            for(const email of candidates) {
-                if(recipients.length >= 25) break; // garde-fou volume
-                if(email === ownerEmail) { recipients.push(email); continue; }
-                if(channel && channel.type === 'custom') {
-                    if((channel.members || []).includes(Utils.sanitizeEmail(email))) recipients.push(email);
-                    continue;
-                }
-                const san = Utils.sanitizeEmail(email);
-                let perms = (data.memberPermissions || {})[san] || null;
-                if(!perms) {
-                    const actorM = (data.actors || []).find(a => (a.email || '').toLowerCase() === email);
-                    if(actorM) perms = Permissions.getForMember(actorM, 'actor');
-                }
-                if(!perms) {
-                    const crewM = (data.crew || []).find(c => (c.email || '').toLowerCase() === email);
-                    if(crewM) perms = Permissions.getForMember(crewM, 'crew');
-                }
-                if(perms && perms['chat_' + channelId] === 'write') recipients.push(email);
-            }
-            if(recipients.length === 0) return;
-            const extrait = (message.text || '').slice(0, 80);
-            const rows = recipients.map(email => ({
-                user_email: email,
-                type: 'chat',
-                title: '💬 Tchat',
-                message: (message.senderName || '?') + ' dans #' + chName + (project.title ? ' (' + project.title + ')' : '') + ' : ' + extrait,
-                link: state.currentProjectId + '|' + channelId,
-                read: false
-            }));
-            const { error } = await supabase.from('notifications').insert(rows);
-            if(error) console.warn('[Chat] notif erreur', error.message);
-        } catch(e) { console.warn('[Chat] notif erreur', e); }
-    },
-
-    renderMessages: (messages) => {
-        const container = document.getElementById('chat-messages-container');
-        const userEmail = state.currentUser?.email;
-        
-        if(messages.length === 0) {
-            container.innerHTML = `
-                <div class="chat-empty">
-                    <p class="fs-2-mb10">💬</p>
-                    <p>Aucun message dans ce canal</p>
-                    <p style="font-size: 0.85rem; opacity: 0.7;">Soyez le premier à écrire !</p>
-                </div>
-            `;
-            return;
-        }
-        
-        let html = '';
-        let lastDate = null;
-        
-        messages.forEach(msg => {
-            const msgDate = new Date(msg.timestamp).toLocaleDateString('fr-FR');
-            const msgTime = new Date(msg.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-            const isOwn = msg.senderEmail === userEmail;
-            
-            // Séparateur de date
-            if(msgDate !== lastDate) {
-                html += `<div class="chat-date-separator">${msgDate}</div>`;
-                lastDate = msgDate;
-            }
-            
-            html += `
-                <div class="chat-message ${isOwn ? 'own' : 'other'}">
-                    ${!isOwn ? `<div class="chat-message-sender">${Utils.escape(msg.senderName)}</div>` : ''}
-                    <div>${Utils.escape(msg.text)}</div>
-                    <div class="chat-message-time">${msgTime}</div>
-                </div>
-            `;
-        });
-        
-        container.innerHTML = html;
-        
-        // Scroll en bas
-        container.scrollTop = container.scrollHeight;
-    },
-    
-    sendMessage: async () => {
-        const input = document.getElementById('chat-message-input');
-        const text = input.value.trim();
-        
-        if(!text || !Chat.currentChannel) return;
-        
-        const message = {
-            id: 'msg_' + Date.now(),
-            text: text,
-            senderEmail: state.currentUser.email,
-            senderName: state.userProfile?.name || state.userProfile?.displayName || state.currentUser.email.split('@')[0],
-            timestamp: Date.now()
-        };
-        
-        try {
-            // Charger les données actuelles du projet
-            const { data: project } = await supabase
-                .from('projects')
-                .select('data, owner_email, title')
-                .eq('id', state.currentProjectId)
-                .maybeSingle();
-            
-            if(project) {
-                // Initialiser la structure si nécessaire
-                if(!project.data.chatMessages) project.data.chatMessages = {};
-                if(!project.data.chatMessages[Chat.currentChannel]) project.data.chatMessages[Chat.currentChannel] = [];
-                
-                // Ajouter le message
-                project.data.chatMessages[Chat.currentChannel].push(message);
-                
-                // Limiter à 100 messages
-                if(project.data.chatMessages[Chat.currentChannel].length > 100) {
-                    project.data.chatMessages[Chat.currentChannel] = project.data.chatMessages[Chat.currentChannel].slice(-100);
-                }
-                
-                // Sauvegarder
-                const {error: updProjErr} = await supabase.from('projects').update({ data: project.data }).eq('id', state.currentProjectId);
-            if(updProjErr) Utils.toast('Erreur de sauvegarde', 'error');
-                
-                // Rafraîchir l'affichage
-                Chat.renderMessages(project.data.chatMessages[Chat.currentChannel]);
-                Chat._notifyRecipients(project, message); // pings (sans await : ne bloque pas l'envoi)
-            }
-            input.value = '';
-        } catch(e) {
-            console.error('Erreur envoi message:', e);
-            Utils.toast('Erreur lors de l\'envoi du message', 'error');
-        }
-    },
-    
-    // ===== MEMBRES du channel =====
-    loadMembers: (channelId) => {
-        const container = document.getElementById('chat-members-list');
-        const addSection = document.getElementById('chat-add-member-section');
-        if(!container) return;
-        
-        const channel = Chat.channels.find(c => c.id === channelId);
-        let members = [];
-        
-        if(channel.type === 'system') {
-            // Membres basés sur les permissions + membres ajoutés manuellement
-            members = Chat.getSystemChannelMembers(channelId);
-            addSection.style.display = state.currentRole === 'owner' ? 'block' : 'none';
-        } else {
-            // Membres du canal personnalisé
-            members = Chat.getCustomChannelMembers(channel);
-            addSection.style.display = state.currentRole === 'owner' ? 'block' : 'none';
-        }
-        
-        if(members.length === 0) {
-            container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-sec);">Aucun membre</div>';
-            return;
-        }
-        
-        let html = '';
-        members.forEach(member => {
-            const photoHTML = member.photo ? `<img src="${member.photo}">` : '👤';
-            html += `
-                <div class="chat-member-item">
-                    <div class="chat-member-photo">${photoHTML}</div>
-                    <div>
-                        <div style="font-weight: 500; font-size: 0.9rem;">${Utils.escape(member.name)}</div>
-                        <div class="text-sec-xs-alt">${Utils.escape(member.role || 'Membre')}</div>
-                    </div>
-                </div>
-            `;
-        });
-        
-        container.innerHTML = html;
-    },
-    
-    getSystemChannelMembers: (channelId) => {
-        const members = [];
-        const ownerEmail = state.data.meta?.owner || state.currentUser?.email;
-        
-        // Ajouter le propriétaire
-        members.push({
-            name: ownerEmail.split('@')[0],
-            email: ownerEmail,
-            role: 'Propriétaire',
-            photo: null
-        });
-        
-        // Ajouter les membres ajoutés manuellement
-        const extraMembers = state.data.chatExtraMembers?.[channelId] || [];
-        extraMembers.forEach(emailKey => {
-            const actor = state.data.actors?.find(a => Utils.sanitizeEmail(a.email) === emailKey);
-            if(actor && !members.find(m => m.email === actor.email)) {
-                members.push({ name: actor.name, email: actor.email, role: 'Comédien.ne (ajouté)', photo: actor.photo });
-                return;
-            }
-            const crew = state.data.crew?.find(c => Utils.sanitizeEmail(c.email) === emailKey);
-            if(crew && !members.find(m => m.email === crew.email)) {
-                members.push({ name: crew.name, email: crew.email, role: (crew.role || 'Technicien') + ' (ajouté)', photo: crew.photo });
-            }
-        });
-        
-        // Selon le canal
-        if(channelId === 'general') {
-            // Tout le monde
-            state.data.actors?.forEach(a => {
-                if(a.email && !members.find(m => m.email === a.email)) {
-                    members.push({ name: a.name, email: a.email, role: 'Comédien.ne', photo: a.photo });
-                }
-            });
-            state.data.crew?.forEach(c => {
-                if(c.email && !members.find(m => m.email === c.email)) {
-                    members.push({ name: c.name, email: c.email, role: c.role || 'Technicien', photo: c.photo });
-                }
-            });
-        } else if(channelId === 'chefs') {
-            // Chefs de poste
-            state.data.crew?.forEach(c => {
-                if(c.email && (c.role?.includes('Chef') || c.role?.includes('Directeur') || c.role?.includes('Réalisateur'))) {
-                    if(!members.find(m => m.email === c.email)) {
-                        members.push({ name: c.name, email: c.email, role: c.role, photo: c.photo });
-                    }
-                }
-            });
-        } else if(channelId === 'technique') {
-            // Équipe technique
-            state.data.crew?.forEach(c => {
-                if(c.email && !members.find(m => m.email === c.email)) {
-                    members.push({ name: c.name, email: c.email, role: c.role || 'Technicien', photo: c.photo });
-                }
-            });
-        } else if(channelId === 'comediens') {
-            // Comédiens
-            state.data.actors?.forEach(a => {
-                if(a.email && !members.find(m => m.email === a.email)) {
-                    members.push({ name: a.name, email: a.email, role: 'Comédien.ne', photo: a.photo });
-                }
-            });
-        }
-        
-        return members;
-    },
-    
-    getCustomChannelMembers: (channel) => {
-        const members = [];
-        if(!channel.members) return members;
-        
-        channel.members.forEach(emailKey => {
-            // Chercher dans actors
-            const actor = state.data.actors?.find(a => Utils.sanitizeEmail(a.email) === emailKey);
-            if(actor) {
-                members.push({ name: actor.name, email: actor.email, role: 'Comédien.ne', photo: actor.photo });
-                return;
-            }
-            
-            // Chercher dans crew
-            const crew = state.data.crew?.find(c => Utils.sanitizeEmail(c.email) === emailKey);
-            if(crew) {
-                members.push({ name: crew.name, email: crew.email, role: crew.role || 'Technicien', photo: crew.photo });
-                return;
-            }
-            
-            // Sinon juste l'email
-            members.push({ name: emailKey.replace(/,/g, '.'), email: emailKey, role: 'Membre', photo: null });
-        });
-        
-        return members;
-    },
-    
-    toggleMembersPanel: () => {
-        const panel = document.getElementById('chat-members-panel');
-        if(panel.style.display === 'none' || panel.style.display === '') {
-            panel.style.display = 'flex';
-        } else {
-            panel.style.display = 'none';
-        }
-    },
-    
-    // ===== CHANNELS CUSTOM : création / suppression / membres =====
-    createCustomChannel: () => {
-        if(state.currentRole !== 'owner') {
-            Utils.toast('Seul le propriétaire peut créer des groupes.', 'error');
-            return;
-        }
-        
-        // Modal de création avec nom + icône
-        const modal = document.createElement('div');
-        modal.id = 'create-channel-modal';
-        modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);display:flex;justify-content:center;align-items:center;z-index:10001;';
-        modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
-        
-        modal.innerHTML = `
-            <div style="background:var(--panel-bg);border-radius:12px;padding:25px;max-width:400px;width:90%;">
-                <h3 class="mt-0">➕ Nouveau groupe de discussion</h3>
-                <div class="mb-15">
-                    <label class="label-bold">Icône</label>
-                    <div style="display:flex;align-items:center;gap:10px;">
-                        <div id="new-channel-icon" class="n8-flex-1">💬</div>
-                        <button onclick="app.Utils.showIconPicker((icon) => document.getElementById('new-channel-icon').textContent = icon)" style="padding:8px 15px;background:var(--bg);border:1px solid var(--border);border-radius:6px;cursor:pointer;">Changer</button>
-                    </div>
-                </div>
-                <div class="mb-20">
-                    <label class="label-bold">Nom du groupe</label>
-                    <input type="text" id="new-channel-name" placeholder="Ex: Équipe nuit, Cascadeurs..." class="n8-input-13">
-                </div>
-                <div class="flex-end-compact">
-                    <button onclick="this.closest('div[style*=fixed]').remove()" class="btn btn--outline">Annuler</button>
-                    <button onclick="app.Chat.confirmCreateChannel()" class="btn btn--success">Créer</button>
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(modal);
-        document.getElementById('new-channel-name').focus();
-    },
-    
-    confirmCreateChannel: () => {
-        const name = document.getElementById('new-channel-name').value.trim();
-        const icon = document.getElementById('new-channel-icon').textContent;
-        
-        if(!name) {
-            Utils.toast('Veuillez entrer un nom pour le groupe.', 'warning');
-            return;
-        }
-        
-        const newChannel = {
-            id: 'custom_' + Date.now(),
-            name: name,
-            icon: icon,
-            type: 'custom',
-            description: 'Groupe personnalisé',
-            members: [Utils.sanitizeEmail(state.currentUser.email)],
-            createdBy: state.currentUser.email,
-            createdAt: new Date().toISOString()
-        };
-        
-        // Ajouter à la liste
-        Chat.channels.push(newChannel);
-        
-        // Sauvegarder dans les données du projet
-        if(!state.data.chatChannels) state.data.chatChannels = [];
-        state.data.chatChannels.push(newChannel);
-        Store.save();
-        
-        // Fermer le modal
-        const modal = document.getElementById('create-channel-modal');
-        if(modal) modal.remove();
-        
-        Chat.renderChannelsList();
-        Chat.selectChannel(newChannel.id);
-        
-        // Ouvrir le panel des membres (l'utilisateur pourra cliquer sur Ajouter)
-        document.getElementById('chat-members-panel').style.display = 'flex';
-    },
-    
-    deleteChannel: async (channelId) => {
-        if(!await ConfirmModal.confirmDelete("Le groupe et tous ses messages seront supprimés.")) return;
-        
-        // Retirer de la liste locale
-        Chat.channels = Chat.channels.filter(c => c.id !== channelId);
-        
-        // Retirer des données du projet
-        if(state.data.chatChannels) {
-            state.data.chatChannels = state.data.chatChannels.filter(c => c.id !== channelId);
-        }
-        
-        // Supprimer les messages du canal
-        if(state.data.chatMessages && state.data.chatMessages[channelId]) {
-            delete state.data.chatMessages[channelId];
-        }
-        
-        Store.save();
-        
-        if(Chat.currentChannel === channelId) {
-            Chat.currentChannel = 'general';
-        }
-        
-        Chat.renderChannelsList();
-        Chat.selectChannel(Chat.currentChannel);
-    },
-    
-    showAddMemberModal: () => {
-        // Récupérer tous les membres du projet
-        const allMembers = [];
-        
-        state.data.actors?.forEach(a => {
-            if(a.email) allMembers.push({ name: a.name, email: a.email, type: 'actor', photo: a.photo });
-        });
-        
-        state.data.crew?.forEach(c => {
-            if(c.email) allMembers.push({ name: c.name, email: c.email, type: 'crew', role: c.role, photo: c.photo });
-        });
-        
-        const channel = Chat.channels.find(c => c.id === Chat.currentChannel);
-        if(!channel || channel.type !== 'custom') return;
-        
-        const currentMembers = channel.members || [];
-        
-        const modal = document.createElement('div');
-        modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);display:flex;justify-content:center;align-items:center;z-index:10001;';
-        modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
-        
-        let membersHtml = '';
-        allMembers.forEach((m, idx) => {
-            const isSelected = currentMembers.includes(Utils.sanitizeEmail(m.email));
-            const photoHTML = m.photo ? `<img src="${m.photo}" style="width:100%;height:100%;object-fit:cover;">` : '👤';
-            membersHtml += `
-                <label class="chat-member-item ${isSelected ? 'selected' : ''}" style="cursor:pointer;">
-                    <input type="checkbox" value="${Utils.sanitizeEmail(m.email)}" ${isSelected ? 'checked' : ''} style="margin-right: 10px;">
-                    <div class="chat-member-photo">${photoHTML}</div>
-                    <div>
-                        <div style="font-weight: 500;">${Utils.escape(m.name)}</div>
-                        <div class="text-sec-xs-alt">${m.type === 'actor' ? 'Comédien.ne' : (m.role || 'Technicien')}</div>
-                    </div>
-                </label>
-            `;
-        });
-        
-        modal.innerHTML = `
-            <div style="background:var(--panel-bg);border-radius:12px;padding:25px;max-width:400px;width:90%;max-height:80vh;overflow-y:auto;">
-                <h3 class="mt-0">👥 Gérer les membres</h3>
-                <p style="color:var(--text-sec); font-size:0.9rem;">Sélectionnez les personnes à ajouter au groupe "${channel.name}"</p>
-                <div style="margin: 20px 0; max-height: 300px; overflow-y: auto;">
-                    ${membersHtml || '<p class="text-sec">Aucun membre disponible</p>'}
-                </div>
-                <div class="flex-end-compact">
-                    <button onclick="this.closest('div[style*=fixed]').remove()" class="btn btn--outline">Annuler</button>
-                    <button onclick="app.Chat.saveChannelMembers(this.closest('div[style*=fixed]'))" class="btn btn--success">✓ Enregistrer</button>
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(modal);
-    },
-    
-    saveChannelMembers: (modal) => {
-        const channel = Chat.channels.find(c => c.id === Chat.currentChannel);
-        if(!channel) return;
-        
-        const checkboxes = modal.querySelectorAll('input[type="checkbox"]:checked');
-        const members = [Utils.sanitizeEmail(state.currentUser.email)]; // Toujours inclure le propriétaire
-        
-        checkboxes.forEach(cb => {
-            if(!members.includes(cb.value)) {
-                members.push(cb.value);
-            }
-        });
-        
-        if(channel.type === 'custom') {
-            channel.members = members;
-            
-            // Mettre à jour dans state.data
-            const dataChannel = state.data.chatChannels?.find(c => c.id === channel.id);
-            if(dataChannel) {
-                dataChannel.members = members;
-            }
-        } else {
-            // Pour les canaux système, stocker les membres extra
-            if(!state.data.chatExtraMembers) state.data.chatExtraMembers = {};
-            state.data.chatExtraMembers[channel.id] = members;
-        }
-        
-        Store.save();
-        
-        modal.remove();
-        Chat.loadMembers(Chat.currentChannel);
-        Chat.renderChannelsList();
-    },
-    
-    // ===== CLEANUP =====
-    cleanup: () => {
-        // Détacher le listener quand on quitte le projet
-        if(Chat.messagesListener) {
-            try { Chat.messagesListener.unsubscribe(); } catch(e) {}
-            Chat.messagesListener = null;
-        }
-        Chat.currentChannel = null;
-    }
 };
 
 const Permissions = {
@@ -40605,16 +39819,6 @@ ${senderName}
 ${projectName}`;
 
             try {
-                // Envoyer message interne
-                await Messages.send(recipient.email, {
-                    subject: subject,
-                    content: content,
-                    type: 'callsheet',
-                    projectId: state.currentProjectId,
-                    projectName: projectName,
-                    shootDayId: shootDay.id,
-                    date: shootDay.date
-                });
                 
                 // Envoyer email
                 await Messages.sendEmailPing(recipient.email, recipient.name, 'callsheet', {
@@ -40947,18 +40151,7 @@ Merci de confirmer votre présence en répondant à ce message.
 Cordialement,
 ${senderName}
 ${projectName}`;
-
             try {
-                // Envoyer message interne
-                await Messages.send(recipient.email, {
-                    subject: subject,
-                    content: content,
-                    type: 'callsheet',
-                    projectId: state.currentProjectId,
-                    projectName: projectName,
-                    shootDayId: shootDay.id,
-                    date: shootDay.date
-                });
                 
                 // Envoyer email avec lien public
                 await Messages.sendEmailPing(recipient.email, recipient.name, 'callsheet', {
@@ -49385,73 +48578,6 @@ const ContractsTemplates = {
 };
 
 // ========== NOTIFICATIONS ==========
-// MiniView — petite fenêtre flottante de consultation (tchat / messagerie) sans quitter son travail.
-const MiniView = {
-    el: null,
-    close: () => { if(MiniView.el) { MiniView.el.remove(); MiniView.el = null; } },
-
-    _frame: (title, onOpenFull) => {
-        MiniView.close();
-        const w = document.createElement('div');
-        w.className = 'miniview';
-        const head = document.createElement('div');
-        head.className = 'miniview-head';
-        const h = document.createElement('div'); h.className = 'miniview-title'; h.textContent = title;
-        const actions = document.createElement('div'); actions.className = 'miniview-actions';
-        const full = document.createElement('button'); full.className = 'miniview-btn'; full.textContent = '⛶ Ouvrir en grand';
-        full.onclick = () => { MiniView.close(); onOpenFull(); };
-        const x = document.createElement('button'); x.className = 'miniview-btn'; x.textContent = '✖';
-        x.onclick = MiniView.close;
-        actions.appendChild(full); actions.appendChild(x);
-        head.appendChild(h); head.appendChild(actions);
-        const body = document.createElement('div'); body.className = 'miniview-body';
-        body.innerHTML = '<div style="padding:20px;text-align:center;opacity:.6;">Chargement…</div>';
-        w.appendChild(head); w.appendChild(body);
-        document.body.appendChild(w);
-        MiniView.el = w;
-        return body;
-    },
-
-    openChat: async (projectId, channelId) => {
-        const body = MiniView._frame('💬 Tchat', async () => {
-            if(state.currentProjectId !== projectId) { try { await Store.loadProject(projectId); } catch(e) {} }
-            setTimeout(() => { try { UI.switchTab('chat'); Chat.selectChannel(channelId); } catch(e) {} }, 400);
-        });
-        try {
-            const { data: project } = await supabase.from('projects').select('data, title').eq('id', projectId).maybeSingle();
-            if(!MiniView.el) return;
-            const sys = { general: 'Général', chefs: 'Chefs de poste', technique: 'Technique', comediens: 'Comédiens' };
-            const custom = ((project && project.data && project.data.chatChannels) || []).find(c => c.id === channelId);
-            const chName = sys[channelId] || (custom && custom.name) || channelId;
-            const titleEl = MiniView.el.querySelector('.miniview-title');
-            if(titleEl) titleEl.textContent = '💬 #' + chName + (project && project.title ? ' — ' + project.title : '');
-            const msgs = ((project && project.data && project.data.chatMessages && project.data.chatMessages[channelId]) || []).slice(-30);
-            if(msgs.length === 0) { body.innerHTML = '<div style="padding:20px;text-align:center;opacity:.6;">Aucun message</div>'; return; }
-            body.innerHTML = msgs.map(m => {
-                const when = m.timestamp ? new Date(m.timestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-                return '<div class="miniview-msg"><div class="miniview-msg-meta"><strong>' + Utils.escape(m.senderName || m.senderEmail || '?') + '</strong> <span>' + when + '</span></div><div>' + Utils.escape(m.text || '') + '</div></div>';
-            }).join('');
-            body.scrollTop = body.scrollHeight;
-        } catch(e) { body.innerHTML = '<div style="padding:20px;text-align:center;opacity:.6;">Impossible de charger le tchat.</div>'; }
-    },
-
-    openMessages: async () => {
-        const body = MiniView._frame('📬 Messagerie', () => {
-            try { app.PublicProfile.open(); setTimeout(() => app.PublicProfile.showTab('messages'), 100); } catch(e) {}
-        });
-        try {
-            const me = (state.currentUser && state.currentUser.email || '').toLowerCase();
-            const { data } = await supabase.from('messages').select('from_name, from_email, subject, content, created_at, read').eq('to_email', me).order('created_at', { ascending: false }).limit(10);
-            if(!MiniView.el) return;
-            const rows = data || [];
-            if(rows.length === 0) { body.innerHTML = '<div style="padding:20px;text-align:center;opacity:.6;">Aucun message reçu</div>'; return; }
-            body.innerHTML = rows.map(m => {
-                const when = m.created_at ? new Date(m.created_at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-                return '<div class="miniview-msg' + (m.read ? '' : ' unread') + '"><div class="miniview-msg-meta"><strong>' + Utils.escape(m.from_name || m.from_email || '?') + '</strong> <span>' + when + '</span></div>' + (m.subject ? '<div class="fw-600">' + Utils.escape(m.subject) + '</div>' : '') + '<div>' + Utils.escape((m.content || '').slice(0, 300)) + '</div></div>';
-            }).join('');
-        } catch(e) { body.innerHTML = '<div style="padding:20px;text-align:center;opacity:.6;">Impossible de charger la messagerie.</div>'; }
-    }
-};
 
 const Notifications = {
     // ===================== ÉTAT & INIT =====================
@@ -49507,50 +48633,11 @@ const Notifications = {
         Notifications.listenerAttached = true;
     },
     
-    // ——— Pings temps réel (toasts cliquables -> MiniView) ———
+    // ——— Suivi des notifications connues (toasts live chat/messagerie retirés) ———
     _known: null,
     _announce: () => {
-        const first = !Notifications._known;
-        if(first) Notifications._known = new Set();
-        const fresh = [];
-        Notifications.items.forEach(n => {
-            if(Notifications._known.has(n.id)) return;
-            Notifications._known.add(n.id);
-            if(first) return; // chargement initial : pas de toasts rétroactifs
-            if(n.read) return;
-            if(Date.now() - n.timestamp > 120000) return; // trop vieux
-            if(n.type !== 'chat' && n.type !== 'message') return;
-            fresh.push(n);
-        });
-        fresh.slice(0, 3).forEach(n => Notifications._liveToast(n));
-    },
-    _liveToast: (n) => {
-        // Déjà sous les yeux ? (même canal de tchat ouvert) -> pas de toast
-        if(n.type === 'chat') {
-            const parts = String(n.link || '').split('|');
-            const chatActive = document.getElementById('tab-chat') && document.getElementById('tab-chat').classList.contains('active');
-            if(state.currentProjectId === parts[0] && chatActive && Chat.currentChannel === parts[1]) return;
-        }
-        const container = document.getElementById('toast-container');
-        if(!container) return;
-        const t = document.createElement('div');
-        t.className = 'toast info notif-live-toast';
-        const icon = document.createElement('span'); icon.className = 'toast-icon'; icon.textContent = n.type === 'chat' ? '💬' : '📬';
-        const msg = document.createElement('span'); msg.className = 'toast-message';
-        msg.textContent = n.message || (n.type === 'chat' ? 'Nouveau message de tchat' : 'Nouveau message');
-        msg.style.cursor = 'pointer'; icon.style.cursor = 'pointer';
-        const openIt = () => {
-            t.remove();
-            Notifications.markAsRead(n.id);
-            if(n.type === 'chat') { const p = String(n.link || '').split('|'); MiniView.openChat(p[0], p[1] || 'general'); }
-            else MiniView.openMessages();
-        };
-        msg.onclick = openIt; icon.onclick = openIt;
-        const close = document.createElement('button'); close.className = 'toast-close'; close.textContent = '✖';
-        close.onclick = () => t.remove();
-        t.appendChild(icon); t.appendChild(msg); t.appendChild(close);
-        container.appendChild(t);
-        setTimeout(() => { if(t.parentElement) t.remove(); }, 12000);
+        if(!Notifications._known) Notifications._known = new Set();
+        Notifications.items.forEach(n => Notifications._known.add(n.id));
     },
 
     // Mettre à jour le badge
@@ -49642,14 +48729,6 @@ const Notifications = {
         if(type === 'invite' && projectId) {
             Notifications.closePanel();
             Store.loadProject(projectId);
-        } else if(type === 'message') {
-            Notifications.closePanel();
-            MiniView.openMessages();
-        } else if(type === 'chat') {
-            Notifications.closePanel();
-            const found = Notifications.items.find(n => n.id === notifId) || {};
-            const parts = String(found.link || '').split('|');
-            if(parts[0]) MiniView.openChat(parts[0], parts[1] || 'general');
         }
     },
     
@@ -49664,25 +48743,28 @@ const Notifications = {
             console.error('Erreur markAsRead:', e);
         }
     },
-    
-    // Marquer toutes comme lues
-    markAllRead: async () => {
+
+    // Effacer toutes les notifications
+    clearAll: async () => {
         if(!state.currentUser) return;
-        
+        if(Notifications.items.length === 0) { Utils.toast('Aucune notification à effacer', 'info'); return; }
+        const ok = await ConfirmModal.confirm('Effacer toutes vos notifications ? Cette action est définitive.', 'Effacer les notifications', true);
+        if(!ok) return;
         const email = state.currentUser.email.toLowerCase();
-        const unreadIds = Notifications.items.filter(n => !n.read).map(n => n.id);
-        
-        if(unreadIds.length > 0) {
-            try {
-                const {error: maErr} = await supabase.from('notifications').update({ read: true }).eq('user_email', email).eq('read', false);
-                if(maErr) throw maErr;
-                Utils.toast('Toutes les notifications marquées comme lues', 'success');
-            } catch(e) {
-                console.error('Erreur markAllRead:', e);
-            }
+        try {
+            const { error } = await supabase.from('notifications').delete().eq('user_email', email);
+            if(error) throw error;
+            Notifications.items = [];
+            Notifications.unreadCount = 0;
+            Notifications.updateBadge();
+            Notifications.renderList();
+            Utils.toast('Notifications effacées', 'success');
+        } catch(e) {
+            console.error('Erreur clearAll:', e);
+            Utils.toast("Impossible d'effacer les notifications.", 'error');
         }
     },
-    
+
     // Envoyer une notification à un utilisateur
     // ===================== ENVOI & RÔLES =====================
     send: async (toEmail, type, message, projectId = null) => {
@@ -58162,37 +57244,6 @@ const UniverseProfileModal = {
         }
     },
 
-    // Envoyer le message de contact
-    
-    // Envoyer le message de contact
-    sendContactMessage: async () => {
-        const profile = Universe.currentProfile;
-        if(!profile) return;
-        
-        const subject = document.getElementById('contact-subject').value.trim();
-        const message = document.getElementById('contact-message').value.trim();
-        
-        if(!subject || !message) {
-            Utils.toast('Veuillez remplir l\'objet et le message.', 'warning');
-            return;
-        }
-        
-        try {
-            // Envoyer le message au profil destinataire
-            await Messages.send(profile.email || profile.ownerId?.replace(/,/g, '.'), {
-                type: 'info',
-                title: subject,
-                content: message
-            }, profile.id); // profile.id = profileId du destinataire
-            
-            Utils.toast('Message envoyé !', 'success');
-            document.getElementById('contact-profile-modal').remove();
-        } catch(e) {
-            console.error('Erreur envoi message:', e);
-            Utils.toast('Erreur lors de l\'envoi du message.', 'error');
-        }
-    },
-    
     // Ajouter à un projet
     addToProject: async () => {
         if(!Universe.currentProfile) return;
@@ -58678,7 +57729,7 @@ const UniverseMap = {
                 <div style="padding:20px; display:flex; gap:10px;">
                     <button onclick="this.closest('div[style*=fixed]').remove()" style="flex:1; padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; cursor:pointer; color:var(--text-main);">Fermer</button>
                     ${!isProject ? `<button onclick="this.closest('div[style*=fixed]').remove(); app.Universe.contactProfile();" style="flex:1; padding:12px; background:var(--primary); color:white; border:none; border-radius:8px; cursor:pointer;">✉️ Contacter</button>` : ''}
-                    ${isProject ? `<button onclick="app.Messages.openCompose('${fullProfile.ownerEmail || ''}'); this.closest('div[style*=fixed]').remove();" style="flex:1; padding:12px; background:#e94560; color:white; border:none; border-radius:8px; cursor:pointer;">✉️ Contacter le projet</button>` : ''}
+                    ${isProject ? `<button onclick="this.closest('div[style*=fixed]').remove(); app.Universe.contactProject('${fullProfile.id || ''}', '${Utils.escape(fullProfile.title || '')}', '${fullProfile.ownerEmail || ''}');" style="flex:1; padding:12px; background:#e94560; color:white; border:none; border-radius:8px; cursor:pointer;">✉️ Contacter le projet</button>` : ''}
                 </div>
             </div>
         `;
@@ -59688,7 +58739,6 @@ hoverCard: null,
     toggleFavorite: (...a) => UniverseProfileModal.toggleFavorite(...a),
     updateFavoriteButton: (...a) => UniverseProfileModal.updateFavoriteButton(...a),
     contactProfile: (...a) => UniverseProfileModal.contactProfile(...a),
-    sendContactMessage: (...a) => UniverseProfileModal.sendContactMessage(...a),
     addToProject: (...a) => UniverseProfileModal.addToProject(...a),
     sendProjectRequest: (...a) => UniverseProfileModal.sendProjectRequest(...a),
 	
@@ -59738,731 +58788,7 @@ hoverCard: null,
 
 // --- MODULE MESSAGES V85 ---
 const Messages = {
-    // ===================== ÉTAT & FILTRES =====================
-    currentMessageId: null,
-    messages: [],
-    allMessages: [],
-    filteredMessages: [],
-    
-    // Initialise les filtres de profils
-    initFilters: () => {
-        const select = document.getElementById('messages-filter-profile');
-        if(!select) return;
-        
-        select.innerHTML = '<option value="">📬 Tous les profils</option>';
-        
-        const profiles = PublicProfile.profiles || [];
-        profiles.forEach(profile => {
-            const opt = document.createElement('option');
-            opt.value = profile.id;
-            const icon = profile.type === 'actor' ? '🎭' : 
-                        profile.type === 'crew' ? '🎥' : 
-                        profile.type === 'association' ? '🏛️' : 
-                        profile.type === 'enterprise' ? '🏢' : '👤';
-            const name = profile.name || profile.assoName || profile.entName || 'Profil';
-            opt.textContent = `${icon} ${name}`;
-            select.appendChild(opt);
-        });
-    },
-    
-    // Applique les filtres
-    applyFilters: () => {
-        const profileFilter = document.getElementById('messages-filter-profile')?.value || '';
-        const typeFilter = document.getElementById('messages-filter-type')?.value || '';
-        const statusFilter = document.getElementById('messages-filter-status')?.value || '';
-        
-        // ID du premier profil (pour les messages sans profileId)
-        const firstProfileId = (PublicProfile.profiles && PublicProfile.profiles.length > 0) 
-            ? PublicProfile.profiles[0].id 
-            : null;
-        
-        Messages.filteredMessages = Messages.allMessages.filter(msg => {
-            // Filtre par profil - les messages sans profileId sont attribués au premier profil
-            if(profileFilter) {
-                const msgProfileId = msg.profileId || firstProfileId;
-                if(msgProfileId !== profileFilter) return false;
-            }
-            // Filtre par type
-            if(typeFilter && msg.type !== typeFilter) return false;
-            // Filtre par statut
-            if(statusFilter === 'unread' && msg.read) return false;
-            if(statusFilter === 'read' && !msg.read) return false;
-            return true;
-        });
-        
-        Messages.render();
-    },
-    
-    // Trouve le nom du profil par son ID
-    getProfileName: (profileId) => {
-        const profiles = PublicProfile.profiles || [];
-        
-        // Si pas de profileId, retourner le premier profil ou un défaut
-        if(!profileId) {
-            if(profiles.length > 0) {
-                const profile = profiles[0];
-                const icon = profile.type === 'actor' ? '🎭' : 
-                            profile.type === 'crew' ? '🎥' : 
-                            profile.type === 'association' ? '🏛️' : 
-                            profile.type === 'enterprise' ? '🏢' : '👤';
-                const name = profile.name || profile.assoName || profile.entName || 'Mon profil';
-                return { icon, name, photo: profile.photo };
-            }
-            return { icon: '👤', name: 'Mon compte', photo: null };
-        }
-        
-        const profile = profiles.find(p => p.id === profileId);
-        if(!profile) return { icon: '👤', name: 'Profil inconnu', photo: null };
-        
-        const icon = profile.type === 'actor' ? '🎭' : 
-                    profile.type === 'crew' ? '🎥' : 
-                    profile.type === 'association' ? '🏛️' : 
-                    profile.type === 'enterprise' ? '🏢' : '👤';
-        const name = profile.name || profile.assoName || profile.entName || 'Profil';
-        return { icon, name, photo: profile.photo };
-    },
-    
-
-    // ===================== CHARGEMENT & RENDU =====================
-	    // Charge les messages de l'utilisateur
-    load: async () => {
-        if(!state.currentUser) return;
-        
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
-        
-        Messages.initFilters();
-        
-        try {
-            // I4c: filtrer par profil actif
-            const activeProfileId = ActiveProfile.getId();
-            const currentEmail = state.currentUser.email.toLowerCase();
-            
-            let query = supabase.from('messages').select('*');
-            
-            // Mono-profil : un compte = un email = une boîte. Routage par email uniquement.
-            query = query.or(`to_email.eq.${currentEmail},from_email.eq.${currentEmail}`);
-            
-            const { data: messagesData } = await query.order('created_at', { ascending: false });
-            const snap = { val: () => messagesData ? messagesData.reduce((acc, m) => { acc[m.id] = m; return acc; }, {}) : {} };
-            const data = snap.val();
-            
-            Messages.allMessages = [];
-            
-            if(data) {
-                Object.keys(data).forEach(key => {
-                    const item = data[key];
-                    // Utiliser created_at (colonne DB) ou createdAt (legacy JSON)
-                    const date = item.created_at || item.createdAt;
-                    if(date) {
-                        Messages.allMessages.push({ 
-                            id: key, 
-                            ...item,
-                            createdAt: date  // normaliser pour le reste du code
-                        });
-                    }
-                });
-                
-                // Trier par date décroissante
-                Messages.allMessages.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            }
-            
-            Messages.filteredMessages = [...Messages.allMessages];
-            Messages.updateBadge();
-            Messages.render();
-        } catch(e) {
-            console.error('Erreur chargement messages:', e);
-        }
-    },
-    
-    // Met à jour le badge de notification
-    updateBadge: () => {
-        const totalUnread = Messages.allMessages.filter(m => !m.read).length;
-        
-        const badge = document.getElementById('messages-badge');
-        if(badge) {
-            if(totalUnread > 0) {
-                badge.textContent = totalUnread;
-                badge.style.display = 'inline';
-            } else {
-                badge.style.display = 'none';
-            }
-        }
-    },
-    
-    // Affiche la liste des messages
-    render: () => {
-        const container = document.getElementById('messages-list');
-        if(!container) return;
-        
-        if(Messages.filteredMessages.length === 0) {
-            container.innerHTML = '<div class="message-empty">📭 Aucun message.</div>';
-            return;
-        }
-        
-        let html = '';
-        Messages.filteredMessages.forEach(msg => {
-            const date = new Date(msg.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-            const typeLabel = msg.type === 'invitation' ? '🎬 Invitation' : (msg.type === 'convocation' ? '📅 Convocation' : 'ℹ️ Information');
-            const preview = msg.content ? msg.content.substring(0, 100) + (msg.content.length > 100 ? '...' : '') : '';
-            
-            // Info du profil destinataire
-            const profileInfo = Messages.getProfileName(msg.profileId);
-            const defaultAvatar = `<div style="width: 20px; height: 20px; border-radius: 50%; background: var(--border); display: flex; align-items: center; justify-content: center; font-size: 10px;">${profileInfo.icon}</div>`;
-            const profileBadge = `<div style="display: inline-flex; align-items: center; gap: 6px; background: var(--bg); padding: 4px 10px; border-radius: 15px; font-size: 0.8rem; border: 1px solid var(--border);">
-                    ${profileInfo.photo ? `<img src="${profileInfo.photo}" style="width: 20px; height: 20px; border-radius: 50%; object-fit: cover;">` : defaultAvatar}
-                    <span style="color: var(--text-main); font-weight: 500;">${Utils.escape(profileInfo.name)}</span>
-                   </div>`;
-            
-            html += `
-                <div class="message-card ${msg.read ? '' : 'unread'}" onclick="app.Messages.openDetail('${msg.id}')">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 5px;">
-                        <span class="message-card-type ${msg.type}">${typeLabel}</span>
-                        ${profileBadge}
-                    </div>
-                    <div class="message-card-header">
-                        <div class="message-card-title">${Utils.escape(msg.title)}</div>
-                        <div class="message-card-date">${date}</div>
-                    </div>
-                    <div class="message-card-from">De : ${Utils.escape(msg.fromName || msg.fromUser)}</div>
-                    ${msg.projectTitle ? `<div style="font-size:0.8rem; color:var(--text-sec); margin-bottom:5px;">📁 ${Utils.escape(msg.projectTitle)}</div>` : ''}
-                    <div class="message-card-preview">${Utils.escape(preview)}</div>
-                </div>
-            `;
-        });
-        
-        container.innerHTML = html;
-    },
-    
-    // ===================== DÉTAIL & RÉPONSES =====================
-	    // Ouvre le détail d'un message
-    openDetail: async (messageId) => {
-        const msg = Messages.allMessages.find(m => m.id === messageId);
-        if(!msg) return;
-        
-        Messages.currentMessageId = messageId;
-        
-        // Marquer comme lu
-        if(!msg.read) {
-            msg.read = true;
-            // Mettre à jour aussi dans filteredMessages
-            const filteredMsg = Messages.filteredMessages.find(m => m.id === messageId);
-            if(filteredMsg) filteredMsg.read = true;
-            
-            const emailKey = Utils.sanitizeEmail(state.currentUser.email);
-            const {error: readErr} = await supabase.from('messages').update({ read: true }).eq('id', messageId);
-            if(readErr) console.error('Erreur marquage lu:', readErr);
-            Messages.updateBadge();
-            Messages.render();
-        }
-        
-        // Afficher le modal
-        const date = new Date(msg.createdAt).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-        
-        document.getElementById('message-detail-title').textContent = msg.title;
-        document.getElementById('message-detail-meta').innerHTML = `
-            <div><strong>De :</strong> ${Utils.escape(msg.fromName || msg.fromUser)}</div>
-            <div><strong>Date :</strong> ${date}</div>
-            ${msg.projectTitle ? `<div><strong>Projet :</strong> ${Utils.escape(msg.projectTitle)}</div>` : ''}
-        `;
-        document.getElementById('message-detail-content').textContent = msg.content;
-        
-        // Afficher les actions selon le type de message
-        const quickActions = document.getElementById('message-detail-quick-actions');
-        if(msg.type === 'claim') {
-            quickActions.innerHTML = `
-                <div class="flex-wrap-center">
-                    <button onclick="app.PublicProfile.open(); app.Messages.closeDetail();" style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                        ✨ Voir / Revendiquer mon profil
-                    </button>
-                    <button onclick="app.Messages.proposeExistingProfile('${msg.fromUser}', '${msg.projectId || ''}', '${Utils.escape(msg.projectTitle || '')}', '${msg.claimId || ''}')" style="background: var(--warning); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                        📤 J'ai déjà un profil (autre email)
-                    </button>
-                    <button onclick="app.Messages.replyTo('${msg.fromUser}')" class="btn btn--primary btn--r8">
-                        💬 Contacter ${Utils.escape(msg.fromName || 'l\'expéditeur')}
-                    </button>
-                    <button onclick="app.Messages.quickReply('${msg.fromUser}', 'info')" class="n8-badge-13">
-                        ❓ Demande d'information
-                    </button>
-                </div>
-            `;
-            quickActions.style.display = 'block';
-        } else if(msg.type === 'invitation') {
-            quickActions.innerHTML = `
-                <div class="flex-wrap-center">
-                    ${msg.projectId ? `<button onclick="app.Store.loadProject('${msg.projectId}'); app.Messages.closeDetail();" style="background: var(--success); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                        ✅ Ouvrir le projet
-                    </button>` : ''}
-                    <button onclick="app.Messages.replyTo('${msg.fromUser}')" class="btn btn--primary btn--r8">
-                        💬 Contacter ${Utils.escape(msg.fromName || 'l\'expéditeur')}
-                    </button>
-                    <button onclick="app.Messages.quickReply('${msg.fromUser}', 'accept')" style="background: var(--success); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer;">
-                        👍 Accepter
-                    </button>
-                    <button onclick="app.Messages.quickReply('${msg.fromUser}', 'decline')" class="n8-badge-16">
-                        👎 Décliner
-                    </button>
-                    <button onclick="app.Messages.quickReply('${msg.fromUser}', 'info')" class="n8-badge-13">
-                        ❓ Demande d'information
-                    </button>
-                </div>
-            `;
-            quickActions.style.display = 'block';
-        } else if(msg.type === 'profile_proposal' && msg.proposedProfile) {
-            const profile = msg.proposedProfile;
-            const photoHtml = profile.photo 
-                ? `<img src="${profile.photo}" style="width:60px;height:60px;border-radius:50%;object-fit:cover;">` 
-                : `<div style="width:60px;height:60px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:1.5rem;color:white;">${(profile.name || '?')[0].toUpperCase()}</div>`;
-            const typeIcon = profile.type === 'actor' ? '🎭' : profile.type === 'crew' ? '🎥' : '📁';
-            
-            quickActions.innerHTML = `
-                <div style="background:var(--bg);border-radius:10px;padding:15px;margin-bottom:15px;">
-                    <div style="display:flex;align-items:center;gap:15px;">
-                        ${photoHtml}
-                        <div>
-                            <div style="font-weight:bold;font-size:1.1rem;color:var(--text-main);">${typeIcon} ${Utils.escape(profile.name)}</div>
-                            <div class="text-sec">${Utils.escape(profile.city || '')} ${profile.role ? '• ' + Utils.escape(profile.role) : ''}</div>
-                            <div style="color:var(--primary);font-size:0.9rem;">${Utils.escape(profile.email)}</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="flex-wrap-center">
-                    <button onclick="app.Messages.acceptProfileProposal('${msg.id}')" style="background: var(--success); color: white; border: none; padding: 12px 25px; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                        ✅ Accepter ce profil
-                    </button>
-                    <button onclick="app.Messages.replyTo('${msg.fromUser}')" class="btn btn--primary btn--r8">
-                        💬 Contacter ${Utils.escape(msg.fromName || 'l\'expéditeur')}
-                    </button>
-                    <button onclick="app.Messages.declineProfileProposal('${msg.fromUser}')" class="n8-badge-16">
-                        ❌ Refuser
-                    </button>
-                </div>
-            `;
-            quickActions.style.display = 'block';
-        } else {
-            quickActions.innerHTML = `
-                <div class="flex-wrap-center">
-                    <button onclick="app.Messages.replyTo('${msg.fromUser}')" class="btn btn--primary btn--r8">
-                        💬 Répondre
-                    </button>
-                </div>
-            `;
-            quickActions.style.display = 'block';
-        }
-        
-        document.getElementById('message-detail-modal').style.display = 'flex';
-    },
-    
-    // Ferme le détail
-    closeDetail: () => {
-        document.getElementById('message-detail-modal').style.display = 'none';
-        Messages.currentMessageId = null;
-    },
-    
-    // Répondre à un message
-    replyTo: (toEmail) => {
-        Messages.closeDetail();
-        // Ouvrir le modal de nouveau message avec destinataire pré-rempli
-        const modal = document.createElement('div');
-        modal.id = 'reply-modal';
-        modal.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); display:flex; justify-content:center; align-items:center; z-index:10002;';
-        modal.innerHTML = `
-            <div style="background:var(--panel-bg); border-radius:12px; padding:25px; max-width:500px; width:90%;">
-                <h3 class="mb-15">💬 Répondre à ${Utils.escape(toEmail)}</h3>
-                <textarea id="reply-message-content" placeholder="Votre message..." class="n8-input-2"></textarea>
-                <div class="flex-end">
-                    <button onclick="document.getElementById('reply-modal').remove();" class="btn btn--secondary btn--r8">Annuler</button>
-                    <button onclick="app.Messages.sendReply('${toEmail}')" class="btn btn--primary btn--r8">📤 Envoyer</button>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(modal);
-        document.getElementById('reply-message-content').focus();
-    },
-    
-    // Envoyer la réponse
-    sendReply: async (toEmail) => {
-        const content = document.getElementById('reply-message-content').value.trim();
-        if(!content) {
-            Utils.toast('Veuillez écrire un message', 'warning');
-            return;
-        }
-        
-        await Messages.send(toEmail, {
-            title: 'Réponse de ' + (state.userProfile?.displayName || state.currentUser.email.split('@')[0]),
-            content: content,
-            type: 'message'
-        });
-        
-        document.getElementById('reply-modal').remove();
-        Utils.toast('Message envoyé !', 'success');
-    },
-    
-    // Réponse rapide pré-définie
-    quickReply: async (toEmail, replyType) => {
-        let title = '';
-        let content = '';
-        
-        switch(replyType) {
-            case 'accept':
-                title = '✅ Invitation acceptée';
-                content = 'Bonjour,\n\nJe vous confirme ma participation au projet. Merci pour cette invitation !\n\nCordialement';
-                break;
-            case 'decline':
-                title = '❌ Invitation déclinée';
-                content = 'Bonjour,\n\nMalheureusement, je ne pourrai pas participer à ce projet. Merci quand même pour cette proposition.\n\nCordialement';
-                break;
-            case 'info':
-                title = '❓ Demande d\'information';
-                content = 'Bonjour,\n\nAvant de donner ma réponse, pourriez-vous me donner plus d\'informations sur :\n- Les dates de tournage\n- Le lieu\n- Les conditions\n\nMerci d\'avance !';
-                break;
-            default:
-                return;
-        }
-        
-        // Ouvrir le modal de réponse avec le contenu pré-rempli
-        Messages.closeDetail();
-        const modal = document.createElement('div');
-        modal.id = 'reply-modal';
-        modal.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); display:flex; justify-content:center; align-items:center; z-index:10002;';
-        modal.innerHTML = `
-            <div style="background:var(--panel-bg); border-radius:12px; padding:25px; max-width:500px; width:90%;">
-                <h3 class="mb-15">${title}</h3>
-                <textarea id="reply-message-content" class="n8-input-2">${content}</textarea>
-                <div class="flex-end">
-                    <button onclick="document.getElementById('reply-modal').remove();" class="btn btn--secondary btn--r8">Annuler</button>
-                    <button onclick="app.Messages.sendQuickReply('${toEmail}', '${title}')" class="btn btn--primary btn--r8">📤 Envoyer</button>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(modal);
-    },
-    
-    // Envoyer la réponse rapide
-    sendQuickReply: async (toEmail, title) => {
-        const content = document.getElementById('reply-message-content').value.trim();
-        if(!content) {
-            Utils.toast('Veuillez écrire un message', 'warning');
-            return;
-        }
-        
-        await Messages.send(toEmail, {
-            title: title,
-            content: content,
-            type: 'message'
-        });
-        
-        document.getElementById('reply-modal').remove();
-        Utils.toast('Message envoyé !', 'success');
-    },
-	
-    // ===================== PROPOSITION DE PROFIL =====================    
-    // Proposer un profil existant au porteur de projet
-    proposeExistingProfile: async (toEmail, projectId, projectTitle, claimId) => {
-        Messages.closeDetail();
-        
-        // Charger les profils de l'utilisateur
-        if(!PublicProfile.profiles || PublicProfile.profiles.length === 0) {
-            ActiveProfile.ensureValid();
-        setTimeout(() => ActiveProfile.attachToDom(), 100);
-        }
-        
-        if(PublicProfile.profiles.length === 0) {
-            Utils.toast('Vous n\'avez pas encore de profil. Créez-en un d\'abord !', 'warning');
-            PublicProfile.open();
-            return;
-        }
-        
-        // Créer le modal de sélection de profil
-        const modal = document.createElement('div');
-        modal.id = 'propose-profile-modal';
-        modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);display:flex;justify-content:center;align-items:center;z-index:10002;';
-        modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
-        
-        let profilesHtml = '';
-        PublicProfile.profiles.forEach((profile, idx) => {
-            if(!profile.type) return; // Ignorer les profils incomplets
-            
-            const icon = profile.type === 'actor' ? '🎭' : profile.type === 'crew' ? '🎥' : profile.type === 'association' ? '🏛️' : '🏢';
-            const name = profile.name || profile.assoName || profile.entName || 'Sans nom';
-            const photoHtml = profile.photo 
-                ? `<img src="${profile.photo}" style="width:50px;height:50px;border-radius:50%;object-fit:cover;">` 
-                : `<div style="width:50px;height:50px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:1.5rem;color:white;">${name[0].toUpperCase()}</div>`;
-            
-            profilesHtml += `
-                <div onclick="app.Messages.sendProfileProposal('${toEmail}', '${projectId}', '${projectTitle}', '${claimId}', ${idx})" style="display:flex;align-items:center;gap:15px;padding:15px;background:var(--bg);border:2px solid var(--border);border-radius:10px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border)'">
-                    ${photoHtml}
-                    <div class="flex-1">
-                        <div style="font-weight:bold;color:var(--text-main);">${icon} ${Utils.escape(name)}</div>
-                        <div style="font-size:0.85rem;color:var(--text-sec);">${Utils.escape(profile.city || '')} ${profile.role ? '• ' + Utils.escape(profile.role) : ''}</div>
-                        <div style="font-size:0.8rem;color:var(--primary);">${profile.email || state.currentUser.email}</div>
-                    </div>
-                </div>
-            `;
-        });
-        
-        modal.innerHTML = `
-            <div class="modal-panel">
-                <h3 style="margin:0 0 10px;color:var(--text-main);">📤 Proposer mon profil existant</h3>
-                <p style="color:var(--text-sec);margin-bottom:20px;">Sélectionnez le profil à envoyer au porteur de projet :</p>
-                
-                <div style="display:flex;flex-direction:column;gap:10px;">
-                    ${profilesHtml || '<p style="color:var(--text-sec);text-align:center;">Aucun profil disponible</p>'}
-                </div>
-                
-                <div style="margin-top:20px;text-align:center;">
-                    <button onclick="document.getElementById('propose-profile-modal').remove()" style="padding:10px 25px;background:var(--border);color:var(--text-main);border:none;border-radius:8px;cursor:pointer;">Annuler</button>
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(modal);
-    },
-    
-    // Envoyer la proposition de profil au porteur
-    sendProfileProposal: async (toEmail, projectId, projectTitle, claimId, profileIdx) => {
-        const profile = PublicProfile.profiles[profileIdx];
-        if(!profile) return;
-        
-        document.getElementById('propose-profile-modal')?.remove();
-        
-        const myName = profile.name || profile.assoName || profile.entName || state.currentUser.email.split('@')[0];
-        const typeLabel = profile.type === 'actor' ? 'comédien' : profile.type === 'crew' ? 'technicien' : profile.type;
-        
-        try {
-            await Messages.send(toEmail, {
-                type: 'profile_proposal',
-                title: `📤 ${myName} vous propose son profil ${typeLabel} existant`,
-                content: `Bonjour,\n\nVous m'avez ajouté au projet "${projectTitle}" mais j'ai déjà un profil ${typeLabel} sur Moteur avec une autre adresse email.\n\nJe vous propose d'utiliser mon profil existant pour que mes informations soient à jour.\n\nCordialement,\n${myName}`,
-                projectId: projectId,
-                projectTitle: projectTitle,
-                claimId: claimId,
-                proposedProfile: {
-                    id: profile.id,
-                    type: profile.type,
-                    name: myName,
-                    email: profile.email || state.currentUser.email,
-                    photo: profile.photo || '',
-                    city: profile.city || '',
-                    role: profile.role || '',
-                    department: profile.department || ''
-                }
-            });
-            
-            Utils.toast('Votre profil a été proposé au porteur de projet !', 'success');
-        } catch(e) {
-            console.error('Erreur envoi proposition:', e);
-            Utils.toast('Erreur lors de l\'envoi', 'error');
-        }
-    },
-    
-    // Accepter une proposition de profil
-    acceptProfileProposal: async (messageId) => {
-        const msg = Messages.allMessages.find(m => m.id === messageId);
-        if(!msg || !msg.proposedProfile || !msg.projectId) {
-            Utils.toast('Données de proposition incomplètes', 'error');
-            return;
-        }
-        
-        const profile = msg.proposedProfile;
-        
-        try {
-            // Charger le projet depuis Supabase
-            const { data: projectRow, error: projectError } = await supabase
-                .from('projects')
-                .select('data')
-                .eq('id', msg.projectId)
-                .maybeSingle();
-            
-            if(projectError || !projectRow) {
-                Utils.toast('Projet introuvable', 'error');
-                return;
-            }
-            
-            const projectData = projectRow.data || {};
-            
-            // Trouver et mettre à jour le membre correspondant
-            const dataArray = profile.type === 'actor' ? projectData.actors : projectData.crew;
-            const tableName = profile.type === 'actor' ? 'public_actors' : 'public_crew';
-            
-            if(dataArray && Array.isArray(dataArray)) {
-                // Chercher par claimId ou par ancien email
-                let memberIdx = -1;
-                
-                // D'abord essayer de trouver via le pending claim
-                if(msg.claimId) {
-                    memberIdx = dataArray.findIndex(m => m.id && msg.claimId.includes(m.id.replace('act_', '').replace('crew_', '')));
-                }
-                
-                // Sinon chercher par email de l'expéditeur
-                if(memberIdx === -1) {
-                    memberIdx = dataArray.findIndex(m => m.email && m.email.toLowerCase() === msg.fromUser.toLowerCase());
-                }
-                
-                if(memberIdx !== -1) {
-                    // Charger les données complètes du profil public depuis Supabase
-                    const { data: publicData } = await supabase
-                        .from(tableName)
-                        .select('*')
-                        .eq('id', profile.id)
-                        .maybeSingle();
-                    
-                    if(publicData) {
-                        // Mettre à jour avec les données du profil public
-                        dataArray[memberIdx] = {
-                            ...dataArray[memberIdx],
-                            ...publicData,
-                            id: dataArray[memberIdx].id, // Garder l'ID local
-                            publicProfileId: profile.id,
-                            email: profile.email
-                        };
-                        
-                        // Sauvegarder dans Supabase
-                        const updatePath = profile.type === 'actor' ? 'actors' : 'crew';
-                        const newData = { ...projectData, [updatePath]: dataArray };
-                        await supabase
-                            .from('projects')
-                            .update({ data: newData, updated_at: new Date().toISOString() })
-                            .eq('id', msg.projectId);
-                        
-                        // Note: pending_profile_claims géré via messages système
-                        // Rien à supprimer ici, le claim est traité
-                        
-                        // Notifier la personne
-                        await Messages.send(msg.fromUser, {
-                            type: 'info',
-                            title: '✅ Votre profil a été accepté !',
-                            content: `Bonne nouvelle ! Votre profil existant a été lié au projet "${msg.projectTitle}".\n\nVos informations sont maintenant synchronisées.`,
-                            projectId: msg.projectId,
-                            projectTitle: msg.projectTitle
-                        });
-                        
-                        Messages.closeDetail();
-                        Utils.toast('Profil accepté et lié au projet !', 'success');
-                        
-                        // Recharger le projet si on est dessus
-                        if(state.currentProjectId === msg.projectId) {
-                            Store.loadProject(msg.projectId);
-                        }
-                        
-                        return;
-                    }
-                }
-            }
-            
-            Utils.toast('Impossible de trouver le membre dans le projet', 'error');
-        } catch(e) {
-            console.error('Erreur acceptation profil:', e);
-            Utils.toast('Erreur lors de l\'acceptation', 'error');
-        }
-    },
-    
-    // Refuser une proposition de profil
-    declineProfileProposal: async (fromEmail) => {
-        if(!await ConfirmModal.show({ title: 'Refuser cette proposition ?', message: 'La proposition de profil sera refusée.', icon: '❌', confirmText: 'Refuser', dangerous: true })) return;
-        
-        await Messages.send(fromEmail, {
-            type: 'info',
-            title: '❌ Proposition de profil déclinée',
-            content: 'Le porteur de projet a décliné votre proposition de profil. Il souhaite peut-être que vous créiez un nouveau profil spécifique pour ce projet.\n\nN\'hésitez pas à le contacter pour plus d\'informations.'
-        });
-        
-        Messages.closeDetail();
-        Utils.toast('Proposition refusée', 'info');
-    },
-	
-    // ===================== SUPPRESSION & ENVOI =====================
-    // Supprime un message
-    deleteMessage: async () => {
-        if(!Messages.currentMessageId) return;
-        if(!await ConfirmModal.confirmDelete("Ce message sera supprimé.")) return;
-        
-        const emailKey = Utils.sanitizeEmail(state.currentUser.email);
-        const {error: delMsgErr} = await supabase.from('messages').delete().eq('id', Messages.currentMessageId);
-        if(delMsgErr) { console.error('Erreur suppression message:', delMsgErr); Toast.show('Erreur suppression message', 'error'); return; }
-        
-        Messages.messages = Messages.messages.filter(m => m.id !== Messages.currentMessageId);
-        Messages.closeDetail();
-        Messages.updateBadge();
-        Messages.render();
-    },
-    
-    // Envoie un message à un utilisateur
-    send: async (toEmail, message, toProfileId = null) => {
-        const emailKey = Utils.sanitizeEmail(toEmail.toLowerCase());
-        
-        // G5b: Vérifier le blocage badge noir
-        if(state.currentUser?.email) {
-            const check = await Moderation.canCommunicate(state.currentUser.email, toEmail);
-            if(!check.allowed) {
-                Utils.toast(check.reason, 'warning', 6000);
-                throw new Error('MODERATION_BLOCKED: ' + check.reason);
-            }
-        }
-        
-        // I4b: utiliser le profil actif global comme expéditeur
-        // Fallback : Messages.currentProfileId (legacy) ou premier profil
-        const fromProfileId = ActiveProfile.getId() 
-            || Messages.currentProfileId 
-            || (PublicProfile.profiles[0]?.id) 
-            || null;
-        
-        // Nom d'expéditeur : celui du profil actif si disponible, sinon displayName / email
-        const fromProfile = PublicProfile.profiles?.find(p => p.id === fromProfileId);
-        const fromName = fromProfile?.name 
-            || fromProfile?.assoName 
-            || fromProfile?.entName 
-            || state.userProfile?.displayName 
-            || state.currentUser.email.split('@')[0];
-        
-        const messageData = {
-            ...message,
-            fromUser: state.currentUser.email,
-            fromName: fromName,
-            fromProfileId: fromProfileId,
-            profileId: toProfileId, // Profil destinataire (legacy data)
-            createdAt: new Date().toISOString(),
-            read: false
-        };
-        
-        // Sauvegarder dans Supabase (avec les vraies colonnes I4a)
-        // id auto-généré via gen_random_uuid() en DB
-        const { error } = await supabase
-            .from('messages')
-            .insert({
-                to_email: toEmail,
-                from_email: state.currentUser.email,
-                from_name: fromName,
-                from_profile_id: fromProfileId,
-                to_profile_id: toProfileId,
-                type: messageData.type || 'message',
-                subject: messageData.subject || messageData.title || '',
-                content: messageData.content || '',
-                data: messageData,
-                read: false,
-                created_at: messageData.createdAt
-            });
-        
-        if(error) {
-            console.error('Erreur envoi message:', error);
-            throw error;
-        }
-        
-        // Envoyer une notification pour la cloche
-        try {
-            await Notifications.send(
-                toEmail,
-                'message',
-                `💬 ${messageData.fromName} vous a envoyé un message : "${message.subject || 'Nouveau message'}"`,
-                message.projectId || null
-            );
-        } catch(e) {
-            console.warn('Erreur notification message:', e);
-        }
-        
-        return true; // Succès (l'id est auto-généré par la DB)
-    },
-    
-    // ===================== EMAIL & COMPOSITION =====================
+    // Messagerie interne retirée — ne restent que les helpers d'envoi d'email (Brevo).// ===================== EMAIL & COMPOSITION =====================
     // Nettoie une string pour l'email (supprime caractères problématiques)
     sanitizeForEmail: (str) => {
         if(str === null || str === undefined) return '';
@@ -60564,15 +58890,6 @@ const Messages = {
             console.error('Erreur ping email:', e);
         }
     },
-
-    openCompose: (toEmail) => {
-        if(!toEmail) return Utils.toast('Pas d\'email disponible', 'warning');
-        PublicProfile.open();
-        setTimeout(() => {
-            PublicProfile.showTab('messages');
-            setTimeout(() => Messages.quickReply(toEmail), 200);
-        }, 200);
-    }
 };
 
 // --- MODULE INVITATIONS V84 ---
@@ -60797,7 +59114,7 @@ const Invitations = {
             // Cloche in-app + email externe direct (plus de message interne)
             const roleLabel = role === 'editor' ? 'Éditeur' : 'Lecteur';
             try {
-                await Notifications.send(email, 'invite', `${inviterName} vous a invité(e) au projet \"${projectTitle}\" en tant que ${roleLabel}`, pid);
+                if(userExists) await Notifications.send(email, 'invite', `${inviterName} vous a invité(e) au projet \"${projectTitle}\" en tant que ${roleLabel}`, pid);
             } catch(e) { console.warn('Notification invitation:', e); }
             
             // Envoyer un ping email
@@ -69184,7 +67501,7 @@ const Weather = {
   // ========== MODE FOCUS (Plein écran onglet) ==========
   const FocusMode = {
       isActive: false,
-      tabOrder: ['presentation', 'synopsis', 'board', 'titlepage', 'script', 'moodboard', 'storyboard', 'chars', 'actors', 'locs', 'resources', 'crew', 'breakdown', 'stats', 'planning', 'scriptreport', 'expenses', 'chat'],
+      tabOrder: ['presentation', 'synopsis', 'board', 'titlepage', 'script', 'moodboard', 'storyboard', 'chars', 'actors', 'locs', 'resources', 'crew', 'breakdown', 'stats', 'planning', 'scriptreport', 'expenses'],
       tabNames: {
           'presentation': '📋 Présentation',
           'synopsis': '📝 Synopsis', 
@@ -69202,8 +67519,7 @@ const Weather = {
           'stats': '📊 Statistiques',
           'planning': '📅 Planning',
           'scriptreport': '📝 Rapport',
-          'expenses': '💰 Dépenses',
-          'chat': '💬 Chat'
+          'expenses': '💰 Dépenses'
       },
       
       toggle: () => {
@@ -70611,7 +68927,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Chat, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, ContractsTemplates, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
+  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, ContractsTemplates, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tutorial, Hub, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF };
 })();
 </script>
 
