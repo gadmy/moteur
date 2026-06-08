@@ -2336,8 +2336,7 @@ V1.0 - Base solide (Déc. 2024)
 <!-- Supabase SDK -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1"></script>
 
-<!-- EmailJS SDK pour les invitations -->
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<!-- EmailJS retiré : emails transactionnels via Edge Function Supabase (super-action) + Brevo -->
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <!-- Leaflet Map -->
@@ -7423,7 +7422,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv524.1</p>
+      <p>vv524.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -48886,15 +48885,16 @@ const Contracts = {
         const contractType = type === 'cddu' ? 'CDDU' : (type === 'prestation' ? 'contrat de prestation' : 'autorisation droit à l\'image');
         
         try {
-            await emailjs.send(CONFIG.emailJS.serviceId, CONFIG.emailJS.templateId, {
-                to_email: p.email,
-                to_name: p.name,
-                from_name: state.currentUser?.displayName || state.currentUser?.email || 'L\'équipe',
-                project_title: projectTitle,
-                subject: `🎬 ${projectTitle} - Infos requises pour ton contrat`,
-                message: `Salut ${p.name} ! 👋\n\nLe projet "${projectTitle}" a besoin de quelques informations pour générer ton ${contractType}.\n\nIl manque : ${issues.join(', ')}\n\nPeux-tu mettre à jour ton profil sur Moteur quand tu as 2 minutes ?\n\nMerci ! 🎬`,
-                reply_to: state.currentUser?.email || ''
-            });
+            await supabase.functions.invoke('super-action', { body: {
+                to: p.email,
+                toName: p.name,
+                type: 'generic',
+                data: {
+                    subject: `🎬 ${projectTitle} - Infos requises pour ton contrat`,
+                    title: 'Informations requises pour ton contrat',
+                    message: `Salut ${p.name} ! 👋\n\nLe projet "${projectTitle}" a besoin de quelques informations pour générer ton ${contractType}.\n\nIl manque : ${issues.join(', ')}\n\nPeux-tu mettre à jour ton profil sur moteur.studio quand tu as 2 minutes ?\n\nMerci ! 🎬`
+                }
+            } });
             
             Utils.toast(`📧 Email envoyé à ${p.name}`, 'success');
             document.getElementById('contract-missing-modal')?.remove();
@@ -54195,15 +54195,16 @@ const Expenses = {
         const projectTitle = state.data.title || 'Sans titre';
         
         try {
-            await emailjs.send(CONFIG.emailJS.serviceId, CONFIG.emailJS.templateId, {
-                to_email: person.email,
-                to_name: person.name,
-                from_name: state.currentUser?.displayName || state.currentUser?.email || 'L\'équipe',
-                project_title: projectTitle,
-                subject: `🎬 ${projectTitle} - Informations manquantes sur ton profil`,
-                message: `Salut ${person.name} ! 👋\n\nLe projet "${projectTitle}" a besoin de quelques informations pour compléter ta fiche et préparer les contrats/salaires.\n\nIl manque : ${issues.join(', ')}\n\nPeux-tu mettre à jour ton profil sur Moteur quand tu as 2 minutes ?\n\nMerci ! 🎬`,
-                reply_to: state.currentUser?.email || ''
-            });
+await supabase.functions.invoke('super-action', { body: {
+                to: person.email,
+                toName: person.name,
+                type: 'generic',
+                data: {
+                    subject: `🎬 ${projectTitle} - Informations manquantes sur ton profil`,
+                    title: 'Informations manquantes sur ton profil',
+                    message: `Salut ${person.name} ! 👋\n\nLe projet "${projectTitle}" a besoin de quelques informations pour compléter ta fiche et préparer les contrats/salaires.\n\nIl manque : ${issues.join(', ')}\n\nPeux-tu mettre à jour ton profil sur moteur.studio quand tu as 2 minutes ?\n\nMerci ! 🎬`
+                }
+            } });
             
             Utils.toast(`📧 Email envoyé à ${person.name}`, 'success');
         } catch(e) {
@@ -56394,13 +56395,12 @@ ${Utils.escape(previewBody)}
                     .replace(/\{email\}/g, recipient.email || '')
                     .replace(/\{date_inscription\}/g, new Date(recipient.created_at).toLocaleDateString('fr-FR'));
                 
-                // Utiliser EmailJS
-                await emailjs.send(CONFIG.emailJS.serviceId, CONFIG.emailJS.templateId, {
-                    to_email: recipient.email,
-                    to_name: recipient.name || 'Utilisateur',
-                    subject: subject,
-                    message: personalizedBody
-                });
+                await supabase.functions.invoke('super-action', { body: {
+                    to: recipient.email,
+                    toName: recipient.name || 'Utilisateur',
+                    type: 'generic',
+                    data: { subject: subject, title: subject, message: personalizedBody }
+                } });
                 
                 sent++;
                 
@@ -59392,23 +59392,21 @@ hoverCard: null,
         try {
             await Messages.send(ownerEmail, { subject: `[Projet] ${projectTitle} - ${subject}`, content: content });
             
-            // Envoyer un email de notification
-            if(typeof emailjs !== 'undefined' && CONFIG.emailJS.publicKey && CONFIG.emailJS.publicKey !== 'VOTRE_PUBLIC_KEY') {
+            // Envoyer un email de notification au porteur du projet
+            try {
                 const myProfile = await PublicProfile.loadProfile(state.currentUser.uid);
-                const myName = Messages.sanitizeForEmail(myProfile?.name || state.currentUser.email || 'Un utilisateur');
-                const sanitize = Messages.sanitizeForEmail;
-                
-                emailjs.send(CONFIG.emailJS.serviceId, CONFIG.emailJS.templateId, {
-                    to_email: sanitize(ownerEmail),
-                    name: sanitize(ownerEmail.split('@')[0]) || 'Utilisateur',
-                    email: sanitize(ownerEmail),
-                    project_title: sanitize(projectTitle) || 'Projet',
-                    role: 'Message',
-                    inviter_name: myName,
-                    message: sanitize(myName + ' vous a contacte concernant votre projet ' + projectTitle + '. Sujet: ' + subject + '. Connectez-vous a Moteur pour lire le message.'),
-                    app_url: sanitize(window.location.origin + window.location.pathname)
-                }, CONFIG.emailJS.publicKey).catch((e) => console.warn('Email non envoye:', e));
-            }
+                const myName = myProfile?.name || state.currentUser.email || 'Un utilisateur';
+                await supabase.functions.invoke('super-action', { body: {
+                    to: ownerEmail,
+                    toName: ownerEmail.split('@')[0] || 'Utilisateur',
+                    type: 'generic',
+                    data: {
+                        subject: `[Projet] ${projectTitle} - ${subject}`,
+                        title: 'Message concernant votre projet',
+                        message: `${myName} vous a contacté concernant votre projet "${projectTitle}".\n\nSujet : ${subject}\n\nConnectez-vous à moteur.studio pour lire le message et répondre.`
+                    }
+                } });
+            } catch(e) { console.warn('Email non envoyé:', e); }
             
             Utils.toast('Message envoyé !', 'success');
             document.querySelector('.profile-modal-overlay')?.remove();
@@ -60499,44 +60497,47 @@ const Messages = {
     
     // Envoie une notification par email (ping simple)
     sendEmailPing: async (toEmail, toName, emailType = 'default', data = {}) => {
-        if(!CONFIG.emailJS.publicKey || CONFIG.emailJS.publicKey === 'VOTRE_PUBLIC_KEY') {
-            console.warn('EmailJS non configuré - ping email ignoré');
-            return;
-        }
-        
         const sanitize = Messages.sanitizeForEmail;
         const safeToEmail = sanitize(toEmail);
+        if(!safeToEmail) { console.warn('Email invalide - ping ignoré'); return; }
         const safeToName = sanitize(toName) || safeToEmail.split('@')[0] || 'Utilisateur';
-        
-        if(!safeToEmail) {
-            console.warn('Email invalide - ping ignoré');
-            return;
-        }
-        
-        // Récupérer le template approprié
-        const templateFn = Messages.emailTemplates[emailType] || Messages.emailTemplates['default'];
-        const template = templateFn({
-            senderName: sanitize(data.senderName) || 'Un utilisateur',
-            projectTitle: sanitize(data.projectTitle) || 'Projet',
-            typeLabel: sanitize(data.typeLabel) || 'membre',
-            role: sanitize(data.role) || 'collaborateur',
-            subject: sanitize(data.subject) || 'Sans sujet',
-            customMessage: sanitize(data.customMessage) || ''
-        });
-        
-        try {
-            const emailData = {
-                to_email: safeToEmail,
-                name: safeToName,
-                email: safeToEmail,
-                project_title: sanitize(template.title) || 'Moteur',
-                role: 'Notification',
-                inviter_name: sanitize(data.senderName) || 'Moteur',
-                message: sanitize(template.message),
-                app_url: 'https://moteur.studio'
+
+        // Types gérés nativement par l'Edge Function (beaux gabarits + bouton)
+        const nativeTypes = ['invitation', 'claim', 'added', 'request'];
+        let body;
+        if(nativeTypes.includes(emailType)) {
+            body = {
+                to: safeToEmail,
+                toName: safeToName,
+                type: emailType,
+                data: {
+                    senderName: sanitize(data.senderName) || 'Un utilisateur',
+                    projectTitle: sanitize(data.projectTitle) || 'votre projet',
+                    typeLabel: sanitize(data.typeLabel) || 'membre',
+                    role: sanitize(data.role) || 'collaborateur'
+                }
             };
-            // console.log('EmailJS Data:', emailData);
-            await emailjs.send(CONFIG.emailJS.serviceId, CONFIG.emailJS.templateId, emailData, CONFIG.emailJS.publicKey);
+        } else {
+            const templateFn = Messages.emailTemplates[emailType] || Messages.emailTemplates['default'];
+            const t = templateFn({
+                senderName: sanitize(data.senderName) || 'Un utilisateur',
+                projectTitle: sanitize(data.projectTitle) || 'Projet',
+                typeLabel: sanitize(data.typeLabel) || 'membre',
+                role: sanitize(data.role) || 'collaborateur',
+                subject: sanitize(data.subject) || 'Sans sujet',
+                customMessage: sanitize(data.customMessage) || '',
+                projectName: sanitize(data.projectName) || sanitize(data.projectTitle) || 'le projet',
+                shootDate: sanitize(data.shootDate) || '',
+                location: sanitize(data.location) || '',
+                callTime: sanitize(data.callTime) || '',
+                publicLink: data.publicLink || 'https://moteur.studio'
+            });
+            body = { to: safeToEmail, toName: safeToName, type: 'generic', data: { subject: t.title, title: t.title, message: t.message } };
+        }
+
+        try {
+            const { error } = await supabase.functions.invoke('super-action', { body });
+            if(error) console.warn('Erreur ping email:', error);
         } catch(e) {
             console.error('Erreur ping email:', e);
         }
@@ -60818,42 +60819,25 @@ const Invitations = {
     
     // Envoie l'email via EmailJS
     sendEmail: async (toEmail, projectTitle, role, inviterName, message) => {
-        // Vérifier si EmailJS est configuré
-        if(!CONFIG.emailJS.publicKey || CONFIG.emailJS.publicKey === 'VOTRE_PUBLIC_KEY') {
-            console.warn('EmailJS non configuré - email non envoyé');
-            Invitations.openMailto(toEmail, projectTitle, role, inviterName, message);
-            return;
-        }
-        
-        // S'assurer que toutes les variables sont des strings valides
         const safeToEmail = String(toEmail || '').trim();
+        if(!safeToEmail) { console.warn('Email invalide - envoi ignoré'); return; }
+        const safeRole = role === 'editor' ? 'Éditeur' : 'Lecteur';
         const safeProjectTitle = String(projectTitle || 'Projet').trim();
-        const safeRole = role === 'editor' ? 'Editeur' : 'Lecteur';
         const safeInviterName = String(inviterName || 'Un utilisateur').trim();
-        const safeMessage = String(message || 'Vous êtes invité à collaborer sur ce projet.').trim();
-        const safeAppUrl = String(window.location.origin + window.location.pathname || 'https://moteur.studio').trim();
-        
-        if(!safeToEmail) {
-            console.warn('Email invalide - envoi ignoré');
-            return;
-        }
-        
+
         try {
-            const sanitize = Messages.sanitizeForEmail;
-            await emailjs.send(CONFIG.emailJS.serviceId, CONFIG.emailJS.templateId, {
-                to_email: sanitize(safeToEmail),
-                name: sanitize(safeToEmail.split('@')[0]) || 'Utilisateur',
-                email: sanitize(safeToEmail),
-                project_title: sanitize(safeProjectTitle) || 'Projet',
-                role: sanitize(safeRole) || 'Invite',
-                inviter_name: sanitize(safeInviterName) || 'Un utilisateur',
-                message: sanitize(safeMessage) || 'Vous etes invite a collaborer.',
-                app_url: sanitize(safeAppUrl) || 'https://moteur.studio'
-            }, CONFIG.emailJS.publicKey);
-            
+            const { error } = await supabase.functions.invoke('super-action', { body: {
+                to: safeToEmail,
+                toName: safeToEmail.split('@')[0] || 'Utilisateur',
+                type: 'invitation',
+                data: { senderName: safeInviterName, projectTitle: safeProjectTitle, role: safeRole }
+            } });
+            if(error) {
+                console.error('Erreur envoi invitation:', error);
+                Invitations.openMailto(toEmail, projectTitle, role, inviterName, message);
+            }
         } catch(e) {
-            console.error('Erreur EmailJS:', e);
-            // Fallback mailto si EmailJS échoue
+            console.error('Erreur envoi invitation:', e);
             Invitations.openMailto(toEmail, projectTitle, role, inviterName, message);
         }
     },
