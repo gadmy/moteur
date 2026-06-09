@@ -7107,10 +7107,14 @@ body.presentation-mode .presentation-bar {
   /* sous-onglet sorti en fenêtre : contenu affiché dans la fenêtre, bouton retiré de la barre */
   .wm-window .wm-body .tab-content.wm-hosted { display: block !important; max-width: none; margin: 0; padding: 0; }
   .tab-subbtn.wm-popped { display: none !important; }
-  /* fenêtre en lecture seule (conflit de domaine intra-session) */
-  .wm-window.wm-readonly .wm-body > * { pointer-events: none; }
-  .wm-window.wm-readonly .wm-ro-banner { pointer-events: auto; }
-  .wm-ro-banner { position: sticky; top: 0; z-index: 5; margin: -12px -12px 10px; padding: 8px 12px; background: rgba(217,119,6,0.15); border-bottom: 1px solid rgba(217,119,6,0.4); color: var(--text-main); font-size: 0.82rem; font-weight: 600; }
+  /* fenêtre en lecture seule : on bloque la SAISIE de données, pas la navigation ni la lecture */
+  .wm-window.wm-readonly .wm-body textarea,
+  .wm-window.wm-readonly .wm-body [contenteditable],
+  .wm-window.wm-readonly .wm-body input[type="text"],
+  .wm-window.wm-readonly .wm-body input[type="number"],
+  .wm-window.wm-readonly .wm-body input[type="search"],
+  .wm-window.wm-readonly .wm-body input:not([type]) { pointer-events: none !important; opacity: 0.7; }
+  .wm-ro-banner { display: flex; align-items: center; gap: 6px; padding: 7px 12px; background: rgba(217,119,6,0.18); border-bottom: 1px solid rgba(217,119,6,0.45); color: var(--text-main); font-size: 0.78rem; font-weight: 600; flex-shrink: 0; }
   /* remonte le mini-tchat au-dessus de la barre des fenêtres réduites */
   body.wm-taskbar-open .minichat-bubble, body.wm-taskbar-open .minichat-panel { bottom: calc(28px + var(--wm-taskbar-h, 0px)); transition: bottom 0.15s; }
 </style>
@@ -14371,12 +14375,12 @@ crewRoles: {
       _setReadonly: (rec, ro) => {
           if(!rec || !rec.el) return;
           rec.el.classList.toggle('wm-readonly', !!ro);
-          let banner = rec.body.querySelector('.wm-ro-banner');
+          let banner = rec.el.querySelector(':scope > .wm-ro-banner');
           if(ro && !banner) {
               banner = document.createElement('div');
               banner.className = 'wm-ro-banner';
-              banner.textContent = '🔒 Lecture seule — cet onglet est déjà ouvert ailleurs';
-              rec.body.insertBefore(banner, rec.body.firstChild);
+              banner.textContent = '🔒 Lecture seule — déjà ouvert ailleurs (navigation et lecture OK, saisie bloquée)';
+              rec.el.insertBefore(banner, rec.body);
           } else if(!ro && banner) {
               banner.remove();
           }
@@ -19276,18 +19280,7 @@ openBoardPrintEpisodeChooser: () => {
     },
     
     initTabsContextMenu: () => {
-        // Onglets classiques
-        document.querySelectorAll('.tab-btn').forEach(tab => {
-            tab.addEventListener('contextmenu', (e) => UICategories.openTabColorMenu(e, tab));
-        });
-        // Catégories (mode catégories)
-        document.querySelectorAll('.tab-category').forEach(tab => {
-            tab.addEventListener('contextmenu', (e) => UICategories.openTabColorMenu(e, tab));
-        });
-        // Sous-onglets (mode catégories)
-        document.querySelectorAll('.tab-subbtn').forEach(tab => {
-            tab.addEventListener('contextmenu', (e) => UICategories.openTabColorMenu(e, tab));
-        });
+        UICategories._ensureCtxDelegation();
         // Fermer le menu au clic ailleurs
         document.addEventListener('click', (e) => {
             if(!e.target.closest('.tab-color-menu')) {
@@ -19301,10 +19294,18 @@ openBoardPrintEpisodeChooser: () => {
     },
     
     // Réattacher les événements après rebuild de la sous-nav
-    initSubnavContextMenu: () => {
-        document.querySelectorAll('.tab-subbtn').forEach(tab => {
-            tab.addEventListener('contextmenu', (e) => UICategories.openTabColorMenu(e, tab));
+    _ctxDelegated: false,
+    _ensureCtxDelegation: () => {
+        if(UICategories._ctxDelegated) return;
+        UICategories._ctxDelegated = true;
+        // Délégation : survit aux re-rendus de la sous-barre (sinon clic droit -> menu du navigateur)
+        document.addEventListener('contextmenu', (e) => {
+            const tab = e.target.closest('.tab-subbtn, .tab-btn, .tab-category');
+            if(tab) UICategories.openTabColorMenu(e, tab);
         });
+    },
+    initSubnavContextMenu: () => {
+        UICategories._ensureCtxDelegation();
         // Initialiser le drag & drop des sous-onglets
         UICategories.initSubnavDragDrop();
     },
