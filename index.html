@@ -7081,6 +7081,36 @@ body.presentation-mode .presentation-bar {
   .tab-content.dlock-preview { outline: 2px dashed rgba(217,119,6,.5); outline-offset: -2px; }
   .tab-content.dlock-preview input, .tab-content.dlock-preview textarea, .tab-content.dlock-preview select, .tab-content.dlock-preview button, .tab-content.dlock-preview [contenteditable] { pointer-events: none; }
   .tab-content.dlock-preview .dlock-preview-banner { pointer-events: auto; }
+
+  /* ===== Gestionnaire de fenêtres flottantes (sous-onglets) ===== */
+  #wm-taskbar { position: fixed; left: 0; bottom: 0; width: 100%; display: none; gap: 8px; padding: 6px 10px; background: var(--panel-bg); border-top: 1px solid var(--border); z-index: 2147483000; flex-wrap: wrap; box-sizing: border-box; }
+  .wm-chip { padding: 6px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 0.82rem; color: var(--text-main); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wm-chip:hover { background: var(--highlight); }
+  .wm-window { position: fixed; display: flex; flex-direction: column; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.35); overflow: hidden; min-width: 260px; min-height: 160px; }
+  .wm-window.wm-maximized { left: 0 !important; top: 0 !important; width: 100% !important; height: 100% !important; border-radius: 0; }
+  .wm-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; background: var(--bg); border-bottom: 1px solid var(--border); cursor: move; user-select: none; flex-shrink: 0; }
+  .wm-title { font-weight: 600; font-size: 0.9rem; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wm-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .wm-btn { width: 26px; height: 24px; border: none; background: transparent; color: var(--text-sec); border-radius: 5px; cursor: pointer; font-size: 0.85rem; line-height: 1; }
+  .wm-btn:hover { background: var(--border); color: var(--text-main); }
+  .wm-close:hover { background: var(--danger); color: #fff; }
+  .wm-body { flex: 1; overflow: auto; padding: 12px; }
+  .wm-resize { position: absolute; }
+  .wm-r-n { top: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+  .wm-r-s { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+  .wm-r-e { right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+  .wm-r-w { left: -3px; top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+  .wm-r-ne { top: -3px; right: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+  .wm-r-nw { top: -3px; left: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
+  .wm-r-se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
+  .wm-r-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+  /* sous-onglet sorti en fenêtre : contenu affiché dans la fenêtre, bouton retiré de la barre */
+  .wm-window .wm-body .tab-content.wm-hosted { display: block !important; max-width: none; margin: 0; padding: 0; }
+  .tab-subbtn.wm-popped { display: none !important; }
+  /* fenêtre en lecture seule (conflit de domaine intra-session) */
+  .wm-window.wm-readonly .wm-body > * { pointer-events: none; }
+  .wm-window.wm-readonly .wm-ro-banner { pointer-events: auto; }
+  .wm-ro-banner { position: sticky; top: 0; z-index: 5; margin: -12px -12px 10px; padding: 8px 12px; background: rgba(217,119,6,0.15); border-bottom: 1px solid rgba(217,119,6,0.4); color: var(--text-main); font-size: 0.82rem; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -9535,6 +9565,7 @@ body.presentation-mode .presentation-bar {
         <button class="tab-color-reset" onclick="app.UI.setTabColor(null)">↩ Réinitialiser</button>
         <hr style="margin: 10px 0; border: none; border-top: 1px solid var(--border);">
         <button class="tab-color-reset" onclick="app.UI.openTabHelp()" style="background: var(--primary);">❓ Aide sur cet onglet</button>
+        <button id="wm-open-item" class="tab-color-reset" onclick="WindowManager.popFromMenu()" style="display:none; background: var(--success); margin-top: 6px;">🪟 Ouvrir dans une fenêtre</button>
     </div>
     
     <nav class="tabs-nav adaptive" id="tabsNav">
@@ -14061,6 +14092,294 @@ crewRoles: {
 
   // ========== SESSION MANAGER ==========
   // Gère la session unique par compte (multi-onglets OK, multi-ordinateurs bloqué)
+  // ========== WINDOW MANAGER (sous-onglets en fenêtres flottantes) — Phase A ==========
+  const WindowManager = {
+      wins: {},
+      zTop: 1000,
+      taskbar: null,
+
+      init: () => {
+          if(WindowManager.taskbar) return;
+          const tb = document.createElement('div');
+          tb.id = 'wm-taskbar';
+          document.body.appendChild(tb);
+          WindowManager.taskbar = tb;
+      },
+
+      open: (id, title, content, opts) => {
+          WindowManager.init();
+          if(WindowManager.wins[id]) { WindowManager.restore(id); WindowManager.focus(id); return WindowManager.wins[id]; }
+          opts = opts || {};
+          const n = Object.keys(WindowManager.wins).length;
+          const x = (opts.x != null) ? opts.x : (60 + n * 28);
+          const y = (opts.y != null) ? opts.y : (70 + n * 28);
+          const w = opts.w || 540, h = opts.h || 400;
+          const win = document.createElement('div');
+          win.className = 'wm-window';
+          win.dataset.wmId = id;
+          win.style.cssText = 'left:' + x + 'px; top:' + y + 'px; width:' + w + 'px; height:' + h + 'px; z-index:' + (++WindowManager.zTop) + ';';
+          win.innerHTML =
+              '<div class="wm-titlebar"><span class="wm-title"></span>'
+              + '<div class="wm-actions">'
+              + '<button class="wm-btn wm-min" title="Réduire">—</button>'
+              + '<button class="wm-btn wm-max" title="Agrandir">▢</button>'
+              + '<button class="wm-btn wm-close" title="Fermer">✕</button>'
+              + '</div></div>'
+              + '<div class="wm-body"></div>'
+              + '<div class="wm-resize wm-r-n"></div><div class="wm-resize wm-r-s"></div>'
+              + '<div class="wm-resize wm-r-e"></div><div class="wm-resize wm-r-w"></div>'
+              + '<div class="wm-resize wm-r-ne"></div><div class="wm-resize wm-r-nw"></div>'
+              + '<div class="wm-resize wm-r-se"></div><div class="wm-resize wm-r-sw"></div>';
+          win.querySelector('.wm-title').textContent = title || '';
+          const body = win.querySelector('.wm-body');
+          if(typeof content === 'string') body.innerHTML = content;
+          else if(content instanceof HTMLElement) body.appendChild(content);
+          document.body.appendChild(win);
+          const rec = { el: win, body: body, title: title || '', id: id, onClose: opts.onClose, state: { x: x, y: y, w: w, h: h, min: false, max: false } };
+          WindowManager.wins[id] = rec;
+          WindowManager._wireButtons(rec);
+          WindowManager._wireDrag(rec);
+          WindowManager._wireResize(rec);
+          win.addEventListener('mousedown', () => WindowManager.focus(id), true);
+          WindowManager.focus(id);
+          WindowManager._persist();
+          return rec;
+      },
+
+      focus: (id) => {
+          const rec = WindowManager.wins[id]; if(!rec) return;
+          rec.el.style.zIndex = ++WindowManager.zTop;
+      },
+
+      _wireButtons: (rec) => {
+          rec.el.querySelector('.wm-close').addEventListener('click', () => WindowManager.close(rec.id));
+          rec.el.querySelector('.wm-min').addEventListener('click', () => WindowManager.minimize(rec.id));
+          rec.el.querySelector('.wm-max').addEventListener('click', () => WindowManager.toggleMax(rec.id));
+          rec.el.querySelector('.wm-titlebar').addEventListener('dblclick', (e) => { if(!e.target.closest('.wm-btn')) WindowManager.toggleMax(rec.id); });
+      },
+
+      _wireDrag: (rec) => {
+          const bar = rec.el.querySelector('.wm-titlebar');
+          bar.addEventListener('mousedown', (e) => {
+              if(e.target.closest('.wm-btn') || rec.state.max) return;
+              e.preventDefault();
+              WindowManager.focus(rec.id);
+              const sx = e.clientX, sy = e.clientY, ox = rec.el.offsetLeft, oy = rec.el.offsetTop;
+              const move = (ev) => {
+                  let nx = ox + (ev.clientX - sx), ny = oy + (ev.clientY - sy);
+                  nx = Math.max(0, Math.min(nx, window.innerWidth - 80));
+                  ny = Math.max(0, Math.min(ny, window.innerHeight - 40));
+                  rec.el.style.left = nx + 'px'; rec.el.style.top = ny + 'px';
+                  rec.state.x = nx; rec.state.y = ny;
+              };
+              const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); WindowManager._persist(); };
+              document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+          });
+      },
+
+      _wireResize: (rec) => {
+          rec.el.querySelectorAll('.wm-resize').forEach((handle) => {
+              handle.addEventListener('mousedown', (e) => {
+                  if(rec.state.max) return;
+                  e.preventDefault(); e.stopPropagation();
+                  WindowManager.focus(rec.id);
+                  const dir = (handle.className.match(/wm-r-([a-z]+)/) || [])[1] || '';
+                  const sx = e.clientX, sy = e.clientY;
+                  const ox = rec.el.offsetLeft, oy = rec.el.offsetTop, ow = rec.el.offsetWidth, oh = rec.el.offsetHeight;
+                  const minW = 260, minH = 160;
+                  const move = (ev) => {
+                      const dx = ev.clientX - sx, dy = ev.clientY - sy;
+                      let nx = ox, ny = oy, nw = ow, nh = oh;
+                      if(dir.indexOf('e') > -1) nw = Math.max(minW, ow + dx);
+                      if(dir.indexOf('s') > -1) nh = Math.max(minH, oh + dy);
+                      if(dir.indexOf('w') > -1) { nw = Math.max(minW, ow - dx); nx = ox + (ow - nw); }
+                      if(dir.indexOf('n') > -1) { nh = Math.max(minH, oh - dy); ny = oy + (oh - nh); }
+                      rec.el.style.width = nw + 'px'; rec.el.style.height = nh + 'px';
+                      rec.el.style.left = nx + 'px'; rec.el.style.top = ny + 'px';
+                      rec.state.x = nx; rec.state.y = ny; rec.state.w = nw; rec.state.h = nh;
+                  };
+                  const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); WindowManager._persist(); };
+                  document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+              });
+          });
+      },
+
+      minimize: (id) => {
+          const rec = WindowManager.wins[id]; if(!rec) return;
+          rec.state.min = true; rec.el.style.display = 'none';
+          WindowManager._renderTaskbar(); WindowManager._persist();
+      },
+
+      restore: (id) => {
+          const rec = WindowManager.wins[id]; if(!rec) return;
+          rec.state.min = false; rec.el.style.display = 'flex';
+          WindowManager.focus(id); WindowManager._renderTaskbar(); WindowManager._persist();
+      },
+
+      toggleMax: (id) => {
+          const rec = WindowManager.wins[id]; if(!rec) return;
+          if(rec.state.max) {
+              rec.state.max = false;
+              rec.el.classList.remove('wm-maximized');
+              rec.el.style.left = rec.state.x + 'px'; rec.el.style.top = rec.state.y + 'px';
+              rec.el.style.width = rec.state.w + 'px'; rec.el.style.height = rec.state.h + 'px';
+          } else {
+              rec.state.max = true;
+              rec.el.classList.add('wm-maximized');
+          }
+          WindowManager.focus(id); WindowManager._persist();
+      },
+
+      close: (id) => {
+          const rec = WindowManager.wins[id]; if(!rec) return;
+          if(typeof rec.onClose === 'function') { try { rec.onClose(rec); } catch(_) {} }
+          rec.el.remove(); delete WindowManager.wins[id];
+          WindowManager._renderTaskbar(); WindowManager._persist();
+      },
+
+      _renderTaskbar: () => {
+          const tb = WindowManager.taskbar; if(!tb) return;
+          const mins = Object.keys(WindowManager.wins).map(k => WindowManager.wins[k]).filter(r => r.state.min);
+          tb.innerHTML = '';
+          tb.style.display = mins.length ? 'flex' : 'none';
+          mins.forEach((r) => {
+              const chip = document.createElement('div');
+              chip.className = 'wm-chip';
+              chip.textContent = r.title;
+              chip.title = r.title;
+              chip.addEventListener('click', () => WindowManager.restore(r.id));
+              tb.appendChild(chip);
+          });
+      },
+
+      poppedTabs: {},
+      _homes: {},
+      _wired: false,
+
+      _ensureWired: () => {
+          if(WindowManager._wired) return;
+          WindowManager._wired = true;
+          // Filet de sécurité : si on tente de switcher vers un onglet sorti, on focus sa fenêtre
+          if(typeof UI !== 'undefined' && typeof UI.switchTab === 'function') {
+              UI._origSwitchTab = UI.switchTab;
+              UI.switchTab = function(tabName) {
+                  if(WindowManager.poppedTabs[tabName]) {
+                      WindowManager.restore('tab:' + tabName); WindowManager.focus('tab:' + tabName);
+                      return;
+                  }
+                  const _r = UI._origSwitchTab.apply(this, arguments);
+                  WindowManager._arbitrate();
+                  return _r;
+              };
+          }
+          // Ré-applique le masquage des sous-onglets sortis après chaque rendu de la sous-barre
+          const sub = document.getElementById('tabsSubnav');
+          if(sub && typeof MutationObserver !== 'undefined' && !WindowManager._obs) {
+              WindowManager._obs = new MutationObserver(() => WindowManager.syncSubnav());
+              WindowManager._obs.observe(sub, { childList: true });
+          }
+      },
+
+      syncSubnav: () => {
+          document.querySelectorAll('.tab-subbtn[data-tab]').forEach((b) => {
+              b.classList.toggle('wm-popped', !!WindowManager.poppedTabs[b.dataset.tab]);
+          });
+      },
+
+      popFromMenu: () => {
+          const tab = (typeof UICategories !== 'undefined') ? UICategories.currentTabTarget : null;
+          const menu = document.getElementById('tab-color-menu'); if(menu) menu.classList.remove('visible');
+          if(!tab || !tab.dataset || !tab.dataset.tab) return;
+          const label = (tab.textContent || tab.dataset.tab).replace(/\s*×\s*$/, '').trim();
+          WindowManager.popTab(tab.dataset.tab, label);
+      },
+
+      popTab: (name, label) => {
+          WindowManager._ensureWired();
+          const content = document.getElementById('tab-' + name);
+          if(!content) { if(typeof Utils !== 'undefined') Utils.toast('Contenu introuvable pour cet onglet', 'error'); return; }
+          if(WindowManager.poppedTabs[name]) { WindowManager.restore('tab:' + name); WindowManager.focus('tab:' + name); return; }
+          const wasActive = content.classList.contains('active');
+          // mémorise l'emplacement d'origine via un commentaire repère
+          const home = document.createComment('wm-home:' + name);
+          content.parentNode.insertBefore(home, content);
+          WindowManager._homes[name] = home;
+          WindowManager.poppedTabs[name] = true;
+          content.classList.add('wm-hosted');
+          WindowManager.open('tab:' + name, label || name, content, { onClose: () => WindowManager._restoreTab(name) });
+          WindowManager.syncSubnav();
+          if(wasActive) WindowManager._switchAway(name);
+          WindowManager._arbitrate();
+          WindowManager._persist();
+      },
+
+      _switchAway: (name) => {
+          const others = Array.prototype.slice.call(document.querySelectorAll('#tabsSubnav .tab-subbtn[data-tab]'))
+              .map(b => b.dataset.tab).filter(t => t && t !== name && !WindowManager.poppedTabs[t]);
+          if(others.length && typeof UI !== 'undefined' && typeof UI._origSwitchTab === 'function') {
+              UI._origSwitchTab.call(UI, others[0]);
+          }
+      },
+
+      _restoreTab: (name) => {
+          const content = document.getElementById('tab-' + name);
+          const home = WindowManager._homes[name];
+          if(content) {
+              content.classList.remove('wm-hosted');
+              content.classList.remove('active');
+              if(home && home.parentNode) { home.parentNode.insertBefore(content, home); home.remove(); }
+          }
+          delete WindowManager._homes[name];
+          delete WindowManager.poppedTabs[name];
+          WindowManager.syncSubnav();
+          WindowManager._arbitrate();
+          WindowManager._persist();
+      },
+
+      // Arbitrage intra-session : 1 seul propriétaire éditable par domaine (onglet courant prioritaire).
+      _arbitrate: () => {
+          let mainDomain = null;
+          try {
+              const mainActive = document.querySelector('.tab-content.active:not(.wm-hosted)');
+              const mainTab = mainActive ? mainActive.id.replace('tab-', '') : null;
+              mainDomain = (mainTab && typeof LockDomains !== 'undefined') ? LockDomains.forTab(mainTab) : null;
+          } catch(_) {}
+          const claimed = {};
+          if(mainDomain) claimed[mainDomain] = 'main';
+          Object.keys(WindowManager.wins).forEach((id) => {
+              if(id.indexOf('tab:') !== 0) return;
+              const rec = WindowManager.wins[id];
+              const name = id.slice(4);
+              let dom = null;
+              try { dom = (typeof LockDomains !== 'undefined') ? LockDomains.forTab(name) : null; } catch(_) {}
+              let readonly = false;
+              if(dom) {
+                  if(claimed[dom] && claimed[dom] !== id) readonly = true;
+                  else claimed[dom] = id;
+              }
+              WindowManager._setReadonly(rec, readonly);
+          });
+      },
+
+      _setReadonly: (rec, ro) => {
+          if(!rec || !rec.el) return;
+          rec.el.classList.toggle('wm-readonly', !!ro);
+          let banner = rec.body.querySelector('.wm-ro-banner');
+          if(ro && !banner) {
+              banner = document.createElement('div');
+              banner.className = 'wm-ro-banner';
+              banner.textContent = '🔒 Lecture seule — cet onglet est déjà ouvert ailleurs';
+              rec.body.insertBefore(banner, rec.body.firstChild);
+          } else if(!ro && banner) {
+              banner.remove();
+          }
+      },
+
+      // Persistance branchée en Phase B2 (mémorise quels sous-onglets sont en fenêtre + leur géométrie).
+      _persist: () => {}
+  };
+  if(typeof window !== 'undefined') window.WindowManager = WindowManager;
+
   const SessionManager = {
       // ===================== ÉTAT =====================
       sessionToken: null,
@@ -18765,6 +19084,8 @@ openBoardPrintEpisodeChooser: () => {
         UICategories.currentTabTarget = tab;
         UI.currentTabType = tab.classList.contains('tab-category') ? 'category' : 
                             tab.classList.contains('tab-subbtn') ? 'subbtn' : 'classic';
+        const wmItem = document.getElementById('wm-open-item');
+        if(wmItem) wmItem.style.display = (UI.currentTabType === 'subbtn') ? 'block' : 'none';
         const menu = document.getElementById('tab-color-menu');
         menu.classList.add('visible');
         
