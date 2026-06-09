@@ -7334,7 +7334,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv525.1</p>
+      <p>vv526</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -14124,6 +14124,14 @@ crewRoles: {
                   }
                   break;
                   
+              case 'SESSION_CLAIMED':
+                  // Un autre onglet du MÊME navigateur a pris la session -> on se neutralise
+                  // (sans déconnexion : token partagé, déconnecter tuerait aussi le gagnant)
+                  if(data && data.token && data.token !== SessionManager.sessionToken) {
+                      SessionManager._supersede(false);
+                  }
+                  break;
+                  
               case 'LOGOUT':
                   // Déconnexion depuis un autre onglet
                   supabase.auth.signOut().then(() => location.reload());
@@ -14204,191 +14212,75 @@ crewRoles: {
       // Multi-onglets du même navigateur = 1 seule session (token partagé via localStorage)
       // Au-delà de MAX_SESSIONS, la plus ancienne est supprimée → kick au prochain heartbeat
       // ===================== VÉRIFICATION & DÉCONNEXION =====================
+      // ===================== SESSION UNIQUE (1 seule active par compte) =====================
+      // Le plus récent gagne. À la connexion on "revendique" la session côté serveur
+      // (active_sessions, 1 ligne par user). Chaque session vérifie que le token serveur est
+      // toujours le sien ; sinon : déconnexion (autre appareil) ou écran de blocage (autre
+      // onglet du même navigateur — token partagé, on ne déconnecte pas pour ne pas tuer le gagnant).
+      _superseded: false,
+      _watchTimer: null,
+
       startSessionCheck: async (userId) => {
           SessionManager.currentUserId = userId;
-          // Session unique DÉSACTIVÉE : auth Supabase uniquement, plus de heartbeat/kick.
-          return true;
-          
-          // Token partagé entre onglets du même navigateur via localStorage
-          let browserToken = localStorage.getItem('moteur_browser_token');
-          if(!browserToken) {
-              browserToken = 'browser_' + Date.now() + '_' + Math.random().toString(36).slice(2, 15);
-              localStorage.setItem('moteur_browser_token', browserToken);
-          }
-          SessionManager.sessionToken = browserToken;
-          
+          SessionManager._superseded = false;
+          SessionManager.sessionToken = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 12);
+          // Marqueur local : permet de savoir si le "gagnant" est ce navigateur (token partagé)
+          try { localStorage.setItem('moteur_active_session', SessionManager.sessionToken); } catch(_) {}
+          // 1) Revendiquer la session (écrase la précédente du même compte -> le plus récent gagne)
           try {
-              // 1) Récupérer les sessions actives du user (triées par last_seen ASC)
-              const { data: sessions, error: selErr } = await SessionManager._withTimeout(
-                  supabase.from('active_sessions')
-                      .select('id, session_token, last_seen')
-                      .eq('user_id', userId)
-                      .order('last_seen', { ascending: true })
-              );
-              
-              if(selErr) {
-                  console.warn('[SessionManager] Erreur lecture sessions:', selErr.message);
-              } else if(sessions) {
-                  const mineAlreadyExists = sessions.some(s => s.session_token === browserToken);
-                  
-                  if(!mineAlreadyExists) {
-                      // 2) Nettoyer les sessions zombies (last_seen > ZOMBIE_TIMEOUT_MS)
-                      const now = Date.now();
-                      const zombies = sessions.filter(s => (now - new Date(s.last_seen).getTime()) > SessionManager.ZOMBIE_TIMEOUT_MS);
-                      const alive = sessions.filter(s => (now - new Date(s.last_seen).getTime()) <= SessionManager.ZOMBIE_TIMEOUT_MS);
-                      
-                      if(zombies.length > 0) {
-                          await SessionManager._withTimeout(
-                              supabase.from('active_sessions').delete().in('id', zombies.map(z => z.id))
-                          ).catch(e => console.warn('[SessionManager] Nettoyage zombies:', e.message));
-                      }
-                      
-                      // 3) Si toujours à la limite après nettoyage, supprimer la plus ancienne vivante
-                      if(alive.length >= SessionManager.MAX_SESSIONS) {
-                          const oldest = alive[0]; // déjà trié par last_seen ASC
-                          await SessionManager._withTimeout(
-                              supabase.from('active_sessions').delete().eq('id', oldest.id)
-                          ).catch(e => console.warn('[SessionManager] Suppression ancienne:', e.message));
-                      }
-                  }
-              }
-              
-              // 4) Enregistrer NOTRE session (UPSERT sur session_token UNIQUE)
-              const { error: upErr } = await SessionManager._withTimeout(
-                  supabase.from('active_sessions').upsert({
-                      user_id: userId,
-                      session_token: browserToken,
-                      last_seen: new Date().toISOString(),
-                      user_agent: navigator.userAgent.slice(0, 200)
-                  }, { onConflict: 'session_token' })
-              );
-              
-              if(upErr) {
-                  console.warn('[SessionManager] Impossible d\'enregistrer la session:', upErr.message);
-              }
-          } catch(e) {
-              console.warn('[SessionManager] Erreur init session:', e.message);
-              // On continue quand même (mode dégradé)
-          }
-          
-          // Démarrer le heartbeat
-          if(SessionManager.heartbeatInterval) clearInterval(SessionManager.heartbeatInterval);
-          SessionManager.heartbeatInterval = setInterval(SessionManager.checkSessionStillValid, SessionManager.HEARTBEAT_INTERVAL_MS);
-          
-          // Nettoyer à la fermeture : arrêter le heartbeat ET supprimer la session en base
-          // (sendBeacon serait idéal mais l'API Supabase suffit en best-effort ici).
-          window.addEventListener('beforeunload', () => {
-              if(SessionManager.heartbeatInterval) clearInterval(SessionManager.heartbeatInterval);
-              SessionManager.deleteOwnSession();
-          });
-          
-          return true;
-      },
-      
-      // Vérifie périodiquement que notre session existe encore en base
-      // Si elle a été supprimée (par un nouveau client qui a pris la place), on est kické.
-      // ROBUSTESSE : on ne kicke PAS au premier échec (un SELECT vide peut venir d'un
-      // glitch RLS/réseau transitoire, surtout juste après un TOKEN_REFRESHED). On exige
-      // 2 échecs consécutifs, ET on tente d'abord de recréer notre propre session
-      // (self-healing) : si on est vraiment seul, le re-upsert nous remet en base sans kick.
-      checkSessionStillValid: async () => {
-          if(!SessionManager.currentUserId || !SessionManager.sessionToken) return;
-          
-          try {
-              // Cherche notre ligne par session_token ET user_id (ne pas dépendre que de la RLS)
-              const { data, error } = await SessionManager._withTimeout(
-                  supabase.from('active_sessions')
-                      .select('id')
-                      .eq('user_id', SessionManager.currentUserId)
-                      .eq('session_token', SessionManager.sessionToken)
-              );
-              
-              if(error) {
-                  console.warn('[SessionManager] Heartbeat error (ignoré):', error.message);
-                  return; // erreur réseau/serveur : on ne touche pas au compteur, on réessaiera
-              }
-              
-              if(!data || data.length === 0) {
-                  // Notre ligne est absente. Avant de kicker, on incrémente un compteur de
-                  // tolérance et on tente de recréer notre session (cas "un seul onglet" :
-                  // la ligne a pu être nettoyée à tort, on se réinscrit simplement).
-                  SessionManager.missedChecks = (SessionManager.missedChecks || 0) + 1;
-                  console.warn('[SessionManager] Session absente en base (tentative ' + SessionManager.missedChecks + '/2)');
-                  
-                  if(SessionManager.missedChecks >= 2) {
-                      // Deux échecs consécutifs : un autre client a probablement pris la place → kick.
-                      SessionManager.showKickedModal();
-                      return;
-                  }
-                  
-                  // Premier échec : self-healing. On ré-enregistre notre session.
-                  await SessionManager._withTimeout(
-                      supabase.from('active_sessions').upsert({
-                          user_id: SessionManager.currentUserId,
-                          session_token: SessionManager.sessionToken,
-                          last_seen: new Date().toISOString(),
-                          user_agent: navigator.userAgent.slice(0, 200)
-                      }, { onConflict: 'session_token' })
-                  ).catch(e => console.warn('[SessionManager] Re-upsert échoué:', e.message));
-                  return;
-              }
-              
-              // Tout va bien : on remet le compteur à zéro et on met à jour last_seen
-              SessionManager.missedChecks = 0;
               await SessionManager._withTimeout(
-                  supabase.from('active_sessions')
-                      .update({ last_seen: new Date().toISOString() })
-                      .eq('session_token', SessionManager.sessionToken)
-              ).catch(() => { /* non critique */ });
-              
-          } catch(e) {
-              // Distinguer un vrai problème (JWT révoqué, signe que la session a été invalidée côté serveur)
-              // d'un simple lag réseau (TIMEOUT) qui ne doit PAS provoquer de kick.
-              if((e.message || '').includes('JWT')) {
-                  console.warn('[SessionManager] Session révoquée (JWT):', e.message);
-                  SessionManager.showKickedModal();
-              } else {
-                  // TIMEOUT ou autre erreur réseau : on ignore, le prochain heartbeat (30s) réessayera.
-                  console.warn('[SessionManager] Erreur heartbeat (ignorée, nouveau check dans 30s):', e.message);
-              }
+                  supabase.from('active_sessions').upsert(
+                      { user_id: userId, session_token: SessionManager.sessionToken, last_seen: new Date().toISOString() },
+                      { onConflict: 'user_id' }
+                  ), 10000);
+          } catch(e) { console.warn('[SessionManager] revendication session echouee:', e && e.message); }
+          // 2) Kick instantane des autres onglets du meme navigateur (sans deconnexion)
+          SessionManager.broadcast('SESSION_CLAIMED', { token: SessionManager.sessionToken });
+          // 3) Surveillance periodique
+          SessionManager._startWatch();
+          return true;
+      },
+
+      _startWatch: () => {
+          if(SessionManager._watchTimer) clearInterval(SessionManager._watchTimer);
+          SessionManager._watchTimer = setInterval(async () => {
+              if(SessionManager._superseded || !SessionManager.currentUserId || !SessionManager.sessionToken) return;
+              try {
+                  const { data, error } = await SessionManager._withTimeout(
+                      supabase.from('active_sessions').select('session_token').eq('user_id', SessionManager.currentUserId).maybeSingle(), 8000);
+                  if(error || !data || !data.session_token) return;   // jamais de kick sur erreur/absence
+                  if(data.session_token !== SessionManager.sessionToken) {
+                      let localTok = null; try { localTok = localStorage.getItem('moteur_active_session'); } catch(_) {}
+                      const sameBrowser = localTok && localTok === data.session_token;
+                      SessionManager._supersede(!sameBrowser);
+                  }
+              } catch(e) { /* timeout/reseau : on retente au prochain tick */ }
+          }, 7000);
+      },
+
+      // crossDevice=true -> autre appareil : vraie deconnexion + accueil.
+      // crossDevice=false -> autre onglet du meme navigateur : on neutralise sans deconnecter.
+      _supersede: (crossDevice) => {
+          if(SessionManager._superseded) return;
+          SessionManager._superseded = true;
+          if(SessionManager._watchTimer) { clearInterval(SessionManager._watchTimer); SessionManager._watchTimer = null; }
+          SessionManager._showLockOverlay(crossDevice);
+          if(crossDevice) {
+              try { supabase.auth.signOut().finally(() => setTimeout(() => { try { location.reload(); } catch(_) {} }, 1800)); }
+              catch(_) { setTimeout(() => { try { location.reload(); } catch(_) {} }, 1800); }
           }
       },
-      
-      // Affiche une modale bloquante quand l'utilisateur est kické
-      showKickedModal: () => {
-          // Arrêter le heartbeat immédiatement
-          if(SessionManager.heartbeatInterval) {
-              clearInterval(SessionManager.heartbeatInterval);
-              SessionManager.heartbeatInterval = null;
-          }
-          
-          // Ne pas afficher la modale deux fois
-          if(document.getElementById('session-kicked-overlay')) return;
-          
-          const overlay = document.createElement('div');
-          overlay.id = 'session-kicked-overlay';
-          overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
-          overlay.innerHTML = `
-              <div style="background:var(--panel-bg, #fff);padding:40px;border-radius:12px;text-align:center;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
-                  <div style="font-size:4rem;margin-bottom:20px;">🔐</div>
-                  <h2 style="margin-bottom:15px;color:var(--text-main, #333);">Session terminée</h2>
-                  <p style="color:var(--text-sec, #666);margin-bottom:25px;line-height:1.5;">Votre compte est connecté sur trop d'appareils. Cette session a été fermée pour libérer la place.</p>
-                  <button id="session-kicked-reconnect" style="padding:12px 30px;background:var(--primary, #007bff);color:white;border:none;border-radius:6px;cursor:pointer;font-size:1rem;font-weight:bold;">🔄 Reconnecter</button>
-              </div>
-          `;
-          document.body.appendChild(overlay);
-          
-          document.getElementById('session-kicked-reconnect').onclick = async () => {
-              try { await supabase.auth.signOut(); } catch(_) {}
-              location.reload();
-          };
-      },
-      
-      // Notifier les autres onglets d'une modification
-      notifyDataUpdate: () => {
-          SessionManager.broadcast('DATA_UPDATED', { 
-              projectId: state.currentProjectId 
-          });
+
+      _showLockOverlay: (crossDevice) => {
+          if(document.getElementById('session-lock-overlay')) return;
+          const ov = document.createElement('div');
+          ov.id = 'session-lock-overlay';
+          ov.style.cssText = 'position:fixed; inset:0; z-index:2147483640; background:linear-gradient(135deg,#0f172a,#1e293b); color:#fff; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:30px; font-family:inherit;';
+          ov.innerHTML = '<div style="font-size:3rem; margin-bottom:16px;">🔒</div>'
+              + '<h2 style="margin:0 0 12px; font-size:1.5rem;">Session ouverte ailleurs</h2>'
+              + '<p style="max-width:440px; color:rgba(255,255,255,0.75); line-height:1.6; margin:0 0 24px;">Ton compte vient d\'être ouvert ' + (crossDevice ? 'sur un autre appareil' : 'dans un autre onglet') + '. Une seule session active est autorisée.' + (crossDevice ? ' Tu vas être déconnecté ici.' : '') + '</p>'
+              + '<button onclick="window.location.reload()" style="padding:12px 28px; border:none; border-radius:8px; background:#3b82f6; color:#fff; font-weight:600; font-size:0.95rem; cursor:pointer;">Retour à l\'accueil</button>';
+          document.body.appendChild(ov);
       },
       
       // Supprime notre propre session en base (best-effort, non bloquant).
