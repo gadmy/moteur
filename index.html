@@ -3962,36 +3962,23 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
 .hidden-categories-toggle:hover { color: var(--text-main); background: var(--panel-bg); }
 .hidden-categories-toggle .hidden-count { background: var(--danger); color: white; border-radius: 10px; padding: 2px 8px; font-size: 0.7rem; }
 
-/* Tooltips modernes - style uniforme - positionnés dynamiquement via JS */
+/* Tooltips — bulle d'aide unifiée, rendue en JS sur <body> (module Tooltip). */
 [data-tooltip] { position: relative; }
-[data-tooltip]:hover::after { 
-    content: attr(data-tooltip); 
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 50%;
-    transform: translateX(-50%);
-    background: #1a1a1a; 
-    color: #fff; 
-    padding: 8px 12px; 
-    border-radius: 6px; 
-    font-size: 0.75rem; 
-    font-weight: 400; 
-    z-index: 100002; 
-    box-shadow: 0 4px 12px rgba(0,0,0,0.4); 
-    max-width: 200px; 
-    text-align: center; 
-    line-height: 1.4; 
-    white-space: normal; 
-    pointer-events: none; 
-    animation: tooltipFadeIn 0.15s ease;
+.app-tooltip {
+    position: fixed; left: 0; top: 0;
+    z-index: 2147483600;
+    max-width: 260px;
+    padding: 8px 12px;
+    background: #1a1a1a; color: #fff;
+    font-size: 0.75rem; font-weight: 400; line-height: 1.4;
+    text-align: center; white-space: normal;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.45);
+    pointer-events: none;
+    opacity: 0; transform: translateY(2px);
+    transition: opacity 0.12s ease, transform 0.12s ease;
 }
-[data-tooltip]:hover::before { content: ''; position: absolute; bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: #1a1a1a; z-index: 100002; }
-[data-tooltip-pos="bottom"]:hover::after { bottom: auto; top: calc(100% + 8px); }
-[data-tooltip-pos="bottom"]:hover::before { bottom: auto; top: calc(100% + 2px); border-top-color: transparent; border-bottom-color: #1a1a1a; }
-/* Tooltips sur les bords - s'adaptent automatiquement */
-[data-tooltip-pos="left"]:hover::after { bottom: auto; top: 50%; left: auto; right: calc(100% + 10px); transform: translateY(-50%); }
-[data-tooltip-pos="left"]:hover::before { bottom: auto; top: 50%; left: auto; right: calc(100% + 4px); transform: translateY(-50%); border-top-color: transparent; border-left-color: #1a1a1a; }
-@keyframes tooltipFadeIn { from { opacity: 0; transform: translateX(-50%) translateY(4px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+.app-tooltip.visible { opacity: 1; transform: translateY(0); }
 
 /* Menu position dropdown */
 .position-dropdown-menu { animation: fadeIn 0.15s ease; }
@@ -4945,8 +4932,7 @@ button, .synopsis-toolbar-btn, .board-mode-btn, .editor-btn { transition: all 0.
 .expense-card, .contact-card, .message-card, .new-project-card { transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease; }
 .expense-card:hover, .contact-card:hover, .message-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
 
-/* Tooltip — fade in subtil */
-[data-tooltip]::after, [data-tooltip]::before { transition: opacity 0.15s ease 0.3s, transform 0.15s ease 0.3s; }
+/* (tooltips : transitions gérées par .app-tooltip) */
 
 /* Inputs — focus doux */
 input, textarea, select { transition: border-color 0.2s ease, box-shadow 0.2s ease; }
@@ -7435,7 +7421,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv525</p>
+      <p>vv525.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -15698,8 +15684,12 @@ const LockManager = {
           try { LockManager.onPresenceChange(); } catch(e) {}
           try { if(state._renderPresenceNow) state._renderPresenceNow(); } catch(e) {}
           try { if(typeof GlobalPresence !== 'undefined') GlobalPresence.renderBadges(); } catch(e) {}
-          // Exclusion après 3 min d'inactivité (uniquement à plusieurs) : sauvegarde + retour dashboard
-          if(state.currentProjectId && !LockManager.isAlone() && LockManager.lastActivity
+          // Exclusion après 3 min d'inactivité : UNIQUEMENT dans l'éditeur d'un projet ET à plusieurs réellement connectés.
+          // Solo (personne d'autre présent) ou hors éditeur (dashboard, Mon Profil, Univers, Forum…) : aucune éjection.
+          const _ejInEditor = els.appView && els.appView.style.display !== 'none';
+          const _ejMyEmail = ((state.currentUser && state.currentUser.email) || '').toLowerCase();
+          const _ejOthers = (state.dbPresence || []).some(r => r.project_id === state.currentProjectId && (r.user_email || '').toLowerCase() !== _ejMyEmail);
+          if(state.currentProjectId && _ejInEditor && _ejOthers && LockManager.lastActivity
              && (Date.now() - LockManager.lastActivity > 180000)) {
               LockManager.lastActivity = Date.now();
               try { await StoreSave.save(); } catch(e) {}
@@ -19996,19 +19986,8 @@ initCategoriesDragDrop: () => {
             UITheme.setTabsMode('scroll');
         }
         
-        // Positionnement dynamique des tooltips pour éviter qu'ils sortent de l'écran
-        document.addEventListener('mouseover', (e) => {
-            const el = e.target.closest('[data-tooltip]');
-            if(el) {
-                const rect = el.getBoundingClientRect();
-                const tooltip = el.querySelector('::after');
-                // Utiliser CSS custom properties pour positionner
-                const tooltipX = Math.min(Math.max(rect.left + rect.width/2, 100), window.innerWidth - 100);
-                const tooltipY = rect.bottom + 10;
-                el.style.setProperty('--tooltip-x', tooltipX + 'px');
-                el.style.setProperty('--tooltip-y', tooltipY + 'px');
-            }
-        });
+        // Tooltips : moteur unifié (module Tooltip). Init global au DOMContentLoaded ; sécurité ici (idempotent).
+        Tooltip.init();
         
         // Init mode navigation (classique ou catégories) - Catégories par défaut
         const savedNavMode = (() => { try { return localStorage.getItem('fmp_nav_mode') || 'categories'; } catch(e) { return 'categories'; } })();
@@ -20021,6 +20000,111 @@ initCategoriesDragDrop: () => {
         // Init CardModal
         CardModal.init();
     },
+  };
+
+  // ==================== TOOLTIP — bulle d'aide unifiée (survol) ====================
+  // Une seule bulle (position:fixed sur <body>) : jamais coupée par un overflow ni posée
+  // par-dessus un menu ouvert. Gère [data-tooltip] ET les title= natifs (neutralisés le temps
+  // du survol puis restaurés). Placement auto avec bascule si pas de place + clamp à l'écran.
+  const Tooltip = {
+      el: null, timer: null, current: null, _inited: false,
+      DELAY: 450,
+
+      _ensure: () => {
+          if(Tooltip.el) return Tooltip.el;
+          const t = document.createElement('div');
+          t.className = 'app-tooltip';
+          t.setAttribute('role', 'tooltip');
+          document.body.appendChild(t);
+          return (Tooltip.el = t);
+      },
+
+      // Un menu déroulant est-il ouvert ? Si oui : aucune bulle (sinon elle le recouvrirait).
+      _menuOpen: () => !!document.querySelector('.menu-dropdown.visible, .dropdown-menu.show'),
+
+      // Texte à afficher ; neutralise le title natif (restauré au mouseout) pour éviter le doublon.
+      _arm: (el) => {
+          const nat = el.getAttribute('title');
+          if(nat) { el.setAttribute('data-tt-native', nat); el.removeAttribute('title'); return nat; }
+          return el.getAttribute('data-tooltip') || '';
+      },
+      _disarm: (el) => {
+          if(el && el.hasAttribute && el.hasAttribute('data-tt-native')) {
+              el.setAttribute('title', el.getAttribute('data-tt-native'));
+              el.removeAttribute('data-tt-native');
+          }
+      },
+
+      _place: (el) => {
+          const t = Tooltip.el; if(!t) return;
+          const r = el.getBoundingClientRect();
+          const tw = t.offsetWidth, th = t.offsetHeight;
+          const gap = 8, pad = 6, vw = window.innerWidth, vh = window.innerHeight;
+          const pref = el.getAttribute('data-tooltip-pos') || 'top';
+          const orders = {
+              top:    ['top','bottom','right','left'],
+              bottom: ['bottom','top','right','left'],
+              left:   ['left','right','top','bottom'],
+              right:  ['right','left','top','bottom']
+          };
+          const order = orders[pref] || orders.top;
+          const fits = {
+              top:    r.top    - gap - th >= pad,
+              bottom: r.bottom + gap + th <= vh - pad,
+              left:   r.left   - gap - tw >= pad,
+              right:  r.right  + gap + tw <= vw - pad
+          };
+          const side = order.find(z => fits[z]) || order[0];
+          let x, y;
+          if(side === 'top' || side === 'bottom') {
+              x = r.left + r.width / 2 - tw / 2;
+              y = side === 'top' ? r.top - gap - th : r.bottom + gap;
+          } else {
+              y = r.top + r.height / 2 - th / 2;
+              x = side === 'left' ? r.left - gap - tw : r.right + gap;
+          }
+          t.style.left = Math.min(Math.max(x, pad), vw - tw - pad) + 'px';
+          t.style.top  = Math.min(Math.max(y, pad), vh - th - pad) + 'px';
+      },
+
+      _show: (el) => {
+          if(Tooltip._menuOpen()) return;
+          const txt = Tooltip._arm(el);
+          if(!txt) return;
+          const t = Tooltip._ensure();
+          t.textContent = txt;
+          Tooltip.current = el;
+          t.classList.add('visible');
+          Tooltip._place(el);
+      },
+
+      hide: () => {
+          clearTimeout(Tooltip.timer); Tooltip.timer = null;
+          if(Tooltip.current) Tooltip._disarm(Tooltip.current);
+          Tooltip.current = null;
+          if(Tooltip.el) Tooltip.el.classList.remove('visible');
+      },
+
+      init: () => {
+          if(Tooltip._inited) return;
+          Tooltip._inited = true;
+          document.addEventListener('mouseover', (e) => {
+              const el = e.target.closest && e.target.closest('[data-tooltip], [title]');
+              if(!el || el === Tooltip.current) return;
+              clearTimeout(Tooltip.timer);
+              Tooltip.timer = setTimeout(() => Tooltip._show(el), Tooltip.DELAY);
+          }, true);
+          document.addEventListener('mouseout', (e) => {
+              const from = e.target.closest && e.target.closest('[data-tooltip], [title], [data-tt-native]');
+              if(!from) return;
+              if(e.relatedTarget && from.contains && from.contains(e.relatedTarget)) return;
+              Tooltip.hide();
+          }, true);
+          ['mousedown','click','keydown','wheel'].forEach(ev => document.addEventListener(ev, Tooltip.hide, true));
+          window.addEventListener('scroll', Tooltip.hide, true);
+          window.addEventListener('resize', Tooltip.hide);
+          window.addEventListener('blur', Tooltip.hide);
+      }
   };
 
   const UIData = {
@@ -32405,6 +32489,7 @@ const DrawingEditor = {
   
   // Initialiser le drag au chargement
   document.addEventListener('DOMContentLoaded', () => {
+      Tooltip.init();
       ScriptEditorSearch.initDrag();
       
       // === Installation auto du blocker d'emojis sur les champs de saisie ===
