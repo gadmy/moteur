@@ -7111,6 +7111,8 @@ body.presentation-mode .presentation-bar {
   .wm-window.wm-readonly .wm-body > * { pointer-events: none; }
   .wm-window.wm-readonly .wm-ro-banner { pointer-events: auto; }
   .wm-ro-banner { position: sticky; top: 0; z-index: 5; margin: -12px -12px 10px; padding: 8px 12px; background: rgba(217,119,6,0.15); border-bottom: 1px solid rgba(217,119,6,0.4); color: var(--text-main); font-size: 0.82rem; font-weight: 600; }
+  /* remonte le mini-tchat au-dessus de la barre des fenêtres réduites */
+  body.wm-taskbar-open .minichat-bubble, body.wm-taskbar-open .minichat-panel { bottom: calc(28px + var(--wm-taskbar-h, 0px)); transition: bottom 0.15s; }
 </style>
 </head>
 <body>
@@ -14250,6 +14252,8 @@ crewRoles: {
               chip.addEventListener('click', () => WindowManager.restore(r.id));
               tb.appendChild(chip);
           });
+          document.body.classList.toggle('wm-taskbar-open', mins.length > 0);
+          document.body.style.setProperty('--wm-taskbar-h', (mins.length ? tb.offsetHeight : 0) + 'px');
       },
 
       poppedTabs: {},
@@ -14294,7 +14298,7 @@ crewRoles: {
           WindowManager.popTab(tab.dataset.tab, label);
       },
 
-      popTab: (name, label) => {
+      popTab: (name, label, geom) => {
           WindowManager._ensureWired();
           const content = document.getElementById('tab-' + name);
           if(!content) { if(typeof Utils !== 'undefined') Utils.toast('Contenu introuvable pour cet onglet', 'error'); return; }
@@ -14306,7 +14310,10 @@ crewRoles: {
           WindowManager._homes[name] = home;
           WindowManager.poppedTabs[name] = true;
           content.classList.add('wm-hosted');
-          WindowManager.open('tab:' + name, label || name, content, { onClose: () => WindowManager._restoreTab(name) });
+          const _g = geom || {};
+          WindowManager.open('tab:' + name, label || name, content, { onClose: () => WindowManager._restoreTab(name), x: _g.x, y: _g.y, w: _g.w, h: _g.h });
+          if(_g.max) WindowManager.toggleMax('tab:' + name);
+          if(_g.min) WindowManager.minimize('tab:' + name);
           WindowManager.syncSubnav();
           if(wasActive) WindowManager._switchAway(name);
           WindowManager._arbitrate();
@@ -14375,8 +14382,32 @@ crewRoles: {
           }
       },
 
-      // Persistance branchée en Phase B2 (mémorise quels sous-onglets sont en fenêtre + leur géométrie).
-      _persist: () => {}
+      // Persistance : mémorise quels sous-onglets sont en fenêtre + leur géométrie.
+      _persist: () => {
+          try {
+              const data = {};
+              Object.keys(WindowManager.wins).forEach((id) => {
+                  if(id.indexOf('tab:') !== 0) return;
+                  const r = WindowManager.wins[id];
+                  data[id.slice(4)] = { x: r.state.x, y: r.state.y, w: r.state.w, h: r.state.h, min: !!r.state.min, max: !!r.state.max };
+              });
+              localStorage.setItem('moteur_wm_windows', JSON.stringify(data));
+          } catch(_) {}
+      },
+
+      restoreSaved: () => {
+          let data;
+          try { data = JSON.parse(localStorage.getItem('moteur_wm_windows') || '{}'); } catch(_) { data = {}; }
+          Object.keys(data).forEach((name) => {
+              if(WindowManager.poppedTabs[name]) return;
+              if(!document.getElementById('tab-' + name)) return;
+              let label = name;
+              const btn = document.querySelector('.tab-subbtn[data-tab="' + name + '"]');
+              if(btn) label = (btn.textContent || name).replace(/\s*×\s*$/, '').trim();
+              WindowManager.popTab(name, label, data[name]);
+          });
+          WindowManager._arbitrate();
+      }
   };
   if(typeof window !== 'undefined') window.WindowManager = WindowManager;
 
@@ -21535,6 +21566,7 @@ const tabToSection = {
           els.dashboardView.style.display = 'none'; 
           document.getElementById('projects-view').style.display = 'none';
           els.appView.style.display = 'flex';
+          setTimeout(() => { try { WindowManager.restoreSaved(); } catch(_) {} }, 400);
           
           // Appliquer les permissions sur les onglets visibles
           UI.applyTabPermissions(); 
