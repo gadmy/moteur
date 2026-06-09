@@ -54676,7 +54676,7 @@ const Admin = {
                         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap;">
                             <span style="background: ${statusLabels[r.status]?.color || '#6b7280'}; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.75rem;">${statusLabels[r.status]?.label || r.status}</span>
                             <span class="fw-bold">${reasonLabels[r.reason] || r.reason}</span>
-                            <span class="text-sec-sm2">• ${r.reported_type}</span>
+                            <span class="text-sec-sm2">• ${r.reported_type === 'forum_thread' ? 'Sujet forum' : r.reported_type === 'forum_reply' ? 'Réponse forum' : r.reported_type === 'profile' ? 'Profil' : r.reported_type}</span>
                             ${hasBadge ? `<span style="background:${currentBadge.badge === 'yellow' ? '#f59e0b' : currentBadge.badge === 'red' ? '#dc2626' : '#1f2937'}; color:white; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Badge ${badgeDotLabels[currentBadge.badge]}</span>` : ''}
                         </div>
                         <div style="margin-bottom: 5px;"><strong>Signalé :</strong> ${Utils.escape(r.reported_name || 'Inconnu')} ${r.reported_email ? `(${r.reported_email})` : ''}</div>
@@ -54702,6 +54702,7 @@ const Admin = {
                             <button onclick="app.Admin.updateReportStatus('${r.id}', 'resolved')" style="padding: 6px 12px; background: var(--success); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">✅ Résolu</button>
                             <button onclick="app.Admin.updateReportStatus('${r.id}', 'dismissed')" style="padding: 6px 12px; background: var(--border); color: var(--text-main); border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">❌ Rejeter</button>
                         ` : ''}
+                        ${(r.reported_type === 'forum_thread' || r.reported_type === 'forum_reply') ? `<button onclick="app.Admin.deleteForumPost('${r.reported_type}', '${r.reported_id}', '${r.id}')" style="padding: 6px 12px; background: #b45309; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🗑️ Supprimer le post</button>` : ''}
                         <button onclick="app.Admin.deleteReport('${r.id}')" style="padding: 6px 12px; background: var(--danger); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🗑️</button>
                     </div>
                 </div>`;
@@ -54825,6 +54826,33 @@ const Admin = {
         } catch(e) {
             console.error('Erreur mise à jour:', e);
             Utils.toast('Erreur', 'error');
+        }
+    },
+    
+    // Supprimer un post forum signalé (sujet -> cascade réponses + votes ; réponse -> seule)
+    deleteForumPost: async (kind, postId, reportId) => {
+        const isThread = kind === 'forum_thread';
+        if(!await ConfirmModal.show({ title: 'Supprimer le post ?', message: isThread ? 'Supprimer définitivement ce sujet ET toutes ses réponses ?' : 'Supprimer définitivement cette réponse ?', icon: '🗑️', confirmText: 'Supprimer' })) return;
+        try {
+            if(isThread) {
+                try { await supabase.from('forum_votes').delete().eq('thread_id', postId); } catch(_) {}
+                await supabase.from('forum_replies').delete().eq('thread_id', postId);
+                const { data, error } = await supabase.from('forum_threads').delete().eq('id', postId).select();
+                if(error) throw error;
+                if(!data || data.length === 0) { Utils.toast('Suppression bloquée : aucune ligne supprimée (vérifie la policy RLS DELETE sur forum_threads).', 'error', 7000); return; }
+            } else {
+                const { data, error } = await supabase.from('forum_replies').delete().eq('id', postId).select();
+                if(error) throw error;
+                if(!data || data.length === 0) { Utils.toast('Suppression bloquée : aucune ligne supprimée (vérifie la policy RLS DELETE sur forum_replies).', 'error', 7000); return; }
+            }
+            try { await supabase.from('reports').update({ status: 'resolved', reviewed_at: new Date().toISOString(), reviewed_by: state.currentUser.email }).eq('id', reportId); } catch(_) {}
+            Utils.toast('Post supprimé', 'success');
+            await Admin.loadReports();
+            await Admin.loadStats();
+            Admin.refreshPendingBadge();
+        } catch(e) {
+            console.error('Erreur suppression post forum:', e);
+            Utils.toast('Erreur lors de la suppression du post', 'error');
         }
     },
     
@@ -62661,6 +62689,63 @@ const Forum = {
             });
     },
     
+    // Signaler un post du forum (sujet ou réponse) -> table reports (réutilise l'infra de modération)
+    reportPost: async (kind, id) => {
+        if(!state.currentUser) { Utils.toast('Vous devez être connecté pour signaler', 'warning'); return; }
+        let post;
+        if(kind === 'forum_thread') post = (Forum.threads || []).find(t => String(t.id) === String(id)) || Forum._openThread;
+        else post = (Forum._openReplies || []).find(r => String(r.id) === String(id));
+        if(!post) { Utils.toast('Post introuvable', 'error'); return; }
+        const reporterEmail = state.currentUser.email.toLowerCase();
+        const authorEmail = (post.authorEmail || '').toLowerCase();
+        if(authorEmail && authorEmail === reporterEmail) { Utils.toast('Vous ne pouvez pas signaler votre propre post', 'warning'); return; }
+        const reasons = [
+            { id: 'inappropriate', label: '🚫 Contenu inapproprié' },
+            { id: 'spam', label: '📧 Spam / Publicité' },
+            { id: 'harassment', label: '⚠️ Harcèlement' },
+            { id: 'scam', label: '💰 Arnaque' },
+            { id: 'other', label: '❓ Autre raison' }
+        ];
+        const reasonHtml = reasons.map(r => `<option value="${r.id}">${r.label}</option>`).join('');
+        const isThread = kind === 'forum_thread';
+        const result = await ConfirmModal.show({
+            title: '🚩 Signaler ' + (isThread ? 'ce sujet' : 'cette réponse'),
+            message: `
+                <p class="mb-15">Signaler le post de <strong>${Utils.escape(post.authorName || 'Anonyme')}</strong> ?</p>
+                <label class="label-bold-block-5">Motif :</label>
+                <select id="forum-report-reason" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;">${reasonHtml}</select>
+                <label class="label-bold-block-5">Détails (optionnel) :</label>
+                <textarea id="forum-report-details" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;min-height:80px;" placeholder="Décrivez le problème..."></textarea>
+            `,
+            confirmText: 'Envoyer le signalement',
+            icon: '🚩'
+        });
+        if(!result) return;
+        const reason = document.getElementById('forum-report-reason')?.value || 'other';
+        const freeText = document.getElementById('forum-report-details')?.value || '';
+        try {
+            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+            const { count, error: cErr } = await supabase.from('reports').select('id', { count: 'exact', head: true }).eq('reporter_email', reporterEmail).gte('created_at', sevenDaysAgo);
+            if(!cErr && count !== null && count >= 5) { Utils.toast('Limite de 5 signalements par semaine atteinte.', 'warning', 6000); return; }
+        } catch(_) {}
+        const excerpt = String(post.content || '').replace(/<[^>]*>/g, '').slice(0, 240);
+        const header = '[' + (isThread ? 'SUJET' : 'RÉPONSE') + (isThread && post.title ? ' « ' + post.title + ' »' : '') + '] ';
+        const details = header + excerpt + (freeText ? ('\n\nMotif libre : ' + freeText) : '');
+        const { error } = await supabase.from('reports').insert({
+            reporter_email: reporterEmail,
+            reported_type: kind,
+            reported_id: String(id),
+            reported_name: post.authorName || 'Anonyme',
+            reported_email: authorEmail,
+            reason: reason,
+            details: details,
+            status: 'pending',
+            created_at: new Date().toISOString()
+        });
+        if(error) { console.error('reportPost:', error); Utils.toast('Erreur lors du signalement', 'error'); return; }
+        Utils.toast('Signalement envoyé. Merci !', 'success');
+    },
+
     openThread: async (threadId) => {
         const thread = Forum.threads.find(t => t.id === threadId);
         if(!thread) return;
@@ -62690,6 +62775,7 @@ const Forum = {
     
     // ===================== MODALE FIL & RÉPONSES =====================
     showThreadModal: (thread, replies) => {
+        Forum._openThread = thread; Forum._openReplies = replies;
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
         modal.style.display = 'flex';
@@ -62712,7 +62798,7 @@ const Forum = {
                         ${thread.image ? `<img src="${thread.image}" style="max-width:100%; border-radius:8px; margin-bottom:15px;" alt="Image">` : ''}
                         <div class="forum-post-actions">
                             <span class="forum-post-action" onclick="app.Forum.vote('${thread.id}', 1)">▲ ${thread.votes || 0}</span>
-                            ${thread.authorEmail === state.currentUser?.email ? `<span class="forum-post-action" onclick="app.Forum.markResolved('${thread.id}')">✅ Marquer résolu</span>` : ''}
+                            ${thread.authorEmail === state.currentUser?.email ? `<span class="forum-post-action" onclick="app.Forum.markResolved('${thread.id}')">✅ Marquer résolu</span>` : `<span class="forum-post-action" onclick="app.Forum.reportPost('forum_thread', '${thread.id}')">🚩 Signaler</span>`}
                         </div>
                     </div>
                     <h3 style="margin:20px 0 15px;">💬 ${replies.length} réponse${replies.length > 1 ? 's' : ''}</h3>
@@ -62727,6 +62813,7 @@ const Forum = {
                                     </div>
                                 </div>
                                 <div class="forum-post-content" style="font-size:0.95rem;">${r.content.replace(/\n/g, '<br>')}</div>
+                                ${r.authorEmail !== state.currentUser?.email ? `<div style="margin-top:6px;"><span class="forum-post-action" style="font-size:0.8rem;" onclick="app.Forum.reportPost('forum_reply', '${r.id}')">🚩 Signaler</span></div>` : ''}
                             </div>
                         `).join('')}
                     </div>
