@@ -9337,6 +9337,10 @@ body.presentation-mode .presentation-bar {
                 <div class="forum-new-thread">
                     <button class="forum-new-btn" onclick="app.Forum.openNewThread()">➕ Nouveau sujet</button>
                 </div>
+                <div style="position:relative; margin-bottom:12px;">
+                    <input type="text" id="forum-search-input" placeholder="🔍 Rechercher dans le forum (titre, contenu, auteur)..." oninput="app.Forum.search(this.value)" style="width:100%; padding:10px 36px 10px 14px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text-main); font-size:0.9rem; box-sizing:border-box;">
+                    <span id="forum-search-clear" onclick="app.Forum.clearSearch()" style="display:none; position:absolute; right:12px; top:50%; transform:translateY(-50%); cursor:pointer; color:var(--text-sec); font-size:1rem;">✖</span>
+                </div>
                 <div id="forum-threads-list"></div>
             </div>
         </div>
@@ -11975,21 +11979,18 @@ const app = (function(){
                           detectSessionInUrl: true,
                           persistSession: true,
                           autoRefreshToken: !isFileProtocol,
-                          // Verrou d'auth avec timeout : sérialise les opérations entre onglets
-                          // (évite la course "refresh token already used" qui casse les sessions multi-onglets),
-                          // mais abandonne après 5 s si le verrou est orphelin (évite le hang infini WebKit/Safari).
-                          lock: async (name, acquireTimeout, fn) => {
-                              const lm = (typeof navigator !== 'undefined') ? navigator.locks : null;
-                              if (!lm || typeof lm.request !== 'function') return await fn();
-                              const controller = new AbortController();
-                              const timer = setTimeout(() => { try { controller.abort(); } catch(_) {} }, 5000);
-                              try {
-                                  return await lm.request(name, { signal: controller.signal }, async () => { clearTimeout(timer); return await fn(); });
-                              } catch (e) {
-                                  clearTimeout(timer);
-                                  return await fn();
-                              }
-                          }
+                          // Verrou d'auth SÉRIALISÉ EN MÉMOIRE (chaîne de promesses) :
+                          // chaque opération d'auth s'exécute une seule fois, jusqu'au bout, l'une après l'autre.
+                          // Supprime tout navigator.locks (verrou orphelin + le motif abort-puis-rejeu qui
+                          // corrompait l'état interne de supabase-js et gelait getSession() définitivement).
+                          lock: (() => {
+                              let chain = Promise.resolve();
+                              return (name, acquireTimeout, fn) => {
+                                  const run = chain.then(() => fn(), () => fn());
+                                  chain = run.then(() => {}, () => {});
+                                  return run;
+                              };
+                          })()
                       },
                       global: {
                           headers: { 'x-application-name': 'moteur' },
@@ -62390,6 +62391,7 @@ const Forum = {
     // ===================== ÉTAT & CATÉGORIES =====================
     currentCategory: 'general',
     currentSort: 'recent',
+    searchQuery: '',
     threads: [],
     
     categories: {
@@ -62433,6 +62435,9 @@ const Forum = {
     
     switchCategory: (category) => {
         Forum.currentCategory = category;
+        Forum.searchQuery = '';
+        const _si = document.getElementById('forum-search-input'); if(_si) _si.value = '';
+        const _sc = document.getElementById('forum-search-clear'); if(_sc) _sc.style.display = 'none';
         document.querySelectorAll('.forum-category').forEach(c => c.classList.remove('active'));
         document.querySelector(`.forum-category[data-category="${category}"]`).classList.add('active');
         const cat = Forum.categories[category];
@@ -62486,25 +62491,45 @@ const Forum = {
         });
     },
     
+    search: (q) => {
+        Forum.searchQuery = q || '';
+        const clr = document.getElementById('forum-search-clear');
+        if(clr) clr.style.display = Forum.searchQuery.trim() ? 'block' : 'none';
+        Forum.renderThreads();
+    },
+    
+    clearSearch: () => {
+        Forum.searchQuery = '';
+        const input = document.getElementById('forum-search-input');
+        if(input) input.value = '';
+        const clr = document.getElementById('forum-search-clear');
+        if(clr) clr.style.display = 'none';
+        Forum.renderThreads();
+    },
+    
     renderThreads: () => {
-        let threads = Forum.threads.filter(t => t.category === Forum.currentCategory);
+        const q = (Forum.searchQuery || '').trim().toLowerCase();
+        let threads = q
+            ? Forum.threads.filter(t => ((t.title || '') + ' ' + (t.content || '') + ' ' + (t.authorName || '')).toLowerCase().includes(q))
+            : Forum.threads.filter(t => t.category === Forum.currentCategory);
         
-        if(Forum.currentSort === 'recent') {
-            threads.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        } else if(Forum.currentSort === 'popular') {
+        if(Forum.currentSort === 'popular') {
             threads.sort((a, b) => (b.votes || 0) - (a.votes || 0));
         } else if(Forum.currentSort === 'unresolved') {
             threads = threads.filter(t => !t.resolved);
+            threads.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        } else {
             threads.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         }
         
         const container = document.getElementById('forum-threads-list');
         if(threads.length === 0) {
-            container.innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-sec);">Aucun sujet dans cette catégorie. Soyez le premier à créer un sujet !</div>';
+            container.innerHTML = `<div style="padding:40px; text-align:center; color:var(--text-sec);">${q ? 'Aucun résultat pour « ' + Utils.escape(Forum.searchQuery.trim()) + ' ».' : 'Aucun sujet dans cette catégorie. Soyez le premier à créer un sujet !'}</div>`;
             return;
         }
         
-        container.innerHTML = threads.map(t => `
+        const head = q ? `<div style="padding:4px 2px 10px; color:var(--text-sec); font-size:0.85rem;">${threads.length} résultat${threads.length > 1 ? 's' : ''} pour « ${Utils.escape(Forum.searchQuery.trim())} » (toutes catégories)</div>` : '';
+        container.innerHTML = head + threads.map(t => `
             <div class="forum-thread" onclick="app.Forum.openThread('${t.id}')">
                 <div class="forum-thread-title">
                     ${t.pinned ? '<span class="badge pinned">📌 Épinglé</span>' : ''}
@@ -62520,6 +62545,7 @@ const Forum = {
                     <span>👤 ${t.authorName || 'Anonyme'}</span>
                     <span>💬 ${t.replyCount || 0} réponses</span>
                     <span>🕐 ${Utils.timeAgo(t.createdAt)}</span>
+                    ${q ? `<span>📂 ${(Forum.categories[t.category] && Forum.categories[t.category].name) || t.category}</span>` : ''}
                 </div>
             </div>
         `).join('');
@@ -62798,7 +62824,8 @@ const Forum = {
                         ${thread.image ? `<img src="${thread.image}" style="max-width:100%; border-radius:8px; margin-bottom:15px;" alt="Image">` : ''}
                         <div class="forum-post-actions">
                             <span class="forum-post-action" onclick="app.Forum.vote('${thread.id}', 1)">▲ ${thread.votes || 0}</span>
-                            ${thread.authorEmail === state.currentUser?.email ? `<span class="forum-post-action" onclick="app.Forum.markResolved('${thread.id}')">✅ Marquer résolu</span>` : `<span class="forum-post-action" onclick="app.Forum.reportPost('forum_thread', '${thread.id}')">🚩 Signaler</span>`}
+                            ${thread.authorEmail === state.currentUser?.email ? `<span class="forum-post-action" onclick="app.Forum.markResolved('${thread.id}')">✅ Marquer résolu</span>` : ''}
+                            <span class="forum-post-action" onclick="app.Forum.reportPost('forum_thread', '${thread.id}')">🚩 Signaler</span>
                         </div>
                     </div>
                     <h3 style="margin:20px 0 15px;">💬 ${replies.length} réponse${replies.length > 1 ? 's' : ''}</h3>
@@ -62813,7 +62840,7 @@ const Forum = {
                                     </div>
                                 </div>
                                 <div class="forum-post-content" style="font-size:0.95rem;">${r.content.replace(/\n/g, '<br>')}</div>
-                                ${r.authorEmail !== state.currentUser?.email ? `<div style="margin-top:6px;"><span class="forum-post-action" style="font-size:0.8rem;" onclick="app.Forum.reportPost('forum_reply', '${r.id}')">🚩 Signaler</span></div>` : ''}
+                                <div style="margin-top:6px;"><span class="forum-post-action" style="font-size:0.8rem;" onclick="app.Forum.reportPost('forum_reply', '${r.id}')">🚩 Signaler</span></div>
                             </div>
                         `).join('')}
                     </div>
