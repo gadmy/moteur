@@ -7421,7 +7421,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv527</p>
+      <p>vv527.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -48381,6 +48381,96 @@ const Orgs = {
         return state.data.orgs;
     },
 
+    // Instantane complet et normalise de la fiche structure (affichage lecture seule + autocompletion contrats).
+    // b = sac de champs a plat (data du profil OU JSON contact) ; facets = pour le siege (hqAddress).
+    _ficheFrom: (b, facets, kind) => {
+        b = b || {};
+        const f = (facets || {})[kind] || {};
+        const sList = (obj, map) => Object.keys(map).filter(k => obj && obj[k]).map(k => map[k]).join(', ');
+        if(kind === 'asso') {
+            return {
+                kind: 'asso',
+                name: b.assoName || '', logo: b.assoLogo || '', type: b.assoType || '',
+                siret: b.assoSiret || '', legalForm: '', year: b.assoYear || '',
+                size: b.assoMembers || '', leader: b.assoPresident || '', contactPerson: '',
+                email: b.assoEmail || '', phone: b.assoPhone || '', website: b.assoWebsite || '',
+                hq: f.hqAddress || b.assoSiege || b.city || '',
+                mission: b.assoMission || '', activities: b.assoActivities || '',
+                services: sList(b.assoServices, { formation:'Formation', ateliers:'Ateliers', networking:'Networking', casting:'Casting', materiel:'Prêt de matériel', production:'Production', diffusion:'Diffusion' }),
+                facebook: b.assoFacebook || '', instagram: b.assoInstagram || '', youtube: b.assoYoutube || '', linkedin: b.assoLinkedin || '', vimeo: '', imdb: ''
+            };
+        }
+        return {
+            kind: 'ent',
+            name: b.entName || '', logo: b.entLogo || '', type: b.entType || '',
+            siret: b.entSiret || '', legalForm: b.entLegal || '', year: b.entYear || '',
+            size: b.entEmployees || '', leader: b.entDirector || '', contactPerson: b.entContact || '',
+            email: b.entEmail || '', phone: b.entPhone || '', website: b.entWebsite || '',
+            hq: f.hqAddress || b.entSiege || b.city || '',
+            mission: b.entDescription || '', activities: b.entServices || '',
+            services: sList(b.entSpecialties, { fiction:'Fiction', doc:'Documentaire', pub:'Publicité', corporate:'Corporate', clip:'Clip', event:'Événementiel', web:'Web' }),
+            facebook: b.entFacebook || '', instagram: b.entInstagram || '', youtube: b.entYoutube || '', linkedin: b.entLinkedin || '', vimeo: b.entVimeo || '', imdb: b.entImdb || ''
+        };
+    },
+
+    // Fiche normalisee a afficher : l'instantane o.fiche, ou repli depuis les anciens champs a plat (donnees legacy).
+    _fiche: (o) => {
+        if(o && o.fiche) return o.fiche;
+        const kind = (o && o.type === 'asso') ? 'asso' : 'ent';
+        return { kind: kind, name: (o && o.name) || '', logo: '', type: '', siret: '', legalForm: '', year: '', size: '', leader: '', contactPerson: '',
+            email: (o && o.contact) || '', phone: (o && o.phone) || '', website: (o && o.site) || '', hq: (o && o.address) || '',
+            mission: (o && o.desc) || '', activities: '', services: '', facebook: '', instagram: '', youtube: '', linkedin: '', vimeo: '', imdb: '' };
+    },
+
+    // Edition d'un champ de la fiche (structures NON liees a l'Univers uniquement).
+    updateFiche: (idx, key, value) => {
+        const list = Orgs._list();
+        if(!list[idx]) return;
+        if(!list[idx].fiche) list[idx].fiche = Orgs._fiche(list[idx]);
+        list[idx].fiche[key] = value;
+        if(key === 'name') list[idx].name = value;
+        if(key === 'email') list[idx].contact = value;
+        Store.save();
+        if(key === 'email' && value && value.indexOf('@') !== -1) Orgs._maybeNotify(list[idx], value.trim());
+    },
+
+    // Fonctions disponibles selon le departement (meme taxonomie que technicien : CONFIG.crewRoles + Financeurs).
+    _rolesFor: (deptId) => {
+        if(deptId === 'fin') return ['Financeur principal', 'Co-financeur', 'Subvention', 'Mécénat', 'Préachat', 'Partenaire', 'Autre'];
+        return (typeof CONFIG !== 'undefined' && CONFIG.crewRoles && CONFIG.crewRoles[deptId]) ? CONFIG.crewRoles[deptId] : ['Autre'];
+    },
+
+    // Options du select departement : groupes crew du projet + Financeurs (+ valeur legacy eventuelle).
+    _deptOptions: (selected) => {
+        const groups = (state.data.groups || []).filter(g => g.type === 'crew');
+        let html = '<option value="">— Département —</option>';
+        groups.forEach(g => { html += `<option value="${Utils.escape(g.id)}"${g.id === selected ? ' selected' : ''}>${Utils.escape(g.name)}</option>`; });
+        html += `<option value="fin"${selected === 'fin' ? ' selected' : ''}>💰 Financeurs</option>`;
+        if(selected && selected !== 'fin' && !groups.some(g => g.id === selected)) html += `<option value="${Utils.escape(selected)}" selected>${Utils.escape(selected)}</option>`;
+        return html;
+    },
+
+    // Changement de departement : la fonction depend du departement -> on la reinitialise.
+    setDept: (idx, value) => {
+        const list = Orgs._list();
+        if(!list[idx]) return;
+        list[idx].department = value;
+        list[idx].role = '';
+        list[idx].roleCustom = false;
+        Store.save();
+        Orgs.render();
+    },
+
+    // Choix de fonction : 'Autre' -> champ libre (comme technicien).
+    onRoleChange: (idx, value) => {
+        const list = Orgs._list();
+        if(!list[idx]) return;
+        if(value === 'Autre') { list[idx].roleCustom = true; }
+        else { list[idx].roleCustom = false; list[idx].role = value; }
+        Store.save();
+        Orgs.render();
+    },
+
     add: () => {
         Orgs._list().push({ id: Utils.generateUniqueId(), type: 'ent', name: '', address: '', phone: '', site: '', desc: '', department: '', role: '', contact: '', notes: '', srcId: null });
         Store.save();
@@ -48423,6 +48513,7 @@ const Orgs = {
                     site: fx(f, ['site', 'website', 'web']) || prof.site || '',
                     desc: fx(f, ['description', 'desc', 'bio']) || '',
                     department: '', role: '', contact: email, notes: '', srcId: null,
+                    fiche: Orgs._ficheFrom(prof, prof.facets, t),
                     profileId: prof.publicProfileId || c.publicProfileId || null });
                 added++;
             });
@@ -48501,15 +48592,17 @@ const Orgs = {
                     phone: fx(fa, ['phone', 'tel']) || d.assoPhone || '',
                     site: fx(fa, ['site', 'website', 'web']) || d.assoSite || '',
                     address: fx(fa, ['siege', 'siegeAddress', 'address']) || d.assoSiege || '',
-                    desc: fx(fa, ['description', 'desc', 'bio']) || d.assoDesc || '' });
+                    desc: fx(fa, ['description', 'desc', 'bio']) || d.assoDesc || '',
+                    fiche: Orgs._ficheFrom(d, f, 'asso') });
                 if(fe.enabled || p.profile_type === 'enterprise') entries.push({ t: 'ent',
                     name: d.entName || fe.name || p.name,
                     email: fe.email || d.entEmail || '',
                     phone: fx(fe, ['phone', 'tel']) || d.entPhone || '',
                     site: fx(fe, ['site', 'website', 'web']) || d.entSite || '',
                     address: fx(fe, ['siege', 'siegeAddress', 'address']) || d.entSiege || '',
-                    desc: fx(fe, ['description', 'desc', 'bio']) || d.entDesc || '' });
-                entries.forEach(en => { if(en.name) out.push({ pid: p.id, t: en.t, name: en.name, city: d.city || p.city || '', email: en.email, phone: en.phone, site: en.site, address: en.address, desc: en.desc }); });
+                    desc: fx(fe, ['description', 'desc', 'bio']) || d.entDesc || '',
+                    fiche: Orgs._ficheFrom(d, f, 'ent') });
+                entries.forEach(en => { if(en.name) out.push({ pid: p.id, t: en.t, name: en.name, city: d.city || p.city || '', email: en.email, phone: en.phone, site: en.site, address: en.address, desc: en.desc, fiche: en.fiche }); });
             });
             const q = (document.getElementById('orgs-search-name')?.value || '').toLowerCase();
             const tf = document.getElementById('orgs-search-type')?.value || '';
@@ -48536,7 +48629,7 @@ const Orgs = {
             return;
         }
         // La fiche structure de la casquette est COPIEE dans le projet (comme une fiche comedien)
-        list.push({ id: Utils.generateUniqueId(), type: r.t, name: r.name || '', address: r.address || r.city || '', phone: r.phone || '', site: r.site || '', desc: r.desc || '', department: '', role: '', contact: r.email || '', notes: '', srcId: null, profileId: r.pid });
+        list.push({ id: Utils.generateUniqueId(), type: r.t, name: r.name || '', address: r.address || r.city || '', phone: r.phone || '', site: r.site || '', desc: r.desc || '', department: '', role: '', contact: r.email || '', notes: '', srcId: null, profileId: r.pid, fiche: r.fiche || null });
         Store.save();
         Orgs.render();
         const modal = document.getElementById('orgs-search-modal'); if(modal) modal.remove();
@@ -48562,7 +48655,7 @@ const Orgs = {
         const before = list[idx][field];
         list[idx][field] = value;
         Store.save();
-        if(field === 'type') Orgs.render();
+        if(field === 'type') { if(list[idx].fiche) list[idx].fiche.kind = (value === 'asso' ? 'asso' : 'ent'); Orgs.render(); }
         // Meme logique que comediens/techniciens : email saisi -> si un compte existe, proposer de prevenir
         if(field === 'contact' && value && value !== before && value.indexOf('@') !== -1) {
             Orgs._maybeNotify(list[idx], value.trim());
@@ -48666,32 +48759,81 @@ const Orgs = {
         }
 
         const cards = list.map((o, i) => {
-            const icon = o.type === 'asso' ? '🏛️' : '🏢';
-            return '<div class="chub-card">'
-                + '<div class="chub-row">'
-                + '<select onchange="app.Orgs.update(' + i + ', \'type\', this.value)" style="padding:6px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
-                + '<option value="ent"' + (o.type !== 'asso' ? ' selected' : '') + '>🏢 Entreprise</option>'
-                + '<option value="asso"' + (o.type === 'asso' ? ' selected' : '') + '>🏛️ Association</option>'
-                + '</select>'
-                + '<input type="text" class="chub-name-input" value="' + Utils.escape(o.name || '') + '" placeholder="Nom de la structure" onchange="app.Orgs.update(' + i + ', \'name\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); font-weight:600;">'
-                + '<button onclick="app.Orgs.remove(' + i + ')" title="Supprimer définitivement" style="background:none; border:none; cursor:pointer; font-size:1rem; color:var(--text-sec); flex:0 0 auto;">🗑</button>'
-                + '</div>'
-                + '<div style="font-size:0.75rem; color:var(--text-sec); text-transform:uppercase; letter-spacing:0.5px; margin-top:2px;">Fiche structure</div>'
-                + '<input type="text" value="' + Utils.escape(o.contact || '') + '" placeholder="📧 Email de contact" onchange="app.Orgs.update(' + i + ', \'contact\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
-                + '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">'
-                + '<input type="text" value="' + Utils.escape(o.address || '') + '" placeholder="📍 Siège / adresse" onchange="app.Orgs.update(' + i + ', \'address\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
-                + '<input type="text" value="' + Utils.escape(o.phone || '') + '" placeholder="☎️ Téléphone" onchange="app.Orgs.update(' + i + ', \'phone\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
-                + '</div>'
-                + '<input type="text" value="' + Utils.escape(o.site || '') + '" placeholder="🌐 Site internet" onchange="app.Orgs.update(' + i + ', \'site\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
-                + '<textarea placeholder="Description de la structure" onchange="app.Orgs.update(' + i + ', \'desc\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); min-height:44px; resize:vertical;">' + Utils.escape(o.desc || '') + '</textarea>'
-                + '<div style="font-size:0.75rem; color:var(--text-sec); text-transform:uppercase; letter-spacing:0.5px; border-top:1px solid var(--border); padding-top:8px;">Sur ce projet</div>'
-                + '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">'
-                + '<input type="text" list="orgs-deps" value="' + Utils.escape(o.department || '') + '" placeholder="Département (ex. Montage)" onchange="app.Orgs.update(' + i + ', \'department\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
-                + '<input type="text" value="' + Utils.escape(o.role || '') + '" placeholder="Fonction (ex. Montage image)" onchange="app.Orgs.update(' + i + ', \'role\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
-                + '</div>'
-                + '<textarea placeholder="Notes projet (périmètre, devis, dates...)" onchange="app.Orgs.update(' + i + ', \'notes\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); min-height:50px; resize:vertical;">' + Utils.escape(o.notes || '') + '</textarea>'
-                + '<div style="font-size:0.78rem; color:var(--text-sec);">' + icon + ' ' + (o.srcId ? 'Importée des partenaires de la Présentation' : (o.profileId ? 'Fiche liée à l\u2019Univers' : 'Structure ajoutée manuellement')) + '</div>'
-                + '</div>';
+            const esc = Utils.escape;
+            const linked = !!o.profileId;
+            const fc = Orgs._fiche(o);
+            const icon = (fc.kind === 'asso') ? '🏛️' : '🏢';
+            const typeLabel = (fc.kind === 'asso') ? 'Association' : 'Entreprise';
+
+            // En-tete : lecture seule si liee a l'Univers, editable sinon
+            let head;
+            if(linked) {
+                const logo = fc.logo ? `<img src="${esc(fc.logo)}" alt="" style="width:34px; height:34px; border-radius:6px; object-fit:cover; flex:0 0 auto;">` : `<span style="font-size:1.5rem;">${icon}</span>`;
+                head = `<div class="chub-row" style="align-items:center;">${logo}`
+                     + `<div style="flex:1; min-width:0;"><div style="font-weight:600;">${esc(fc.name || o.name || 'Sans nom')}</div>`
+                     + `<div style="font-size:0.75rem; color:var(--text-sec);">${typeLabel}${fc.type ? ' · ' + esc(fc.type) : ''}</div></div>`
+                     + `<button onclick="app.Orgs.remove(${i})" title="Retirer du projet" style="background:none; border:none; cursor:pointer; font-size:1rem; color:var(--text-sec); flex:0 0 auto;">🗑</button></div>`;
+            } else {
+                head = `<div class="chub-row">`
+                     + `<select onchange="app.Orgs.update(${i}, 'type', this.value)" style="padding:6px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">`
+                     + `<option value="ent"${o.type !== 'asso' ? ' selected' : ''}>🏢 Entreprise</option>`
+                     + `<option value="asso"${o.type === 'asso' ? ' selected' : ''}>🏛️ Association</option></select>`
+                     + `<input type="text" class="chub-name-input" value="${esc(fc.name || o.name || '')}" placeholder="Nom de la structure" onchange="app.Orgs.updateFiche(${i}, 'name', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); font-weight:600;">`
+                     + `<button onclick="app.Orgs.remove(${i})" title="Supprimer définitivement" style="background:none; border:none; cursor:pointer; font-size:1rem; color:var(--text-sec); flex:0 0 auto;">🗑</button></div>`;
+            }
+
+            // Fiche structure
+            let fiche;
+            if(linked) {
+                const roRow = (ic, label, val) => val ? `<div style="display:flex; gap:8px; font-size:0.88rem; padding:2px 0;"><span style="opacity:0.7; flex:0 0 18px;">${ic}</span><span style="color:var(--text-sec); flex:0 0 96px;">${label}</span><span style="color:var(--text-main); word-break:break-word;">${esc(val)}</span></div>` : '';
+                const href = (u) => esc(u.indexOf('http') === 0 ? u : 'https://' + u);
+                const social = [['Facebook', fc.facebook], ['Instagram', fc.instagram], ['LinkedIn', fc.linkedin], ['YouTube', fc.youtube], ['Vimeo', fc.vimeo], ['IMDb', fc.imdb]].filter(s => s[1]);
+                fiche = `<div style="font-size:0.75rem; color:var(--text-sec); text-transform:uppercase; letter-spacing:0.5px; margin-top:2px;">Fiche structure · 🔒 lecture seule</div>`
+                      + `<div style="background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 12px;">`
+                      + roRow('🏷️', 'Type', fc.type)
+                      + roRow('🔢', (fc.kind === 'asso' ? 'RNA / SIRET' : 'SIRET'), fc.siret)
+                      + roRow('⚖️', 'Forme', fc.legalForm)
+                      + roRow('📅', 'Année', fc.year)
+                      + roRow('👥', (fc.kind === 'asso' ? 'Membres' : 'Effectif'), fc.size)
+                      + roRow('👤', (fc.kind === 'asso' ? 'Président·e' : 'Dirigeant·e'), fc.leader)
+                      + roRow('🧑', 'Contact', fc.contactPerson)
+                      + roRow('📧', 'Email', fc.email)
+                      + roRow('☎️', 'Téléphone', fc.phone)
+                      + roRow('📍', 'Siège', fc.hq)
+                      + (fc.website ? `<div style="display:flex; gap:8px; font-size:0.88rem; padding:2px 0;"><span style="opacity:0.7; flex:0 0 18px;">🌐</span><span style="color:var(--text-sec); flex:0 0 96px;">Site</span><a href="${href(fc.website)}" target="_blank" rel="noopener" style="color:var(--primary); word-break:break-all;">${esc(fc.website)}</a></div>` : '')
+                      + (fc.mission ? `<div style="font-size:0.88rem; color:var(--text-main); white-space:pre-wrap; border-top:1px solid var(--border); margin-top:6px; padding-top:6px;">${esc(fc.mission)}</div>` : '')
+                      + roRow('🛠️', 'Activités', fc.activities)
+                      + roRow('✨', 'Services', fc.services)
+                      + (social.length ? `<div style="border-top:1px solid var(--border); margin-top:6px; padding-top:6px; font-size:0.78rem;">` + social.map(s => `<a href="${href(s[1])}" target="_blank" rel="noopener" style="color:var(--primary);">${s[0]}</a>`).join(' · ') + `</div>` : '')
+                      + `</div>`;
+            } else {
+                const inp = (key, ph) => `<input type="text" value="${esc(fc[key] || '')}" placeholder="${ph}" onchange="app.Orgs.updateFiche(${i}, '${key}', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">`;
+                fiche = `<div style="font-size:0.75rem; color:var(--text-sec); text-transform:uppercase; letter-spacing:0.5px; margin-top:2px;">Fiche structure</div>`
+                      + inp('email', '📧 Email de contact')
+                      + `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">` + inp('hq', '📍 Siège / adresse') + inp('phone', '☎️ Téléphone') + `</div>`
+                      + inp('website', '🌐 Site internet')
+                      + `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">` + inp('siret', (fc.kind === 'asso' ? '🔢 RNA / SIRET' : '🔢 SIRET')) + inp('year', '📅 Année de création') + `</div>`
+                      + `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">` + inp('size', (fc.kind === 'asso' ? '👥 Nb de membres' : '👥 Effectif')) + inp('leader', (fc.kind === 'asso' ? '👤 Président·e' : '👤 Dirigeant·e')) + `</div>`
+                      + (fc.kind === 'ent' ? inp('legalForm', '⚖️ Forme juridique') : '')
+                      + `<textarea placeholder="${fc.kind === 'asso' ? 'Mission / objet' : 'Description'}" onchange="app.Orgs.updateFiche(${i}, 'mission', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); min-height:44px; resize:vertical;">${esc(fc.mission || '')}</textarea>`;
+            }
+
+            // Sur ce projet : departement (select) -> fonction (select dependant) + Autre
+            const deptId = o.department || '';
+            const roles = Orgs._rolesFor(deptId);
+            const showFree = !!o.roleCustom || (!!o.role && roles.indexOf(o.role) === -1);
+            const roleSel = showFree ? 'Autre' : (o.role || '');
+            const roleOpts = `<option value="">— Fonction —</option>` + roles.map(r => `<option value="${esc(r)}"${r === roleSel ? ' selected' : ''}>${esc(r)}</option>`).join('');
+            const project = `<div style="font-size:0.75rem; color:var(--text-sec); text-transform:uppercase; letter-spacing:0.5px; border-top:1px solid var(--border); padding-top:8px;">Sur ce projet</div>`
+                + `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">`
+                + `<select onchange="app.Orgs.setDept(${i}, this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">${Orgs._deptOptions(deptId)}</select>`
+                + `<select onchange="app.Orgs.onRoleChange(${i}, this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">${roleOpts}</select></div>`
+                + (showFree ? `<input type="text" value="${esc(o.role || '')}" placeholder="Préciser la fonction" onchange="app.Orgs.update(${i}, 'role', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">` : '')
+                + `<textarea placeholder="Notes projet (périmètre, devis, dates...)" onchange="app.Orgs.update(${i}, 'notes', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); min-height:50px; resize:vertical;">${esc(o.notes || '')}</textarea>`;
+
+            const footer = `<div style="font-size:0.78rem; color:var(--text-sec);">${icon} ${o.srcId ? 'Importée des partenaires de la Présentation' : (linked ? 'Fiche liée à l\u2019Univers' : 'Structure ajoutée manuellement')}</div>`;
+
+            return `<div class="chub-card">${head}${fiche}${project}${footer}</div>`;
         }).join('');
 
         host.innerHTML = dl + importHtml + '<div class="chub-grid">' + cards + '</div>';
