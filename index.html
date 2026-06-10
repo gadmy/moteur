@@ -7125,9 +7125,11 @@ body.presentation-mode .presentation-bar {
   .wm-toggle.disabled { opacity: .45; cursor: not-allowed; }
   .wm-holder { min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: #c0392b; color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; margin-left: 6px; flex: 0 0 auto; }
   .wm-occupied { position: relative; }
-  .dlock-occupied .wm-self-avatar { right: 10px; z-index: 2; }
+  .dlock-occupied .wm-self-avatar { right: 6px; z-index: 2; }
   .tab-subbtn.dlock-occupied:hover .wm-self-avatar, .tab-btn.dlock-occupied:hover .wm-self-avatar { right: 19px; }
   .wm-chip-closeall { background: #c0392b; color: #fff; font-weight: bold; flex: 0 0 auto; }
+  .dlock-watcher { position: absolute; top: 1px; right: var(--c, 11px); min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: #607d8b; color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; z-index: 1; transition: right .15s; pointer-events: none; opacity: .8; }
+  .tab-subbtn.dlock-occupied:hover .dlock-watcher, .tab-btn.dlock-occupied:hover .dlock-watcher { right: var(--s, 37px); }
   .wm-self-avatar { transition: right .15s; position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: var(--primary); color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; z-index: 3; pointer-events: none; box-shadow: 0 0 0 1px var(--panel-bg); }
   /* fenêtre en lecture seule : on bloque la SAISIE de données, pas la navigation ni la lecture */
   .wm-window.wm-readonly .wm-body textarea,
@@ -14378,6 +14380,8 @@ crewRoles: {
           // Onglets-categories : PAS de badge (trop charge) — nettoyage d'eventuels residus
           document.querySelectorAll('.tab-category .wm-self-avatar').forEach(el => el.remove());
           document.querySelectorAll('.tab-category.wm-occupied').forEach(el => el.classList.remove('wm-occupied'));
+          // Signaler aux autres ce que je regarde (presence enrichie)
+          try { if(typeof DBPresence !== 'undefined' && DBPresence.beatSoon) DBPresence.beatSoon(); } catch(_) {}
       },
 
       popFromMenu: () => {
@@ -16005,7 +16009,7 @@ const LockManager = {
           try { if(typeof WindowManager !== 'undefined' && WindowManager.wins) WindowManager._arbitrate(); } catch(_) {}
           // Seul(e) sur le projet : aucun verrou affiché, tout reste éditable
           if(LockManager.isAlone()) {
-              document.querySelectorAll('.dlock-avatar-tab, .dlock-badge, .dlock-banner').forEach(el => el.remove());
+              document.querySelectorAll('.dlock-avatar-tab, .dlock-badge, .dlock-banner, .dlock-watcher').forEach(el => el.remove());
               document.querySelectorAll('.dlock-occupied').forEach(el => el.classList.remove('dlock-occupied'));
               const act = document.querySelector('.tab-content.active');
               if(act) act.classList.remove('is-domain-locked');
@@ -16033,6 +16037,40 @@ const LockManager = {
           };
           // sous-onglets (mode catégories) + onglets plats
           document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => markBtn(btn, lockFor(btn.dataset.tab)));
+          // Spectateurs : badge gris pour chaque personne qui REGARDE le domaine (sans le modifier)
+          document.querySelectorAll('.dlock-watcher').forEach(el => el.remove());
+          const myEm = ((state.currentUser && state.currentUser.email) || '').toLowerCase();
+          const watchersFor = (tabName) => {
+              const d = LockDomains.forTab(tabName);
+              if(!d) return [];
+              const lock = (state.domainLocks||{})[d];
+              const holder = lock ? (LockManager._who(lock) || '') : '';
+              const seen = {};
+              return (state.dbPresence || []).filter(r => {
+                  if(r.project_id !== state.currentProjectId) return false;
+                  const em = (r.user_email || '').toLowerCase();
+                  if(!em || em === myEm) return false;
+                  if(!Array.isArray(r.watching) || r.watching.indexOf(d) === -1) return false;
+                  if(holder && em.split('@')[0] === holder) return false; // le detenteur n'est pas un spectateur
+                  if(seen[em]) return false;
+                  seen[em] = true;
+                  return true;
+              });
+          };
+          document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => {
+              const ws = watchersFor(btn.dataset.tab);
+              if(!ws.length) return;
+              btn.classList.add('dlock-occupied');
+              ws.slice(0, 4).forEach((r, i) => {
+                  const av = document.createElement('span');
+                  av.className = 'dlock-watcher';
+                  av.style.setProperty('--c', (11 + i * 5) + 'px');
+                  av.style.setProperty('--s', (37 + i * 18) + 'px');
+                  av.textContent = ((r.user_email || '?').charAt(0)).toUpperCase();
+                  av.title = '👁 Regarde — ' + (r.user_email || '').split('@')[0];
+                  btn.appendChild(av);
+              });
+          });
           // Onglets-categories : PAS de badge (trop charge) — on nettoie d'eventuels residus
           document.querySelectorAll('.tab-category .dlock-avatar-tab, .tab-category .dlock-badge').forEach(el => el.remove());
           document.querySelectorAll('.tab-category.dlock-occupied').forEach(el => el.classList.remove('dlock-occupied'));
@@ -16147,11 +16185,48 @@ const LockManager = {
           }
       },
 
+      // Domaines que JE regarde en ce moment (onglet principal + fenetres flottantes)
+      _watching: () => {
+          const out = {};
+          try {
+              if(!state.currentProjectId) return [];
+              const act = document.querySelector('.tab-content.active:not(.wm-hosted)');
+              if(act && typeof LockDomains !== 'undefined') {
+                  const d = LockDomains.forTab(act.id.replace('tab-',''));
+                  if(d) out[d] = true;
+              }
+              if(typeof WindowManager !== 'undefined' && typeof LockDomains !== 'undefined') {
+                  Object.keys(WindowManager.poppedTabs || {}).forEach(t => {
+                      const d = LockDomains.forTab(t);
+                      if(d) out[d] = true;
+                  });
+              }
+          } catch(_) {}
+          return Object.keys(out).sort();
+      },
+
+      _lastWatch: '',
+      _soonT: null,
+      // Battement anticipe si ce que je regarde a change (debounce 1,2 s)
+      beatSoon: () => {
+          try {
+              const w = JSON.stringify(DBPresence._watching());
+              if(w === DBPresence._lastWatch) return;
+          } catch(_) {}
+          clearTimeout(DBPresence._soonT);
+          DBPresence._soonT = setTimeout(DBPresence.beat, 1200);
+      },
+
       beat: async () => {
           if(!state.currentUser) return;
           try { const s = await supabase.auth.getSession(); state._jwt = s && s.data && s.data.session && s.data.session.access_token; } catch(e) {}
           try {
               await supabase.rpc('presence_beat', { p_project: DBPresence.where, p_name: (state.currentUser.email||'').split('@')[0] });
+          } catch(e) {}
+          try {
+              const w = DBPresence._watching();
+              DBPresence._lastWatch = JSON.stringify(w);
+              await supabase.rpc('presence_watching', { p_watching: w });
           } catch(e) {}
           DBPresence.fetch();
       },
@@ -19667,7 +19742,7 @@ openBoardPrintEpisodeChooser: () => {
             ecriture: ['synopsis', 'board', 'titlepage', 'script', 'storyboard'],
             casting: ['chars', 'actors', 'locs', 'resources'],
             production: ['presentation', 'crew', 'breakdown', 'planning', 'scriptreport'],
-            admin: ['stats', 'expenses', 'chat']
+            admin: ['stats', 'expenses']
         };
         const defaultCategoryLabels = {
             ecriture: { synopsis: 'Synopsis', board: 'Séquencier', titlepage: 'Titre', script: 'Scénario', storyboard: 'Storyboard' },
@@ -19797,7 +19872,8 @@ initCategoriesDragDrop: () => {
       // Restaurer l'ordre des sous-onglets pour chaque catégorie
       Object.keys(savedOrder).forEach(category => {
           if(savedOrder[category] && savedOrder[category].length > 0) {
-              UI.categoryTabs[category] = savedOrder[category];
+              // Assainissement : onglets demolis (chat...) potentiellement memorises dans le projet
+              UI.categoryTabs[category] = savedOrder[category].filter(t => t !== 'chat');
           }
       });
       
