@@ -10742,9 +10742,10 @@ body.presentation-mode .presentation-bar {
 	</div>
 	  
 <div id="tab-orgs" class="tab-content">
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
-        <h2 style="margin:0;">🏛️ Asso / Entreprises</h2>
-        <button onclick="app.Orgs.add()" style="padding:8px 15px; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.85rem;">➕ Ajouter une structure</button>
+    <h2 style="margin:0 0 10px 0;">🏛️ Asso / Entreprises</h2>
+    <div class="data-toolbar" style="display:flex; gap:10px; margin-bottom:10px; flex-wrap:wrap; align-items:center;">
+        <button onclick="app.Orgs.add()" class="btn-tool">➕ Ajouter une structure</button>
+        <button onclick="app.Orgs.openSearch()" class="btn-tool">🔍 Rechercher une structure</button>
     </div>
     <p style="color:var(--text-sec); margin:0 0 20px 0; font-size:0.9rem;">Les associations et entreprises qui travaillent sur le projet, assignables à un département et/ou une fonction (ex. une société tierce qui assure le montage).</p>
     <div id="orgs-list"></div>
@@ -48373,6 +48374,78 @@ const Orgs = {
         Orgs.render();
     },
 
+    // Recherche d'une structure dans l'Univers (fiches publiques asso / entreprise)
+    _searchResults: [],
+    openSearch: () => {
+        const modal = document.createElement('div');
+        modal.id = 'orgs-search-modal';
+        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 10002;';
+        modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
+        modal.innerHTML = '<div style="background: var(--panel-bg); border-radius: 12px; width: 90%; max-width: 560px; max-height: 80vh; display: flex; flex-direction: column;">'
+            + '<div style="display:flex; align-items:center; justify-content:space-between; padding:15px 20px; border-bottom:1px solid var(--border);">'
+            + '<h3 style="margin:0;">🔍 Rechercher une structure</h3>'
+            + '<button onclick="document.getElementById(\'orgs-search-modal\').remove()" class="icon-btn-sec">✖</button>'
+            + '</div>'
+            + '<div style="display:flex; gap:8px; padding:12px 20px;">'
+            + '<input type="text" id="orgs-search-name" placeholder="Nom, ville..." oninput="app.Orgs.runSearch()" style="flex:1; padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
+            + '<select id="orgs-search-type" onchange="app.Orgs.runSearch()" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
+            + '<option value="">Tous types</option><option value="asso">🏛️ Associations</option><option value="ent">🏢 Entreprises</option>'
+            + '</select>'
+            + '</div>'
+            + '<div id="orgs-search-results" style="padding: 0 20px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;"><div style="text-align:center; color:var(--text-sec); padding:20px;">🔄 Chargement...</div></div>'
+            + '</div>';
+        document.body.appendChild(modal);
+        Orgs.runSearch();
+    },
+
+    runSearch: async () => {
+        const box = document.getElementById('orgs-search-results');
+        if(!box) return;
+        try {
+            const { data, error } = await supabase.from('user_profiles').select('*').eq('is_public', true);
+            if(error) { box.innerHTML = '<div style="color:var(--text-sec); text-align:center; padding:20px;">Recherche indisponible pour le moment.</div>'; return; }
+            const out = [];
+            (data || []).forEach(p => {
+                const d = p.data || {};
+                const f = d.facets || {};
+                const entries = [];
+                if((f.asso && f.asso.enabled) || p.profile_type === 'association') entries.push({ t: 'asso', name: d.assoName || (f.asso && f.asso.name) || p.name, email: (f.asso && f.asso.email) || d.assoEmail || '' });
+                if((f.ent && f.ent.enabled) || p.profile_type === 'enterprise') entries.push({ t: 'ent', name: d.entName || (f.ent && f.ent.name) || p.name, email: (f.ent && f.ent.email) || d.entEmail || '' });
+                entries.forEach(en => { if(en.name) out.push({ pid: p.id, t: en.t, name: en.name, city: d.city || p.city || '', email: en.email }); });
+            });
+            const q = (document.getElementById('orgs-search-name')?.value || '').toLowerCase();
+            const tf = document.getElementById('orgs-search-type')?.value || '';
+            let res = out;
+            if(tf) res = res.filter(r => r.t === tf);
+            if(q) res = res.filter(r => (r.name || '').toLowerCase().includes(q) || (r.city || '').toLowerCase().includes(q));
+            Orgs._searchResults = res;
+            if(!res.length) { box.innerHTML = '<div style="color:var(--text-sec); text-align:center; padding:20px;">Aucune structure trouvée dans l\u2019Univers. Tu peux en créer une vierge avec « ➕ Ajouter une structure ».</div>'; return; }
+            box.innerHTML = res.map((r, i) => '<div onclick="app.Orgs.addFromUniverse(' + i + ')" style="display:flex; align-items:center; gap:12px; padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; cursor:pointer;">'
+                + '<div style="font-size:1.4rem;">' + (r.t === 'asso' ? '🏛️' : '🏢') + '</div>'
+                + '<div style="flex:1;"><div style="font-weight:600;">' + Utils.escape(r.name) + '</div>'
+                + (r.city ? '<div style="font-size:0.8rem; color:var(--text-sec);">📍 ' + Utils.escape(r.city) + '</div>' : '')
+                + '</div><div style="color:var(--primary); font-weight:600;">＋</div></div>').join('');
+        } catch(e) { box.innerHTML = '<div style="color:var(--text-sec); text-align:center; padding:20px;">Erreur de recherche.</div>'; }
+    },
+
+    addFromUniverse: (i) => {
+        const r = Orgs._searchResults[i];
+        if(!r) return;
+        const list = Orgs._list();
+        if(list.some(o => (o.profileId && o.profileId === r.pid && o.type === r.t) || ((o.name || '').toLowerCase() === (r.name || '').toLowerCase())) ) {
+            Utils.toast('Cette structure est déjà dans le projet.', 'warning');
+            return;
+        }
+        list.push({ id: Utils.generateUniqueId(), type: r.t, name: r.name || '', department: '', role: '', contact: r.email || '', notes: '', srcId: null, profileId: r.pid });
+        Store.save();
+        Orgs.render();
+        const modal = document.getElementById('orgs-search-modal'); if(modal) modal.remove();
+        Utils.toast(Utils.escape(r.name) + ' ajoutée au projet !', 'success');
+        if(r.email) {
+            setTimeout(() => { Orgs._maybeNotify(list[list.length - 1], r.email); }, 300);
+        }
+    },
+
     importPartner: (t, id) => {
         const pres = state.data.presentation || {};
         const src = (t === 'asso' ? (pres.associations || []) : (pres.enterprises || [])).find(p => p.id === id);
@@ -48386,9 +48459,28 @@ const Orgs = {
     update: (idx, field, value) => {
         const list = Orgs._list();
         if(!list[idx]) return;
+        const before = list[idx][field];
         list[idx][field] = value;
         Store.save();
         if(field === 'type') Orgs.render();
+        // Meme logique que comediens/techniciens : email saisi -> si un compte existe, proposer de prevenir
+        if(field === 'contact' && value && value !== before && value.indexOf('@') !== -1) {
+            Orgs._maybeNotify(list[idx], value.trim());
+        }
+    },
+
+    _maybeNotify: async (org, email) => {
+        try {
+            const { data } = await supabase.from('user_profiles').select('id, name').ilike('email', email).limit(1);
+            if(!data || !data.length) return; // pas de compte : rien a envoyer
+            const ok = await ConfirmModal.show({ title: 'Prévenir cette structure ?', message: 'Un compte existe pour ' + email + '. Lui envoyer une notification pour l\u2019informer que sa structure a été ajoutée au projet ?', icon: '📧', confirmText: 'Envoyer' });
+            if(!ok) return;
+            const projectTitle = document.getElementById('projectTitle')?.value || 'Un projet';
+            const senderName = state.userProfile?.displayName || state.currentUser?.email?.split('@')[0] || 'Quelqu\u2019un';
+            await Notifications.send(email, 'invite', senderName + ' a ajouté votre structure au projet "' + projectTitle + '"', state.currentProjectId);
+            await Messages.sendEmailPing(email, org.name || email.split('@')[0], 'invitation', { senderName: senderName, projectTitle: projectTitle, role: 'structure partenaire' });
+            Utils.toast('Notification envoyée !', 'success');
+        } catch(e) { console.warn('[Orgs] notification structure:', e); }
     },
 
     // Suppression DEFINITIVE : cet onglet est le pole des structures. Supprimer ici retire
@@ -48433,7 +48525,7 @@ const Orgs = {
         // (L'inverse n'est pas vrai : on peut avoir des structures hors partenaires.)
         const pres = state.data.presentation || {};
         const already = {};
-        list.forEach(o => { if(o.srcId) already[o.srcId] = true; });
+        list.forEach(o => { if(o.srcId) already[o.srcId] = true; already[o.id] = true; });
         let autoAdded = false;
         const considerAuto = (p, t) => {
             if(!p || !p.id || already[p.id]) return;
@@ -51221,47 +51313,42 @@ const Presentation = {
     
     // Ouvre le modal de recherche de partenaires
     openPartnerSearch: (type) => {
+        // Selecteur dans les structures du POLE (Production > Asso / Entreprises), qui est le registre maitre.
         const isAssociation = type === 'association';
+        const t = isAssociation ? 'asso' : 'ent';
         const title = isAssociation ? '🏛️ Ajouter une Association' : '🏢 Ajouter une Entreprise';
-        const typeList = isAssociation ? CONFIG.associationTypes : CONFIG.enterpriseTypes;
-        
-        // Charger les partenaires disponibles depuis Universe
-        const partners = Universe.allProfiles.filter(p => p.type === type);
-        
+        const pres = state.data.presentation || {};
+        const partnerIds = {};
+        ((pres.associations || []).concat(pres.enterprises || [])).forEach(p => { if(p && p.id) partnerIds[p.id] = true; });
+        const orgsList = (typeof Orgs !== 'undefined') ? Orgs._list().filter(o => o.type === t && o.name && !partnerIds[o.id]) : [];
+
         const modal = document.createElement('div');
         modal.id = 'partner-search-modal';
         modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 10002;';
-        
+        modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
+
         let listHtml = '';
-        if(partners.length === 0) {
+        if(orgsList.length === 0) {
             listHtml = `<div style="text-align: center; padding: 30px; color: var(--text-sec);">
                 <div class="fs-2-mb10">${isAssociation ? '🏛️' : '🏢'}</div>
-                <p>Aucun${isAssociation ? 'e association' : 'e entreprise'} disponible dans l'Univers.</p>
+                <p>Aucune ${isAssociation ? 'association' : 'entreprise'} disponible.</p>
+                <p style="font-size:0.85rem;">Ajoute d'abord des structures dans <strong>Production > Asso / Entreprises</strong> (le pôle des structures du projet).</p>
             </div>`;
         } else {
-            listHtml = partners.map(p => {
-                const name = p.name || p.assoName || p.entName || 'Sans nom';
-                const typeInfo = isAssociation 
-                    ? CONFIG.associationTypes.find(t => t.id === p.assoType)
-                    : CONFIG.enterpriseTypes.find(t => t.id === p.entType);
-                const typeName = typeInfo ? typeInfo.name : '';
-                const photo = p.photo || '';
-                
-                return `<div onclick="app.Presentation.addPartner('${type}', '${p.id}', '${Utils.escape(name)}', '${Utils.escape(photo)}')" 
+            listHtml = orgsList.map(o => {
+                const fn = [o.department, o.role].filter(Boolean).join(' — ');
+                return `<div onclick="app.Presentation.addPartner('${type}', '${Utils.escape(o.id)}', '${Utils.escape(o.name)}', '')"
                     style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: all 0.2s;"
                     onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border)'">
-                    <div style="width: 45px; height: 45px; border-radius: 50%; background: var(--panel-bg); display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                        ${photo ? `<img src="${photo}" class="img-cover">` : (isAssociation ? '🏛️' : '🏢')}
-                    </div>
+                    <div style="font-size:1.4rem;">${isAssociation ? '🏛️' : '🏢'}</div>
                     <div>
-                        <div style="font-weight: 600; color: var(--text-main);">${Utils.escape(name)}</div>
-                        <div class="text-sec-sm">${typeName}</div>
-                        ${p.city ? `<div class="text-sec-xs-alt">📍 ${Utils.escape(p.city)}</div>` : ''}
+                        <div style="font-weight: 600; color: var(--text-main);">${Utils.escape(o.name)}</div>
+                        ${fn ? `<div class="text-sec-sm">${Utils.escape(fn)}</div>` : ''}
                     </div>
                 </div>`;
             }).join('');
         }
-        
+
         modal.innerHTML = `
             <div style="background: var(--panel-bg); border-radius: 12px; width: 90%; max-width: 500px; max-height: 80vh; display: flex; flex-direction: column;">
                 <div class="n8-flex-5">
@@ -51273,7 +51360,7 @@ const Presentation = {
                 </div>
             </div>
         `;
-        
+
         document.body.appendChild(modal);
     },
     
