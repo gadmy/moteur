@@ -23,6 +23,14 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v527 (10 Juin 2026)
+  - Production > Asso / Entreprises (module Orgs) : le pôle des structures gagne une VRAIE fiche, à parité avec comédiens / techniciens. À l'ajout depuis l'Univers, un instantané complet de la fiche est copié dans le projet (logo, type, SIRET / RNA, forme juridique, année, effectif / membres, dirigeant·e ou président·e, mission / description, services, email, téléphone, siège, site, réseaux sociaux) — base prévue pour l'autocomplétion future des contrats.
+  - Fiche en lecture seule si elle est liée à l'Univers (cadenas : seul le propriétaire de la fiche en modifie le contenu), entièrement éditable si la structure a été créée à la main ou importée d'un contact non lié. La section « Sur ce projet » (département, fonction, notes) reste toujours éditable.
+  - Mise à jour automatique : à chaque ouverture de l'onglet, les fiches liées sont resynchronisées depuis l'Univers en une seule requête groupée (même mécanisme que comédiens / techniciens) — fini les copies figées qui vieillissent ; une modif faite par la structure sur sa fiche Univers se reflète au retour sur l'onglet.
+  - « Sur ce projet » repensé : le département devient un menu déroulant (groupes techniques du projet + Financeurs) qui pilote la liste des fonctions disponibles (taxonomie technicien), avec « Autre » qui ouvre un champ libre.
+  - Extraction robuste : repli sur les champs génériques du profil (bio / email / téléphone / site) pour les fiches qui n'utilisent pas le formulaire structure dédié — plus de fiches à moitié vides.
+  - Admin > Contrats : grille de toutes les personnes du projet (comédiens + techniciens), dédupliquée par personne, chaque carte regroupant toutes ses fonctions ; quatre types de contrats (droit à l'image, CDDU, prestation, bénévole) ouvrent la modale de contrat pré-réglée. Boutons « Contrat » retirés des fiches comédien et technicien (doublon).
+  - Correctifs d'affichage : sélecteurs département / fonction passés en pleine largeur dans les cartes (fini la troncature « — Départ », « — Fc ») ; barre de recherche de structure rééquilibrée (champ nom dominant, sélecteur de type à largeur fixe).
 v526.2 (10 Juin 2026)
   - Fenêtres flottantes — interrupteur Consultation / Modification : chaque fenêtre naît en CONSULTATION (interrupteur gris a côté du titre, bandeau « 👁 Consultation », navigation libre mais saisie bloquée) et ne signale RIEN aux autres. Basculé sur Modification (vert), la fenêtre devient éditable et pose le verrou serveur du domaine : les collègues voient le badge rouge et passent en lecture seule. Si quelqu'un édite déjà : interrupteur grisé bloqué sur Consultation avec l'initiale du détenteur en rouge dans la barre de titre, et déblocage en direct dès son départ. Repasser en consultation, fermer la fenêtre ou quitter la page relâche le verrou ; le choix survit au rechargement (re-vérifié avec les mêmes garde-fous) ; conflits internes refusés avec message (domaine déjà édité dans l'onglet principal ou une autre fenêtre).
   - Verrous serveur multi-domaines : le battement de verrou couvre désormais l'onglet principal ET les domaines pris par les fenêtres (fin de la limite « les fenêtres ne posaient pas de verrou pour les collaborateurs »).
@@ -7148,7 +7156,7 @@ body.presentation-mode .presentation-bar {
   .chub-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); }
   .chub-btn { padding: 6px 10px; background: var(--bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 0.78rem; }
   .chub-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
-  .chub-card select { flex: 0 0 auto; width: auto; max-width: 46%; }
+  .chub-card select { flex: 0 0 auto; width: 100%; box-sizing: border-box; }
   .chub-card input[type="text"] { min-width: 0; }
   .chub-name-input { flex: 1 1 140px; min-width: 140px; }
   .chub-row { display: flex; align-items: center; gap: 8px; }
@@ -7421,7 +7429,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv527.1</p>
+      <p>vv527.2</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -22093,7 +22101,7 @@ const tabToSection = {
           if(tabName === 'crew') { Actions.syncCrewFromPublicProfiles().then(() => UI.renderCrewTab()); }
           if(tabName === 'expenses') Expenses.init();
           if(tabName === 'contracts') Contracts.renderHub();
-          if(tabName === 'orgs') Orgs.render();
+          if(tabName === 'orgs') Orgs.syncFromUniverse().then(() => Orgs.render());
           if(tabName === 'presentation') Presentation.init();
           if(typeof LockManager !== 'undefined') LockManager.onTabEnter(tabName);
       },
@@ -48390,24 +48398,24 @@ const Orgs = {
         if(kind === 'asso') {
             return {
                 kind: 'asso',
-                name: b.assoName || '', logo: b.assoLogo || '', type: b.assoType || '',
+                name: b.assoName || b.name || '', logo: b.assoLogo || b.logo || b.photo || '', type: b.assoType || '',
                 siret: b.assoSiret || '', legalForm: '', year: b.assoYear || '',
                 size: b.assoMembers || '', leader: b.assoPresident || '', contactPerson: '',
-                email: b.assoEmail || '', phone: b.assoPhone || '', website: b.assoWebsite || '',
-                hq: f.hqAddress || b.assoSiege || b.city || '',
-                mission: b.assoMission || '', activities: b.assoActivities || '',
+                email: b.assoEmail || b.email || '', phone: b.assoPhone || b.phone || '', website: b.assoWebsite || b.website || '',
+                hq: f.hqAddress || b.assoSiege || b.address || b.city || '',
+                mission: b.assoMission || b.bio || b.description || '', activities: b.assoActivities || '',
                 services: sList(b.assoServices, { formation:'Formation', ateliers:'Ateliers', networking:'Networking', casting:'Casting', materiel:'Prêt de matériel', production:'Production', diffusion:'Diffusion' }),
                 facebook: b.assoFacebook || '', instagram: b.assoInstagram || '', youtube: b.assoYoutube || '', linkedin: b.assoLinkedin || '', vimeo: '', imdb: ''
             };
         }
         return {
             kind: 'ent',
-            name: b.entName || '', logo: b.entLogo || '', type: b.entType || '',
+            name: b.entName || b.name || '', logo: b.entLogo || b.logo || b.photo || '', type: b.entType || '',
             siret: b.entSiret || '', legalForm: b.entLegal || '', year: b.entYear || '',
             size: b.entEmployees || '', leader: b.entDirector || '', contactPerson: b.entContact || '',
-            email: b.entEmail || '', phone: b.entPhone || '', website: b.entWebsite || '',
-            hq: f.hqAddress || b.entSiege || b.city || '',
-            mission: b.entDescription || '', activities: b.entServices || '',
+            email: b.entEmail || b.email || '', phone: b.entPhone || b.phone || '', website: b.entWebsite || b.website || '',
+            hq: f.hqAddress || b.entSiege || b.address || b.city || '',
+            mission: b.entDescription || b.bio || b.description || '', activities: b.entServices || '',
             services: sList(b.entSpecialties, { fiction:'Fiction', doc:'Documentaire', pub:'Publicité', corporate:'Corporate', clip:'Clip', event:'Événementiel', web:'Web' }),
             facebook: b.entFacebook || '', instagram: b.entInstagram || '', youtube: b.entYoutube || '', linkedin: b.entLinkedin || '', vimeo: b.entVimeo || '', imdb: b.entImdb || ''
         };
@@ -48469,6 +48477,30 @@ const Orgs = {
         else { list[idx].roleCustom = false; list[idx].role = value; }
         Store.save();
         Orgs.render();
+    },
+
+    // Resynchronise les fiches liees a l'Univers (lecture seule), comme comedien/technicien : 1 requete groupee a l'ouverture de l'onglet.
+    // Ne touche jamais a la section « Sur ce projet » (department / role / notes).
+    syncFromUniverse: async () => {
+        const list = Orgs._list();
+        const ids = [...new Set(list.filter(o => o.profileId).map(o => o.profileId))];
+        if(!ids.length) return;
+        try {
+            const { data, error } = await supabase.from('user_profiles').select('*').in('id', ids);
+            if(error || !data) return;
+            const byId = {};
+            data.forEach(p => { byId[p.id] = p; });
+            let changed = false;
+            list.forEach(o => {
+                if(!o.profileId) return;
+                const p = byId[o.profileId];
+                if(!p) return; // fiche introuvable (supprimee/privee) : on garde l'instantane existant
+                const kind = (o.type === 'asso') ? 'asso' : 'ent';
+                o.fiche = Orgs._ficheFrom(Object.assign({}, p, p.data || {}), (p.data || {}).facets, kind);
+                changed = true;
+            });
+            if(changed) Store.save();
+        } catch(e) { console.warn('[Orgs] sync Univers:', e); }
     },
 
     add: () => {
@@ -48561,9 +48593,9 @@ const Orgs = {
             + '<h3 style="margin:0;">🔍 Rechercher une structure</h3>'
             + '<button onclick="document.getElementById(\'orgs-search-modal\').remove()" class="icon-btn-sec">✖</button>'
             + '</div>'
-            + '<div style="display:flex; gap:8px; padding:12px 20px;">'
-            + '<input type="text" id="orgs-search-name" placeholder="Nom, ville..." oninput="app.Orgs.runSearch()" style="flex:1; padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
-            + '<select id="orgs-search-type" onchange="app.Orgs.runSearch()" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
+            + '<div style="display:flex; flex-direction:column; gap:8px; padding:12px 20px;">'
+            + '<input type="text" id="orgs-search-name" placeholder="Nom, ville..." oninput="app.Orgs.runSearch()" style="flex:1 1 auto; min-width:0; padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
+            + '<select id="orgs-search-type" onchange="app.Orgs.runSearch()" style="width:100%; box-sizing:border-box; padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
             + '<option value="">Tous types</option><option value="asso">🏛️ Associations</option><option value="ent">🏢 Entreprises</option>'
             + '</select>'
             + '</div>'
@@ -48593,7 +48625,7 @@ const Orgs = {
                     site: fx(fa, ['site', 'website', 'web']) || d.assoSite || '',
                     address: fx(fa, ['siege', 'siegeAddress', 'address']) || d.assoSiege || '',
                     desc: fx(fa, ['description', 'desc', 'bio']) || d.assoDesc || '',
-                    fiche: Orgs._ficheFrom(d, f, 'asso') });
+                    fiche: Orgs._ficheFrom(Object.assign({}, p, d), f, 'asso') });
                 if(fe.enabled || p.profile_type === 'enterprise') entries.push({ t: 'ent',
                     name: d.entName || fe.name || p.name,
                     email: fe.email || d.entEmail || '',
@@ -48601,7 +48633,7 @@ const Orgs = {
                     site: fx(fe, ['site', 'website', 'web']) || d.entSite || '',
                     address: fx(fe, ['siege', 'siegeAddress', 'address']) || d.entSiege || '',
                     desc: fx(fe, ['description', 'desc', 'bio']) || d.entDesc || '',
-                    fiche: Orgs._ficheFrom(d, f, 'ent') });
+                    fiche: Orgs._ficheFrom(Object.assign({}, p, d), f, 'ent') });
                 entries.forEach(en => { if(en.name) out.push({ pid: p.id, t: en.t, name: en.name, city: d.city || p.city || '', email: en.email, phone: en.phone, site: en.site, address: en.address, desc: en.desc, fiche: en.fiche }); });
             });
             const q = (document.getElementById('orgs-search-name')?.value || '').toLowerCase();
@@ -48825,9 +48857,8 @@ const Orgs = {
             const roleSel = showFree ? 'Autre' : (o.role || '');
             const roleOpts = `<option value="">— Fonction —</option>` + roles.map(r => `<option value="${esc(r)}"${r === roleSel ? ' selected' : ''}>${esc(r)}</option>`).join('');
             const project = `<div style="font-size:0.75rem; color:var(--text-sec); text-transform:uppercase; letter-spacing:0.5px; border-top:1px solid var(--border); padding-top:8px;">Sur ce projet</div>`
-                + `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">`
-                + `<select onchange="app.Orgs.setDept(${i}, this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">${Orgs._deptOptions(deptId)}</select>`
-                + `<select onchange="app.Orgs.onRoleChange(${i}, this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">${roleOpts}</select></div>`
+                + `<select onchange="app.Orgs.setDept(${i}, this.value)" style="width:100%; box-sizing:border-box; padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">${Orgs._deptOptions(deptId)}</select>`
+                + `<select onchange="app.Orgs.onRoleChange(${i}, this.value)" style="width:100%; box-sizing:border-box; padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">${roleOpts}</select>`
                 + (showFree ? `<input type="text" value="${esc(o.role || '')}" placeholder="Préciser la fonction" onchange="app.Orgs.update(${i}, 'role', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">` : '')
                 + `<textarea placeholder="Notes projet (périmètre, devis, dates...)" onchange="app.Orgs.update(${i}, 'notes', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); min-height:50px; resize:vertical;">${esc(o.notes || '')}</textarea>`;
 
