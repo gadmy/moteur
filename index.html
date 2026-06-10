@@ -7118,6 +7118,12 @@ body.presentation-mode .presentation-bar {
   /* sous-onglet sorti en fenêtre : contenu affiché dans la fenêtre, bouton retiré de la barre */
   .wm-window .wm-body .tab-content.wm-hosted { display: block !important; max-width: none; margin: 0; padding: 0; }
   .tab-subbtn.wm-popped { position: relative; opacity: 0.72; }
+  .wm-toggle { width: 34px; height: 18px; border-radius: 9px; border: none; background: #b8bcc4; position: relative; cursor: pointer; margin-left: 8px; flex: 0 0 auto; padding: 0; transition: background .15s; }
+  .wm-toggle::after { content: ''; position: absolute; width: 14px; height: 14px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .wm-toggle.on { background: #27ae60; }
+  .wm-toggle.on::after { left: 18px; }
+  .wm-toggle.disabled { opacity: .45; cursor: not-allowed; }
+  .wm-holder { min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: #c0392b; color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; margin-left: 6px; flex: 0 0 auto; }
   .wm-occupied { position: relative; }
   .dlock-occupied .wm-self-avatar { right: 19px; }
   .wm-self-avatar { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: var(--primary); color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; z-index: 3; pointer-events: none; box-shadow: 0 0 0 1px var(--panel-bg); }
@@ -14138,8 +14144,10 @@ crewRoles: {
           win.className = 'wm-window';
           win.dataset.wmId = id;
           win.style.cssText = 'left:' + x + 'px; top:' + y + 'px; width:' + w + 'px; height:' + h + 'px; z-index:' + (++WindowManager.zTop) + ';';
+          const isTab = id.indexOf('tab:') === 0;
           win.innerHTML =
               '<div class="wm-titlebar"><span class="wm-title"></span>'
+              + (isTab ? '<button class="wm-toggle" title="Consultation — clique pour passer en modification"></button><span class="wm-holder" style="display:none"></span>' : '')
               + '<div class="wm-actions">'
               + '<button class="wm-btn wm-min" title="Réduire">—</button>'
               + '<button class="wm-btn wm-max" title="Agrandir">▢</button>'
@@ -14155,9 +14163,14 @@ crewRoles: {
           if(typeof content === 'string') body.innerHTML = content;
           else if(content instanceof HTMLElement) body.appendChild(content);
           document.body.appendChild(win);
-          const rec = { el: win, body: body, title: title || '', id: id, onClose: opts.onClose, state: { x: x, y: y, w: w, h: h, min: false, max: false } };
+          const rec = { el: win, body: body, title: title || '', id: id, onClose: opts.onClose, editMode: false, state: { x: x, y: y, w: w, h: h, min: false, max: false } };
           WindowManager.wins[id] = rec;
           WindowManager._wireButtons(rec);
+          const tg = win.querySelector('.wm-toggle');
+          if(tg) {
+              tg.addEventListener('mousedown', (e) => e.stopPropagation());
+              tg.addEventListener('click', (e) => { e.stopPropagation(); WindowManager.toggleEdit(id); });
+          }
           WindowManager._wireDrag(rec);
           WindowManager._wireResize(rec);
           win.addEventListener('mousedown', () => WindowManager.focus(id), true);
@@ -14382,6 +14395,7 @@ crewRoles: {
           WindowManager.open('tab:' + name, label || name, content, { onClose: () => WindowManager._restoreTab(name), x: _g.x, y: _g.y, w: _g.w, h: _g.h });
           if(_g.max) WindowManager.toggleMax('tab:' + name);
           if(_g.min) WindowManager.minimize('tab:' + name);
+          if(_g.edit) { try { WindowManager.toggleEdit('tab:' + name); } catch(_) {} }
           WindowManager.syncSubnav();
           if(wasActive) WindowManager._switchAway(name);
           WindowManager._arbitrate();
@@ -14406,12 +14420,70 @@ crewRoles: {
           }
           delete WindowManager._homes[name];
           delete WindowManager.poppedTabs[name];
+          try {
+              const d = (typeof LockDomains !== 'undefined') ? LockDomains.forTab(name) : null;
+              if(d && typeof LockManager !== 'undefined' && LockManager.winDomains[d]) {
+                  delete LockManager.winDomains[d];
+                  if(LockManager.currentDomain !== d) LockManager.release(d);
+              }
+          } catch(_) {}
           WindowManager.syncSubnav();
           WindowManager._arbitrate();
           WindowManager._persist();
       },
 
       // Arbitrage intra-session : 1 seul propriétaire éditable par domaine (onglet courant prioritaire).
+      // Verrou serveur tenu par quelqu'un d'autre (frais) sur ce domaine ?
+      _foreignLock: (dom) => {
+          if(!dom || typeof state === 'undefined') return null;
+          const l = (state.domainLocks || {})[dom];
+          if(!l) return null;
+          if(typeof LockManager !== 'undefined' && LockManager._mine(l)) return null;
+          if(l.heartbeat_at && (Date.now() - new Date(l.heartbeat_at).getTime()) > 180000) return null;
+          return l;
+      },
+
+      // Interrupteur consultation/modification d'une fenetre
+      toggleEdit: (id) => {
+          const rec = WindowManager.wins[id];
+          if(!rec || id.indexOf('tab:') !== 0) return;
+          if(typeof state !== 'undefined' && state.currentRole === 'viewer') { Utils.toast('Ton rôle est en lecture seule sur ce projet.', 'info'); return; }
+          const name = id.slice(4);
+          let dom = null;
+          try { dom = (typeof LockDomains !== 'undefined') ? LockDomains.forTab(name) : null; } catch(_) {}
+          if(!rec.editMode) {
+              if(dom) {
+                  const f = WindowManager._foreignLock(dom);
+                  if(f) { Utils.toast('En travaux par ' + (LockManager._who(f) || 'quelqu\u2019un') + ' — modification impossible pour le moment.', 'info'); WindowManager._arbitrate(); return; }
+                  const mainActive = document.querySelector('.tab-content.active:not(.wm-hosted)');
+                  const mainDom = mainActive ? LockDomains.forTab(mainActive.id.replace('tab-','')) : null;
+                  if(mainDom && mainDom === dom) { Utils.toast('Tu modifies déjà ce domaine dans l\u2019onglet principal.', 'info'); return; }
+                  const clash = Object.keys(WindowManager.wins).some(oid => oid !== id && oid.indexOf('tab:') === 0 && WindowManager.wins[oid].editMode && LockDomains.forTab(oid.slice(4)) === dom);
+                  if(clash) { Utils.toast('Ce domaine est déjà en modification dans une autre de tes fenêtres.', 'info'); return; }
+              }
+              rec.editMode = true;
+              if(dom && typeof LockManager !== 'undefined' && !LockManager.isAlone()) {
+                  LockManager.winDomains[dom] = true;
+                  LockManager.acquire(dom).then((ok) => {
+                      if(!ok) {
+                          rec.editMode = false;
+                          delete LockManager.winDomains[dom];
+                          Utils.toast('Impossible de prendre la main : quelqu\u2019un vient de la prendre.', 'info');
+                          WindowManager._arbitrate(); WindowManager._persist();
+                      }
+                  });
+              }
+          } else {
+              rec.editMode = false;
+              if(dom && typeof LockManager !== 'undefined') {
+                  delete LockManager.winDomains[dom];
+                  if(LockManager.currentDomain !== dom) LockManager.release(dom);
+              }
+          }
+          WindowManager._arbitrate();
+          WindowManager._persist();
+      },
+
       _arbitrate: () => {
           let mainDomain = null;
           try {
@@ -14427,25 +14499,62 @@ crewRoles: {
               const name = id.slice(4);
               let dom = null;
               try { dom = (typeof LockDomains !== 'undefined') ? LockDomains.forTab(name) : null; } catch(_) {}
-              let readonly = false;
-              if(dom) {
-                  if(claimed[dom] && claimed[dom] !== id) readonly = true;
-                  else claimed[dom] = id;
+              const foreign = dom ? WindowManager._foreignLock(dom) : null;
+              if(foreign && rec.editMode) { rec.editMode = false; if(typeof LockManager !== 'undefined') delete LockManager.winDomains[dom]; }
+              let readonly = true, roText = '';
+              if(!rec.editMode) {
+                  roText = foreign
+                      ? ('🚧 En travaux par ' + ((typeof LockManager !== 'undefined' && LockManager._who(foreign)) || '?') + ' — consultation seule')
+                      : '👁 Consultation — active l\u2019interrupteur pour modifier';
+              } else if(dom && claimed[dom] && claimed[dom] !== id) {
+                  rec.editMode = false;
+                  if(typeof LockManager !== 'undefined') delete LockManager.winDomains[dom];
+                  roText = '👁 Consultation — domaine déjà en modification ailleurs';
+              } else {
+                  if(dom) claimed[dom] = id;
+                  readonly = false;
               }
-              WindowManager._setReadonly(rec, readonly);
+              WindowManager._setReadonly(rec, readonly, roText);
+              WindowManager._syncChrome(rec, foreign);
           });
       },
 
-      _setReadonly: (rec, ro) => {
+      // Met a jour l'interrupteur et le badge du detenteur dans la barre de titre
+      _syncChrome: (rec, foreign) => {
+          if(!rec || !rec.el) return;
+          const tg = rec.el.querySelector('.wm-toggle');
+          if(tg) {
+              tg.classList.toggle('on', !!rec.editMode);
+              tg.classList.toggle('disabled', !!foreign);
+              tg.title = foreign
+                  ? ('Verrouillé : en travaux par ' + ((typeof LockManager !== 'undefined' && LockManager._who(foreign)) || '?'))
+                  : (rec.editMode ? 'Modification activée — clique pour repasser en consultation' : 'Consultation — clique pour passer en modification');
+          }
+          const hd = rec.el.querySelector('.wm-holder');
+          if(hd) {
+              if(foreign) {
+                  const who = (typeof LockManager !== 'undefined' && LockManager._who(foreign)) || '?';
+                  hd.style.display = '';
+                  hd.textContent = (who.charAt(0) || '?').toUpperCase();
+                  hd.title = 'En travaux par ' + who;
+              } else {
+                  hd.style.display = 'none';
+              }
+          }
+      },
+
+      _setReadonly: (rec, ro, text) => {
           if(!rec || !rec.el) return;
           rec.el.classList.toggle('wm-readonly', !!ro);
           let banner = rec.el.querySelector(':scope > .wm-ro-banner');
-          if(ro && !banner) {
-              banner = document.createElement('div');
-              banner.className = 'wm-ro-banner';
-              banner.textContent = '🔒 Lecture seule — déjà ouvert ailleurs (navigation et lecture OK, saisie bloquée)';
-              rec.el.insertBefore(banner, rec.body);
-          } else if(!ro && banner) {
+          if(ro) {
+              if(!banner) {
+                  banner = document.createElement('div');
+                  banner.className = 'wm-ro-banner';
+                  rec.el.insertBefore(banner, rec.body);
+              }
+              banner.textContent = text || '🔒 Lecture seule';
+          } else if(banner) {
               banner.remove();
           }
       },
@@ -14457,7 +14566,7 @@ crewRoles: {
               Object.keys(WindowManager.wins).forEach((id) => {
                   if(id.indexOf('tab:') !== 0) return;
                   const r = WindowManager.wins[id];
-                  data[id.slice(4)] = { x: r.state.x, y: r.state.y, w: r.state.w, h: r.state.h, min: !!r.state.min, max: !!r.state.max };
+                  data[id.slice(4)] = { x: r.state.x, y: r.state.y, w: r.state.w, h: r.state.h, min: !!r.state.min, max: !!r.state.max, edit: !!r.editMode };
               });
               localStorage.setItem('moteur_wm_windows', JSON.stringify(data));
           } catch(_) {}
@@ -15609,6 +15718,7 @@ const LockManager = {
       _who: (lock) => (lock && (lock.holder_name || (lock.holder_email||'').split('@')[0])) || '?',
 
       held: {},
+      winDomains: {},   // domaines pris par MES fenetres flottantes (interrupteur Modification)
       lastActivity: 0,
       _activity: () => { LockManager.lastActivity = Date.now(); },
       previewTimer: null,
@@ -15798,7 +15908,7 @@ const LockManager = {
               if(lock) state.domainLocks[domain] = lock;
               const got = LockManager._mine(lock);
               if(got) LockManager.held[domain] = true;
-              if(LockManager.currentDomain !== domain && got) { LockManager.release(domain); return false; }
+              if(LockManager.currentDomain !== domain && !LockManager.winDomains[domain] && got) { LockManager.release(domain); return false; }
               LockManager.applyUI();
               return got;
           } catch(e) { LockManager.pendingDomain = null; LockManager.applyUI(); return false; }
@@ -15883,6 +15993,7 @@ const LockManager = {
       },
 
       applyUI: () => {
+          try { if(typeof WindowManager !== 'undefined' && WindowManager.wins) WindowManager._arbitrate(); } catch(_) {}
           // Seul(e) sur le projet : aucun verrou affiché, tout reste éditable
           if(LockManager.isAlone()) {
               document.querySelectorAll('.dlock-avatar-tab, .dlock-badge, .dlock-banner').forEach(el => el.remove());
@@ -15973,9 +16084,13 @@ const LockManager = {
               UI.showDashboard();
               return;
           }
-          const dom = LockManager.currentDomain;
-          if(dom && LockManager._mine((state.domainLocks||{})[dom])) {
-              try { await supabase.rpc('lock_heartbeat', { p_id: state.currentProjectId, p_key: dom, p_uid: LockManager._uid() }); } catch(e) {}
+          const doms = {};
+          if(LockManager.currentDomain) doms[LockManager.currentDomain] = true;
+          Object.keys(LockManager.winDomains || {}).forEach(d => { doms[d] = true; });
+          for(const dom in doms) {
+              if(LockManager._mine((state.domainLocks||{})[dom])) {
+                  try { await supabase.rpc('lock_heartbeat', { p_id: state.currentProjectId, p_key: dom, p_uid: LockManager._uid() }); } catch(e) {}
+              }
           }
       },
 
