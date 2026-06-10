@@ -7125,8 +7125,10 @@ body.presentation-mode .presentation-bar {
   .wm-toggle.disabled { opacity: .45; cursor: not-allowed; }
   .wm-holder { min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: #c0392b; color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; margin-left: 6px; flex: 0 0 auto; }
   .wm-occupied { position: relative; }
-  .dlock-occupied .wm-self-avatar { right: 19px; }
-  .wm-self-avatar { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: var(--primary); color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; z-index: 3; pointer-events: none; box-shadow: 0 0 0 1px var(--panel-bg); }
+  .dlock-occupied .wm-self-avatar { right: 10px; z-index: 2; }
+  .tab-subbtn.dlock-occupied:hover .wm-self-avatar, .tab-btn.dlock-occupied:hover .wm-self-avatar { right: 19px; }
+  .wm-chip-closeall { background: #c0392b; color: #fff; font-weight: bold; flex: 0 0 auto; }
+  .wm-self-avatar { transition: right .15s; position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: var(--primary); color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; z-index: 3; pointer-events: none; box-shadow: 0 0 0 1px var(--panel-bg); }
   /* fenêtre en lecture seule : on bloque la SAISIE de données, pas la navigation ni la lecture */
   .wm-window.wm-readonly .wm-body textarea,
   .wm-window.wm-readonly .wm-body [contenteditable],
@@ -14270,6 +14272,12 @@ crewRoles: {
           WindowManager._renderTaskbar(); WindowManager._persist();
       },
 
+      closeAllMin: () => {
+          Object.keys(WindowManager.wins)
+              .filter(id => WindowManager.wins[id].state.min)
+              .forEach(id => WindowManager.close(id));
+      },
+
       _renderTaskbar: () => {
           const tb = WindowManager.taskbar; if(!tb) return;
           const mins = Object.keys(WindowManager.wins).map(k => WindowManager.wins[k]).filter(r => r.state.min);
@@ -14283,6 +14291,14 @@ crewRoles: {
               chip.addEventListener('click', () => WindowManager.restore(r.id));
               tb.appendChild(chip);
           });
+          if(mins.length > 1) {
+              const x = document.createElement('div');
+              x.className = 'wm-chip wm-chip-closeall';
+              x.textContent = '✕';
+              x.title = 'Fermer toutes les fenêtres réduites';
+              x.addEventListener('click', () => WindowManager.closeAllMin());
+              tb.appendChild(x);
+          }
           document.body.classList.toggle('wm-taskbar-open', mins.length > 0);
           document.body.style.setProperty('--wm-taskbar-h', (mins.length ? tb.offsetHeight : 0) + 'px');
       },
@@ -14359,16 +14375,9 @@ crewRoles: {
               b.classList.toggle('wm-popped', popped);
               setBadge(b, !!busy, popped ? 'Ouvert dans une de tes fenêtres (clic = ramener la fenêtre)' : 'En cours d\'utilisation par toi');
           });
-          // Onglets-categories : badge si un onglet de la categorie touche un domaine occupe
-          document.querySelectorAll('.tab-category[data-category]').forEach((cat) => {
-              const tabs = (typeof UI !== 'undefined' && UI.categoryTabs && UI.categoryTabs[cat.dataset.category]) || [];
-              const busy = tabs.some(t => {
-                  if(WindowManager.poppedTabs[t]) return true;
-                  const d = (typeof LockDomains !== 'undefined') ? LockDomains.forTab(t) : null;
-                  return !!(d && busyDomains[d]);
-              });
-              setBadge(cat, busy, 'Tu travailles dans cette catégorie');
-          });
+          // Onglets-categories : PAS de badge (trop charge) — nettoyage d'eventuels residus
+          document.querySelectorAll('.tab-category .wm-self-avatar').forEach(el => el.remove());
+          document.querySelectorAll('.tab-category.wm-occupied').forEach(el => el.classList.remove('wm-occupied'));
       },
 
       popFromMenu: () => {
@@ -16024,13 +16033,9 @@ const LockManager = {
           };
           // sous-onglets (mode catégories) + onglets plats
           document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => markBtn(btn, lockFor(btn.dataset.tab)));
-          // onglets-catégories : occupé si un onglet de la catégorie est tenu par un autre
-          document.querySelectorAll('.tab-category[data-category]').forEach(cat => {
-              const tabs = (UI.categoryTabs && UI.categoryTabs[cat.dataset.category]) || [];
-              let lock = null;
-              for(const t of tabs) { const l = lockFor(t); if(l) { lock = l; break; } }
-              markBtn(cat, lock);
-          });
+          // Onglets-categories : PAS de badge (trop charge) — on nettoie d'eventuels residus
+          document.querySelectorAll('.tab-category .dlock-avatar-tab, .tab-category .dlock-badge').forEach(el => el.remove());
+          document.querySelectorAll('.tab-category.dlock-occupied').forEach(el => el.classList.remove('dlock-occupied'));
           // lecture seule + bandeau de l'onglet actif
           if(LockManager.previewTab) return; // un aperçu est affiché : ne pas interférer
           const active = document.querySelector('.tab-content.active');
