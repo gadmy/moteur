@@ -7148,6 +7148,15 @@ body.presentation-mode .presentation-bar {
   .chub-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); }
   .chub-btn { padding: 6px 10px; background: var(--bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 0.78rem; }
   .chub-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .chub-card select { flex: 0 0 auto; width: auto; max-width: 46%; }
+  .chub-card input[type="text"] { min-width: 0; }
+  .chub-name-input { flex: 1 1 140px; min-width: 140px; }
+  .chub-row { display: flex; align-items: center; gap: 8px; }
+  .chub-compact { display: flex; align-items: center; gap: 10px; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+  .chub-compact .chub-cname { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chub-compact .chub-cfn { color: var(--text-sec); font-size: 0.83rem; flex: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chub-list { display: flex; flex-direction: column; gap: 8px; }
+  .btn-tool.active-view { background: var(--primary); color: #fff; border-color: var(--primary); }
   .wm-self-avatar { transition: right .15s; position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: var(--primary); color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; z-index: 3; pointer-events: none; box-shadow: 0 0 0 1px var(--panel-bg); }
   /* fenêtre en lecture seule : on bloque la SAISIE de données, pas la navigation ni la lecture */
   .wm-window.wm-readonly .wm-body textarea,
@@ -10745,7 +10754,11 @@ body.presentation-mode .presentation-bar {
     <h2 style="margin:0 0 10px 0;">🏛️ Asso / Entreprises</h2>
     <div class="data-toolbar" style="display:flex; gap:10px; margin-bottom:10px; flex-wrap:wrap; align-items:center;">
         <button onclick="app.Orgs.add()" class="btn-tool">➕ Ajouter une structure</button>
+        <button onclick="app.Orgs.importFromContacts()" class="btn-tool">📇 Mes contacts</button>
         <button onclick="app.Orgs.openSearch()" class="btn-tool">🔍 Rechercher une structure</button>
+        <span style="flex:1;"></span>
+        <button id="orgs-view-compact" onclick="app.Orgs.setView('compact')" class="btn-tool">▤ Compact</button>
+        <button id="orgs-view-detailed" onclick="app.Orgs.setView('detailed')" class="btn-tool">▦ Détaillé</button>
     </div>
     <p style="color:var(--text-sec); margin:0 0 20px 0; font-size:0.9rem;">Les associations et entreprises qui travaillent sur le projet, assignables à un département et/ou une fonction (ex. une société tierce qui assure le montage).</p>
     <div id="orgs-list"></div>
@@ -48374,6 +48387,65 @@ const Orgs = {
         Orgs.render();
     },
 
+    // Vue compacte / detaillee (comme comediens / techniciens)
+    viewMode: (function(){ try { return localStorage.getItem('moteur_orgs_view') || 'detailed'; } catch(_) { return 'detailed'; } })(),
+    setView: (m) => {
+        Orgs.viewMode = (m === 'compact') ? 'compact' : 'detailed';
+        try { localStorage.setItem('moteur_orgs_view', Orgs.viewMode); } catch(_) {}
+        Orgs.render();
+    },
+
+    // Import depuis Mes contacts (structures enregistrees dans tes contacts)
+    importFromContacts: async () => {
+        try {
+            const email = (state.currentUser && state.currentUser.email || '').toLowerCase();
+            if(!email) return;
+            const { data } = await supabase.from('contacts').select('*').eq('owner_email', email);
+            const orgContacts = (data || []).filter(c => ['org', 'association', 'enterprise', 'asso', 'ent'].indexOf(c.contact_type) !== -1);
+            if(!orgContacts.length) {
+                Utils.toast('Aucune structure dans tes contacts pour le moment. Utilise « 🔍 Rechercher une structure » pour passer par l\u2019Univers.', 'info', 6000);
+                return;
+            }
+            const list = Orgs._list();
+            let added = 0;
+            orgContacts.forEach(c => {
+                if(list.some(o => (o.name || '').toLowerCase() === (c.name || '').toLowerCase())) return;
+                const t = (c.contact_type === 'association' || c.contact_type === 'asso') ? 'asso' : 'ent';
+                list.push({ id: Utils.generateUniqueId(), type: t, name: c.name || '', department: '', role: '', contact: c.email || '', notes: '', srcId: null, profileId: c.publicProfileId || null });
+                added++;
+            });
+            if(added) { Store.save(); Orgs.render(); }
+            Utils.toast(added ? (added + ' structure(s) importée(s) de tes contacts.') : 'Toutes tes structures de contacts sont déjà dans le projet.', added ? 'success' : 'info');
+        } catch(e) { console.warn('[Orgs] contacts:', e); }
+    },
+
+    // Apercu de la fiche de presentation d'une structure de l'Univers
+    preview: (i) => {
+        const r = Orgs._searchResults[i];
+        if(!r) return;
+        const old = document.getElementById('orgs-preview-modal'); if(old) old.remove();
+        const modal = document.createElement('div');
+        modal.id = 'orgs-preview-modal';
+        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; justify-content: center; align-items: center; z-index: 10003;';
+        modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
+        const line = (ico, val) => val ? ('<div style="display:flex; gap:8px; font-size:0.9rem;"><span>' + ico + '</span><span>' + Utils.escape(val) + '</span></div>') : '';
+        modal.innerHTML = '<div style="background: var(--panel-bg); border-radius: 12px; width: 90%; max-width: 460px; max-height: 80vh; overflow-y:auto; display: flex; flex-direction: column;">'
+            + '<div style="display:flex; align-items:center; justify-content:space-between; padding:15px 20px; border-bottom:1px solid var(--border);">'
+            + '<h3 style="margin:0;">' + (r.t === 'asso' ? '🏛️ ' : '🏢 ') + Utils.escape(r.name) + '</h3>'
+            + '<button onclick="document.getElementById(\'orgs-preview-modal\').remove()" class="icon-btn-sec">✖</button>'
+            + '</div>'
+            + '<div style="padding:20px; display:flex; flex-direction:column; gap:10px;">'
+            + '<div style="color:var(--text-sec); font-size:0.85rem;">' + (r.t === 'asso' ? 'Association' : 'Entreprise') + ' — fiche publique de l\u2019Univers</div>'
+            + line('📍', r.address || r.city)
+            + line('📧', r.email)
+            + line('☎️', r.phone)
+            + line('🌐', r.site)
+            + (r.desc ? '<div style="font-size:0.9rem; color:var(--text-sec); white-space:pre-wrap; border-top:1px solid var(--border); padding-top:10px;">' + Utils.escape(r.desc) + '</div>' : '')
+            + '<button onclick="app.Orgs.addFromUniverse(' + i + '); document.getElementById(\'orgs-preview-modal\').remove();" style="margin-top:6px; padding:10px; background:var(--primary); color:#fff; border:none; border-radius:6px; cursor:pointer;">➕ Ajouter au projet</button>'
+            + '</div></div>';
+        document.body.appendChild(modal);
+    },
+
     // Recherche d'une structure dans l'Univers (fiches publiques asso / entreprise)
     _searchResults: [],
     openSearch: () => {
@@ -48409,9 +48481,23 @@ const Orgs = {
                 const d = p.data || {};
                 const f = d.facets || {};
                 const entries = [];
-                if((f.asso && f.asso.enabled) || p.profile_type === 'association') entries.push({ t: 'asso', name: d.assoName || (f.asso && f.asso.name) || p.name, email: (f.asso && f.asso.email) || d.assoEmail || '' });
-                if((f.ent && f.ent.enabled) || p.profile_type === 'enterprise') entries.push({ t: 'ent', name: d.entName || (f.ent && f.ent.name) || p.name, email: (f.ent && f.ent.email) || d.entEmail || '' });
-                entries.forEach(en => { if(en.name) out.push({ pid: p.id, t: en.t, name: en.name, city: d.city || p.city || '', email: en.email }); });
+                const fx = (o, keys) => { for(const k of keys) { if(o && o[k]) return o[k]; } return ''; };
+                const fa = f.asso || {}, fe = f.ent || {};
+                if(fa.enabled || p.profile_type === 'association') entries.push({ t: 'asso',
+                    name: d.assoName || fa.name || p.name,
+                    email: fa.email || d.assoEmail || '',
+                    phone: fx(fa, ['phone', 'tel']) || d.assoPhone || '',
+                    site: fx(fa, ['site', 'website', 'web']) || d.assoSite || '',
+                    address: fx(fa, ['siege', 'siegeAddress', 'address']) || d.assoSiege || '',
+                    desc: fx(fa, ['description', 'desc', 'bio']) || d.assoDesc || '' });
+                if(fe.enabled || p.profile_type === 'enterprise') entries.push({ t: 'ent',
+                    name: d.entName || fe.name || p.name,
+                    email: fe.email || d.entEmail || '',
+                    phone: fx(fe, ['phone', 'tel']) || d.entPhone || '',
+                    site: fx(fe, ['site', 'website', 'web']) || d.entSite || '',
+                    address: fx(fe, ['siege', 'siegeAddress', 'address']) || d.entSiege || '',
+                    desc: fx(fe, ['description', 'desc', 'bio']) || d.entDesc || '' });
+                entries.forEach(en => { if(en.name) out.push({ pid: p.id, t: en.t, name: en.name, city: d.city || p.city || '', email: en.email, phone: en.phone, site: en.site, address: en.address, desc: en.desc }); });
             });
             const q = (document.getElementById('orgs-search-name')?.value || '').toLowerCase();
             const tf = document.getElementById('orgs-search-type')?.value || '';
@@ -48420,11 +48506,12 @@ const Orgs = {
             if(q) res = res.filter(r => (r.name || '').toLowerCase().includes(q) || (r.city || '').toLowerCase().includes(q));
             Orgs._searchResults = res;
             if(!res.length) { box.innerHTML = '<div style="color:var(--text-sec); text-align:center; padding:20px;">Aucune structure trouvée dans l\u2019Univers. Tu peux en créer une vierge avec « ➕ Ajouter une structure ».</div>'; return; }
-            box.innerHTML = res.map((r, i) => '<div onclick="app.Orgs.addFromUniverse(' + i + ')" style="display:flex; align-items:center; gap:12px; padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; cursor:pointer;">'
+            box.innerHTML = res.map((r, i) => '<div onclick="app.Orgs.preview(' + i + ')" style="display:flex; align-items:center; gap:12px; padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; cursor:pointer;">'
                 + '<div style="font-size:1.4rem;">' + (r.t === 'asso' ? '🏛️' : '🏢') + '</div>'
                 + '<div style="flex:1;"><div style="font-weight:600;">' + Utils.escape(r.name) + '</div>'
                 + (r.city ? '<div style="font-size:0.8rem; color:var(--text-sec);">📍 ' + Utils.escape(r.city) + '</div>' : '')
-                + '</div><div style="color:var(--primary); font-weight:600;">＋</div></div>').join('');
+                + '<div style="font-size:0.75rem; color:var(--text-sec);">Clique pour voir la fiche</div>'
+                + '</div><button onclick="event.stopPropagation(); app.Orgs.addFromUniverse(' + i + ')" class="chub-btn">➕ Ajouter</button></div>').join('');
         } catch(e) { box.innerHTML = '<div style="color:var(--text-sec); text-align:center; padding:20px;">Erreur de recherche.</div>'; }
     },
 
@@ -48436,7 +48523,12 @@ const Orgs = {
             Utils.toast('Cette structure est déjà dans le projet.', 'warning');
             return;
         }
-        list.push({ id: Utils.generateUniqueId(), type: r.t, name: r.name || '', department: '', role: '', contact: r.email || '', notes: '', srcId: null, profileId: r.pid });
+        const noteBits = [];
+        if(r.address) noteBits.push('📍 ' + r.address); else if(r.city) noteBits.push('📍 ' + r.city);
+        if(r.phone) noteBits.push('☎️ ' + r.phone);
+        if(r.site) noteBits.push('🌐 ' + r.site);
+        if(r.desc) noteBits.push(r.desc);
+        list.push({ id: Utils.generateUniqueId(), type: r.t, name: r.name || '', department: '', role: '', contact: r.email || '', notes: noteBits.join('\n'), srcId: null, profileId: r.pid });
         Store.save();
         Orgs.render();
         const modal = document.getElementById('orgs-search-modal'); if(modal) modal.remove();
@@ -48543,16 +48635,38 @@ const Orgs = {
             return;
         }
 
+        // Etat des boutons de vue
+        try {
+            const bC = document.getElementById('orgs-view-compact'), bD = document.getElementById('orgs-view-detailed');
+            if(bC) bC.classList.toggle('active-view', Orgs.viewMode === 'compact');
+            if(bD) bD.classList.toggle('active-view', Orgs.viewMode !== 'compact');
+        } catch(_) {}
+
+        if(Orgs.viewMode === 'compact') {
+            const rows = list.map((o, i) => {
+                const icon = o.type === 'asso' ? '🏛️' : '🏢';
+                const fn = [o.department, o.role].filter(Boolean).join(' — ');
+                return '<div class="chub-compact">'
+                    + '<span>' + icon + '</span>'
+                    + '<span class="chub-cname">' + (Utils.escape(o.name) || '<i style="color:var(--text-sec);">Sans nom</i>') + '</span>'
+                    + '<span class="chub-cfn">' + Utils.escape(fn || (o.contact || '')) + '</span>'
+                    + '<button onclick="app.Orgs.remove(' + i + ')" title="Supprimer définitivement" style="background:none; border:none; cursor:pointer; color:var(--text-sec);">🗑</button>'
+                    + '</div>';
+            }).join('');
+            host.innerHTML = dl + importHtml + '<div class="chub-list">' + rows + '</div>';
+            return;
+        }
+
         const cards = list.map((o, i) => {
             const icon = o.type === 'asso' ? '🏛️' : '🏢';
             return '<div class="chub-card">'
-                + '<div style="display:flex; align-items:center; gap:8px;">'
+                + '<div class="chub-row">'
                 + '<select onchange="app.Orgs.update(' + i + ', \'type\', this.value)" style="padding:6px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
                 + '<option value="ent"' + (o.type !== 'asso' ? ' selected' : '') + '>🏢 Entreprise</option>'
                 + '<option value="asso"' + (o.type === 'asso' ? ' selected' : '') + '>🏛️ Association</option>'
                 + '</select>'
-                + '<input type="text" value="' + Utils.escape(o.name || '') + '" placeholder="Nom de la structure" onchange="app.Orgs.update(' + i + ', \'name\', this.value)" style="flex:1; padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); font-weight:600;">'
-                + '<button onclick="app.Orgs.remove(' + i + ')" title="Retirer du projet" style="background:none; border:none; cursor:pointer; font-size:1rem; color:var(--text-sec);">🗑</button>'
+                + '<input type="text" class="chub-name-input" value="' + Utils.escape(o.name || '') + '" placeholder="Nom de la structure" onchange="app.Orgs.update(' + i + ', \'name\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); font-weight:600;">'
+                + '<button onclick="app.Orgs.remove(' + i + ')" title="Supprimer définitivement" style="background:none; border:none; cursor:pointer; font-size:1rem; color:var(--text-sec); flex:0 0 auto;">🗑</button>'
                 + '</div>'
                 + '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">'
                 + '<input type="text" list="orgs-deps" value="' + Utils.escape(o.department || '') + '" placeholder="Département (ex. Montage)" onchange="app.Orgs.update(' + i + ', \'department\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
@@ -48560,7 +48674,7 @@ const Orgs = {
                 + '</div>'
                 + '<input type="text" value="' + Utils.escape(o.contact || '') + '" placeholder="Contact (email / téléphone / référent)" onchange="app.Orgs.update(' + i + ', \'contact\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
                 + '<textarea placeholder="Notes (périmètre, devis, dates...)" onchange="app.Orgs.update(' + i + ', \'notes\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); min-height:50px; resize:vertical;">' + Utils.escape(o.notes || '') + '</textarea>'
-                + '<div style="font-size:0.78rem; color:var(--text-sec);">' + icon + ' ' + (o.srcId ? 'Importée des partenaires de la Présentation' : 'Structure ajoutée manuellement') + '</div>'
+                + '<div style="font-size:0.78rem; color:var(--text-sec);">' + icon + ' ' + (o.srcId ? 'Importée des partenaires de la Présentation' : (o.profileId ? 'Fiche liée à l\u2019Univers' : 'Structure ajoutée manuellement')) + '</div>'
                 + '</div>';
         }).join('');
 
@@ -51386,13 +51500,16 @@ const Presentation = {
     },
     
     // Supprime un partenaire
-    removePartner: (type, id) => {
+    removePartner: (type, id, idx) => {
         if(!state.data.presentation) return;
         
         const key = type === 'association' ? 'associations' : 'enterprises';
-        if(!state.data.presentation[key]) return;
+        const arr = state.data.presentation[key];
+        if(!arr) return;
         
-        state.data.presentation[key] = state.data.presentation[key].filter(p => p.id !== id);
+        // Suppression par index (fiable meme si un vieux partenaire n'a pas d'id), repli par id
+        if(typeof idx === 'number' && arr[idx]) arr.splice(idx, 1);
+        else state.data.presentation[key] = arr.filter(p => !p || p.id !== id);
         Store.save();
         Presentation.renderPartners();
     },
@@ -51408,13 +51525,13 @@ const Presentation = {
             if(associations.length === 0) {
                 assoList.innerHTML = '<span class="text-sec-sm2">Aucune association ajoutée</span>';
             } else {
-                assoList.innerHTML = associations.map(a => `
+                assoList.innerHTML = associations.map((a, i) => `
                     <div class="n8-flex-3">
                         <div class="n8-avatar-2">
                             ${a.photo ? `<img src="${a.photo}" class="img-cover">` : '🏛️'}
                         </div>
                         <span class="fs-09">${Utils.escape(a.name)}</span>
-                        <button onclick="app.Presentation.removePartner('association', '${a.id}')" style="background: none; border: none; cursor: pointer; color: var(--danger); font-size: 0.8rem;">✖</button>
+                        <button onclick="app.Presentation.removePartner('association', '${a.id}', ${i})" style="background: none; border: none; cursor: pointer; color: var(--danger); font-size: 0.8rem;">✖</button>
                     </div>
                 `).join('');
             }
@@ -51427,13 +51544,13 @@ const Presentation = {
             if(enterprises.length === 0) {
                 entList.innerHTML = '<span class="text-sec-sm2">Aucune entreprise ajoutée</span>';
             } else {
-                entList.innerHTML = enterprises.map(e => `
+                entList.innerHTML = enterprises.map((e, i) => `
                     <div class="n8-flex-3">
                         <div class="n8-avatar-2">
                             ${e.photo ? `<img src="${e.photo}" class="img-cover">` : '🏢'}
                         </div>
                         <span class="fs-09">${Utils.escape(e.name)}</span>
-                        <button onclick="app.Presentation.removePartner('enterprise', '${e.id}')" style="background: none; border: none; cursor: pointer; color: var(--danger); font-size: 0.8rem;">✖</button>
+                        <button onclick="app.Presentation.removePartner('enterprise', '${e.id}', ${i})" style="background: none; border: none; cursor: pointer; color: var(--danger); font-size: 0.8rem;">✖</button>
                     </div>
                 `).join('');
             }
