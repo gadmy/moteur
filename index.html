@@ -48382,7 +48382,7 @@ const Orgs = {
     },
 
     add: () => {
-        Orgs._list().push({ id: Utils.generateUniqueId(), type: 'ent', name: '', department: '', role: '', contact: '', notes: '', srcId: null });
+        Orgs._list().push({ id: Utils.generateUniqueId(), type: 'ent', name: '', address: '', phone: '', site: '', desc: '', department: '', role: '', contact: '', notes: '', srcId: null });
         Store.save();
         Orgs.render();
     },
@@ -48411,7 +48411,19 @@ const Orgs = {
             orgContacts.forEach(c => {
                 if(list.some(o => (o.name || '').toLowerCase() === (c.name || '').toLowerCase())) return;
                 const t = (c.contact_type === 'association' || c.contact_type === 'asso') ? 'asso' : 'ent';
-                list.push({ id: Utils.generateUniqueId(), type: t, name: c.name || '', department: '', role: '', contact: c.email || '', notes: '', srcId: null, profileId: c.publicProfileId || null });
+                // La fiche complete est stockee en JSON dans le contact : on la copie comme depuis la recherche
+                let prof = {};
+                try { prof = JSON.parse(c.notes || '{}'); } catch(_) {}
+                const fx = (o, keys) => { for(const k of keys) { if(o && o[k]) return o[k]; } return ''; };
+                const f = ((prof.facets || {})[t === 'asso' ? 'asso' : 'ent']) || {};
+                const email = (c.contact_email && c.contact_email.indexOf('@') !== -1) ? c.contact_email : (f.email || prof.email || '');
+                list.push({ id: Utils.generateUniqueId(), type: t, name: c.name || '',
+                    address: fx(f, ['siege', 'siegeAddress', 'address']) || prof.city || '',
+                    phone: fx(f, ['phone', 'tel']) || prof.phone || '',
+                    site: fx(f, ['site', 'website', 'web']) || prof.site || '',
+                    desc: fx(f, ['description', 'desc', 'bio']) || '',
+                    department: '', role: '', contact: email, notes: '', srcId: null,
+                    profileId: prof.publicProfileId || c.publicProfileId || null });
                 added++;
             });
             if(added) { Store.save(); Orgs.render(); }
@@ -48523,12 +48535,8 @@ const Orgs = {
             Utils.toast('Cette structure est déjà dans le projet.', 'warning');
             return;
         }
-        const noteBits = [];
-        if(r.address) noteBits.push('📍 ' + r.address); else if(r.city) noteBits.push('📍 ' + r.city);
-        if(r.phone) noteBits.push('☎️ ' + r.phone);
-        if(r.site) noteBits.push('🌐 ' + r.site);
-        if(r.desc) noteBits.push(r.desc);
-        list.push({ id: Utils.generateUniqueId(), type: r.t, name: r.name || '', department: '', role: '', contact: r.email || '', notes: noteBits.join('\n'), srcId: null, profileId: r.pid });
+        // La fiche structure de la casquette est COPIEE dans le projet (comme une fiche comedien)
+        list.push({ id: Utils.generateUniqueId(), type: r.t, name: r.name || '', address: r.address || r.city || '', phone: r.phone || '', site: r.site || '', desc: r.desc || '', department: '', role: '', contact: r.email || '', notes: '', srcId: null, profileId: r.pid });
         Store.save();
         Orgs.render();
         const modal = document.getElementById('orgs-search-modal'); if(modal) modal.remove();
@@ -48668,12 +48676,20 @@ const Orgs = {
                 + '<input type="text" class="chub-name-input" value="' + Utils.escape(o.name || '') + '" placeholder="Nom de la structure" onchange="app.Orgs.update(' + i + ', \'name\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); font-weight:600;">'
                 + '<button onclick="app.Orgs.remove(' + i + ')" title="Supprimer définitivement" style="background:none; border:none; cursor:pointer; font-size:1rem; color:var(--text-sec); flex:0 0 auto;">🗑</button>'
                 + '</div>'
+                + '<div style="font-size:0.75rem; color:var(--text-sec); text-transform:uppercase; letter-spacing:0.5px; margin-top:2px;">Fiche structure</div>'
+                + '<input type="text" value="' + Utils.escape(o.contact || '') + '" placeholder="📧 Email de contact" onchange="app.Orgs.update(' + i + ', \'contact\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
+                + '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">'
+                + '<input type="text" value="' + Utils.escape(o.address || '') + '" placeholder="📍 Siège / adresse" onchange="app.Orgs.update(' + i + ', \'address\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
+                + '<input type="text" value="' + Utils.escape(o.phone || '') + '" placeholder="☎️ Téléphone" onchange="app.Orgs.update(' + i + ', \'phone\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
+                + '</div>'
+                + '<input type="text" value="' + Utils.escape(o.site || '') + '" placeholder="🌐 Site internet" onchange="app.Orgs.update(' + i + ', \'site\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
+                + '<textarea placeholder="Description de la structure" onchange="app.Orgs.update(' + i + ', \'desc\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); min-height:44px; resize:vertical;">' + Utils.escape(o.desc || '') + '</textarea>'
+                + '<div style="font-size:0.75rem; color:var(--text-sec); text-transform:uppercase; letter-spacing:0.5px; border-top:1px solid var(--border); padding-top:8px;">Sur ce projet</div>'
                 + '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">'
                 + '<input type="text" list="orgs-deps" value="' + Utils.escape(o.department || '') + '" placeholder="Département (ex. Montage)" onchange="app.Orgs.update(' + i + ', \'department\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
                 + '<input type="text" value="' + Utils.escape(o.role || '') + '" placeholder="Fonction (ex. Montage image)" onchange="app.Orgs.update(' + i + ', \'role\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
                 + '</div>'
-                + '<input type="text" value="' + Utils.escape(o.contact || '') + '" placeholder="Contact (email / téléphone / référent)" onchange="app.Orgs.update(' + i + ', \'contact\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main);">'
-                + '<textarea placeholder="Notes (périmètre, devis, dates...)" onchange="app.Orgs.update(' + i + ', \'notes\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); min-height:50px; resize:vertical;">' + Utils.escape(o.notes || '') + '</textarea>'
+                + '<textarea placeholder="Notes projet (périmètre, devis, dates...)" onchange="app.Orgs.update(' + i + ', \'notes\', this.value)" style="padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-main); min-height:50px; resize:vertical;">' + Utils.escape(o.notes || '') + '</textarea>'
                 + '<div style="font-size:0.78rem; color:var(--text-sec);">' + icon + ' ' + (o.srcId ? 'Importée des partenaires de la Présentation' : (o.profileId ? 'Fiche liée à l\u2019Univers' : 'Structure ajoutée manuellement')) + '</div>'
                 + '</div>';
         }).join('');
