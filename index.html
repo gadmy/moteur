@@ -23,6 +23,16 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v528 (11 Juin 2026)
+  - Refresh onglets : rendu immédiat avant la resynchro réseau sur Comédiens, Équipe technique et Asso/Entreprises. Avant, l'onglet restait blanc tant que syncActorsFromPublicProfiles / syncCrewFromPublicProfiles / syncFromUniverse n'avait pas répondu (ou en cas d'échec). Audit : seuls ces trois onglets cachaient le défaut, les autres peignaient déjà en synchrone.
+  - Refonte complète de Admin > Contrats en véritable gestionnaire. Nouveau modèle de données state.data.contracts (ajouté au schéma getEmpty + migration douce au chargement des projets existants) et helpers CRUD Contracts.store (all / get / forParty / create / upsert / remove / setStatus). Un contrat = { id, partyType, partyId, partyName, type, status, title, body, dates }.
+  - Layout maître-détail 3 colonnes : Col 1 = fiches (comédiens + techniciens + structures), tri A→Z ou par métier avec groupes repliables et VRAIS noms de groupes (résolus via state.data.groups, fini gc1/gc2). Col 2 = contrats de la personne sélectionnée + « + Nouveau » (choix des 4 types). Col 3 = éditeur inline (remplace l'ancienne modale plein écran).
+  - Pastilles de statut dans la colonne de gauche : jusqu'à 4 par personne, une par statut, avec le compte de contrats. Code couleur : brouillon = gris, à signer = orange, signé = vert, archivé = gris foncé, pointillé = aucun contrat. La prod voit d'un coup d'œil qui n'a pas signé / pas de contrat.
+  - Éditeur en blocs : document contenteditable + palette de champs auto (jetons data-field résolus depuis la fiche personne/structure et l'identité production) et de blocs de saisie libre (date, lieu, rémunération, signatures, mention légale). Re-clic sur le nom = enregistre et ferme le contrat ouvert.
+  - Feuille de service : champ « Période » auto (agrégat de shootingDays) + tableau jours/horaires/convocations + bloc rémunération détaillée (brut, congés spectacles, net).
+  - Clauses juridiques par type (CDDU, droit à l'image, prestation, bénévole) portées en blocs insérables. Mention légale (modèle indicatif, vérifier la conformité) présente sur tout contrat.
+  - Statuts (brouillon / à signer / signé / archivé), enregistrement persistant, et export PDF refondu via html2canvas → jsPDF multipage (l'ancien doc.html() rendait une page blanche).
+  - Sécurité : alerte GitHub Secret Scanning (clé Google API publique dans un ancien commit) traitée. Clé non utilisée dans le code actuel, issue d'un ancien projet Google supprimé, alerte close as revoked. Rappel interne : une clé reste dans l'historique git même retirée du fichier courant.
 v527 (10 Juin 2026)
   - Production > Asso / Entreprises (module Orgs) : le pôle des structures gagne une VRAIE fiche, à parité avec comédiens / techniciens. À l'ajout depuis l'Univers, un instantané complet de la fiche est copié dans le projet (logo, type, SIRET / RNA, forme juridique, année, effectif / membres, dirigeant·e ou président·e, mission / description, services, email, téléphone, siège, site, réseaux sociaux) — base prévue pour l'autocomplétion future des contrats.
   - Fiche en lecture seule si elle est liée à l'Univers (cadenas : seul le propriétaire de la fiche en modifie le contenu), entièrement éditable si la structure a été créée à la main ou importée d'un contact non lié. La section « Sur ce projet » (département, fonction, notes) reste toujours éditable.
@@ -7512,7 +7522,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv528.2</p>
+      <p>vv528.3</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -49071,7 +49081,7 @@ const Contracts = {
         if(Contracts._sel) {
             const contracts = (Contracts.store.forParty(Contracts._sel.partyType, Contracts._sel.partyId) || []).slice().sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
             const picker = Contracts._pickerOpen ? '<div class="ccol-picker">'
-                + ['image', 'cddu', 'prestation', 'benevole'].map(t => '<button class="ctr-pal-btn" onclick="app.Contracts.newContract(\'' + t + '\')">' + (Contracts._typeLabel[t] || t) + '</button>').join('')
+                + (Contracts._sel.partyType === 'org' ? ['prestation', 'benevole'] : ['image', 'cddu', 'prestation', 'benevole']).map(t => '<button class="ctr-pal-btn" onclick="app.Contracts.newContract(\'' + t + '\')">' + (Contracts._typeLabel[t] || t) + '</button>').join('')
                 + '</div>' : '';
             const rows = contracts.length ? contracts.map(ct => {
                 const tlabel = Contracts._typeLabel[ct.type] || ct.type;
@@ -49123,7 +49133,10 @@ const Contracts = {
     // Mini-modale : choix du type de contrat au clic (gauche ou droit) sur une carte de la grille
     openMini: (partyType, idx) => {
         const old = document.getElementById('chub-mini'); if(old) old.remove();
-        const T = [
+        const T = partyType === 'org' ? [
+            ['prestation', '📄 Prestation', 'La structure est prestataire'],
+            ['benevole', '❤️ Bénévole', 'Partenariat / collaboration bénévole']
+        ] : [
             ['image', '📸 Droit à l\u2019image', 'Autorisation d\u2019exploitation de l\u2019image'],
             ['cddu', '📋 CDDU', 'Intermittent·e du spectacle'],
             ['prestation', '📄 Prestation', 'Auto-entrepreneur / structure'],
@@ -49157,6 +49170,8 @@ const Contracts = {
         'party.phone':  { label: 'Partie — téléphone',      resolve: (x) => x.party.phone },
         'party.role':   { label: 'Partie — fonction',       resolve: (x) => x.party.role },
         'party.siret':  { label: 'Partie — SIRET',          resolve: (x) => x.party.siret },
+        'party.legalForm': { label: 'Partie — forme juridique', resolve: (x) => x.party.legalForm },
+        'party.rep':    { label: 'Partie — représentant·e',     resolve: (x) => x.party.rep },
         'party.secu':   { label: 'Partie — n° Sécu',        resolve: (x) => x.party.numSecu },
         'party.conges': { label: 'Partie — Congés Spectacles', resolve: (x) => x.party.numCongesSpectacles },
         'project.title':{ label: 'Projet — titre',          resolve: (x) => x.projectTitle },
@@ -49181,7 +49196,7 @@ const Contracts = {
     },
     // Blocs HTML construits dynamiquement à l'insertion (instantané, non re-résolu)
     _snippetBuilders: {
-        clauses: () => { const ct = Contracts.store.get(Contracts._editing); const type = (ct && ct.type) || 'image'; return Contracts._clauses[type] || Contracts._clauses.image; },
+        clauses: () => { const ct = Contracts.store.get(Contracts._editing); const type = (ct && ct.type) || 'image'; if(type === 'prestation' && ct && ct.partyType === 'org') return Contracts._clauses.prestation_org; return Contracts._clauses[type] || Contracts._clauses.image; },
         callsheet: () => {
             const cs = Contracts._callsheet();
             if(!cs.count) return '<p><em>Aucun jour de tournage saisi dans la feuille de service.</em></p>';
@@ -49251,6 +49266,26 @@ const Contracts = {
 <p>Le/la prestataire déclare :<br>☐ Être régulièrement inscrit·e au RCS ou au Répertoire des Métiers<br>☐ Être à jour de ses obligations fiscales et sociales<br>☐ Ne pas être en situation de dépendance économique vis-à-vis du/de la client·e</p>
 <p class="ctr-legal">Attention : le recours à un·e prestataire auto-entrepreneur·e est licite uniquement si celui/celle-ci exerce son activité de manière réellement indépendante, sans lien de subordination. À défaut, le contrat pourrait être requalifié en contrat de travail.</p>
 `,
+        prestation_org: `
+<h2>Indépendance des parties</h2>
+<p>Le Prestataire exécute la mission en toute indépendance, avec ses propres moyens humains et matériels. Le présent contrat n'établit aucun lien de subordination entre le personnel du Prestataire et le Client, ni aucune société de fait entre les parties.</p>
+<h2>Obligations du Prestataire</h2>
+<p>Le Prestataire est tenu à une obligation de moyens. Il s'engage à exécuter la mission conformément aux règles de l'art, dans le respect du calendrier convenu, et à informer sans délai le Client de toute difficulté.</p>
+<h2>Réception des livrables</h2>
+<p>Le Client dispose d'un délai de <span class="ctr-blank">___</span> jours à compter de la remise des livrables pour formuler ses réserves par écrit. Passé ce délai, les livrables sont réputés acceptés. Nombre de séries de corrections incluses : <span class="ctr-blank">___</span>.</p>
+<h2>Assurance</h2>
+<p>Le Prestataire déclare être titulaire d'une assurance responsabilité civile professionnelle (compagnie : <span class="ctr-blank">_____________</span>, police n° <span class="ctr-blank">_____________</span>) couvrant l'ensemble de la mission.</p>
+<h2>Propriété intellectuelle</h2>
+<p>Les droits patrimoniaux attachés aux créations réalisées dans le cadre de la mission sont cédés au Client au fur et à mesure de leur création, sous condition du paiement intégral du prix, pour tous supports, tous modes d'exploitation, pour le monde entier et pour la durée légale de protection des droits d'auteur. Le Prestataire garantit que les livrables ne portent atteinte à aucun droit de tiers.</p>
+<h2>Confidentialité</h2>
+<p>Chaque partie s'engage à garder confidentielles les informations échangées dans le cadre du contrat, pendant sa durée et pendant 2 ans après son terme.</p>
+<h2>Sous-traitance</h2>
+<p>Le Prestataire ne peut sous-traiter tout ou partie de la mission sans l'accord préalable et écrit du Client. Il demeure en toute hypothèse seul responsable de la bonne exécution.</p>
+<h2>Résiliation</h2>
+<p><strong>Pour convenance :</strong> chaque partie peut résilier moyennant un préavis de <span class="ctr-blank">___</span> jours notifié par écrit.<br><strong>Pour faute :</strong> en cas de manquement grave non réparé dans les 8 jours suivant une mise en demeure, l'autre partie peut résilier de plein droit.<br><strong>Conséquences :</strong> les prestations réalisées et acceptées à la date d'effet restent dues.</p>
+<h2>Litige et droit applicable</h2>
+<p>Le contrat est soumis au droit français. Les parties rechercheront une solution amiable ; à défaut d'accord dans un délai de 30 jours, le litige sera porté devant le tribunal compétent du ressort du siège du défendeur.</p>
+`,
         benevole: `
 <h2>Préambule</h2>
 <p>Le présent accord définit les conditions d'une collaboration bénévole dans le cadre d'un projet audiovisuel à but non lucratif ou à budget limité. Il n'établit aucun lien de subordination et ne constitue pas un contrat de travail. Chaque partie s'engage librement et de bonne foi.</p>
@@ -49277,15 +49312,39 @@ const Contracts = {
         let party = {};
         if(partyType === 'org') {
             const fc = (typeof Orgs !== 'undefined' && Orgs._fiche) ? Orgs._fiche(obj) : (obj.fiche || obj);
-            party = { name: (fc && fc.name) || obj.name || '', address: (fc && (fc.address || fc.siege)) || '', email: (fc && fc.email) || '', phone: (fc && fc.phone) || '', role: [obj.department, (obj.roleCustom || obj.role)].filter(Boolean).join(' — '), numSecu: '', numCongesSpectacles: '', siret: (fc && fc.siret) || '' };
+            party = { name: (fc && fc.name) || obj.name || '', address: (fc && (fc.hq || fc.address || fc.siege)) || '', email: (fc && fc.email) || '', phone: (fc && fc.phone) || '', role: [obj.department, (obj.roleCustom || obj.role)].filter(Boolean).join(' — '), numSecu: '', numCongesSpectacles: '', siret: (fc && fc.siret) || '', legalForm: (fc && fc.legalForm) || '', rep: (fc && fc.leader) || '', isOrg: true };
         } else {
             party = { name: obj.name || '', address: obj.address || '', email: obj.email || '', phone: obj.phone || '', role: obj.role || (partyType === 'actor' ? 'Comédien·ne' : 'Technicien·ne'), numSecu: obj.numSecu || '', numCongesSpectacles: obj.numCongesSpectacles || '', siret: '' };
         }
         return { project: project, projectTitle: projectTitle, party: party };
     },
 
+    // Modele B2B : la Production (Client) commande une prestation a une structure (Prestataire)
+    _orgPrestationBody: (tok) => {
+        const blank = (hint) => '<span class="ctr-blank">' + hint + '</span>';
+        const client = '<p><strong>Le Client (la Production) :</strong><br>'+tok('prod.name')+'<br>Adresse : '+tok('prod.address')+'<br>SIRET : '+tok('prod.siret')+'<br>Représenté par '+tok('prod.rep')+', '+tok('prod.repTitle')+'.</p>';
+        const presta = '<p><strong>Le Prestataire :</strong><br>'+tok('party.name')+' ('+tok('party.legalForm')+')<br>Siège : '+tok('party.address')+'<br>SIRET : '+tok('party.siret')+'<br>Représenté·e par '+tok('party.rep')+'<br>Contact : '+tok('party.email')+' — '+tok('party.phone')+'</p>';
+        const objet = '<h2>Objet</h2><p>Le Prestataire s\u2019engage à réaliser pour le Client, dans le cadre du projet « '+tok('project.title')+' », la prestation suivante : '+blank('description de la mission')+'.</p>'
+            + '<p>Livrables attendus : '+blank('liste des livrables, formats, quantités')+'.</p>'
+            + '<p>La prestation est réalisée conformément au devis n° '+blank('________')+' du '+blank('________')+', accepté par le Client, qui fait partie intégrante du présent contrat.</p>';
+        const duree = '<h2>Durée et délais</h2><p>La prestation est exécutée du '+blank('__________')+' au '+blank('__________')+'. Les livrables seront remis au plus tard le '+blank('__________')+'.</p>';
+        const prix = '<h2>Prix et facturation</h2><table class="ctr-cs"><tbody>'
+            + '<tr><td>Montant HT</td><td>'+blank('_________ €')+'</td></tr>'
+            + '<tr><td>TVA</td><td>'+blank('20 % / non applicable, art. 293 B du CGI')+'</td></tr>'
+            + '<tr><td>Montant TTC</td><td>'+blank('_________ €')+'</td></tr>'
+            + '<tr><td>Acompte à la signature</td><td>'+blank('____ %')+'</td></tr>'
+            + '<tr><td>Solde</td><td>'+blank('à la livraison / réception de facture')+'</td></tr>'
+            + '</tbody></table><p>Paiement par virement bancaire sous 30 jours à compter de la réception de la facture.</p>';
+        const penalites = '<h2>Pénalités de retard</h2><p>Tout retard de paiement entraîne de plein droit l\u2019application de pénalités calculées sur la base de trois fois le taux d\u2019intérêt légal, ainsi qu\u2019une indemnité forfaitaire de 40 € pour frais de recouvrement (articles L.441-10 et D.441-5 du Code de commerce).</p>';
+        const sign = '<p>Fait à '+blank('__________')+', le '+blank('__________')+', en deux exemplaires.</p><table class="ctr-sign"><tr><td>Pour le Client<br><small>(signature)</small></td><td>Pour le Prestataire<br><small>(cachet + signature)</small></td></tr></table>';
+        return '<h1>CONTRAT DE PRESTATION DE SERVICES</h1>'
+            + '<h2>Entre les soussignés</h2>' + client + presta
+            + objet + duree + prix + penalites + sign + Contracts._snippets.legal;
+    },
+
     defaultBody: (type, ctx) => {
         const tok = (id) => '<span class="ctr-field" contenteditable="false" data-field="'+id+'">___________</span>';
+        if(type === 'prestation' && ctx && ctx.party && ctx.party.isOrg) return Contracts._orgPrestationBody(tok);
         const titles = { image: 'AUTORISATION D\u2019EXPLOITATION DU DROIT À L\u2019IMAGE', cddu: 'CONTRAT À DURÉE DÉTERMINÉE D\u2019USAGE (CDDU)', prestation: 'CONTRAT DE PRESTATION DE SERVICES', benevole: 'ACCORD DE COLLABORATION BÉNÉVOLE' };
         const partiesProd = '<p><strong>La Production :</strong><br>'+tok('prod.name')+'<br>Adresse : '+tok('prod.address')+'<br>SIRET : '+tok('prod.siret')+'<br>Représentée par '+tok('prod.rep')+', '+tok('prod.repTitle')+'.</p>';
         const partyLabel = type === 'prestation' ? 'Le Prestataire' : (type === 'cddu' ? 'Le/La Salarié·e' : 'La Partie');
@@ -49326,7 +49385,7 @@ const Contracts = {
         const old = document.getElementById('ctr-editor'); if(old) old.remove();
         const palette = [
             { g: 'Production', items: [['prod.name','Nom'],['prod.address','Adresse'],['prod.siret','SIRET'],['prod.ape','APE/NAF'],['prod.licence','Licence'],['prod.rep','Représentant·e'],['prod.repTitle','Qualité']] },
-            { g: 'Personne / Structure', items: [['party.name','Nom'],['party.address','Adresse'],['party.email','Email'],['party.phone','Téléphone'],['party.role','Fonction'],['party.secu','N° Sécu'],['party.conges','Congés Spect.'],['party.siret','SIRET']] },
+            { g: 'Personne / Structure', items: [['party.name','Nom'],['party.address','Adresse'],['party.email','Email'],['party.phone','Téléphone'],['party.role','Fonction'],['party.secu','N° Sécu'],['party.conges','Congés Spect.'],['party.siret','SIRET'],['party.legalForm','Forme jur.'],['party.rep','Représentant·e']] },
             { g: 'Projet', items: [['project.title','Titre du projet']] }
         ];
         let paletteHTML = palette.map(grp => '<div class="ctr-pal-group"><div class="ctr-pal-title">'+grp.g+'</div>'+grp.items.map(it => '<button class="ctr-pal-btn" onclick="app.Contracts.insertField(\''+it[0]+'\')">'+it[1]+'</button>').join('')+'</div>').join('');
