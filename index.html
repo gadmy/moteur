@@ -39,6 +39,9 @@ v528 (11 Juin 2026)
   - Modèles de base enrichis (comédiens / techniciens) : à la création, CDDU et Prestation embarquent d'office le tableau de jours scopé + le tableau Rémunération détaillée (qui remplace la ligne « Rémunération : ___ € ») ; Bénévole embarque le tableau de jours sans rému ; Droit à l'image inchangé. Le tableau n'est inséré que si la personne a au moins une convocation. Les blocs restent des instantanés : réinsérer depuis la palette pour refléter un Planning modifié.
   - Éditeur de contrats : croix de suppression au survol dans la colonne du milieu (suppression sans ouvrir, fermeture de l'éditeur si c'était le contrat ouvert), removeContract unifié hub + modale « Mes contrats ». Nouveau bloc « Heures sup » dans la palette (seuil journalier + taux de majoration, rappel 25 % / 50 %).
   - Sécurité : alerte GitHub Secret Scanning (clé Google API publique dans un ancien commit) traitée. Clé non utilisée dans le code actuel, issue d'un ancien projet Google supprimé, alerte close as revoked. Rappel interne : une clé reste dans l'historique git même retirée du fichier courant.
+  - Mes modèles de contrats : un arrangement de blocs peut être enregistré comme modèle réutilisable (bouton « ⭐ Modèle » dans l'éditeur), avec choix du périmètre à la sauvegarde — « 📁 Que pour ce projet » (state.data.contractTemplates, synchronisé avec le projet) ou « 🌐 Pour tous mes projets » (stock global localStorage moteur_contract_templates, synchronisé entre appareils via PreferencesSync / user_profiles.preferences, zéro migration SQL). Les modèles apparaissent dans le picker « + Nouveau » (Col 2), filtrés par types autorisés (les structures ne voient que Prestation / Bénévole) ; en créer un contrat reprend le corps et le nom du modèle, et les jetons data-field se re-résolvent sur la nouvelle personne (les blocs-instantanés restent figés, comme partout). Suppression avec le même choix de périmètre : un modèle global peut être retiré « que pour ce projet » (masquage local via contractTemplatesHidden, il reste visible ailleurs) ou supprimé pour tous les projets.
+  - Renumérotation automatique des articles : les titres « ARTICLE n » des h2 sont recalés dans l'ordre du document à chaque enregistrement / fermeture, à l'insertion des clauses-types, et à la demande via le nouveau bouton « № Articles » de l'éditeur. Supprimer ou déplacer un bloc ne laisse plus de trous ni de doublons dans la numérotation ; seul le premier nœud texte de chaque titre est réécrit, la mise en forme interne survit.
+  - Pastilles de statut en direct : changer le statut ou le titre d'un contrat ouvert met à jour immédiatement les pastilles de la Col 1 et la ligne du contrat en Col 2 (badge + titre), sans attendre l'enregistrement ni la fermeture — mise à jour ciblée du DOM, sans re-rendu du hub ni perte du curseur dans l'éditeur.
 v527 (10 Juin 2026)
   - Production > Asso / Entreprises (module Orgs) : le pôle des structures gagne une VRAIE fiche, à parité avec comédiens / techniciens. À l'ajout depuis l'Univers, un instantané complet de la fiche est copié dans le projet (logo, type, SIRET / RNA, forme juridique, année, effectif / membres, dirigeant·e ou président·e, mission / description, services, email, téléphone, siège, site, réseaux sociaux) — base prévue pour l'autocomplétion future des contrats.
   - Fiche en lecture seule si elle est liée à l'Univers (cadenas : seul le propriétaire de la fiche en modifie le contenu), entièrement éditable si la structure a été créée à la main ou importée d'un contact non lié. La section « Sur ce projet » (département, fonction, notes) reste toujours éditable.
@@ -15883,7 +15886,7 @@ const LockManager = {
               LockManager.applyUI();
               const d = LockManager.currentDomain;
               if(d && state.currentRole !== 'viewer' && !map[d] && !LockManager._yieldedRecently(d)) LockManager.acquire(d);
-          } catch(e) {}
+          } catch(e) { console.warn('[LockManager] Échec du poll des verrous:', e && e.message); }
       },
 
       _uid: () => (state.currentUser && (state.currentUser.uid || state.currentUser.id)) || null,
@@ -16092,7 +16095,7 @@ const LockManager = {
           const cur = (state.domainLocks||{})[domain];
           if(!LockManager._mine(cur) && !LockManager.held[domain]) return;
           delete LockManager.held[domain];
-          try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: domain, p_uid: LockManager._uid() }); } catch(e) {}
+          try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: domain, p_uid: LockManager._uid() }); } catch(e) { console.warn('[LockManager] lock_release échoué (' + domain + '), le verrou expirera par TTL:', e && e.message); }
           if(state.domainLocks) delete state.domainLocks[domain];
           LockManager.applyUI();
       },
@@ -16145,7 +16148,7 @@ const LockManager = {
       yieldDomain: async (domain) => {
           if(!domain) return;
           LockManager.yielded[domain] = Date.now();
-          try { await StoreSave.save(); } catch(e) {}
+          try { await StoreSave.save(); } catch(e) { console.warn('[LockManager] Sauvegarde avant cession du domaine échouée:', e && e.message); }
           await LockManager.release(domain);
           Utils.toast('Section libérée — recliquez sur l\'onglet pour reprendre la main.', 'info', 5000);
       },
@@ -16281,7 +16284,7 @@ const LockManager = {
           if(state.currentProjectId && _ejInEditor && _ejOthers && LockManager.lastActivity
              && (Date.now() - LockManager.lastActivity > 180000)) {
               LockManager.lastActivity = Date.now();
-              try { await StoreSave.save(); } catch(e) {}
+              try { await StoreSave.save(); } catch(e) { console.warn('[LockManager] Sauvegarde avant éjection inactivité échouée:', e && e.message); }
               Utils.toast('Inactif depuis 3 min : retour au tableau de bord (travail enregistré).', 'info', 6000);
               NavMemory.setProject(null); NavMemory.setTab(null, null);
               UI.showDashboard();
@@ -16310,7 +16313,7 @@ const LockManager = {
           const mineSet = new Set(Object.keys(LockManager.held||{}));
           Object.keys(state.domainLocks||{}).forEach(k => { if(LockManager._mine(state.domainLocks[k])) mineSet.add(k); });
           for(const k of mineSet) {
-              try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: k, p_uid: LockManager._uid() }); } catch(e) {}
+              try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: k, p_uid: LockManager._uid() }); } catch(e) { console.warn('[LockManager] lock_release au démontage échoué (' + k + '):', e && e.message); }
           }
           LockManager.held = {};
           LockManager._pingSent = {}; LockManager._pingSeen = {}; LockManager.yielded = {};
@@ -17346,7 +17349,7 @@ const LockManager = {
           // I5c : utiliser PublicProfile.profiles (multi-profils)
           // S'assurer qu'ils sont chargés
           if(!PublicProfile.profiles || PublicProfile.profiles.length === 0) {
-              try { await PublicProfile.loadProfiles(); } catch(e) {}
+              try { await PublicProfile.loadProfiles(); } catch(e) { console.warn('[Projects] Chargement des profils échoué (modale rôle):', e && e.message); }
           }
           
           const userProfiles = (PublicProfile.profiles || []).map(p => {
@@ -49208,7 +49211,7 @@ const Contracts = {
     },
 
     _hubSort: 'alpha',
-    setHubSort: (mode) => { Contracts._hubSort = mode; Contracts.renderHub(); },
+    setHubSort: (mode) => { if(Contracts._editing) Contracts._persist(); Contracts._hubSort = mode; Contracts.renderHub(); },
     _sel: null,
     _pickerOpen: false,
     _metierCollapsed: {},
@@ -49226,8 +49229,8 @@ const Contracts = {
         Contracts._pickerOpen = false;
         Contracts.renderHub();
     },
-    toggleGroup: (catEnc) => { const cat = decodeURIComponent(catEnc); Contracts._metierCollapsed[cat] = !Contracts._metierCollapsed[cat]; Contracts.renderHub(); },
-    togglePicker: () => { Contracts._pickerOpen = !Contracts._pickerOpen; Contracts.renderHub(); },
+    toggleGroup: (catEnc) => { if(Contracts._editing) Contracts._persist(); const cat = decodeURIComponent(catEnc); Contracts._metierCollapsed[cat] = !Contracts._metierCollapsed[cat]; Contracts.renderHub(); },
+    togglePicker: () => { if(Contracts._editing) Contracts._persist(); Contracts._pickerOpen = !Contracts._pickerOpen; Contracts.renderHub(); },
     newContract: (type) => { if(!Contracts._sel) return; Contracts._pickerOpen = false; Contracts.openEditor(Contracts._sel.partyType, Contracts._sel.idx, type); Contracts.renderHub(); },
 
     // Mini-modale : choix du type de contrat au clic (gauche ou droit) sur une carte de la grille
@@ -49304,9 +49307,13 @@ const Contracts = {
         clauses: () => { const ct = Contracts.store.get(Contracts._editing); const type = (ct && ct.type) || 'image'; if(type === 'prestation' && ct && ct.partyType === 'org') return Contracts._clauses.prestation_org; return Contracts._clauses[type] || Contracts._clauses.image; },
         callsheet: (party) => {
             const cs = Contracts._callsheet(party !== undefined ? party : Contracts._editingParty());
-            if(!cs.count) return (cs.scoped && cs.total) ? '<p><em>Aucune convocation pour cette personne dans la feuille de service.</em></p>' : '<p><em>Aucun jour de tournage saisi dans la feuille de service.</em></p>';
-            const rows = cs.days.map(d => '<tr><td>J'+d.n+'</td><td>'+(d.start===d.end ? cs.fmt(d.start) : cs.fmt(d.start)+' → '+cs.fmt(d.end))+'</td><td>'+Utils.escape(d.location||'—')+'</td><td>'+Utils.escape(d.call||'—')+'</td><td>'+Utils.escape(d.wrap||'—')+'</td></tr>').join('');
-            return '<h2>Période &amp; horaires (feuille de service)</h2><table class="ctr-cs"><thead><tr><th>Jour</th><th>Date</th><th>Lieu</th><th>Convocation</th><th>Fin (estimée)</th></tr></thead><tbody>'+rows+'</tbody></table>';
+            let inner;
+            if(!cs.count) inner = (cs.scoped && cs.total) ? '<p><em>Aucune convocation pour cette personne dans la feuille de service.</em></p>' : '<p><em>Aucun jour de tournage saisi dans la feuille de service.</em></p>';
+            else {
+                const rows = cs.days.map(d => '<tr><td>J'+d.n+'</td><td>'+(d.start===d.end ? cs.fmt(d.start) : cs.fmt(d.start)+' → '+cs.fmt(d.end))+'</td><td>'+Utils.escape(d.location||'—')+'</td><td>'+Utils.escape(d.call||'—')+'</td><td>'+Utils.escape(d.wrap||'—')+'</td></tr>').join('');
+                inner = '<h2>Période &amp; horaires (feuille de service)</h2><table class="ctr-cs"><thead><tr><th>Jour</th><th>Date</th><th>Lieu</th><th>Convocation</th><th>Fin (estimée)</th></tr></thead><tbody>'+rows+'</tbody></table>';
+            }
+            return '<div data-snippet="callsheet">' + inner + '</div>';
         },
         remuTable: () => '<h2>Rémunération</h2><table class="ctr-cs"><tbody>'
             + '<tr><td>Base</td><td><span class="ctr-blank">cachet / journalier / forfait</span></td></tr>'
@@ -49527,7 +49534,12 @@ const Contracts = {
             + '<div class="ctr-editor-body"><div class="ctr-palette">'+paletteHTML+'</div><div id="ctr-doc" class="ctr-doc" contenteditable="true"></div></div>'
             + '</div>';
         const doc = document.getElementById('ctr-doc');
-        if(doc) { doc.innerHTML = ct.body || ''; Contracts.resolveFields(doc); }
+        if(doc) {
+            doc.innerHTML = ct.body || '';
+            const frozen = (ct.status === 'signed' || ct.status === 'archived');
+            if(!frozen) { Contracts.refreshSnippets(doc, ct); Contracts.resolveFields(doc); }
+            Contracts._stampSnippets(doc);
+        }
         const st = document.getElementById('ctr-status'); if(st) { st.value = ct.status || 'draft'; st.addEventListener('change', Contracts.refreshLiveBadges); }
         const ti = document.getElementById('ctr-title');
         if(ti) ti.addEventListener('input', () => { clearTimeout(Contracts._liveT); Contracts._liveT = setTimeout(Contracts.refreshLiveBadges, 400); });
@@ -49555,6 +49567,7 @@ const Contracts = {
         const html = (Contracts._snippetBuilders && Contracts._snippetBuilders[key]) ? Contracts._snippetBuilders[key]() : Contracts._snippets[key];
         if(!html) return;
         Contracts.insertHTMLAtCaret(html + ' ');
+        Contracts._stampSnippets(document.getElementById('ctr-doc'));
         if(key === 'clauses') Contracts.renumberArticles();
     },
     resolveFields: (root) => {
@@ -49577,6 +49590,28 @@ const Contracts = {
                     break;
                 }
             }
+        });
+    },
+    // Empreinte simple (djb2) pour détecter les blocs-instantanés modifiés à la main
+    _hash: (s) => { let h = 5381; for(let i = 0; i < s.length; i++) { h = ((h << 5) + h + s.charCodeAt(i)) | 0; } return String(h); },
+    // Estampille les blocs data-snippet fraîchement insérés (après normalisation du navigateur)
+    _stampSnippets: (root) => {
+        if(!root || !root.querySelectorAll) return;
+        root.querySelectorAll('[data-snippet]:not([data-hash])').forEach(el => el.setAttribute('data-hash', Contracts._hash(el.innerHTML)));
+    },
+    // Reconstruit depuis le Planning courant les tableaux jours INTACTS (hash inchangé).
+    // Un bloc ajusté à la main (heures sup...) garde la version de l'utilisateur.
+    refreshSnippets: (root, ct) => {
+        if(!root || !ct || !root.querySelectorAll) return;
+        const party = (ct.partyId && ct.partyType !== 'org') ? { id: ct.partyId } : null;
+        root.querySelectorAll('[data-snippet="callsheet"]').forEach(el => {
+            const stored = el.getAttribute('data-hash');
+            if(!stored) return;
+            if(Contracts._hash(el.innerHTML) !== stored) return;
+            const tpl = document.createElement('template');
+            tpl.innerHTML = Contracts._snippetBuilders.callsheet(party);
+            const fresh = tpl.content.firstChild;
+            if(fresh) { el.innerHTML = fresh.innerHTML; el.setAttribute('data-hash', Contracts._hash(el.innerHTML)); }
         });
     },
     _liveT: null,
@@ -70994,7 +71029,7 @@ const Weather = {
                       .eq('terms_accepted', true)
                       .limit(1);
                   if(!error && data && data.length > 0) return true;
-              } catch(e) {}
+              } catch(e) { console.warn('[Terms] Vérification CGU échouée, re-prompt possible:', e && e.message); }
           }
           return false;
       }
