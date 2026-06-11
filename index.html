@@ -35,6 +35,9 @@ v528 (11 Juin 2026)
   - Contrats structures (B2B) : vrai modèle Prestataire ↔ Client pour les contrats de prestation visant une asso/entreprise. Corps dédié (désignation des deux structures avec forme juridique, siège, SIRET, représentant·e ; objet + livrables + référence devis ; durée et délais ; tableau Prix HT/TVA/TTC avec acompte et solde ; pénalités de retard B2B — 3x taux légal + indemnité 40 €, art. L.441-10 et D.441-5 du Code de commerce ; signatures Pour le Client / Pour le Prestataire avec cachet) et jeu de clauses-types B2B dégenré (indépendance, obligations, réception des livrables avec délai de réserves et corrections incluses, assurance RC pro, PI cédée au paiement intégral, confidentialité bilatérale, sous-traitance, résiliation, litige au siège du défendeur), servi automatiquement par le bouton « Clauses-types » quand le contrat prestation vise une structure.
   - Contexte org enrichi : correction du bug d'adresse (buildContext lisait fc.address/fc.siege au lieu de fc.hq — l'adresse des structures était toujours vide dans les contrats) + nouveaux jetons party.legalForm (forme juridique) et party.rep (représentant·e : dirigeant·e ou président·e), ajoutés à la palette de l'éditeur.
   - Picker filtré pour les structures : « + Nouveau » (Col 2) et la mini-modale au clic sur une carte ne proposent plus que Prestation (« La structure est prestataire ») et Bénévole — CDDU et droit à l'image n'ont pas de sens pour une personne morale.
+  - Feuille de service scopée à la personne : le bloc « Tableau jours/horaires » et le jeton « Période (du…au…) » d'un contrat ne listent plus tout le tournage mais uniquement les jours où la personne du contrat est convoquée (matching personId du callSheet du jour = partyId du contrat). Horaire de convocation individuel prioritaire (repli sur la convocation équipe du jour), nouvelle colonne « Fin (estimée) » (estimatedWrap du jour). Message dédié si la personne n'a aucune convocation ; les contrats de structures gardent la vue projet-global.
+  - Modèles de base enrichis (comédiens / techniciens) : à la création, CDDU et Prestation embarquent d'office le tableau de jours scopé + le tableau Rémunération détaillée (qui remplace la ligne « Rémunération : ___ € ») ; Bénévole embarque le tableau de jours sans rému ; Droit à l'image inchangé. Le tableau n'est inséré que si la personne a au moins une convocation. Les blocs restent des instantanés : réinsérer depuis la palette pour refléter un Planning modifié.
+  - Éditeur de contrats : croix de suppression au survol dans la colonne du milieu (suppression sans ouvrir, fermeture de l'éditeur si c'était le contrat ouvert), removeContract unifié hub + modale « Mes contrats ». Nouveau bloc « Heures sup » dans la palette (seuil journalier + taux de majoration, rappel 25 % / 50 %).
   - Sécurité : alerte GitHub Secret Scanning (clé Google API publique dans un ancien commit) traitée. Clé non utilisée dans le code actuel, issue d'un ancien projet Google supprimé, alerte close as revoked. Rappel interne : une clé reste dans l'historique git même retirée du fichier courant.
 v527 (10 Juin 2026)
   - Production > Asso / Entreprises (module Orgs) : le pôle des structures gagne une VRAIE fiche, à parité avec comédiens / techniciens. À l'ajout depuis l'Univers, un instantané complet de la fiche est copié dans le projet (logo, type, SIRET / RNA, forme juridique, année, effectif / membres, dirigeant·e ou président·e, mission / description, services, email, téléphone, siège, site, réseaux sociaux) — base prévue pour l'autocomplétion future des contrats.
@@ -49208,8 +49211,8 @@ const Contracts = {
     // Blocs HTML construits dynamiquement à l'insertion (instantané, non re-résolu)
     _snippetBuilders: {
         clauses: () => { const ct = Contracts.store.get(Contracts._editing); const type = (ct && ct.type) || 'image'; if(type === 'prestation' && ct && ct.partyType === 'org') return Contracts._clauses.prestation_org; return Contracts._clauses[type] || Contracts._clauses.image; },
-        callsheet: () => {
-            const cs = Contracts._callsheet(Contracts._editingParty());
+        callsheet: (party) => {
+            const cs = Contracts._callsheet(party !== undefined ? party : Contracts._editingParty());
             if(!cs.count) return (cs.scoped && cs.total) ? '<p><em>Aucune convocation pour cette personne dans la feuille de service.</em></p>' : '<p><em>Aucun jour de tournage saisi dans la feuille de service.</em></p>';
             const rows = cs.days.map(d => '<tr><td>J'+d.n+'</td><td>'+(d.start===d.end ? cs.fmt(d.start) : cs.fmt(d.start)+' → '+cs.fmt(d.end))+'</td><td>'+Utils.escape(d.location||'—')+'</td><td>'+Utils.escape(d.call||'—')+'</td><td>'+Utils.escape(d.wrap||'—')+'</td></tr>').join('');
             return '<h2>Période &amp; horaires (feuille de service)</h2><table class="ctr-cs"><thead><tr><th>Jour</th><th>Date</th><th>Lieu</th><th>Convocation</th><th>Fin (estimée)</th></tr></thead><tbody>'+rows+'</tbody></table>';
@@ -49325,7 +49328,7 @@ const Contracts = {
             const fc = (typeof Orgs !== 'undefined' && Orgs._fiche) ? Orgs._fiche(obj) : (obj.fiche || obj);
             party = { name: (fc && fc.name) || obj.name || '', address: (fc && (fc.hq || fc.address || fc.siege)) || '', email: (fc && fc.email) || '', phone: (fc && fc.phone) || '', role: [obj.department, (obj.roleCustom || obj.role)].filter(Boolean).join(' — '), numSecu: '', numCongesSpectacles: '', siret: (fc && fc.siret) || '', legalForm: (fc && fc.legalForm) || '', rep: (fc && fc.leader) || '', isOrg: true };
         } else {
-            party = { name: obj.name || '', address: obj.address || '', email: obj.email || '', phone: obj.phone || '', role: obj.role || (partyType === 'actor' ? 'Comédien·ne' : 'Technicien·ne'), numSecu: obj.numSecu || '', numCongesSpectacles: obj.numCongesSpectacles || '', siret: '' };
+            party = { name: obj.name || '', address: obj.address || '', email: obj.email || '', phone: obj.phone || '', role: obj.role || (partyType === 'actor' ? 'Comédien·ne' : 'Technicien·ne'), numSecu: obj.numSecu || '', numCongesSpectacles: obj.numCongesSpectacles || '', siret: '', id: obj.id || null };
         }
         return { project: project, projectTitle: projectTitle, party: party };
     },
@@ -49368,11 +49371,13 @@ const Contracts = {
         else if(type === 'cddu') objet = '<h2>Objet</h2><p>La Production engage le/la salarié·e en qualité de '+tok('party.role')+' pour le projet « '+tok('project.title')+' ».</p>';
         else if(type === 'prestation') objet = '<h2>Objet</h2><p>Le Prestataire réalise pour la Production la prestation suivante dans le cadre du projet « '+tok('project.title')+' » : <span class="ctr-blank">_____________</span>.</p>';
         else objet = '<h2>Objet</h2><p>La Partie participe bénévolement au projet « '+tok('project.title')+' ».</p>';
-        const remu = (type === 'cddu' || type === 'prestation') ? '<h2>Rémunération</h2><p>'+Contracts._snippets.remu+'</p>' : '';
+        const party = (ctx && ctx.party && ctx.party.id && !ctx.party.isOrg) ? { id: ctx.party.id } : null;
+        const auto = (type !== 'image' && party && Contracts._callsheet(party).count) ? Contracts._snippetBuilders.callsheet(party) : '';
+        const remu = (type === 'cddu' || type === 'prestation') ? Contracts._snippetBuilders.remuTable() : '';
         const dates = '<h2>Période &amp; lieu</h2><p>Du '+Contracts._snippets.date+' au '+Contracts._snippets.date+', '+Contracts._snippets.lieu+'.</p>';
         return '<h1>'+titles[type]+'</h1>'
             + '<h2>Entre les soussigné·e·s</h2>' + partiesProd + partiesParty + extra
-            + objet + dates + remu
+            + objet + dates + auto + remu
             + Contracts._snippets.sign
             + Contracts._snippets.legal;
     },
