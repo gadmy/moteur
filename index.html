@@ -32,6 +32,9 @@ v528 (11 Juin 2026)
   - Feuille de service : champ « Période » auto (agrégat de shootingDays) + tableau jours/horaires/convocations + bloc rémunération détaillée (brut, congés spectacles, net).
   - Clauses juridiques par type (CDDU, droit à l'image, prestation, bénévole) portées en blocs insérables. Mention légale (modèle indicatif, vérifier la conformité) présente sur tout contrat.
   - Statuts (brouillon / à signer / signé / archivé), enregistrement persistant, et export PDF refondu via html2canvas → jsPDF multipage (l'ancien doc.html() rendait une page blanche).
+  - Contrats structures (B2B) : vrai modèle Prestataire ↔ Client pour les contrats de prestation visant une asso/entreprise. Corps dédié (désignation des deux structures avec forme juridique, siège, SIRET, représentant·e ; objet + livrables + référence devis ; durée et délais ; tableau Prix HT/TVA/TTC avec acompte et solde ; pénalités de retard B2B — 3x taux légal + indemnité 40 €, art. L.441-10 et D.441-5 du Code de commerce ; signatures Pour le Client / Pour le Prestataire avec cachet) et jeu de clauses-types B2B dégenré (indépendance, obligations, réception des livrables avec délai de réserves et corrections incluses, assurance RC pro, PI cédée au paiement intégral, confidentialité bilatérale, sous-traitance, résiliation, litige au siège du défendeur), servi automatiquement par le bouton « Clauses-types » quand le contrat prestation vise une structure.
+  - Contexte org enrichi : correction du bug d'adresse (buildContext lisait fc.address/fc.siege au lieu de fc.hq — l'adresse des structures était toujours vide dans les contrats) + nouveaux jetons party.legalForm (forme juridique) et party.rep (représentant·e : dirigeant·e ou président·e), ajoutés à la palette de l'éditeur.
+  - Picker filtré pour les structures : « + Nouveau » (Col 2) et la mini-modale au clic sur une carte ne proposent plus que Prestation (« La structure est prestataire ») et Bénévole — CDDU et droit à l'image n'ont pas de sens pour une personne morale.
   - Sécurité : alerte GitHub Secret Scanning (clé Google API publique dans un ancien commit) traitée. Clé non utilisée dans le code actuel, issue d'un ancien projet Google supprimé, alerte close as revoked. Rappel interne : une clé reste dans l'historique git même retirée du fichier courant.
 v527 (10 Juin 2026)
   - Production > Asso / Entreprises (module Orgs) : le pôle des structures gagne une VRAIE fiche, à parité avec comédiens / techniciens. À l'ajout depuis l'Univers, un instantané complet de la fiche est copié dans le projet (logo, type, SIRET / RNA, forme juridique, année, effectif / membres, dirigeant·e ou président·e, mission / description, services, email, téléphone, siège, site, réseaux sociaux) — base prévue pour l'autocomplétion future des contrats.
@@ -49175,7 +49178,7 @@ const Contracts = {
         'party.secu':   { label: 'Partie — n° Sécu',        resolve: (x) => x.party.numSecu },
         'party.conges': { label: 'Partie — Congés Spectacles', resolve: (x) => x.party.numCongesSpectacles },
         'project.title':{ label: 'Projet — titre',          resolve: (x) => x.projectTitle },
-        'period.range': { label: 'Feuille de service — période', resolve: () => { const cs = Contracts._callsheet(); return cs.count ? ('du ' + cs.start + ' au ' + cs.end + ' (' + cs.count + ' jour' + (cs.count > 1 ? 's' : '') + ' de tournage)') : ''; } }
+        'period.range': { label: 'Feuille de service — période', resolve: () => { const cs = Contracts._callsheet(Contracts._editingParty()); return cs.count ? ('du ' + cs.start + ' au ' + cs.end + ' (' + cs.count + ' jour' + (cs.count > 1 ? 's' : '') + ' de tournage)') : ''; } }
     },
     _snippets: {
         date:  'le <span class="ctr-blank">_____________</span>',
@@ -49187,19 +49190,23 @@ const Contracts = {
     _escapeAttr: (s) => (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'),
 
     // Agrégat de la feuille de service (jours triés, période, lieux, convocations)
-    _callsheet: () => {
-        const raw = (state.data.shootingDays || []).filter(d => d.startDate || d.date);
+    _callsheet: (party) => {
+        const all = (state.data.shootingDays || []).filter(d => d.startDate || d.date);
+        let raw = all;
+        if(party && party.id) raw = all.map(d => { const c = (d.callSheet || []).find(x => x.personId === party.id); return c ? Object.assign({ _pCall: c.callTime || '' }, d) : null; }).filter(Boolean);
         const days = raw.slice().sort((a,b) => new Date(a.startDate||a.date) - new Date(b.startDate||b.date));
         const fmt = (s) => { try { return s ? Utils.formatDate(s) : ''; } catch(e){ return s || ''; } };
-        const norm = days.map((d, i) => ({ n: d.dayNumber || (i+1), start: d.startDate || d.date || '', end: d.endDate || d.startDate || d.date || '', location: d.location || '', call: d.crewCall || '' }));
-        return { count: norm.length, start: norm.length ? fmt(norm[0].start) : '', end: norm.length ? fmt(norm[norm.length-1].end) : '', days: norm, fmt: fmt };
+        const norm = days.map((d, i) => ({ n: d.dayNumber || (i+1), start: d.startDate || d.date || '', end: d.endDate || d.startDate || d.date || '', location: d.location || '', call: d._pCall || d.crewCall || '' }));
+        return { count: norm.length, total: all.length, scoped: !!(party && party.id), start: norm.length ? fmt(norm[0].start) : '', end: norm.length ? fmt(norm[norm.length-1].end) : '', days: norm, fmt: fmt };
     },
+    // Partie du contrat en cours d'edition, pour scoper la feuille de service a ses convocations (null pour les structures)
+    _editingParty: () => { const ct = Contracts.store.get(Contracts._editing); return (ct && ct.partyId && ct.partyType !== 'org') ? { type: ct.partyType, id: ct.partyId } : null; },
     // Blocs HTML construits dynamiquement à l'insertion (instantané, non re-résolu)
     _snippetBuilders: {
         clauses: () => { const ct = Contracts.store.get(Contracts._editing); const type = (ct && ct.type) || 'image'; if(type === 'prestation' && ct && ct.partyType === 'org') return Contracts._clauses.prestation_org; return Contracts._clauses[type] || Contracts._clauses.image; },
         callsheet: () => {
-            const cs = Contracts._callsheet();
-            if(!cs.count) return '<p><em>Aucun jour de tournage saisi dans la feuille de service.</em></p>';
+            const cs = Contracts._callsheet(Contracts._editingParty());
+            if(!cs.count) return (cs.scoped && cs.total) ? '<p><em>Aucune convocation pour cette personne dans la feuille de service.</em></p>' : '<p><em>Aucun jour de tournage saisi dans la feuille de service.</em></p>';
             const rows = cs.days.map(d => '<tr><td>J'+d.n+'</td><td>'+(d.start===d.end ? cs.fmt(d.start) : cs.fmt(d.start)+' → '+cs.fmt(d.end))+'</td><td>'+Utils.escape(d.location||'—')+'</td><td>'+Utils.escape(d.call||'—')+'</td></tr>').join('');
             return '<h2>Période &amp; horaires (feuille de service)</h2><table class="ctr-cs"><thead><tr><th>Jour</th><th>Date</th><th>Lieu</th><th>Convocation</th></tr></thead><tbody>'+rows+'</tbody></table>';
         },
