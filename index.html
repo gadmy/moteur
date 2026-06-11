@@ -7251,7 +7251,9 @@ body.presentation-mode .presentation-bar {
   .ccol-head-name { font-weight: 700; font-size: 1.02rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ccol-picker { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; padding: 10px; background: var(--bg); border-radius: 8px; }
   .ccol-ctrs { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-  .ccol-ctr { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+  .ccol-ctr { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; position: relative; }
+  .ccol-ctr-del { position: absolute; top: 6px; right: 8px; border: none; background: none; color: var(--text-sec); font-size: 1rem; line-height: 1; cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+  .ccol-ctr-del:hover { color: #fff; background: var(--danger); }
   .ccol-ctr:hover { border-color: var(--primary); }
   .ccol-ctr-open { border-color: var(--primary); background: var(--bg); }
   .ccol-ctr-title { font-weight: 600; }
@@ -49091,6 +49093,7 @@ const Contracts = {
                 const slabel = Contracts._statusLabel[ct.status] || ct.status;
                 const open = Contracts._editing === ct.id;
                 return '<div class="ccol-ctr' + (open ? ' ccol-ctr-open' : '') + '" onclick="app.Contracts.openExisting(\'' + ct.id + '\')">'
+                    + '<button class="ccol-ctr-del" title="Supprimer ce contrat" onclick="event.stopPropagation(); app.Contracts.removeContract(\'' + ct.id + '\')">×</button>'
                     + '<div class="ccol-ctr-title">' + (ct.title ? esc(ct.title) : tlabel) + '</div>'
                     + '<div class="ccol-ctr-meta">' + tlabel + ' <span class="ctr-badge ctr-badge-' + (ct.status || 'draft') + '">' + slabel + '</span></div></div>';
             }).join('') : '<div class="ccol-empty">Aucun contrat. Crée-en un avec « + Nouveau ».</div>';
@@ -49184,6 +49187,7 @@ const Contracts = {
         date:  'le <span class="ctr-blank">_____________</span>',
         lieu:  'à <span class="ctr-blank">_____________</span>',
         remu:  '<span class="ctr-blank">_____________ €</span>',
+        heuresSup: '<p><strong>Heures supplémentaires :</strong> au-delà de <span class="ctr-blank">___</span> heures de travail effectif par jour, les heures supplémentaires sont rémunérées au taux horaire majoré de <span class="ctr-blank">___ %</span> (25 % pour les 8 premières heures, 50 % au-delà, sauf accord collectif plus favorable).</p>',
         sign:  '<p>Fait à <span class="ctr-blank">__________</span>, le <span class="ctr-blank">__________</span>, en deux exemplaires.</p><table class="ctr-sign"><tr><td>La Production<br><small>(signature)</small></td><td>La Partie<br><small>(« Bon pour accord » + signature)</small></td></tr></table>',
         legal: '<p class="ctr-legal" contenteditable="false">Modèle de contrat fourni à titre purement indicatif. Il ne constitue pas un conseil juridique. Avant toute signature, vérifiez sa conformité au droit applicable (Code du travail, convention collective, etc.) auprès d\u2019un professionnel du droit. moteur.studio décline toute responsabilité quant à l\u2019usage de ce document.</p>'
     },
@@ -49196,7 +49200,7 @@ const Contracts = {
         if(party && party.id) raw = all.map(d => { const c = (d.callSheet || []).find(x => x.personId === party.id); return c ? Object.assign({ _pCall: c.callTime || '' }, d) : null; }).filter(Boolean);
         const days = raw.slice().sort((a,b) => new Date(a.startDate||a.date) - new Date(b.startDate||b.date));
         const fmt = (s) => { try { return s ? Utils.formatDate(s) : ''; } catch(e){ return s || ''; } };
-        const norm = days.map((d, i) => ({ n: d.dayNumber || (i+1), start: d.startDate || d.date || '', end: d.endDate || d.startDate || d.date || '', location: d.location || '', call: d._pCall || d.crewCall || '' }));
+        const norm = days.map((d, i) => ({ n: d.dayNumber || (i+1), start: d.startDate || d.date || '', end: d.endDate || d.startDate || d.date || '', location: d.location || '', call: d._pCall || d.crewCall || '', wrap: d.estimatedWrap || '' }));
         return { count: norm.length, total: all.length, scoped: !!(party && party.id), start: norm.length ? fmt(norm[0].start) : '', end: norm.length ? fmt(norm[norm.length-1].end) : '', days: norm, fmt: fmt };
     },
     // Partie du contrat en cours d'edition, pour scoper la feuille de service a ses convocations (null pour les structures)
@@ -49207,8 +49211,8 @@ const Contracts = {
         callsheet: () => {
             const cs = Contracts._callsheet(Contracts._editingParty());
             if(!cs.count) return (cs.scoped && cs.total) ? '<p><em>Aucune convocation pour cette personne dans la feuille de service.</em></p>' : '<p><em>Aucun jour de tournage saisi dans la feuille de service.</em></p>';
-            const rows = cs.days.map(d => '<tr><td>J'+d.n+'</td><td>'+(d.start===d.end ? cs.fmt(d.start) : cs.fmt(d.start)+' → '+cs.fmt(d.end))+'</td><td>'+Utils.escape(d.location||'—')+'</td><td>'+Utils.escape(d.call||'—')+'</td></tr>').join('');
-            return '<h2>Période &amp; horaires (feuille de service)</h2><table class="ctr-cs"><thead><tr><th>Jour</th><th>Date</th><th>Lieu</th><th>Convocation</th></tr></thead><tbody>'+rows+'</tbody></table>';
+            const rows = cs.days.map(d => '<tr><td>J'+d.n+'</td><td>'+(d.start===d.end ? cs.fmt(d.start) : cs.fmt(d.start)+' → '+cs.fmt(d.end))+'</td><td>'+Utils.escape(d.location||'—')+'</td><td>'+Utils.escape(d.call||'—')+'</td><td>'+Utils.escape(d.wrap||'—')+'</td></tr>').join('');
+            return '<h2>Période &amp; horaires (feuille de service)</h2><table class="ctr-cs"><thead><tr><th>Jour</th><th>Date</th><th>Lieu</th><th>Convocation</th><th>Fin (estimée)</th></tr></thead><tbody>'+rows+'</tbody></table>';
         },
         remuTable: () => '<h2>Rémunération</h2><table class="ctr-cs"><tbody>'
             + '<tr><td>Base</td><td><span class="ctr-blank">cachet / journalier / forfait</span></td></tr>'
@@ -49407,6 +49411,7 @@ const Contracts = {
             + '<button class="ctr-pal-btn" onclick="app.Contracts.insertField(\'period.range\')">Période (du…au…)</button>'
             + '<button class="ctr-pal-btn" onclick="app.Contracts.insertSnippet(\'callsheet\')">Tableau jours/horaires</button>'
             + '<button class="ctr-pal-btn" onclick="app.Contracts.insertSnippet(\'remuTable\')">Rémunération détaillée</button>'
+            + '<button class="ctr-pal-btn" onclick="app.Contracts.insertSnippet(\'heuresSup\')">Heures sup</button>'
             + '</div>';
         paletteHTML += '<div class="ctr-pal-group"><div class="ctr-pal-title">Clauses juridiques</div>'
             + '<button class="ctr-pal-btn" onclick="app.Contracts.insertSnippet(\'clauses\')">Clauses-types (selon le contrat)</button>'
@@ -49530,8 +49535,10 @@ const Contracts = {
     },
     removeContract: (id) => {
         if(!confirm('Supprimer ce contrat ? Cette action est définitive.')) return;
+        if(Contracts._editing === id) Contracts._editing = null;
         Contracts.store.remove(id);
-        Contracts.openList();
+        if(document.getElementById('ctr-list')) Contracts.openList();
+        Contracts.renderHub();
     },
     exportPDF: async (id) => {
         const ct = id ? Contracts.store.get(id) : Contracts.store.get(Contracts._editing);
