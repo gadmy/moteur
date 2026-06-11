@@ -7199,6 +7199,10 @@ body.presentation-mode .presentation-bar {
   .ctr-pal-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-sec); font-weight: 700; }
   .ctr-pal-btn { padding: 7px 10px; background: var(--bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 0.82rem; text-align: left; }
   .ctr-pal-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .ctr-tpl-row { display: flex; align-items: center; gap: 4px; }
+  .ctr-tpl-row .ctr-pal-btn { flex: 1 1 auto; min-width: 0; }
+  .ctr-tpl-del { border: none; background: none; color: var(--text-sec); font-size: 1rem; line-height: 1; cursor: pointer; padding: 2px 6px; border-radius: 4px; flex: 0 0 auto; }
+  .ctr-tpl-del:hover { color: #fff; background: var(--danger); }
   .ctr-doc { flex: 1 1 auto; overflow-y: auto; background: #fff; color: #111; padding: 28px 34px; border-radius: 6px; border: 1px solid var(--border); line-height: 1.5; font-size: 0.92rem; }
   .ctr-doc h1 { font-size: 1.25rem; text-align: center; margin: 0 0 16px; }
   .ctr-doc h2 { font-size: 1rem; margin: 18px 0 6px; border-bottom: 1px solid #ddd; padding-bottom: 3px; }
@@ -7530,7 +7534,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv528.3</p>
+      <p>vv528.4</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -13867,7 +13871,7 @@ crewRoles: {
           'fmp_tabs_position', 'fmp_board_mode', 'fmp_script_view_mode',
           'fmp_card_view_mode', 'moteur_icon_style', 'moteur_hub_cards',
           'moteur_ob_dismissed', 'moteur_script_prefs', 'moteur_scriptAC_enabled',
-          'moteur_scriptBd_enabled'
+          'moteur_scriptBd_enabled', 'moteur_contract_templates'
       ],
       _pushTimer: null,
 
@@ -49019,6 +49023,90 @@ const Contracts = {
         }
     },
 
+    // ===================== MES MODÈLES (Chantier 3) =====================
+    // Scope projet : state.data.contractTemplates (sync Store) — scope global :
+    // localStorage moteur_contract_templates, sync multi-appareils via PreferencesSync.
+    // Suppression locale d'un modèle global = masquage via contractTemplatesHidden.
+    tpl: {
+        KEY: 'moteur_contract_templates',
+        proj: () => { if(!Array.isArray(state.data.contractTemplates)) state.data.contractTemplates = []; return state.data.contractTemplates; },
+        hidden: () => { if(!Array.isArray(state.data.contractTemplatesHidden)) state.data.contractTemplatesHidden = []; return state.data.contractTemplatesHidden; },
+        glob: () => { try { return JSON.parse(localStorage.getItem(Contracts.tpl.KEY) || '[]') || []; } catch(e) { return []; } },
+        saveGlob: (list) => {
+            const json = JSON.stringify(list || []);
+            const PS = (typeof window !== 'undefined' && window.app && window.app.PreferencesSync) ? window.app.PreferencesSync : (typeof PreferencesSync !== 'undefined' ? PreferencesSync : null);
+            if(PS && PS.save) PS.save(Contracts.tpl.KEY, json);
+            else { try { localStorage.setItem(Contracts.tpl.KEY, json); } catch(e) {} }
+        },
+        list: () => {
+            const hid = Contracts.tpl.hidden();
+            return Contracts.tpl.glob().filter(t => hid.indexOf(t.id) === -1).map(t => ({ t: t, scope: 'glob' }))
+                .concat(Contracts.tpl.proj().map(t => ({ t: t, scope: 'proj' })));
+        }
+    },
+    _tplPendingSave: null,
+    _tplOpts: null,
+    saveAsTemplate: () => {
+        if(!Contracts._editing) return;
+        Contracts._persist();
+        const ct = Contracts.store.get(Contracts._editing); if(!ct) return;
+        const name = prompt('Nom du modèle :', ct.title || '');
+        if(!name || !name.trim()) return;
+        Contracts._tplPendingSave = { name: name.trim(), type: ct.type || 'image', body: ct.body || '' };
+        Contracts._tplModal('Enregistrer le modèle « ' + Utils.escape(name.trim()) + ' » :', [
+            { label: '📁 Que pour ce projet', fn: () => Contracts.tplCommitSave('proj') },
+            { label: '🌐 Pour tous mes projets', fn: () => Contracts.tplCommitSave('glob') }
+        ]);
+    },
+    tplCommitSave: (scope) => {
+        const p = Contracts._tplPendingSave; Contracts._tplPendingSave = null;
+        if(!p) return;
+        const t = { id: 'tpl_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), name: p.name, type: p.type, body: p.body, createdAt: new Date().toISOString() };
+        if(scope === 'glob') { const l = Contracts.tpl.glob(); l.push(t); Contracts.tpl.saveGlob(l); }
+        else { Contracts.tpl.proj().push(t); Store.save(); }
+        Utils.toast(scope === 'glob' ? 'Modèle enregistré pour tous tes projets' : 'Modèle enregistré pour ce projet', 'success');
+    },
+    newFromTemplate: (scope, id) => {
+        if(!Contracts._sel) return;
+        const arr = scope === 'glob' ? Contracts.tpl.glob() : Contracts.tpl.proj();
+        const t = arr.find(x => x.id === id); if(!t) return;
+        Contracts._pickerOpen = false;
+        Contracts.openEditor(Contracts._sel.partyType, Contracts._sel.idx, t.type || 'image', t.body || '', t.name || '');
+        Contracts.renderHub();
+    },
+    removeTemplate: (scope, id) => {
+        if(scope === 'proj') {
+            if(!confirm('Supprimer ce modèle de ce projet ? Cette action est définitive.')) return;
+            const l = Contracts.tpl.proj(); const i = l.findIndex(x => x.id === id);
+            if(i > -1) { l.splice(i, 1); Store.save(); }
+            Contracts.renderHub();
+        } else {
+            Contracts._tplModal('Ce modèle est disponible dans tous tes projets. Le supprimer :', [
+                { label: '📁 Que pour ce projet', fn: () => { const h = Contracts.tpl.hidden(); if(h.indexOf(id) === -1) { h.push(id); Store.save(); } Contracts.renderHub(); } },
+                { label: '🌐 Pour tous mes projets', fn: () => { const l = Contracts.tpl.glob(); const i = l.findIndex(x => x.id === id); if(i > -1) { l.splice(i, 1); Contracts.tpl.saveGlob(l); } Contracts.renderHub(); } }
+            ]);
+        }
+    },
+    _tplModal: (msg, opts) => {
+        const old = document.getElementById('ctr-tpl-modal'); if(old) old.remove();
+        Contracts._tplOpts = opts;
+        const m = document.createElement('div');
+        m.className = 'contracts-modal'; m.id = 'ctr-tpl-modal';
+        m.onclick = (e) => { if(e.target === m) m.remove(); };
+        m.innerHTML = '<div class="contracts-box" style="max-width:420px;">'
+            + '<div class="contracts-header"><h3>📑 Modèle de contrat</h3><button class="history-close-btn" onclick="document.getElementById(\'ctr-tpl-modal\').remove()">✕</button></div>'
+            + '<div style="padding:18px;"><p style="margin:0 0 14px;">' + msg + '</p>'
+            + opts.map((o, i) => '<button class="ctr-pal-btn" style="display:block; width:100%; margin-bottom:8px;" onclick="app.Contracts._tplPick(' + i + ')">' + o.label + '</button>').join('')
+            + '</div></div>';
+        document.body.appendChild(m);
+    },
+    _tplPick: (i) => {
+        const o = (Contracts._tplOpts || [])[i];
+        const m = document.getElementById('ctr-tpl-modal'); if(m) m.remove();
+        Contracts._tplOpts = null;
+        if(o && o.fn) o.fn();
+    },
+
     // ===================== HUB ADMIN > CONTRATS =====================
     // Grille de toutes les personnes du projet, dedupliquees, avec toutes leurs fonctions.
     renderHub: () => {
@@ -49088,9 +49176,12 @@ const Contracts = {
         let col2;
         if(Contracts._sel) {
             const contracts = (Contracts.store.forParty(Contracts._sel.partyType, Contracts._sel.partyId) || []).slice().sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+            const allowedTypes = Contracts._sel.partyType === 'org' ? ['prestation', 'benevole'] : ['image', 'cddu', 'prestation', 'benevole'];
+            const tpls = Contracts.tpl.list().filter(x => allowedTypes.indexOf(x.t.type || 'image') !== -1);
+            const tplHTML = tpls.length ? '<div class="ctr-pal-title" style="margin-top:4px;">Mes modèles</div>' + tpls.map(x => '<div class="ctr-tpl-row"><button class="ctr-pal-btn" onclick="app.Contracts.newFromTemplate(\'' + x.scope + '\',\'' + x.t.id + '\')">' + (x.scope === 'glob' ? '🌐 ' : '📁 ') + esc(x.t.name || 'Sans nom') + '</button><button class="ctr-tpl-del" title="Supprimer ce modèle" onclick="app.Contracts.removeTemplate(\'' + x.scope + '\',\'' + x.t.id + '\')">×</button></div>').join('') : '';
             const picker = Contracts._pickerOpen ? '<div class="ccol-picker">'
-                + (Contracts._sel.partyType === 'org' ? ['prestation', 'benevole'] : ['image', 'cddu', 'prestation', 'benevole']).map(t => '<button class="ctr-pal-btn" onclick="app.Contracts.newContract(\'' + t + '\')">' + (Contracts._typeLabel[t] || t) + '</button>').join('')
-                + '</div>' : '';
+                + allowedTypes.map(t => '<button class="ctr-pal-btn" onclick="app.Contracts.newContract(\'' + t + '\')">' + (Contracts._typeLabel[t] || t) + '</button>').join('')
+                + tplHTML + '</div>' : '';
             const rows = contracts.length ? contracts.map(ct => {
                 const tlabel = Contracts._typeLabel[ct.type] || ct.type;
                 const slabel = Contracts._statusLabel[ct.status] || ct.status;
@@ -49382,7 +49473,7 @@ const Contracts = {
             + Contracts._snippets.legal;
     },
 
-    openEditor: (partyType, idx, type) => {
+    openEditor: (partyType, idx, type, tplBody, tplTitle) => {
         if(!state.currentProjectId) { Utils.toast('Ouvrez un projet d\u2019abord', 'warning'); return; }
         const list = partyType === 'actor' ? state.data.actors : (partyType === 'org' ? state.data.orgs : state.data.crew);
         const obj = (list && list[idx]) || {};
@@ -49390,8 +49481,8 @@ const Contracts = {
         if(partyType === 'org') { const fc = (typeof Orgs !== 'undefined' && Orgs._fiche) ? Orgs._fiche(obj) : (obj.fiche || obj); partyName = (fc && fc.name) || obj.name || ''; }
         else partyName = obj.name || '';
         Contracts._ctx = Contracts.buildContext(obj, partyType);
-        const ct = Contracts.store.create({ partyType: partyType, partyId: obj.id || null, partyName: partyName, type: type, status: 'draft', title: '' });
-        ct.body = Contracts.defaultBody(type, Contracts._ctx);
+        const ct = Contracts.store.create({ partyType: partyType, partyId: obj.id || null, partyName: partyName, type: type, status: 'draft', title: tplTitle || '' });
+        ct.body = tplBody || Contracts.defaultBody(type, Contracts._ctx);
         Contracts.store.upsert(ct);
         Contracts._editing = ct.id;
         Contracts.renderHub();
@@ -49427,15 +49518,19 @@ const Contracts = {
             + '<input id="ctr-title" class="ctr-title-input" placeholder="Titre du contrat (optionnel)" value="'+Contracts._escapeAttr(ct.title || '')+'">'
             + '<select id="ctr-status" class="ctr-status-sel"><option value="draft">Brouillon</option><option value="to_sign">À signer</option><option value="signed">Signé</option><option value="archived">Archivé</option></select>'
             + '<button class="chub-sort-btn" onclick="app.Contracts.resolveFields(document.getElementById(\'ctr-doc\'))">↻ Champs</button>'
+            + '<button class="chub-sort-btn" onclick="app.Contracts.renumberArticles()" title="Renuméroter les articles dans l\u2019ordre du document">№ Articles</button>'
             + '<button class="chub-sort-btn active" onclick="app.Contracts.saveEditor()">💾 Enregistrer</button>'
             + '<button class="chub-sort-btn" onclick="app.Contracts.exportPDF()">📄 PDF</button>'
+            + '<button class="chub-sort-btn" onclick="app.Contracts.saveAsTemplate()" title="Enregistrer comme modèle réutilisable">⭐ Modèle</button>'
             + '<button class="history-close-btn" onclick="app.Contracts.closeEditor()">✕</button>'
             + '</div>'
             + '<div class="ctr-editor-body"><div class="ctr-palette">'+paletteHTML+'</div><div id="ctr-doc" class="ctr-doc" contenteditable="true"></div></div>'
             + '</div>';
         const doc = document.getElementById('ctr-doc');
         if(doc) { doc.innerHTML = ct.body || ''; Contracts.resolveFields(doc); }
-        const st = document.getElementById('ctr-status'); if(st) st.value = ct.status || 'draft';
+        const st = document.getElementById('ctr-status'); if(st) { st.value = ct.status || 'draft'; st.addEventListener('change', Contracts.refreshLiveBadges); }
+        const ti = document.getElementById('ctr-title');
+        if(ti) ti.addEventListener('input', () => { clearTimeout(Contracts._liveT); Contracts._liveT = setTimeout(Contracts.refreshLiveBadges, 400); });
     },
 
     insertHTMLAtCaret: (html) => {
@@ -49460,6 +49555,7 @@ const Contracts = {
         const html = (Contracts._snippetBuilders && Contracts._snippetBuilders[key]) ? Contracts._snippetBuilders[key]() : Contracts._snippets[key];
         if(!html) return;
         Contracts.insertHTMLAtCaret(html + ' ');
+        if(key === 'clauses') Contracts.renumberArticles();
     },
     resolveFields: (root) => {
         if(!root || !root.querySelectorAll) return;
@@ -49468,9 +49564,50 @@ const Contracts = {
             if(f && Contracts._ctx) el.textContent = (f.resolve(Contracts._ctx) || '___________');
         });
     },
+    renumberArticles: () => {
+        const ed = document.getElementById('ctr-doc'); if(!ed) return;
+        let n = 0;
+        ed.querySelectorAll('h2').forEach(h => {
+            const nodes = h.childNodes;
+            for(let i = 0; i < nodes.length; i++) {
+                const node = nodes[i];
+                if(node.nodeType === 3 && /ARTICLE\s+\d+/i.test(node.data)) {
+                    n++;
+                    node.data = node.data.replace(/ARTICLE\s+\d+/i, 'ARTICLE ' + n);
+                    break;
+                }
+            }
+        });
+    },
+    _liveT: null,
+    refreshLiveBadges: () => {
+        if(!Contracts._editing) return;
+        const ct = Contracts.store.get(Contracts._editing); if(!ct) return;
+        const sSel = document.getElementById('ctr-status');
+        const tInp = document.getElementById('ctr-title');
+        const liveStatus = (sSel && sSel.value) || ct.status || 'draft';
+        const liveTitle = tInp ? tInp.value : (ct.title || '');
+        const row = document.querySelector('.ccol-ctr-open');
+        if(row) {
+            const tl = row.querySelector('.ccol-ctr-title');
+            if(tl) tl.textContent = liveTitle || (Contracts._typeLabel[ct.type] || ct.type);
+            const b = row.querySelector('.ctr-badge');
+            if(b) { b.className = 'ctr-badge ctr-badge-' + liveStatus; b.textContent = Contracts._statusLabel[liveStatus] || liveStatus; }
+        }
+        const dots = document.querySelector('.ccol-item-sel .ccol-dots');
+        if(dots && Contracts._sel) {
+            const cs = Contracts.store.forParty(Contracts._sel.partyType, Contracts._sel.partyId) || [];
+            const counts = {};
+            cs.forEach(c => { const s = (c.id === ct.id) ? liveStatus : (c.status || 'draft'); counts[s] = (counts[s] || 0) + 1; });
+            const order = ['draft', 'to_sign', 'signed', 'archived'];
+            dots.innerHTML = cs.length
+                ? order.filter(s => counts[s]).map(s => '<span class="ccol-dot ccol-dot-' + s + '" title="' + (Contracts._statusLabel[s] || s) + ' : ' + counts[s] + '">' + counts[s] + '</span>').join('')
+                : '<span class="ccol-dot ccol-dot-none" title="Aucun contrat">0</span>';
+        }
+    },
     _persist: () => {
         const ct = Contracts.store.get(Contracts._editing); if(!ct) return;
-        const doc = document.getElementById('ctr-doc'); if(doc) ct.body = doc.innerHTML;
+        const doc = document.getElementById('ctr-doc'); if(doc) { Contracts.renumberArticles(); ct.body = doc.innerHTML; }
         const t = document.getElementById('ctr-title'); if(t) ct.title = t.value;
         const s = document.getElementById('ctr-status'); if(s) ct.status = s.value;
         Contracts.store.upsert(ct);
