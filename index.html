@@ -34,12 +34,13 @@ A2 [X] (C) XSS stocké profils publics : échapper services, actualités,
        champs libres des fiches Univers affichées aux autres (v530)
 A3 [~] (C) SRI + crossorigin + defer faits sur 7/8 CDN (v530). Reste supabase-js
        (alias de version sans nom de fichier -> SRI à faire via URL UMD exacte)
-A4 [ ] (C) Neutraliser , ( ) * dans les valeurs des filtres PostgREST .or()
+A4 [X] (C) Neutraliser , ( ) * dans les valeurs des filtres PostgREST .or()
+       via Utils.pgSafe, appliqué aux 7 call sites dont la recherche ilike (v530)
 A5 [X] Audit RLS complet (11/06). Buckets tous public=true (lecture par URL
        assumée). Cascade forum déjà en place (FK ON DELETE CASCADE).
-A6 [~] (G) Forum : policies "deletable by author" exécutées (v530). Reste
-       (C) boutons UI : suppression de SES posts pour chacun, suppression
-       de TOUT pour ga.dmy@ikmail.com (policies admin déjà en place)
+A6 [X] (G) Forum : policies "deletable by author" exécutées (v530).
+       (C) Boutons UI livrés : suppression de SES posts pour chacun,
+       suppression de TOUT pour ga.dmy@ikmail.com (v530)
 A7 [X] (G) Bucket storage "projects" scoped par projet : 4 policies
        can_edit/can_view_project sur le dossier UUID (déjà en place, vérifié
        le 12/06 ; bonus garde-fou regex UUID avant cast)
@@ -51,7 +52,8 @@ A11 [X] (G) DROP des tables zombies feed_posts / feed_comments / feed_likes
        (FIX 6, v530)
 
 PHASE B — PRODUIT / UX (bloc-notes)
-B1 [ ] (C) Thème : mémoriser le dernier mode utilisé (fmp_theme_pref)
+B1 [X] (C) Thème : déjà mémorisé en local ; fix cross-appareil — le thème
+       synchronisé est ré-appliqué au DOM après PreferencesSync.load (v530)
 B2 [ ] (C) Hub : retirer la carte "Messages" (allCards + listes sauvegardées)
        — absorbé par B3 si la refonte arrive avant
 B3 [~] DÉCIDÉ : option P1 "Projets d'abord". (C) À la connexion, atterrissage
@@ -102,6 +104,9 @@ v530 (12 Juin 2026)
   - SÉCURITÉ — XSS stocké profils publics (A2) : la modale UniverseProfileModal échappe désormais l'intégralité des champs saisis par autrui — identité, description physique, langues, sports, tarif, véhicule, métier/expérience, infos projet, SIRET, services, disponibilité — ainsi que le contact (email, téléphone) et le site web (href filtré par le nouveau Utils.safeUrl : http(s)/mailto seulement). Les actualités du profil (contenu + image) et les vignettes de galerie (src + lien d'ouverture) sont également sécurisées.
   - Nouveaux helpers Utils : escape() renforcé (échappe aussi les apostrophes et guillemets, ce qui sécurise au passage tous les attributs value="${esc(...)}" du fichier), sanitizeRich() (HTML riche sûr via DOMParser + allowlist), safeMediaUrl() (URL d'image), safeUrl() (URL de lien).
   - SÉCURITÉ Supabase (RLS) — appliqué côté base : bucket storage « projects » déjà restreint par projet (can_edit/can_view_project sur le dossier UUID, A7) ; project_members lisible uniquement par les membres du projet (A8) ; trigger d'immuabilité de owner_email sur projects (A9) ; policies DELETE author sur forum_threads/forum_replies (A6) ; policies DELETE sur messages et user_profiles pour la purge de compte (A10) ; DROP des tables zombies feed_posts/feed_comments/feed_likes (A11) ; visibilité des profils démo élargie au compte secondaire d'administration (B7).
+  - Thème (B1) : le dernier mode clair/sombre utilisé est ré-appliqué juste après la synchro des préférences à la connexion. Avant, le thème rapatrié depuis Supabase (changement fait sur un autre appareil) n'était visible qu'au rechargement suivant, le boot lisant localStorage avant la synchro distante.
+  - SÉCURITÉ — Filtres PostgREST (A4) : nouveau helper Utils.pgSafe qui retire les caractères réservés de la grammaire des filtres .or() (virgule, parenthèses, astérisque) ; appliqué aux 7 appels .or() à valeurs interpolées du fichier — recherche Univers (ilike sur la saisie utilisateur), PreferencesSync (load + pushAll), Moderation (getBadge + haveRelation), purge de compte (messages) et vérification CGU. Une valeur piégée ne peut plus injecter de condition supplémentaire dans la requête.
+  - Forum — suppression des posts (A6, volet UI) : bouton « Supprimer » sur le sujet et sur chaque réponse dans la modale, visible par l'auteur du post et par l'admin (Forum.canDelete s'appuie sur CONFIG.adminEmails). Suppression de sujet en cascade (votes + réponses), décrément du compteur de réponses, confirmation via ConfirmModal, et fermeture immédiate de la fenêtre du sujet dès la confirmation (la requête part en arrière-plan). Si la RLS bloque, toast explicite.
   - SÉCURITÉ — SRI sur les CDN (A3) : ajout de integrity + crossorigin + defer sur 7 des 8 librairies externes (pdf.js, leaflet, leaflet.markercluster, jspdf, pdf-lib, html2canvas, chart.js). Le navigateur refuse désormais d'exécuter un de ces fichiers s'il a été altéré sur le CDN. Le worker pdf.js est initialisé au load (les libs étant deferred). supabase-js reste sans SRI pour l'instant : son URL d'alias de version (sans nom de fichier) subit une négociation de contenu jsDelivr incompatible avec un hash figé — à couvrir plus tard via l'URL du fichier UMD exact.
 v529.1 (11 Juin 2026)
   - Dette technique — chantier orphelins CSS post-V8 soldé : audit complet des 1611 classes définies dans les feuilles de style (détection des constructions dynamiques par concaténation et template literals incluse), 28 classes / sélecteurs morts confirmés et supprimés, −51 lignes.
@@ -3708,7 +3713,7 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
   .p-btn-del:hover { color: var(--danger); }.p-btn-del:hover { color: var(--danger); }
 
   /* ═══════ V2.1.6 — HUB CENTRAL ═══════ */
-  .hub-main { max-width:1000px; margin:0 auto; padding:40px 30px 60px; }
+  .hub-main { max-width:1200px; margin:0 auto; padding:30px 30px 60px; }
   .hub-welcome { margin-bottom:30px; }
   .hub-welcome h2 { font-size:1.6rem; font-weight:700; margin:0 0 4px; }
   .hub-welcome h2 span { color:var(--primary); }
@@ -7593,31 +7598,13 @@ body.presentation-mode .presentation-bar {
         <p id="user-welcome">Bienvenue</p>
       </div>
       <div class="flex-row-gap10">
-      <!-- Mon Espace -->
-      <div class="nav-dropdown pos-relative" onmouseenter="this.querySelector('.dropdown-menu').classList.add('show')" onmouseleave="this.querySelector('.dropdown-menu').classList.remove('show')">
-        <button class="hub-nav-btn"><span class="moteur-icon cat-system"><span class="emoji">👤</span><svg><use href="#ico-user"/></svg></span> Mon Espace ▾</button>
-        <div class="dropdown-menu dropdown-abs">
-          <div onclick="app.Admin.close(); app.PublicProfile.open()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:6px 6px 0 0;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-system"><span class="emoji">👤</span><svg><use href="#ico-user"/></svg></span> Mon Profil</div>
-          <div onclick="app.Admin.close(); app.Universe.showProjects()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-system"><span class="emoji">📁</span><svg><use href="#ico-folder"/></svg></span> Mes Projets</div>
-          <div onclick="app.Admin.close(); app.Contacts.open()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:0 0 6px 6px;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-system"><span class="emoji">📇</span><svg><use href="#ico-contact"/></svg></span> Contacts</div>
-        </div>
-      </div>
-      <!-- Communauté -->
-      <div class="nav-dropdown pos-relative" onmouseenter="this.querySelector('.dropdown-menu').classList.add('show')" onmouseleave="this.querySelector('.dropdown-menu').classList.remove('show')">
-        <button class="hub-nav-btn"><span class="moteur-icon cat-social"><span class="emoji">🌐</span><svg><use href="#ico-globe"/></svg></span> Communauté ▾</button>
-        <div class="dropdown-menu dropdown-abs">
-          <div onclick="app.Universe.openFromMenu()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:6px 6px 0 0;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-social"><span class="emoji">🗺️</span><svg><use href="#ico-globe"/></svg></span> Univers</div>
-          <div onclick="app.Forum.open()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-social"><span class="emoji">💬</span><svg><use href="#ico-message"/></svg></span> Forum</div>
-        </div>
-      </div>
-      <!-- Aide -->
-      <div class="nav-dropdown pos-relative" onmouseenter="this.querySelector('.dropdown-menu').classList.add('show')" onmouseleave="this.querySelector('.dropdown-menu').classList.remove('show')">
-        <button class="hub-nav-btn"><span class="moteur-icon cat-help"><span class="emoji">❓</span><svg><use href="#ico-help"/></svg></span> Aide ▾</button>
-        <div class="dropdown-menu dropdown-abs">
-          <div onclick="app.Tutorial.open()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:6px 6px 0 0;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-help"><span class="emoji">📖</span><svg><use href="#ico-book"/></svg></span> Guide</div>
-          <div onclick="app.Courses.open()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:0 0 6px 6px;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-help"><span class="emoji">🎓</span><svg><use href="#ico-graduation"/></svg></span> Cours</div>
-        </div>
-      </div>
+      <!-- B3 P1 : barre compacte -->
+      <button class="hub-nav-btn" onclick="app.Universe.openFromMenu()"><span class="moteur-icon cat-social"><span class="emoji">🗺️</span><svg><use href="#ico-globe"/></svg></span> Univers</button>
+      <button class="hub-nav-btn" onclick="app.Admin.close(); app.Contacts.open()"><span class="moteur-icon cat-system"><span class="emoji">📇</span><svg><use href="#ico-contact"/></svg></span> Contacts</button>
+      <button class="hub-nav-btn" onclick="app.Forum.open()"><span class="moteur-icon cat-social"><span class="emoji">💬</span><svg><use href="#ico-message"/></svg></span> Forum</button>
+      <button class="hub-nav-btn" onclick="app.Courses.open()"><span class="moteur-icon cat-help"><span class="emoji">🎓</span><svg><use href="#ico-graduation"/></svg></span> Cours</button>
+      <button class="hub-nav-btn" onclick="app.Tutorial.open()"><span class="moteur-icon cat-help"><span class="emoji">📖</span><svg><use href="#ico-book"/></svg></span> Guide</button>
+      <button class="hub-nav-btn" onclick="app.Admin.close(); app.PublicProfile.open()"><span class="moteur-icon cat-system"><span class="emoji">👤</span><svg><use href="#ico-user"/></svg></span> Profil</button>
       <!-- Design -->
       <div class="nav-dropdown pos-relative" onmouseenter="document.getElementById('design-dropdown').classList.add('show')" onmouseleave="document.getElementById('design-dropdown').classList.remove('show')">
         <button class="hub-nav-btn"><span class="moteur-icon cat-visual"><span class="emoji">🎨</span><svg><use href="#ico-palette"/></svg></span> Design ▾</button>
@@ -7947,32 +7934,8 @@ body.presentation-mode .presentation-bar {
 
     <!-- HUB CENTRAL -->
     <div id="hub-content" class="hub-main">
-      <div class="hub-welcome">
-        <h2 id="hub-welcome-title">Bienvenue</h2>
-        <p class="hub-welcome-sub" id="hub-welcome-sub"></p>
-      </div>
-      <div class="hub-onboarding d-none" id="hub-onboarding">
-        <div class="hub-onboarding-icon">🎬</div>
-        <div>
-          <h3>Bienvenue sur Moteur !</h3>
-          <p>Complétez votre profil pour apparaître dans l'Univers et créez votre premier projet.</p>
-          <div class="hub-ob-steps">
-            <span class="hub-ob-step done">✓ Compte créé</span>
-            <span class="hub-ob-step" id="hub-ob-profile">○ Profil complété</span>
-            <span class="hub-ob-step" id="hub-ob-project">○ Premier projet</span>
-          </div>
-        </div>
-        <button class="hub-ob-dismiss" onclick="document.getElementById('hub-onboarding').style.display='none'; app.PreferencesSync.save('moteur_ob_dismissed','1')">Masquer</button>
-      </div>
-      <div class="hub-customize-bar"><button class="hub-customize-btn" onclick="app.Hub.toggleCustomize()">⚙️ Personnaliser</button></div>
-      <div class="hub-cards" id="hub-cards"></div>
-      <div class="hub-section-title">📊 Statistiques</div>
-      <div class="hub-stats" id="hub-stats">
-        <div class="hub-stat"><div class="hub-stat-value" id="hub-stat-projects">-</div><div class="hub-stat-label">Mes projets</div></div>
-        <div class="hub-stat"><div class="hub-stat-value" id="hub-stat-profiles">-</div><div class="hub-stat-label">Profils Univers</div></div>
-        <div class="hub-stat"><div class="hub-stat-value" id="hub-stat-forum">-</div><div class="hub-stat-label">Sujets Forum</div></div>
-        <div class="hub-stat"><div class="hub-stat-value" id="hub-stat-messages">-</div><div class="hub-stat-label">Messages</div></div>
-      </div>
+      <h2 style="margin:0 0 20px;">📁 Mes Projets</h2>
+      <div id="project-list" class="project-grid"></div>
     </div>
   </div>
 
@@ -8213,21 +8176,6 @@ body.presentation-mode .presentation-bar {
         </div>
     </div>
     </div>
-
-  <div id="projects-view" style="display:none; flex-direction:column; height:100%; width:100%; background:var(--bg); overflow-y:auto;">
-    <div class="forum-header">
-        <div class="flex-row-center">
-            <button onclick="app.Universe.closeProjects()" class="btn btn--secondary btn--sm">⬅ Retour</button>
-            <h1>📁 Mes Projets</h1>
-        </div>
-        <div class="flex-row-gap10">
-            <button class="theme-btn" onclick="app.UI.toggleTheme()">🌓 Mode</button>
-        </div>
-    </div>
-    <div style="padding:40px; overflow-y:auto;">
-      <div id="project-list" class="project-grid"></div>
-    </div>
-  </div>
   
   <div id="public-profile-view" class="public-profile-view">
     <div class="public-profile-header">
@@ -15149,6 +15097,14 @@ showDashboard: async () => {
     }
     // S1: Charger les préférences synchronisées
     await PreferencesSync.load();
+    // B1: Ré-appliquer le thème synchronisé (le boot a lu localStorage avant la synchro distante)
+    try {
+        const _t = localStorage.getItem(CONFIG.themeKey);
+        if(_t) {
+            document.body.classList.toggle('dark-mode', _t === 'dark');
+            if(Universe.map) Universe.updateMapTheme();
+        }
+    } catch(e) {}
     
     // I3: Charger les profils publics pour le sélecteur "Profil actif"
     try {
@@ -20188,8 +20144,9 @@ initCategoriesDragDrop: () => {
     },
 
     renderDashboard: async () => { 
-        // V2.1.6 : Hub central au démarrage
-        Hub.render();
+        // B3 P1 : Projets d'abord
+        document.getElementById('hub-content').style.display = '';
+        await UIDashboard.renderProjectList();
     },
     
     showPriorityMenu: (e, projectId) => {
@@ -20460,7 +20417,7 @@ initCategoriesDragDrop: () => {
         const dropdown2 = document.getElementById('design-dropdown-project');
         if(dropdown2) dropdown2.classList.remove('show');
         // Re-render le hub si visible
-        if(document.getElementById('dashboard-view')?.style.display === 'flex') Hub.renderCards();
+        if(document.getElementById('dashboard-view')?.style.display === 'flex') UI.renderProjectList();
         Utils.toast('Design ' + (design?.name || designId) + ' appliqué !', 'success');
     },
     
@@ -21934,7 +21891,6 @@ const tabToSection = {
           document.getElementById('landing-view').style.display = 'none';
           document.getElementById('dashboard-view').style.display = 'none';
           document.getElementById('universe-view').style.display = 'none';
-          document.getElementById('projects-view').style.display = 'none';
           document.getElementById('app-view').style.display = 'none';
           const adminV = document.getElementById('admin-view');
           if(adminV) adminV.style.display = 'none';
@@ -21990,7 +21946,6 @@ const tabToSection = {
       
       launchEditor: () => { 
           els.dashboardView.style.display = 'none'; 
-          document.getElementById('projects-view').style.display = 'none';
           els.appView.style.display = 'flex';
           setTimeout(() => { try { WindowManager.restoreSaved(); } catch(_) {} }, 400);
           
@@ -56156,7 +56111,6 @@ const Admin = {
         // Admin est dans dashboard-view, donc on cache juste le hub
         document.getElementById('hub-content').style.display = 'none';
         document.getElementById('universe-view').style.display = 'none';
-        document.getElementById('projects-view').style.display = 'none';
         document.getElementById('admin-view').style.display = 'flex';
         
         await Admin.loadStats();
@@ -56165,6 +56119,7 @@ const Admin = {
     
     close: () => {
         UI.hideAllViews();
+        document.getElementById('hub-content').style.display = '';
         document.getElementById('dashboard-view').style.display = 'flex';
         // Scroller en haut de la page
         window.scrollTo(0, 0);
@@ -60745,16 +60700,13 @@ hoverCard: null,
         document.getElementById('dashboard-view').style.display = 'flex';
     },
 
-    // V2.1.6 : Fermer les projets → retour hub
-    closeProjects: () => {
-        UI.hideAllViews();
-        document.getElementById('dashboard-view').style.display = 'flex';
-    },
+    // B3 P1 : l'accueil EST la liste des projets
+    closeProjects: () => { Universe.showProjects(); },
 
-    // Afficher la vue projets
     showProjects: () => {
         UI.hideAllViews();
-        document.getElementById('projects-view').style.display = 'flex';
+        document.getElementById('hub-content').style.display = '';
+        document.getElementById('dashboard-view').style.display = 'flex';
         UI.renderProjectList();
     },
     
@@ -64757,13 +64709,13 @@ const Forum = {
 
     deleteThread: async (threadId) => {
         if(!await ConfirmModal.show({ title: 'Supprimer le sujet ?', message: 'Supprimer définitivement ce sujet ET toutes ses réponses ?', icon: '🗑️', confirmText: 'Supprimer' })) return;
+        document.querySelector('.modal-overlay')?.remove();
         try {
             try { await supabase.from('forum_votes').delete().eq('thread_id', threadId); } catch(_) {}
             await supabase.from('forum_replies').delete().eq('thread_id', threadId);
             const { data, error } = await supabase.from('forum_threads').delete().eq('id', threadId).select();
             if(error) throw error;
             if(!data || data.length === 0) { Utils.toast('Suppression bloquée par les droits (RLS).', 'error', 6000); return; }
-            document.querySelector('.modal-overlay')?.remove();
             Utils.toast('Sujet supprimé', 'success');
             Forum.loadThreads();
         } catch(e) {
@@ -64774,6 +64726,7 @@ const Forum = {
 
     deleteReply: async (replyId, threadId) => {
         if(!await ConfirmModal.show({ title: 'Supprimer la réponse ?', message: 'Supprimer définitivement cette réponse ?', icon: '🗑️', confirmText: 'Supprimer' })) return;
+        document.querySelector('.modal-overlay')?.remove();
         try {
             const { data, error } = await supabase.from('forum_replies').delete().eq('id', replyId).select();
             if(error) throw error;
@@ -64783,7 +64736,6 @@ const Forum = {
             try { await supabase.from('forum_threads').update({ reply_count: newCount }).eq('id', threadId); } catch(_) {}
             if(thread) thread.replyCount = newCount;
             Utils.toast('Réponse supprimée', 'success');
-            document.querySelector('.modal-overlay')?.remove();
             Forum.openThread(threadId);
         } catch(e) {
             console.error('Erreur suppression réponse:', e);
