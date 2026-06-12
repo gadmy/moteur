@@ -62,7 +62,8 @@ B3 [X] Refonte P1 "Projets d'abord" livrée (v530) : connexion -> liste des
 B4 [X] (C) Admin : connexions internes (CONFIG.internalEmails) exclues des
        compteurs et graphiques, affichées en suffixe « (+N int.) » (v530)
 B5 [X] (C) Bouton "Admin" : re-clic = retour à l'accueil (Admin.toggle, v530)
-B6 [ ] (C) En-tête : intitulés des profils à côté de l'email de connexion
+B6 [X] (C) En-tête : intitulés des fiches du compte (icône + nom) listés à
+       côté de l'email, via UIDashboard.renderUserWelcome (v530)
 B7 [X] (G) Faux profils : ~380 flaggés is_demo=true (fournées 15/04 + 20/04).
        Policy de visibilité démo élargie à ga.demauroy@gmail.com (v530).
        Masquage en place côté serveur.
@@ -104,6 +105,7 @@ v530 (12 Juin 2026)
   - SÉCURITÉ — XSS stocké profils publics (A2) : la modale UniverseProfileModal échappe désormais l'intégralité des champs saisis par autrui — identité, description physique, langues, sports, tarif, véhicule, métier/expérience, infos projet, SIRET, services, disponibilité — ainsi que le contact (email, téléphone) et le site web (href filtré par le nouveau Utils.safeUrl : http(s)/mailto seulement). Les actualités du profil (contenu + image) et les vignettes de galerie (src + lien d'ouverture) sont également sécurisées.
   - Nouveaux helpers Utils : escape() renforcé (échappe aussi les apostrophes et guillemets, ce qui sécurise au passage tous les attributs value="${esc(...)}" du fichier), sanitizeRich() (HTML riche sûr via DOMParser + allowlist), safeMediaUrl() (URL d'image), safeUrl() (URL de lien).
   - SÉCURITÉ Supabase (RLS) — appliqué côté base : bucket storage « projects » déjà restreint par projet (can_edit/can_view_project sur le dossier UUID, A7) ; project_members lisible uniquement par les membres du projet (A8) ; trigger d'immuabilité de owner_email sur projects (A9) ; policies DELETE author sur forum_threads/forum_replies (A6) ; policies DELETE sur messages et user_profiles pour la purge de compte (A10) ; DROP des tables zombies feed_posts/feed_comments/feed_likes (A11) ; visibilité des profils démo élargie au compte secondaire d'administration (B7).
+  - En-tête d'accueil (B6) : l'intitulé des fiches du compte (icône de casquette + nom de chaque profil : comédien·ne, technicien·ne, association, entreprise) s'affiche désormais à côté de l'email de connexion, au lieu du seul type de compte générique. Replié sur l'ancien libellé si aucune fiche n'est encore chargée, et rafraîchi une fois les profils récupérés.
   - Bouton Admin (B5) : un re-clic sur le bouton quand le tableau de bord est ouvert ramène à l'accueil (toggle ouvert/fermé au lieu d'un aller simple).
   - Admin — connexions internes (B4) : les connexions des deux comptes de Guillaume (nouvelle liste CONFIG.internalEmails) sont exclues du total, des compteurs aujourd'hui/7j/30j et des graphiques jour/semaine/mois de l'onglet connexions, ainsi que de la courbe « Connexions » des statistiques générales. Le décompte interne reste visible en suffixe « (+N int.) » sur les totaux.
   - Accueil « Projets d'abord » (B3, option P1) : la connexion atterrit directement sur la grille des projets, qui remplace l'écran hub (welcome, onboarding, cartes personnalisables, statistiques) au sein de dashboard-view — tous les boutons « Retour » existants continuent donc de fonctionner sans réécriture. La barre du haut conserve les trois menus déroulants Mon Espace (Profil, Contacts — « Mes Projets » retiré, c'est l'accueil), Communauté (Univers, Forum) et Aide (Cours, Guide), plus Design, thème, notifications, Admin et Déconnexion. L'ancienne vue projects-view est supprimée (le #project-list a déménagé dans l'accueil), Admin.close ré-affiche correctement l'accueil (hub-content restait en display:none après l'admin), et la grille se réorganise selon la largeur de fenêtre (le margin auto de .hub-main la faisait passer en shrink-to-fit dans le flex colonne, corrigé par width:100%). Nettoyage : module Hub (175 lignes), CSS hub-* mort, clés moteur_hub_cards / moteur_ob_dismissed retirées de la synchro. La carte « Messages » disparaît avec les cartes (B2 absorbé).
@@ -15096,6 +15098,7 @@ showDashboard: async () => {
         await PublicProfile.loadProfiles();
         ActiveProfile.ensureValid();
         setTimeout(() => ActiveProfile.attachToDom(), 200);
+        UIDashboard.renderUserWelcome(); // B6 : intitulés à jour une fois les fiches chargées
     } catch(e) { console.warn('Chargement profils pour ActiveProfile échoué:', e); }
     // Raccourcis clavier globaux pour le mode Focus
     if(!state.focusKeyListenerAttached) { state.focusKeyListenerAttached = true;
@@ -20100,9 +20103,7 @@ initCategoriesDragDrop: () => {
         if(typeof MiniChat !== 'undefined') MiniChat.stop();
         // Nettoyer les locks de scène
         if(typeof LockManager !== 'undefined') await LockManager.cleanup();
-        const accountType = state.userProfile?.accountType || 'producer';
-        const typeLabel = accountType === 'actor' ? '🎭 Comédien.ne' : (accountType === 'crew' ? '🎥 Technicien.ne' : '🎬 Réalisateur');
-        document.getElementById('user-welcome').innerText = typeLabel + " • " + (state.currentUser ? state.currentUser.email : ""); 
+        UIDashboard.renderUserWelcome(); 
         
         // Mettre à jour le bouton profil
         const profileBtn = document.getElementById('btn-my-profile');
@@ -20126,6 +20127,28 @@ initCategoriesDragDrop: () => {
                 }
             }, 60000); // Mise à jour toutes les minutes
         }
+    },
+
+    // B6 : en-tête = email + intitulés des fiches du compte
+    renderUserWelcome: () => {
+        const el = document.getElementById('user-welcome');
+        if(!el) return;
+        const email = state.currentUser ? state.currentUser.email : '';
+        const profiles = (typeof PublicProfile !== 'undefined' && PublicProfile.profiles) || [];
+        const meta = (t) => t === 'actor' ? ['🎭','Comédien·ne'] : t === 'crew' ? ['🎥','Technicien·ne'] : t === 'association' ? ['🏛️','Association'] : t === 'enterprise' ? ['🏢','Entreprise'] : ['👤','Profil'];
+        let html;
+        if(profiles.length === 0) {
+            const accountType = state.userProfile?.accountType || 'producer';
+            const [ic, lb] = accountType === 'actor' ? ['🎭','Comédien.ne'] : accountType === 'crew' ? ['🎥','Technicien.ne'] : ['🎬','Réalisateur'];
+            html = ic + ' ' + lb;
+        } else {
+            html = profiles.map(p => {
+                const [ic] = meta(p.type);
+                const name = p.name || p.assoName || p.entName || 'Sans nom';
+                return ic + ' ' + Utils.escape(name);
+            }).join('  ·  ');
+        }
+        el.innerHTML = html + ' • ' + Utils.escape(email);
     },
 
     renderDashboard: async () => { 
