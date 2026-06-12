@@ -28,27 +28,26 @@ Mis à jour au fil des sessions. Statuts : [ ] à faire, [~] en cours,
 (patches index.html).
 
 PHASE A — SÉCURITÉ (priorité absolue)
-A1 [ ] (C) XSS stocké forum : échapper titre / contenu / nom d'auteur des
-       threads et réponses au rendu + sécuriser les <img src>
-A2 [ ] (C) XSS stocké profils publics : échapper services, actualités,
-       champs libres des fiches Univers affichées aux autres
+A1 [X] (C) XSS stocké forum : échapper titre / contenu / nom d'auteur des
+       threads et réponses au rendu + sécuriser les <img src> (v530)
+A2 [X] (C) XSS stocké profils publics : échapper services, actualités,
+       champs libres des fiches Univers affichées aux autres (v530)
 A3 [ ] (C) SRI (integrity + crossorigin) + defer sur les 8 <script src> CDN
 A4 [ ] (C) Neutraliser , ( ) * dans les valeurs des filtres PostgREST .or()
 A5 [X] Audit RLS complet (11/06). Buckets tous public=true (lecture par URL
        assumée). Cascade forum déjà en place (FK ON DELETE CASCADE).
-A6 [~] (G) Forum : exécuter les 2 policies "deletable by author" (SQL fourni)
-       puis (C) boutons UI : suppression de SES posts pour chacun, suppression
+A6 [~] (G) Forum : policies "deletable by author" exécutées (v530). Reste
+       (C) boutons UI : suppression de SES posts pour chacun, suppression
        de TOUT pour ga.dmy@ikmail.com (policies admin déjà en place)
-A7 [ ] (G) CRITIQUE : bucket storage "projects" — INSERT/UPDATE/DELETE
-       ouverts à tout authentifié sur les fichiers de TOUS les projets
-       -> 4 policies par projet (SQL FIX 1 fourni)
-A8 [ ] (G) CRITIQUE : project_members lisible par tous (fuite des emails de
-       tous les membres) -> restreindre à can_view_project (SQL FIX 2)
-A9 [ ] (G) Trigger anti-changement de owner_email sur projects (SQL FIX 3)
-A10 [ ] (G) Policies DELETE messages + user_profiles pour que la suppression
-       de compte purge réellement (SQL FIX 5)
-A11 [ ] (G) DROP des tables zombies feed_posts / feed_comments / feed_likes
-       (SQL FIX 6)
+A7 [X] (G) Bucket storage "projects" scoped par projet : 4 policies
+       can_edit/can_view_project sur le dossier UUID (déjà en place, vérifié
+       le 12/06 ; bonus garde-fou regex UUID avant cast)
+A8 [X] (G) project_members restreint à can_view_project (FIX 2, v530)
+A9 [X] (G) Trigger anti-changement de owner_email sur projects (FIX 3, v530)
+A10 [X] (G) Policies DELETE messages + user_profiles pour la purge de
+       compte (FIX 5, v530)
+A11 [X] (G) DROP des tables zombies feed_posts / feed_comments / feed_likes
+       (FIX 6, v530)
 
 PHASE B — PRODUIT / UX (bloc-notes)
 B1 [ ] (C) Thème : mémoriser le dernier mode utilisé (fmp_theme_pref)
@@ -61,10 +60,9 @@ B4 [ ] (C) Admin : distinguer les connexions de Guillaume (ga.dmy@ikmail.com,
        ga.demauroy@gmail.com) de celles des autres
 B5 [ ] (C) Bouton "Admin" : re-clic = retour à l'accueil (toggle)
 B6 [ ] (C) En-tête : intitulés des profils à côté de l'email de connexion
-B7 [~] (G) Faux profils : fournées identifiées = 15/04/2026 (200) +
-       20/04/2026 (180), ~380 profils. Exécuter l'UPDATE is_demo=true +
-       élargir la policy à ga.demauroy@gmail.com (SQL fourni). Mécanisme
-       de masquage déjà en place côté serveur.
+B7 [X] (G) Faux profils : ~380 flaggés is_demo=true (fournées 15/04 + 20/04).
+       Policy de visibilité démo élargie à ga.demauroy@gmail.com (v530).
+       Masquage en place côté serveur.
 B8 [X] Audit des vrais profils : ~380 faux (2 fournées), le reste = créations
        unitaires réelles. Croisement user_logins possible plus tard si besoin.
 
@@ -98,6 +96,11 @@ DÉCISIONS ACTÉES
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v530 (12 Juin 2026)
+  - SÉCURITÉ — XSS stocké forum (A1) : tout le contenu inter-utilisateurs des sujets et réponses est désormais échappé au rendu — titres, noms d'auteur (liste + modale + avatars), et corps. Le corps des sujets (HTML riche issu de l'éditeur) passe par un nouveau sanitizer Utils.sanitizeRich (allowlist de balises de formatage, suppression de tout attribut), le corps des réponses est échappé avant la conversion des sauts de ligne, et les images de sujet passent par Utils.safeMediaUrl (data:image/ ou https:// uniquement).
+  - SÉCURITÉ — XSS stocké profils publics (A2) : la modale UniverseProfileModal échappe désormais l'intégralité des champs saisis par autrui — identité, description physique, langues, sports, tarif, véhicule, métier/expérience, infos projet, SIRET, services, disponibilité — ainsi que le contact (email, téléphone) et le site web (href filtré par le nouveau Utils.safeUrl : http(s)/mailto seulement). Les actualités du profil (contenu + image) et les vignettes de galerie (src + lien d'ouverture) sont également sécurisées.
+  - Nouveaux helpers Utils : escape() renforcé (échappe aussi les apostrophes et guillemets, ce qui sécurise au passage tous les attributs value="${esc(...)}" du fichier), sanitizeRich() (HTML riche sûr via DOMParser + allowlist), safeMediaUrl() (URL d'image), safeUrl() (URL de lien).
+  - SÉCURITÉ Supabase (RLS) — appliqué côté base : bucket storage « projects » déjà restreint par projet (can_edit/can_view_project sur le dossier UUID, A7) ; project_members lisible uniquement par les membres du projet (A8) ; trigger d'immuabilité de owner_email sur projects (A9) ; policies DELETE author sur forum_threads/forum_replies (A6) ; policies DELETE sur messages et user_profiles pour la purge de compte (A10) ; DROP des tables zombies feed_posts/feed_comments/feed_likes (A11) ; visibilité des profils démo élargie au compte secondaire d'administration (B7).
 v529.1 (11 Juin 2026)
   - Dette technique — chantier orphelins CSS post-V8 soldé : audit complet des 1611 classes définies dans les feuilles de style (détection des constructions dynamiques par concaténation et template literals incluse), 28 classes / sélecteurs morts confirmés et supprimés, −51 lignes.
   - Ancien système d'onglets profils retiré : .profile-tab-card (avec :hover / .active / .add-profile), .profile-tab-header, .profile-project-badge et -badges, .profile-circle-fn — remplacé depuis par les cartes-cercles (profile-circle-*). .scene-status-badge conserve seul les règles de transition qui étaient partagées.
@@ -2489,23 +2492,25 @@ V1.0 - Base solide (Déc. 2024)
 <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
 
 <!-- Supabase SDK -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1" integrity="sha384-YieCqqg9gQufX7+5HcFvCEg/n3KUEdl8/Jb+A6J0npf1mB740VayvwKjTrtCeUoy" crossorigin="anonymous" defer></script>
 
 <!-- EmailJS retiré : emails transactionnels via Edge Function Supabase (super-action) + Brevo -->
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha512-q+4liFwdPC/bNdhUpZx6aXDx/h77yEQtn4I1slHydcbZK34nLaR3cAeYSJshoxIOq3mjEf7xJE8YWIUHMn+oCQ==" crossorigin="anonymous" defer></script>
 <!-- Leaflet Map -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous" defer></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
-<script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js" integrity="sha384-RLIyj5q1b5XJTn0tqUhucRZe40nFTocRP91R/NkRJHwAe4XxnTV77FXy/vGLiec2" crossorigin="anonymous" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-qZvrmS2ekKPF2mSznTQsxqPgnpkI4DNTlrdUmTzrDgektczlKNRRhy5X5AAOnx5S09ydFYWWNSfcEqDTTHgtNA==" crossorigin="anonymous" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js" integrity="sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI" crossorigin="anonymous" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha512-BNaRQnYJYiPSqHHDb58B0yaPfCu+Wgds8Gp/gU33kqBtgNS4tSPHuGibyoeqMV/TJlSKda6FXzoEyYGjTe+vXA==" crossorigin="anonymous" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous" defer></script>
 <script>
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    window.addEventListener('load', function() {
+      if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    });
     
     // iOS Safari 100vh fix
     function setVH() {
