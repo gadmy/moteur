@@ -32,7 +32,8 @@ A1 [X] (C) XSS stocké forum : échapper titre / contenu / nom d'auteur des
        threads et réponses au rendu + sécuriser les <img src> (v530)
 A2 [X] (C) XSS stocké profils publics : échapper services, actualités,
        champs libres des fiches Univers affichées aux autres (v530)
-A3 [ ] (C) SRI (integrity + crossorigin) + defer sur les 8 <script src> CDN
+A3 [~] (C) SRI + crossorigin + defer faits sur 7/8 CDN (v530). Reste supabase-js
+       (alias de version sans nom de fichier -> SRI à faire via URL UMD exacte)
 A4 [ ] (C) Neutraliser , ( ) * dans les valeurs des filtres PostgREST .or()
 A5 [X] Audit RLS complet (11/06). Buckets tous public=true (lecture par URL
        assumée). Cascade forum déjà en place (FK ON DELETE CASCADE).
@@ -101,6 +102,7 @@ v530 (12 Juin 2026)
   - SÉCURITÉ — XSS stocké profils publics (A2) : la modale UniverseProfileModal échappe désormais l'intégralité des champs saisis par autrui — identité, description physique, langues, sports, tarif, véhicule, métier/expérience, infos projet, SIRET, services, disponibilité — ainsi que le contact (email, téléphone) et le site web (href filtré par le nouveau Utils.safeUrl : http(s)/mailto seulement). Les actualités du profil (contenu + image) et les vignettes de galerie (src + lien d'ouverture) sont également sécurisées.
   - Nouveaux helpers Utils : escape() renforcé (échappe aussi les apostrophes et guillemets, ce qui sécurise au passage tous les attributs value="${esc(...)}" du fichier), sanitizeRich() (HTML riche sûr via DOMParser + allowlist), safeMediaUrl() (URL d'image), safeUrl() (URL de lien).
   - SÉCURITÉ Supabase (RLS) — appliqué côté base : bucket storage « projects » déjà restreint par projet (can_edit/can_view_project sur le dossier UUID, A7) ; project_members lisible uniquement par les membres du projet (A8) ; trigger d'immuabilité de owner_email sur projects (A9) ; policies DELETE author sur forum_threads/forum_replies (A6) ; policies DELETE sur messages et user_profiles pour la purge de compte (A10) ; DROP des tables zombies feed_posts/feed_comments/feed_likes (A11) ; visibilité des profils démo élargie au compte secondaire d'administration (B7).
+  - SÉCURITÉ — SRI sur les CDN (A3) : ajout de integrity + crossorigin + defer sur 7 des 8 librairies externes (pdf.js, leaflet, leaflet.markercluster, jspdf, pdf-lib, html2canvas, chart.js). Le navigateur refuse désormais d'exécuter un de ces fichiers s'il a été altéré sur le CDN. Le worker pdf.js est initialisé au load (les libs étant deferred). supabase-js reste sans SRI pour l'instant : son URL d'alias de version (sans nom de fichier) subit une négociation de contenu jsDelivr incompatible avec un hash figé — à couvrir plus tard via l'URL du fichier UMD exact.
 v529.1 (11 Juin 2026)
   - Dette technique — chantier orphelins CSS post-V8 soldé : audit complet des 1611 classes définies dans les feuilles de style (détection des constructions dynamiques par concaténation et template literals incluse), 28 classes / sélecteurs morts confirmés et supprimés, −51 lignes.
   - Ancien système d'onglets profils retiré : .profile-tab-card (avec :hover / .active / .add-profile), .profile-tab-header, .profile-project-badge et -badges, .profile-circle-fn — remplacé depuis par les cartes-cercles (profile-circle-*). .scene-status-badge conserve seul les règles de transition qui étaient partagées.
@@ -12932,6 +12934,8 @@ crewRoles: {
         u = String(u || '').trim();
         return (/^(https?:\/\/|mailto:)/i.test(u)) ? u.replace(/"/g, '%22').replace(/'/g, '%27') : '';
       },
+      // A4 - Neutralise les caracteres reserves de la syntaxe des filtres PostgREST (.or)
+      pgSafe: (v) => String(v || '').replace(/[,()*]/g, ''),
       generateUniqueId: () => Date.now() + '_' + Math.random().toString(36).slice(2, 11),
       
       /**
@@ -13886,7 +13890,7 @@ crewRoles: {
               const { data, error } = await supabase
                   .from('user_profiles')
                   .select('preferences')
-                  .or(`owner_email.eq.${email},email.eq.${email}`)
+                  .or(`owner_email.eq.${Utils.pgSafe(email)},email.eq.${Utils.pgSafe(email)}`)
                   .not('preferences', 'is', null)
                   .limit(1);
               if (error) { console.warn('[PreferencesSync] load error:', error.message); return; }
@@ -13924,7 +13928,7 @@ crewRoles: {
               const { error } = await supabase
                   .from('user_profiles')
                   .update({ preferences: prefs })
-                  .or(`owner_email.eq.${email},email.eq.${email}`);
+                  .or(`owner_email.eq.${Utils.pgSafe(email)},email.eq.${Utils.pgSafe(email)}`);
               if (error) console.warn('[PreferencesSync] push error:', error.message);
           } catch(e) { console.warn('[PreferencesSync] push exception:', e); }
       }
@@ -14003,7 +14007,7 @@ crewRoles: {
               const { data } = await supabase
                   .from('user_profiles')
                   .select('moderation_badge')
-                  .or(`email.eq.${key},owner_email.eq.${key}`)
+                  .or(`email.eq.${Utils.pgSafe(key)},owner_email.eq.${Utils.pgSafe(key)}`)
                   .not('moderation_badge', 'is', null);
               
               let badge = null;
@@ -14040,7 +14044,7 @@ crewRoles: {
               const { count: msgCount } = await supabase
                   .from('messages')
                   .select('id', { count: 'exact', head: true })
-                  .or(`and(from_email.eq.${a},to_email.eq.${b}),and(from_email.eq.${b},to_email.eq.${a})`);
+                  .or(`and(from_email.eq.${Utils.pgSafe(a)},to_email.eq.${Utils.pgSafe(b)}),and(from_email.eq.${Utils.pgSafe(b)},to_email.eq.${Utils.pgSafe(a)})`);
               if(msgCount && msgCount > 0) return true;
               
               // 2) Projet commun ?
@@ -35905,7 +35909,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             await supabase.from('user_profiles').delete().eq('email', email);
             
             // 4. Supprimer les messages
-            const {error: msgDelErr} = await supabase.from('messages').delete().or(`from_email.eq.${email},to_email.eq.${email}`);
+            const {error: msgDelErr} = await supabase.from('messages').delete().or(`from_email.eq.${Utils.pgSafe(email)},to_email.eq.${Utils.pgSafe(email)}`);
             if(msgDelErr) console.error('Erreur suppression messages:', msgDelErr);
             
             // 5. Supprimer les notifications
@@ -51789,7 +51793,7 @@ const Presentation = {
                 .from('user_profiles')
                 .select('id, name, email, photo, profile_type')
                 .eq('is_public', true)
-                .or(`name.ilike.%${q}%,email.ilike.%${q}%`)
+                .or(`name.ilike.%${Utils.pgSafe(q)}%,email.ilike.%${Utils.pgSafe(q)}%`)
                 .limit(50);
             
             (profiles || []).forEach(profile => {
@@ -64680,6 +64684,7 @@ const Forum = {
                             <span class="forum-post-action" onclick="app.Forum.vote('${thread.id}', 1)">▲ ${thread.votes || 0}</span>
                             ${thread.authorEmail === state.currentUser?.email ? `<span class="forum-post-action" onclick="app.Forum.markResolved('${thread.id}')">✅ Marquer résolu</span>` : ''}
                             <span class="forum-post-action" onclick="app.Forum.reportPost('forum_thread', '${thread.id}')">🚩 Signaler</span>
+                            ${Forum.canDelete(thread.authorEmail) ? `<span class="forum-post-action" style="color:var(--danger, #e74c3c);" onclick="app.Forum.deleteThread('${thread.id}')">🗑️ Supprimer</span>` : ''}
                         </div>
                     </div>
                     <h3 style="margin:20px 0 15px;">💬 ${replies.length} réponse${replies.length > 1 ? 's' : ''}</h3>
@@ -64694,7 +64699,7 @@ const Forum = {
                                     </div>
                                 </div>
                                 <div class="forum-post-content" style="font-size:0.95rem;">${Utils.escape(r.content).replace(/\n/g, '<br>')}</div>
-                                <div style="margin-top:6px;"><span class="forum-post-action" style="font-size:0.8rem;" onclick="app.Forum.reportPost('forum_reply', '${r.id}')">🚩 Signaler</span></div>
+                                <div style="margin-top:6px;"><span class="forum-post-action" style="font-size:0.8rem;" onclick="app.Forum.reportPost('forum_reply', '${r.id}')">🚩 Signaler</span>${Forum.canDelete(r.authorEmail) ? ` <span class="forum-post-action" style="font-size:0.8rem; color:var(--danger, #e74c3c);" onclick="app.Forum.deleteReply('${r.id}', '${thread.id}')">🗑️ Supprimer</span>` : ''}</div>
                             </div>
                         `).join('')}
                     </div>
@@ -64743,6 +64748,49 @@ const Forum = {
         }
     },
     
+    // A6 - Droits de suppression : auteur du post, ou admin (CONFIG.adminEmails)
+    canDelete: (authorEmail) => {
+        const me = state.currentUser?.email?.toLowerCase();
+        if(!me) return false;
+        return me === (authorEmail || '').toLowerCase() || Admin.isAdmin();
+    },
+
+    deleteThread: async (threadId) => {
+        if(!await ConfirmModal.show({ title: 'Supprimer le sujet ?', message: 'Supprimer définitivement ce sujet ET toutes ses réponses ?', icon: '🗑️', confirmText: 'Supprimer' })) return;
+        try {
+            try { await supabase.from('forum_votes').delete().eq('thread_id', threadId); } catch(_) {}
+            await supabase.from('forum_replies').delete().eq('thread_id', threadId);
+            const { data, error } = await supabase.from('forum_threads').delete().eq('id', threadId).select();
+            if(error) throw error;
+            if(!data || data.length === 0) { Utils.toast('Suppression bloquée par les droits (RLS).', 'error', 6000); return; }
+            document.querySelector('.modal-overlay')?.remove();
+            Utils.toast('Sujet supprimé', 'success');
+            Forum.loadThreads();
+        } catch(e) {
+            console.error('Erreur suppression sujet:', e);
+            Utils.toast('Erreur lors de la suppression', 'error');
+        }
+    },
+
+    deleteReply: async (replyId, threadId) => {
+        if(!await ConfirmModal.show({ title: 'Supprimer la réponse ?', message: 'Supprimer définitivement cette réponse ?', icon: '🗑️', confirmText: 'Supprimer' })) return;
+        try {
+            const { data, error } = await supabase.from('forum_replies').delete().eq('id', replyId).select();
+            if(error) throw error;
+            if(!data || data.length === 0) { Utils.toast('Suppression bloquée par les droits (RLS).', 'error', 6000); return; }
+            const thread = Forum.threads.find(t => String(t.id) === String(threadId));
+            const newCount = Math.max(0, (thread?.replyCount || 1) - 1);
+            try { await supabase.from('forum_threads').update({ reply_count: newCount }).eq('id', threadId); } catch(_) {}
+            if(thread) thread.replyCount = newCount;
+            Utils.toast('Réponse supprimée', 'success');
+            document.querySelector('.modal-overlay')?.remove();
+            Forum.openThread(threadId);
+        } catch(e) {
+            console.error('Erreur suppression réponse:', e);
+            Utils.toast('Erreur lors de la suppression', 'error');
+        }
+    },
+
     markResolved: async (threadId) => {
         try {
             await supabase
@@ -70910,7 +70958,7 @@ const Weather = {
                   const { data, error } = await supabase
                       .from('user_profiles')
                       .select('id')
-                      .or(`owner_email.eq.${email},email.eq.${email}`)
+                      .or(`owner_email.eq.${Utils.pgSafe(email)},email.eq.${Utils.pgSafe(email)}`)
                       .eq('terms_accepted', true)
                       .limit(1);
                   if(!error && data && data.length > 0) return true;
