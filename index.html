@@ -71,8 +71,10 @@ B8 [X] Audit des vrais profils : ~380 faux (2 fournées), le reste = créations
        unitaires réelles. Croisement user_logins possible plus tard si besoin.
 
 PHASE C — PERFORMANCE / ALLÈGEMENT
-C1 [ ] (C) Lazy-load des libs lourdes (jspdf, pdf-lib, html2canvas, chart.js,
-       leaflet + markercluster) au premier usage (~500 Ko gagnés au boot)
+C1 [X] (C) Lazy-load des libs lourdes (jspdf, pdf-lib, html2canvas, chart.js,
+       leaflet + markercluster) au premier usage via le helper LazyLib
+       (~500 Ko hors du boot). 8 balises retirées du <head> ;
+       supabase-js reste eager (cœur de l'app). (v531)
 C2 [~] DÉCIDÉ : design unique "Lavande" (= icônes duotone). (C) Supprimer le
        sélecteur de design, les entrées Classique/Minimal, et les styles
        d'icônes emoji/colored/minimal/gradient. Rappel : les classes
@@ -100,6 +102,12 @@ DÉCISIONS ACTÉES
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v531 (12 Juin 2026)
+  - PERFORMANCE — Lazy-load des librairies lourdes (C1) : les six grosses libs externes (~500 Ko cumulés) ne sont plus chargées au démarrage mais à la demande, au premier usage réel. Nouveau helper LazyLib : registre de définitions js/css par clé, cache de promesses (une lib n'est chargée qu'une fois), chargement des scripts en séquence pour respecter les dépendances, et hook « after » exécuté une fois la lib prête. Huit balises <script>/<link> retirées du <head>. supabase-js reste chargé au boot (requis dès l'authentification).
+  - Chart.js : chargé à l'ouverture de l'onglet Statistiques (Stats.renderAdvanced passé en async, await LazyLib.load('chart') avant le rendu des quatre graphiques). Premier affichage légèrement différé, instantané ensuite grâce au cache.
+  - Leaflet + markercluster (+ 3 feuilles CSS) : chargés à l'ouverture d'une carte — Univers, mini-carte de fiche lieu / planning (showMiniMap) et carte de feuille de service. Les trois points d'entrée passent par await LazyLib.load('leaflet').
+  - pdf.js : chargé à l'import d'un scénario PDF (Importer.parsePDF). Le workerSrc est désormais positionné par le hook « after » de la définition pdfjs ; l'ancienne initialisation au window.load, qui dépendait de pdfjsLib présent au boot, est retirée.
+  - Export PDF (jspdf + pdf-lib + html2canvas) : chargés au premier export. Les 22 fonctions d'export du fichier passent en async et appellent await LazyLib.load('pdfexport') avant d'instancier jsPDF — un clic export ne peut donc plus tomber avant disponibilité de la lib. Le patch jsPDF.getTextWidth (cohérence avec PdfTheme.cleanText) devient la fonction nommée window.__patchJsPDF, rejouée par le hook « after » une fois jspdf chargé, au lieu de s'exécuter au boot.
 v530 (12 Juin 2026)
   - SÉCURITÉ — XSS stocké forum (A1) : tout le contenu inter-utilisateurs des sujets et réponses est désormais échappé au rendu — titres, noms d'auteur (liste + modale + avatars), et corps. Le corps des sujets (HTML riche issu de l'éditeur) passe par un nouveau sanitizer Utils.sanitizeRich (allowlist de balises de formatage, suppression de tout attribut), le corps des réponses est échappé avant la conversion des sauts de ligne, et les images de sujet passent par Utils.safeMediaUrl (data:image/ ou https:// uniquement).
   - SÉCURITÉ — XSS stocké profils publics (A2) : la modale UniverseProfileModal échappe désormais l'intégralité des champs saisis par autrui — identité, description physique, langues, sports, tarif, véhicule, métier/expérience, infos projet, SIRET, services, disponibilité — ainsi que le contact (email, téléphone) et le site web (href filtré par le nouveau Utils.safeUrl : http(s)/mailto seulement). Les actualités du profil (contenu + image) et les vignettes de galerie (src + lien d'ouverture) sont également sécurisées.
@@ -2508,20 +2516,20 @@ V1.0 - Base solide (Déc. 2024)
 
 <!-- EmailJS retiré : emails transactionnels via Edge Function Supabase (super-action) + Brevo -->
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha512-q+4liFwdPC/bNdhUpZx6aXDx/h77yEQtn4I1slHydcbZK34nLaR3cAeYSJshoxIOq3mjEf7xJE8YWIUHMn+oCQ==" crossorigin="anonymous" defer></script>
+<!-- pdf.js: lazy via LazyLib.load('pdfjs') -->
 <!-- Leaflet Map -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous" defer></script>
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
-<script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js" integrity="sha384-RLIyj5q1b5XJTn0tqUhucRZe40nFTocRP91R/NkRJHwAe4XxnTV77FXy/vGLiec2" crossorigin="anonymous" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-qZvrmS2ekKPF2mSznTQsxqPgnpkI4DNTlrdUmTzrDgektczlKNRRhy5X5AAOnx5S09ydFYWWNSfcEqDTTHgtNA==" crossorigin="anonymous" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js" integrity="sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI" crossorigin="anonymous" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha512-BNaRQnYJYiPSqHHDb58B0yaPfCu+Wgds8Gp/gU33kqBtgNS4tSPHuGibyoeqMV/TJlSKda6FXzoEyYGjTe+vXA==" crossorigin="anonymous" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous" defer></script>
+<!-- leaflet css: lazy via LazyLib.load('leaflet') -->
+<!-- leaflet js: lazy via LazyLib.load('leaflet') -->
+<!-- markercluster css: lazy -->
+<!-- markercluster css default: lazy -->
+<!-- markercluster js: lazy -->
+<!-- jspdf: lazy via LazyLib.load('pdfexport') -->
+<!-- pdf-lib: lazy via LazyLib.load('pdfexport') -->
+<!-- html2canvas: lazy via LazyLib.load('pdfexport') -->
+<!-- chart.js: lazy-load via LazyLib.load('chart') -->
 <script>
     window.addEventListener('load', function() {
-      if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      /* pdf.js worker: configure dans LazyLib pdfjs.after */
     });
     
     // iOS Safari 100vh fix
@@ -7497,7 +7505,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv530</p>
+      <p>vv531</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -12839,6 +12847,69 @@ crewRoles: {
               overlay.classList.remove('visible');
           }, 300);
       }
+  };
+
+  const LazyLib = {
+    _cache: {},
+    _defs: {
+      chart: { js: [{ src: 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js', integrity: 'sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4', crossorigin: 'anonymous' }], css: [], ready: () => typeof Chart !== 'undefined' },
+      leaflet: {
+        css: ['https://unpkg.com/leaflet@1.9.4/dist/leaflet.css', 'https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css', 'https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css'],
+        js: [
+          { src: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js', integrity: 'sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH', crossorigin: 'anonymous' },
+          { src: 'https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js', integrity: 'sha384-RLIyj5q1b5XJTn0tqUhucRZe40nFTocRP91R/NkRJHwAe4XxnTV77FXy/vGLiec2', crossorigin: 'anonymous' }
+        ],
+        ready: () => typeof L !== 'undefined' && !!L.markerClusterGroup
+      },
+      pdfjs: {
+        js: [{ src: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', integrity: 'sha512-q+4liFwdPC/bNdhUpZx6aXDx/h77yEQtn4I1slHydcbZK34nLaR3cAeYSJshoxIOq3mjEf7xJE8YWIUHMn+oCQ==', crossorigin: 'anonymous' }],
+        css: [],
+        ready: () => typeof pdfjsLib !== 'undefined',
+        after: () => { if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; }
+      },
+      pdfexport: {
+        js: [
+          { src: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', integrity: 'sha512-qZvrmS2ekKPF2mSznTQsxqPgnpkI4DNTlrdUmTzrDgektczlKNRRhy5X5AAOnx5S09ydFYWWNSfcEqDTTHgtNA==', crossorigin: 'anonymous' },
+          { src: 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js', integrity: 'sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI', crossorigin: 'anonymous' },
+          { src: 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', integrity: 'sha512-BNaRQnYJYiPSqHHDb58B0yaPfCu+Wgds8Gp/gU33kqBtgNS4tSPHuGibyoeqMV/TJlSKda6FXzoEyYGjTe+vXA==', crossorigin: 'anonymous' }
+        ],
+        css: [],
+        ready: () => !!(window.jspdf && window.jspdf.jsPDF) && typeof PDFLib !== 'undefined' && typeof html2canvas !== 'undefined',
+        after: () => { if (window.__patchJsPDF) window.__patchJsPDF(); }
+      }
+    },
+    _loadScript(s) {
+      return new Promise((resolve, reject) => {
+        const el = document.createElement('script');
+        el.src = s.src;
+        if (s.integrity) el.integrity = s.integrity;
+        if (s.crossorigin) el.crossOrigin = s.crossorigin;
+        el.onload = () => resolve();
+        el.onerror = () => reject(new Error('LazyLib echec ' + s.src));
+        document.head.appendChild(el);
+      });
+    },
+    _loadCss(href) {
+      return new Promise((resolve, reject) => {
+        const el = document.createElement('link');
+        el.rel = 'stylesheet'; el.href = href;
+        el.onload = () => resolve();
+        el.onerror = () => reject(new Error('LazyLib echec css ' + href));
+        document.head.appendChild(el);
+      });
+    },
+    load(key) {
+      if (this._cache[key]) return this._cache[key];
+      const def = this._defs[key];
+      if (!def) return Promise.reject(new Error('LazyLib cle inconnue ' + key));
+      const runAfter = () => { if (def.after) { try { def.after(); } catch(e) { console.warn('LazyLib after', key, e); } } };
+      if (def.ready && def.ready()) { runAfter(); this._cache[key] = Promise.resolve(); return this._cache[key]; }
+      let chain = Promise.all((def.css || []).map(h => this._loadCss(h)));
+      (def.js || []).forEach(s => { chain = chain.then(() => this._loadScript(s)); });
+      chain = chain.then(runAfter);
+      this._cache[key] = chain;
+      return chain;
+    }
   };
 
   const Utils = {
@@ -24181,7 +24252,7 @@ const tabToSection = {
   
   // BreakdownExport — sous-module B.4.1 : export PDF du dépouillement (autonome)
   const BreakdownExport = {
-      exportPDF: (opts = {}) => {
+      exportPDF: async (opts = {}) => {
           const { jsPDF } = window.jspdf;
           const doc = new jsPDF('p', 'mm', 'a4');
           const pageWidth = doc.internal.pageSize.getWidth();
@@ -40345,7 +40416,8 @@ callsheetHTML += `<tr class="bg-base"><td colspan="5" class="th-primary">🎭 ${
         
         // Initialiser la carte Leaflet
         if(shootDay.locationLat && shootDay.locationLng) {
-            setTimeout(() => {
+            setTimeout(async () => {
+                await LazyLib.load('leaflet');
                 const mapContainer = document.getElementById('fds-map-container');
                 if(mapContainer && typeof L !== 'undefined') {
                     const fdsMap = L.map(mapContainer, { zoomControl: true, attributionControl: false })
@@ -44319,7 +44391,8 @@ closeModal: () => {
         Planning.showMiniMap(lat, lng);
     },
     
-    showMiniMap: (lat, lng) => {
+    showMiniMap: async (lat, lng) => {
+        await LazyLib.load('leaflet');
         const mapContainer = document.getElementById('location-minimap');
         if(!mapContainer) return;
         
@@ -45084,7 +45157,8 @@ const Stats = {
       // ===== STATISTIQUES AVANCÉES V1.4.3 =====
       chartInstances: {},
       
-      renderAdvanced: () => {
+      renderAdvanced: async () => {
+          await LazyLib.load('chart');
           Stats.renderProgressScenes();
           Stats.renderIntExtChart();
           Stats.renderJourNuitChart();
@@ -46223,7 +46297,7 @@ const Stats = {
 // serait trop large par rapport au texte effectivement rendu (vide à droite).
 // On patche donc getTextWidth pour qu'il mesure le texte post-cleanText.
 // (Pas de PubSub interne sur getTextWidth, contrairement à text() — patch safe.)
-(function patchJsPDFGetTextWidth() {
+window.__patchJsPDF = function patchJsPDFGetTextWidth() {
     try {
         const jsPDFLib = (typeof window !== 'undefined' && window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : null;
         if(!jsPDFLib) {
@@ -46299,7 +46373,7 @@ const Stats = {
     } catch(e) {
         console.warn('[PdfTheme] Erreur patch getTextWidth:', e);
     }
-})();
+};
 
 // ============================================================================
 // === MoteurArchive [Phase B] : helper d'export/import ZIP "moteur" complet ===
@@ -47252,7 +47326,7 @@ const MoteurArchive = {
     },
     
     // ========== RAPPORT DE PRODUCTION PDF ==========
-    productionReport: (opts = {}) => {
+    productionReport: async (opts = {}) => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -48107,6 +48181,7 @@ const MoteurArchive = {
 
       parsePDF: async (file) => {
           try {
+              await LazyLib.load('pdfjs');
               els.projectList.innerHTML = '<div class="p-20">Lecture PDF (Patience, chargement complet)...</div>';
               const arrayBuffer = await file.arrayBuffer();
               const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -50020,7 +50095,7 @@ const Contracts = {
     },
     
     // Génération effective du PDF
-    doGeneratePDF: () => {
+    doGeneratePDF: async () => {
         const html = Contracts.generateContractHTML();
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
@@ -52620,7 +52695,7 @@ const Presentation = {
     },
     
     // [Phase C.5.3] Export PDF de la présentation projet
-    exportPDF: (opts = {}) => {
+    exportPDF: async (opts = {}) => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -52759,7 +52834,7 @@ const ExpensesExport = {
     // opts = { includeCover, returnBlob, simple }
     // - simple : page de garde + résumé global + totaux par catégorie CNC (saute le tableau détaillé des dépenses)
     // - sinon : tout (par défaut = détaillé)
-    exportPDF: (opts = {}) => {
+    exportPDF: async (opts = {}) => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -59101,7 +59176,8 @@ const UniverseProfileModal = {
 
 const UniverseMap = {
     // Initialiser la carte
-    initMap: () => {
+    initMap: async () => {
+        await LazyLib.load('leaflet');
         if(Universe.map) return; // Déjà initialisée
         
         const mapContainer = document.getElementById('universe-map');
@@ -64885,7 +64961,7 @@ const TitlePage = {
     },
     
     // [Phase C.5.1] Export PDF de la page de titre seule (style Final Draft)
-    exportPDF: (opts = {}) => {
+    exportPDF: async (opts = {}) => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const tp = state.data.titlePage || {};
@@ -68953,7 +69029,7 @@ const ScriptReport = {
         };
     },
     
-    _launchPrintReports: (items) => {
+    _launchPrintReports: async (items) => {
         Utils.toast(`Génération de ${items.length} fiche${items.length > 1 ? 's' : ''}...`, 'info');
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
@@ -68980,7 +69056,7 @@ const ScriptReport = {
         setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
     },
     
-    generatePDF: (sceneId, shotId, reportIdx) => {
+    generatePDF: async (sceneId, shotId, reportIdx) => {
         const key = `${sceneId}_${shotId}`;
         const report = state.data.scriptReports?.[key]?.[reportIdx];
         if(!report) return;
@@ -70470,8 +70546,8 @@ const Weather = {
       },
       
       // [Phase C.5.4] Export PDF du Séquencier (PAS le BeatBoard)
-      exportSequencerPDF: (opts = {}) => {
-          const { jsPDF } = window.jspdf;
+      exportSequencerPDF: async (opts = {}) => {
+          await LazyLib.load('pdfexport'); const { jsPDF } = window.jspdf;
           const doc = new jsPDF('p', 'mm', 'a4');
           const pageWidth = doc.internal.pageSize.getWidth();
           const pageHeight = doc.internal.pageSize.getHeight();
