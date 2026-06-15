@@ -75,17 +75,25 @@ C1 [X] (C) Lazy-load des libs lourdes (jspdf, pdf-lib, html2canvas, chart.js,
        leaflet + markercluster) au premier usage via le helper LazyLib
        (~500 Ko hors du boot). 8 balises retirées du <head> ;
        supabase-js reste eager (cœur de l'app). (v531)
-C2 [~] DÉCIDÉ : design unique "Lavande" (= icônes duotone). (C) Supprimer le
-       sélecteur de design, les entrées Classique/Minimal, et les styles
-       d'icônes emoji/colored/minimal/gradient. Rappel : les classes
-       design-* n'avaient aucun CSS, seul le style d'icônes est réel.
+C2 [X] FAIT (v532) : design unique "Lavande" (= icônes duotone). Sélecteur de
+       design (header hub + header projet), entrées Classique/Minimal et styles
+       d'icônes emoji/colored/minimal/gradient supprimés ; UITheme.designs/
+       currentDesign/setDesign + proxys App + CSS orphelins #design-dropdown
+       retirés ; duotone forcé au boot (Icons.init/setStyle). Les classes
+       design-* n'avaient aucun CSS.
 
 PHASE D — FOND DE ROULEMENT (au fil de l'eau)
-D1 [ ] (C) Guide : remise à jour complète (accueil P1, contrats v528,
-       fenêtres flottantes v526, fiches v523, Orgs v527...)
-D2 [ ] (C) Versioning du schéma de données (state.data._schemaVersion)
-D3 [ ] (C) Nettoyage : 70 console.log, 3 confirm() natifs -> ConfirmModal
-D4 [ ] (C) Réécrire l'IIFE async _courierPrimeLoading en fonction nommée
+D1 [~] EN COURS : sections Introduction (accueil P1), Contrats (v528) et
+       Personnalisation (post-C2) refondues. Reste : sections à CRÉER pour
+       fenêtres flottantes v526 et Orgs v527, relire casquettes (v523),
+       Exports et Collaboration.
+D2 [X] FAIT : SCHEMA_VERSION + registre _schemaMigrations + runner, tampon
+       au chargement (loadProject) et dans getEmpty
+D3 [X] FAIT : 3 confirm() natifs -> ConfirmModal (Orgs.remove, removeTemplate,
+       removeContract, passés en async), 7 console.log debug supprimés/warn.
+       Les ~60 restants sont l'UI console des outils (ErrorLogger, sbDiag,
+       migrations admin) : conservés volontairement.
+D4 [X] FAIT : IIFE remplacée par downloadCourierPrime() nommée
 D5 [ ] (C) Accessibilité minimale : alt images, role/tabindex sur les
        div cliquables principales
 D6 [ ] (option long terme) Buckets privés + URLs signées si la confidentialité
@@ -102,6 +110,8 @@ DÉCISIONS ACTÉES
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v532 (12 Juin 2026)
+  - DESIGN — Design unique « Lavande » (C2) : le sélecteur de design est supprimé (dropdown du header hub et du header projet), il ne reste qu'un seul rendu — icônes duotone (fonds de catégorie teintés, SVG colorés par catégorie). Côté CSS, les styles d'icônes emoji, colored, minimal et gradient sont retirés ; seul le bloc duotone subsiste, plus les règles orphelines #design-dropdown (dédiées et fragments dans les sélecteurs groupés .dropdown-menu). Côté JS, UITheme.designs / currentDesign / setDesign et leurs proxys App disparaissent, l'init du design dans Auth.init (lecture fmp_design + sélecteur fantôme design-selector) est retirée, et le registre Icons.styles est réduit à duotone. Icons.setStyle et Icons.init forcent désormais icon-style-duotone — appliqué au boot, sans bascule possible. Rappel : les classes design-* n'avaient jamais eu de CSS, seul le style d'icônes était réel.
 v531 (12 Juin 2026)
   - PERFORMANCE — Lazy-load des librairies lourdes (C1) : les six grosses libs externes (~500 Ko cumulés) ne sont plus chargées au démarrage mais à la demande, au premier usage réel. Nouveau helper LazyLib : registre de définitions js/css par clé, cache de promesses (une lib n'est chargée qu'une fois), chargement des scripts en séquence pour respecter les dépendances, et hook « after » exécuté une fois la lib prête. Huit balises <script>/<link> retirées du <head>. supabase-js reste chargé au boot (requis dès l'authentification).
   - Chart.js : chargé à l'ouverture de l'onglet Statistiques (Stats.renderAdvanced passé en async, await LazyLib.load('chart') avant le rendu des quatre graphiques). Premier affichage légèrement différé, instantané ensuite grâce au cache.
@@ -7461,7 +7471,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv531</p>
+      <p>vv531.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -15028,7 +15038,7 @@ crewRoles: {
                   if (event === 'SIGNED_IN') {
                       try {
                           await supabase.from('user_logins').insert({ user_email: session.user.email.toLowerCase() });
-                      } catch(e) { console.log('Login log error:', e); }
+                      } catch(e) { console.warn('Login log error:', e); }
                   }
                   // Ne pas rediriger si déjà dans un projet ou sur le dashboard
                   if(els.appView.style.display === 'flex' || els.dashboardView.style.display === 'flex') {
@@ -16977,8 +16987,35 @@ const LockManager = {
   // donc le reste du code continue d'appeler Store.save(), etc.
   // ====================================================================
   const Store = {
+      // D2 : versioning du schéma de données.
+      // À chaque évolution structurelle de state.data : incrémenter SCHEMA_VERSION
+      // et ajouter une fonction au registre _schemaMigrations (clé = version cible).
+      SCHEMA_VERSION: 1,
+      _schemaMigrations: {
+          // 2: (data) => { /* migration v1 -> v2 */ },
+      },
+      runSchemaMigrations: (data) => {
+          let v = (typeof data._schemaVersion === 'number') ? data._schemaVersion : 1;
+          while(v < Store.SCHEMA_VERSION) {
+              v++;
+              const fn = Store._schemaMigrations[v];
+              if(typeof fn === 'function') {
+                  try { fn(data); } catch(e) { console.error('[Schema] Migration vers v' + v + ' échouée :', e); }
+              }
+              data._schemaVersion = v;
+          }
+      },
       // V62: Initialisation du tableau snapshots
-      getEmpty: () => ({ title: "Nouveau Film", filmId: 'film_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11), synopsis: "", synopsisShort: "", synopsisLong: "", scriptMeta: { author: "", coAuthor: "", contact: "", copyright: "", draft: "Premier jet", draftDate: "", source: "", notes: "" }, snapshots: [], scenes: [], characters: [], actors: [], locations: [], resources: [], crew: [], shootingDays: [], tags: CONFIG.defaultTags, groups: [...CONFIG.defaultGroups, ...CONFIG.crewGroups], shots: [], counter: 1, uiConfig: { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [] }, budget: { total: 0, currency: '€', manager: '', managerEmailNotif: true, envelopes: {}, deptManagers: {} }, expenses: [], presentation: { title: '', genre: '', format: '', duration: '', productionType: '', description: '', team: [], associations: [], enterprises: [], needsCrew: {}, needsActors: [], image: '' }, memberPermissions: {}, chatChannels: [], chatExtraMembers: [], workplanOverrides: {}, scriptReports: {}, contracts: [], episodes: [], seasons: [] }),
+      getEmpty: () => ({ _schemaVersion: Store.SCHEMA_VERSION, title: "Nouveau Film",              let needsMigrationSave = false;              let needsMigrationSave = false;
+              // D2 : versioning du schéma — tamponner les anciens projets, rejouer les migrations manquantes
+              if(typeof safeData._schemaVersion !== 'number') { safeData._schemaVersion = 1; needsMigrationSave = true; }
+              if(safeData._schemaVersion > Store.SCHEMA_VERSION) {
+                  console.warn('[Schema] Projet en v' + safeData._schemaVersion + ', app en v' + Store.SCHEMA_VERSION);
+                  Utils.toast("Ce projet a été enregistré avec une version plus récente de l'app. Recharge la page (Ctrl+F5).", 'warning');
+              } else if(safeData._schemaVersion < Store.SCHEMA_VERSION) {
+                  Store.runSchemaMigrations(safeData);
+                  needsMigrationSave = true;
+              } filmId: 'film_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11), synopsis: "", synopsisShort: "", synopsisLong: "", scriptMeta: { author: "", coAuthor: "", contact: "", copyright: "", draft: "Premier jet", draftDate: "", source: "", notes: "" }, snapshots: [], scenes: [], characters: [], actors: [], locations: [], resources: [], crew: [], shootingDays: [], tags: CONFIG.defaultTags, groups: [...CONFIG.defaultGroups, ...CONFIG.crewGroups], shots: [], counter: 1, uiConfig: { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [] }, budget: { total: 0, currency: '€', manager: '', managerEmailNotif: true, envelopes: {}, deptManagers: {} }, expenses: [], presentation: { title: '', genre: '', format: '', duration: '', productionType: '', description: '', team: [], associations: [], enterprises: [], needsCrew: {}, needsActors: [], image: '' }, memberPermissions: {}, chatChannels: [], chatExtraMembers: [], workplanOverrides: {}, scriptReports: {}, contracts: [], episodes: [], seasons: [] }),
       getProjectsList: async () => { 
           if(!state.currentUser) return []; 
           const myEmail = state.currentUser.email.toLowerCase();
@@ -29988,7 +30025,6 @@ const DrawingEditor = {
                     const compressed = DrawingEditor._compressImage(img, 1280, 720, 0.8);
                     const before = Math.round(dataUrl.length / 1024);
                     const after = Math.round(compressed.dataUrl.length / 1024);
-                    console.log(`[insertBgLayer] ${img.width}×${img.height} → ${compressed.width}×${compressed.height} | ${before} Ko → ${after} Ko (${Math.round(100 * after / before)}%)`);
                     
                     // Charger l'image compressée pour la dessiner dans le calque
                     const compImg = new Image();
@@ -30089,7 +30125,6 @@ const DrawingEditor = {
                     const compressed = DrawingEditor._compressImage(img, 1280, 720, 0.8);
                     const before = Math.round(dataUrl.length / 1024);
                     const after = Math.round(compressed.dataUrl.length / 1024);
-                    console.log(`[insertImage] ${img.width}×${img.height} → ${compressed.width}×${compressed.height} | ${before} Ko → ${after} Ko (${Math.round(100 * after / before)}%)`);
                     
                     // === Upload vers Storage (au lieu de garder le base64 en state.data) ===
                     Utils.toast('Envoi de l\'image...', 'info', 2000);
@@ -32198,7 +32233,7 @@ const DrawingEditor = {
   const ScriptEditorToolbar = {
       wrapNote: (block) => { let txt = block.innerText.trim(); if(!txt.startsWith('{')) { block.innerText = '{ ' + txt + ' }'; ScriptEditorToolbar.placeCursorInside(block, '{', '}'); } },
       wrapParen: (block) => { let txt = block.innerText.trim(); if(!txt.startsWith('(')) { block.innerText = '( ' + txt + ' )'; ScriptEditorToolbar.placeCursorInside(block, '(', ')'); } },
-      placeCursorInside: (block, openChar, closeChar) => { const text = block.innerText; const startPos = text.indexOf(openChar) + 2; const endPos = text.lastIndexOf(closeChar) - 1; if(block.firstChild) { const range = document.createRange(); const sel = window.getSelection(); try { const textNode = block.firstChild; const safeStart = Math.min(startPos, textNode.length); range.setStart(textNode, safeStart); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); } catch(e) { console.log('Cursor placement error', e); } } },
+      placeCursorInside: (block, openChar, closeChar) => { const text = block.innerText; const startPos = text.indexOf(openChar) + 2; const endPos = text.lastIndexOf(closeChar) - 1; if(block.firstChild) { const range = document.createRange(); const sel = window.getSelection(); try { const textNode = block.firstChild; const safeStart = Math.min(startPos, textNode.length); range.setStart(textNode, safeStart); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); } catch(e) { console.warn('Cursor placement error', e); } } },
       
       // V7.8.b — Mise à jour visuelle des toolbars + sauvegarde/restauration de la sélection
       // État local (sera retiré de ScriptEditor à V7.8.e)
@@ -33087,7 +33122,6 @@ const DrawingEditor = {
           console.warn('[Utils] MutationObserver KO, blocker emoji limité aux éléments existants:', e);
       }
       
-      console.log('[Utils] Blocker emojis installé (input/textarea, exceptions: [data-allow-emojis=true])');
   });
   
   // ==================== MODULE RESOURCES ====================
@@ -46255,11 +46289,9 @@ window.__patchJsPDF = function patchJsPDFGetTextWidth() {
             // Préserver le prototype et les propriétés statiques
             window.jspdf.jsPDF.prototype = OriginalCtor.prototype;
             Object.setPrototypeOf(window.jspdf.jsPDF, OriginalCtor);
-            console.log('[PdfTheme] getTextWidth() patché via wrapper du constructeur jsPDF ✓');
         } else {
             // Patch direct sur le prototype trouvé
             targetObj.getTextWidth = cleanWrapper;
-            console.log('[PdfTheme] getTextWidth() patché sur le prototype ✓');
         }
         
         jsPDFLib.__getTextWidthPatched = true;
@@ -46692,14 +46724,15 @@ const MoteurArchive = {
             return btoa(binary);
         };
         
-        Exporter._courierPrimeLoading = (async () => {
+        const downloadCourierPrime = async () => {
             const fonts = {};
             await Promise.all(Object.entries(urls).map(async ([variant, url]) => {
                 fonts[variant] = await ttfToBase64(url);
             }));
             Exporter._courierPrimeFonts = fonts;
             Exporter._courierPrimeLoaded = true;
-        })();
+        };
+        Exporter._courierPrimeLoading = downloadCourierPrime();
         
         try {
             await Exporter._courierPrimeLoading;
@@ -48728,7 +48761,7 @@ const Orgs = {
 
     // Suppression DEFINITIVE : cet onglet est le pole des structures. Supprimer ici retire
     // aussi la structure des Partenaires de la Presentation (la Presentation n'est qu'une vitrine).
-    remove: (idx) => {
+    remove: async (idx) => {
         const list = Orgs._list();
         if(!list[idx]) return;
         const o = list[idx];
@@ -48741,7 +48774,7 @@ const Orgs = {
         const msg = isPartner
             ? 'Supprimer définitivement ' + name + ' ? Elle sera aussi retirée des Partenaires du Projet (Présentation).'
             : 'Supprimer définitivement ' + name + ' du projet ?';
-        if(!confirm(msg)) return;
+        if(!(await ConfirmModal.confirmDelete(msg))) return;
         if(isPartner) {
             if(Array.isArray(pres.associations)) pres.associations = pres.associations.filter(p => !p || p.id !== o.srcId);
             if(Array.isArray(pres.enterprises)) pres.enterprises = pres.enterprises.filter(p => !p || p.id !== o.srcId);
@@ -48986,9 +49019,9 @@ const Contracts = {
         Contracts.openEditor(Contracts._sel.partyType, Contracts._sel.idx, t.type || 'image', t.body || '', t.name || '');
         Contracts.renderHub();
     },
-    removeTemplate: (scope, id) => {
+    removeTemplate: async (scope, id) => {
         if(scope === 'proj') {
-            if(!confirm('Supprimer ce modèle de ce projet ? Cette action est définitive.')) return;
+            if(!(await ConfirmModal.confirmDelete('Ce modèle sera supprimé de ce projet. Cette action est définitive.', 'Supprimer ce modèle ?'))) return;
             const l = Contracts.tpl.proj(); const i = l.findIndex(x => x.id === id);
             if(i > -1) { l.splice(i, 1); Store.save(); }
             Contracts.renderHub();
@@ -49594,8 +49627,8 @@ const Contracts = {
         copy.body = ct.body; Contracts.store.upsert(copy);
         Contracts.openList();
     },
-    removeContract: (id) => {
-        if(!confirm('Supprimer ce contrat ? Cette action est définitive.')) return;
+    removeContract: async (id) => {
+        if(!(await ConfirmModal.confirmDelete('Ce contrat sera définitivement supprimé.', 'Supprimer ce contrat ?'))) return;
         if(Contracts._editing === id) Contracts._editing = null;
         Contracts.store.remove(id);
         if(document.getElementById('ctr-list')) Contracts.openList();
@@ -61027,8 +61060,8 @@ ${window.location.origin}${window.location.pathname}
           <p>Plus besoin de jongler entre dix logiciels différents. Moteur gère tout, du premier mot à la dernière prise.</p>
           
           <h3>Les 3 espaces principaux</h3>
-          <p><strong>🏠 Dashboard :</strong> Ton hub personnel. Raccourcis vers tes projets, l'Univers, le forum, tes cours, tes contacts.</p>
-          <p><strong>📁 Mes Projets :</strong> L'espace de travail sur un film. Onglets à gauche (scénario, séquencier, dépouillement...), menus en haut, équipe connectée en temps réel.</p>
+          <p><strong>🏠 Accueil :</strong> Dès la connexion, tu arrives sur la grille de tes projets. Les menus du haut donnent accès au reste : Mon Espace (Profil, Contacts), Communauté (Univers, Forum), Aide (Cours, Guide).</p>
+          <p><strong>📁 L'espace projet :</strong> L'espace de travail sur un film. Onglets à gauche (scénario, séquencier, dépouillement...), menus en haut, équipe connectée en temps réel.</p>
           <p><strong>🌍 Univers :</strong> L'annuaire communautaire. Tous les profils et projets publics géolocalisés sur une carte.</p>
           
           <h3>Collaboration dans l'ADN</h3>
@@ -61037,7 +61070,7 @@ ${window.location.origin}${window.location.pathname}
           <div class="tuto-tip"><strong>🚧 Pré-alpha ouverte :</strong> Moteur est en développement actif. Des bugs peuvent survenir, des fonctionnalités sont incomplètes. Tes données peuvent évoluer. Utilise à des fins de test et d'exploration !</div>
           <div class="tuto-tip"><strong>💬 Feedback bienvenu :</strong> Trouvé un bug ? Une fonctionnalité à suggérer ? Va dans le Forum. L'app grandit avec vous !</div>
           
-          <p><strong>Commence par :</strong> compléter ton profil public (pour apparaître dans l'Univers), puis crée ton premier projet via le bouton "Nouveau projet" sur le dashboard.</p>
+          <p><strong>Commence par :</strong> compléter ton profil public (pour apparaître dans l'Univers), puis crée ton premier projet via le bouton "Nouveau projet" sur l'accueil.</p>
         `
       },
       {
@@ -61225,10 +61258,12 @@ ${window.location.origin}${window.location.pathname}
         title: '📋 Contrats',
         content: `
           <h3>Documents conformes au droit français</h3>
-          <p><strong>Types disponibles :</strong> Droit à l'image (RGPD), CDDU (intermittents), Prestation (auto-entrepreneur), Accord bénévole.</p>
-          <p>Le CDDU inclut toutes les mentions légales : motif de recours, DPAE, congés spectacles...</p>
-          <div class="tuto-tip"><strong>💡 Vérification :</strong> Le système vérifie que toutes les infos sont renseignées avant de générer. Sinon, il t'alerte !</div>
-          <p>Les infos légales de ta production se remplissent dans l'onglet Présentation (SIRET, licence...).</p>
+          <p><strong>4 types :</strong> Droit à l'image (RGPD), CDDU (intermittents), Prestation, Accord bénévole. Le CDDU inclut toutes les mentions légales : motif de recours, DPAE, congés spectacles...</p>
+          <h3>Un hub en 3 colonnes</h3>
+          <p>À gauche, les fiches du projet (comédien·nes, technicien·nes, structures), triées A→Z ou par métier. Au centre, les contrats de la personne sélectionnée et le bouton « + Nouveau ». À droite, l'éditeur du contrat, directement dans la page.</p>
+          <p><strong>Statuts :</strong> brouillon → à signer → signé → archivé. Chaque contrat est enregistré dans le projet et exportable en PDF.</p>
+          <p><strong>Mes modèles :</strong> enregistre un arrangement comme modèle réutilisable (bouton « ⭐ Modèle » dans l'éditeur), pour ce projet seul ou pour tous tes projets. Les modèles apparaissent dans le picker « + Nouveau » et leurs champs se remplissent automatiquement pour la nouvelle personne.</p>
+          <div class="tuto-tip"><strong>💡 Champs dynamiques :</strong> les jetons (nom, dates, montants...) se remplissent depuis les fiches. Les infos légales de ta production se règlent dans l'onglet Présentation (SIRET, licence...).</div>
         `
       },
       {
@@ -61364,10 +61399,8 @@ ${window.location.origin}${window.location.pathname}
         title: '🎨 Personnalisation',
         content: `
           <h3>Fais de Moteur TON outil</h3>
-          <p><strong>11 thèmes :</strong> Classique, Glass, Cinema (noir et or), Cyberpunk (néon), Nature, Sunset, Océan, Lavande, Minimal, Terminal...</p>
-          <p>Mode clair/sombre en un clic. Ton choix est sauvegardé.</p>
-          <p><strong>5 styles d'icônes :</strong> Emoji, Coloré, Duotone, Minimal, Gradient.</p>
-          <div class="tuto-tip"><strong>💡 Menu Design :</strong> Tout se trouve dans le menu Design en haut à droite.</div>
+          <p><strong>Mode clair / sombre :</strong> bascule en un clic depuis le header. Ton choix est sauvegardé et te suit sur tous tes appareils.</p>
+          <p><strong>Onglets sur mesure :</strong> dans un projet, glisse-dépose les onglets pour les réordonner, change leurs couleurs, et masque ceux que tu n'utilises pas (croix sur l'onglet, menu « ⊕ Masqués » pour les retrouver).</p>
         `
       }
     ],
