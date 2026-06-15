@@ -13169,6 +13169,22 @@ crewRoles: {
               if(!error && data && data.signedUrl) Utils._signedCache.set(path, { url: data.signedUrl, exp: Date.now() + (ttl - 60) * 1000 });
           } catch(e) {}
       },
+      // Lot 4 : convertit en place les URLs publiques/signées 'projects' de data en paths bruts (hygiène payload). Idempotent : ne réécrit QUE les URLs projet (path brut, data:, URLs externes et strings normales inchangés via _projPathFrom). Retourne le nb de remplacements.
+      migrateProjPathsInData: (data) => {
+          let n = 0;
+          const conv = (v) => {
+              if(typeof v === 'string') {
+                  const p = Utils._projPathFrom(v);
+                  if(p && p !== v) { n++; return p; }
+                  return v;
+              }
+              if(Array.isArray(v)) { for(let i = 0; i < v.length; i++) v[i] = conv(v[i]); return v; }
+              if(v && typeof v === 'object') { for(const k in v) if(Object.prototype.hasOwnProperty.call(v, k)) v[k] = conv(v[k]); return v; }
+              return v;
+          };
+          conv(data);
+          return n;
+      },
       _resolveOneImg: (img) => {
           try {
               const cur = img.getAttribute('src');
@@ -17777,6 +17793,14 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               
               state.data = safeData; state.currentProjectId = id;
               state.savedBaseline = JSON.parse(JSON.stringify(safeData)); // Phase 0 : état de référence pour sauvegarde partielle / merge sélectif
+              // Lot 4 : migration hygiène URLs publiques 'projects' -> paths (one-shot, idempotent, gated par flag). APRÈS la baseline => la diff URL->path est réelle et sera persistée au prochain save.
+              if(!state.data._mediaPathsMigrated) {
+                  try {
+                      const _migN = Utils.migrateProjPathsInData(state.data);
+                      state.data._mediaPathsMigrated = true;
+                      if(_migN > 0) needsMigrationSave = true;
+                  } catch(e) { console.warn('migrateProjPathsInData:', e); }
+              }
               await Utils.refreshSignedCache(state.data); // Lot D6 : pré-signe les médias 'projects' avant rendu
               Utils.startImgResolver(); // Lot D6 : résolveur DOM des <img> signées
               state.currentProjectType = project.project_type || 'film'; // S3.4
@@ -19741,6 +19765,7 @@ openBoardPrintEpisodeChooser: () => {
             'locs': 'depouillement',
             'resources': 'depouillement',
             'crew': 'equipe',
+            'orgs': 'orgs',
             'breakdown': 'depouillement',
             'planning': 'planning',
             'expenses': 'budget',
@@ -61361,6 +61386,23 @@ ${window.location.origin}${window.location.pathname}
         `
       },
       {
+        id: 'orgs',
+        title: '🏛️ Asso / Entreprises',
+        content: `
+          <h3>Le pôle des structures</h3>
+          <p>L'onglet <strong>Production &gt; Asso / Entreprises</strong> gère les associations, sociétés de production, partenaires et financeurs, à parité avec les onglets Comédien·nes et Équipe technique.</p>
+
+          <h3>Une vraie fiche structure</h3>
+          <p>Quand tu ajoutes une structure depuis l'Univers, un instantané complet de sa fiche est copié dans ton projet : logo, type, SIRET / RNA, forme juridique, année, effectif ou nombre de membres, dirigeant·e ou président·e, mission, services, email, téléphone, siège, site et réseaux sociaux. C'est aussi la base qui alimentera l'autocomplétion des contrats.</p>
+          <p><strong>🔒 Liée à l'Univers :</strong> une fiche rattachée à un profil de l'Univers est en lecture seule — seul le propriétaire de la structure en modifie le contenu. Une fiche créée à la main ou importée d'un contact non lié reste entièrement éditable.</p>
+
+          <h3>Sur ce projet</h3>
+          <p>Cette section est <strong>toujours éditable</strong>, même sur une fiche verrouillée. Le <strong>département</strong> est un menu déroulant (les groupes techniques de ton projet + Financeurs) qui pilote la liste des fonctions disponibles ; « Autre » ouvre un champ libre. Tu peux aussi y laisser des notes.</p>
+
+          <div class="tuto-tip"><strong>💡 Toujours à jour :</strong> à chaque ouverture de l'onglet, les fiches liées sont resynchronisées depuis l'Univers en une seule requête. Fini les copies figées : si la structure modifie sa fiche, tu vois le changement au retour.</div>
+        `
+      },
+      {
         id: 'planning',
         title: '📅 Planning & Feuilles de Service',
         content: `
@@ -61460,6 +61502,23 @@ ${window.location.origin}${window.location.pathname}
           <h3>Gestion des permissions</h3>
           <p>Le propriétaire peut à tout moment <strong>changer le rôle</strong> d'un membre (editor → viewer par exemple), ou <strong>retirer l'accès</strong>. Il peut aussi définir des permissions fines par onglet (qui peut éditer quoi).</p>
           <div class="tuto-tip"><strong>⚠️ Contrôle :</strong> Seul le propriétaire peut supprimer le projet ou changer les permissions. Les autres membres peuvent quitter le projet à tout moment.</div>
+        `
+      },
+      {
+        id: 'fenetres',
+        title: '🪟 Fenêtres flottantes',
+        content: `
+          <h3>Détache tes onglets</h3>
+          <p>Dans l'éditeur, fais un <strong>clic droit sur un sous-onglet</strong> puis « 🪟 Ouvrir dans une fenêtre ». Le contenu réel de l'onglet est déplacé dans une fenêtre flottante : déplaçable par sa barre de titre, redimensionnable (8 poignées), réductible dans une barre des tâches en bas et agrandissable en plein cadre. Tes fenêtres ouvertes sont mémorisées et rouvertes au rechargement.</p>
+
+          <h3>Consultation ou Modification</h3>
+          <p>Chaque fenêtre naît en <strong>Consultation</strong> (interrupteur gris, bandeau « 👁 Consultation ») : navigation libre, saisie bloquée, et rien n'est signalé aux autres. Bascule l'interrupteur sur <strong>Modification</strong> (vert) pour éditer : la fenêtre pose alors le verrou du domaine, et les collègues voient un badge rouge et passent en lecture seule.</p>
+          <p>Si quelqu'un édite déjà ce domaine, ton interrupteur reste bloqué sur Consultation avec l'initiale du détenteur en rouge dans la barre de titre. Le déblocage se fait en direct dès qu'il quitte.</p>
+
+          <h3>Qui regarde quoi</h3>
+          <p>Sur le sous-onglet, une pile de badges indique l'activité : <strong>rouge</strong> = la personne qui édite (la main), <strong>bleu</strong> = toi, <strong>gris</strong> = les spectateurs qui consultent. Les badges sont serrés ; survole le sous-onglet pour écarter la pile et tout lire.</p>
+
+          <div class="tuto-tip"><strong>🔓 Libérer le verrou :</strong> repasse en Consultation, ferme la fenêtre ou quitte la page — le domaine redevient aussitôt disponible pour les autres.</div>
         `
       },
       {
