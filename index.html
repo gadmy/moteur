@@ -97,8 +97,11 @@ D4 [X] FAIT : IIFE remplacée par downloadCourierPrime() nommée
 D5 [X] FAIT : alt sur 100% des images (libellés courts contextuels) ;
        helper clavier global (Entrée/Espace sur role="button") + role/tabindex
        sur onglets, cartes projet (accueil) et fiches Univers.
-D6 [ ] (option long terme) Buckets privés + URLs signées si la confidentialité
-       des fichiers projets devient une exigence (gros chantier getPublicUrl)
+D6 [X] Buckets privés + URLs signées :
+       - JS : résolveur Utils (signedUrlFor / refreshSignedCache / observer / _cacheNewPath), lots 1/2/3/3b/3c/5.
+       - RLS : minichat_*_members créées + anciennes minichat_read/upload/delete supprimées ; policies projects existantes conservées (read_members/can_view + *_editors/can_edit) ; mes projects_*_members redondantes supprimées.
+       - Buckets 'projects' + 'minichat' en Private.
+       - RESTE (optionnel, non bloquant) : lot 4 = migration URLs publiques stockées → paths (hygiène/payload ; le résolveur gère déjà les deux formes).
 
 DÉCISIONS ACTÉES
 - MiniChat (talkie-walkie éphémère par projet, texte + fichiers) : CONSERVÉ.
@@ -111,6 +114,11 @@ DÉCISIONS ACTÉES
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v533 — Sécurité : buckets de stockage privés (audit juin 2026, chantier D6)
+- Bucket 'projects' passé en privé : images projet (photos, galeries, storyboard, fiches) servies via URLs signées expirantes (TTL 1 h), re-signées par cache, accès réservé aux membres du projet (RLS).
+- Bucket 'minichat' passé en privé : fichiers du talkie-walkie servis via URL signée (TTL 24 h), accès réservé aux membres.
+- Résolveur d'URLs signées centralisé : pré-signature au chargement du projet, observer DOM, re-signature périodique. Aucun changement du modèle de stockage (rétrocompatible).
+- Buckets 'avatars' et 'gallery' restent publics (profils publics).
 v532 (12 Juin 2026)
   - DESIGN — Design unique « Lavande » (C2) : le sélecteur de design est supprimé (dropdown du header hub et du header projet), il ne reste qu'un seul rendu — icônes duotone (fonds de catégorie teintés, SVG colorés par catégorie). Côté CSS, les styles d'icônes emoji, colored, minimal et gradient sont retirés ; seul le bloc duotone subsiste, plus les règles orphelines #design-dropdown (dédiées et fragments dans les sélecteurs groupés .dropdown-menu). Côté JS, UITheme.designs / currentDesign / setDesign et leurs proxys App disparaissent, l'init du design dans Auth.init (lecture fmp_design + sélecteur fantôme design-selector) est retirée, et le registre Icons.styles est réduit à duotone. Icons.setStyle et Icons.init forcent désormais icon-style-duotone — appliqué au boot, sans bascule possible. Rappel : les classes design-* n'avaient jamais eu de CSS, seul le style d'icônes était réel.
   - ROBUSTESSE — IIFE async supprimée (D4) : le chargement des polices Courier Prime de l'export PDF scénario (Exporter._courierPrimeLoading) ne passe plus par une IIFE async auto-exécutée mais par une fonction nommée downloadCourierPrime(), conforme à la règle « pas d'IIFE async ».
@@ -13109,6 +13117,95 @@ crewRoles: {
       // Évite de stocker des base64 dans state.data (cause majeure de surcharge Supabase)
       // Convention de chemin : {projectId}/{category}/{filename}
       // category : 'actors', 'locations', 'crew'
+
+      // === Lot D6 : résolveur d'URLs signées pour le bucket privé 'projects' ===
+      STORAGE_TTL: 3600, // 1 h
+      _signedCache: new Map(), // path -> { url, exp }
+      _projPathFrom: (s) => {
+          if(typeof s !== 'string' || !s) return null;
+          const m = s.match(/\/object\/(?:public|sign)\/projects\/([^?]+)/);
+          if(m) return decodeURIComponent(m[1]);
+          if(!s.startsWith('http') && !s.startsWith('data:') && /^[\w-]+\/[\w./-]+$/.test(s)) return s;
+          return null;
+      },
+      // Helper SYNCHRONE de rendu : URL signée en cache, sinon valeur d'origine (fallback sûr)
+      signedUrlFor: (stored) => {
+          if(typeof stored !== 'string' || !stored) return stored;
+          const path = Utils._projPathFrom(stored);
+          if(!path) return stored;
+          const hit = Utils._signedCache.get(path);
+          if(hit && hit.exp > Date.now()) return hit.url;
+          return stored;
+      },
+      // Pré-signe en lot tous les médias 'projects' de data (appelé au chargement)
+      refreshSignedCache: async (data) => {
+          try {
+              if(!data) return;
+              const paths = new Set();
+              const walk = (o) => {
+                  if(!o) return;
+                  if(typeof o === 'string') { const p = Utils._projPathFrom(o); if(p) paths.add(p); return; }
+                  if(Array.isArray(o)) { o.forEach(walk); return; }
+                  if(typeof o === 'object') Object.values(o).forEach(walk);
+              };
+              walk(data);
+              if(!paths.size) return;
+              const list = [...paths];
+              const ttl = Utils.STORAGE_TTL;
+              const exp = Date.now() + (ttl - 60) * 1000;
+              for(let i = 0; i < list.length; i += 100) {
+                  const chunk = list.slice(i, i + 100);
+                  const { data: signed, error } = await supabase.storage.from('projects').createSignedUrls(chunk, ttl);
+                  if(error || !signed) continue;
+                  signed.forEach(s => { if(s && s.signedUrl && !s.error) Utils._signedCache.set(s.path, { url: s.signedUrl, exp }); });
+              }
+          } catch(e) { console.warn('refreshSignedCache:', e); }
+      },
+      // Signe + cache un path fraîchement uploadé (rendu immédiat sans recharger)
+      _cacheNewPath: async (path) => {
+          try {
+              const ttl = Utils.STORAGE_TTL;
+              const { data, error } = await supabase.storage.from('projects').createSignedUrl(path, ttl);
+              if(!error && data && data.signedUrl) Utils._signedCache.set(path, { url: data.signedUrl, exp: Date.now() + (ttl - 60) * 1000 });
+          } catch(e) {}
+      },
+      _resolveOneImg: (img) => {
+          try {
+              const cur = img.getAttribute('src');
+              if(!cur || cur.indexOf('/object/sign/projects/') !== -1) return;
+              const path = Utils._projPathFrom(cur);
+              if(!path) return;
+              const hit = Utils._signedCache.get(path);
+              if(hit && hit.exp > Date.now() && hit.url !== cur) img.setAttribute('src', hit.url);
+          } catch(e) {}
+      },
+      resolveProjectImgs: (root) => {
+          try { (root || document).querySelectorAll('img[src]').forEach(Utils._resolveOneImg); } catch(e) {}
+      },
+      // Observer global : résout les <img> 'projects' au fil des rendus + re-signature périodique
+      startImgResolver: () => {
+          if(Utils._imgObserver) { Utils.resolveProjectImgs(document); return; }
+          Utils._imgObserver = new MutationObserver((muts) => {
+              for(const m of muts) {
+                  if(!m.addedNodes) continue;
+                  m.addedNodes.forEach((n) => {
+                      if(n.nodeType !== 1) return;
+                      if(n.tagName === 'IMG') Utils._resolveOneImg(n);
+                      else if(n.querySelectorAll) n.querySelectorAll('img[src]').forEach(Utils._resolveOneImg);
+                  });
+              }
+          });
+          Utils._imgObserver.observe(document.body, { childList: true, subtree: true });
+          Utils.resolveProjectImgs(document);
+          if(!Utils._resignTimer) {
+              Utils._resignTimer = setInterval(async () => {
+                  if(!state.currentProjectId || !state.data) return;
+                  await Utils.refreshSignedCache(state.data);
+                  Utils.resolveProjectImgs(document);
+              }, (Utils.STORAGE_TTL - 600) * 1000);
+          }
+      },
+
       uploadProjectFile: async (file, opts) => {
           // opts = { category: 'actors'|'locations'|'crew', entityId: 'act_xxx', kind: 'photo'|'gallery', maxDimension, quality, maxKb }
           if(!state.currentProjectId) { Utils.toast('Aucun projet ouvert', 'error'); return null; }
@@ -13155,6 +13252,7 @@ crewRoles: {
               
               // Récupérer l'URL publique
               const { data: urlData } = supabase.storage.from('projects').getPublicUrl(filePath);
+              await Utils._cacheNewPath(filePath); // Lot D6 : signe+cache pour rendu immédiat sous bucket privé
               return urlData?.publicUrl || null;
           } catch(e) {
               console.error('Exception upload Storage:', e);
@@ -13199,6 +13297,7 @@ crewRoles: {
                   return null;
               }
               const { data: urlData } = supabase.storage.from('projects').getPublicUrl(filePath);
+              await Utils._cacheNewPath(filePath); // Lot D6 : signe+cache pour rendu immédiat sous bucket privé
               // Ajout d'un cache-buster pour éviter que le navigateur affiche une vieille version après upsert
               return urlData?.publicUrl ? `${urlData.publicUrl}?t=${Date.now()}` : null;
           } catch(e) {
@@ -16581,11 +16680,12 @@ const LockManager = {
               const path = MiniChat.projectId + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '_' + safeName;
               const { error } = await supabase.storage.from(MiniChat.BUCKET).upload(path, file, { upsert: false });
               if(error) throw error;
-              const { data: urlData } = supabase.storage.from(MiniChat.BUCKET).getPublicUrl(path);
+              const { data: urlData, error: signErr } = await supabase.storage.from(MiniChat.BUCKET).createSignedUrl(path, 86400);
+              if(signErr) throw signErr;
               const msg = {
                   id: 'mc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
                   fileName: file.name,
-                  fileUrl: urlData.publicUrl,
+                  fileUrl: urlData.signedUrl,
                   fileSize: file.size,
                   senderEmail: state.currentUser.email,
                   senderName: (state.userProfile && (state.userProfile.name || state.userProfile.displayName)) || state.currentUser.email.split('@')[0],
@@ -17677,6 +17777,8 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               
               state.data = safeData; state.currentProjectId = id;
               state.savedBaseline = JSON.parse(JSON.stringify(safeData)); // Phase 0 : état de référence pour sauvegarde partielle / merge sélectif
+              await Utils.refreshSignedCache(state.data); // Lot D6 : pré-signe les médias 'projects' avant rendu
+              Utils.startImgResolver(); // Lot D6 : résolveur DOM des <img> signées
               state.currentProjectType = project.project_type || 'film'; // S3.4
               state.statsFilter = { scope: 'all', seasonId: null, episodeId: null }; // Stats: filtre de scope par défaut
               NavMemory.setProject(id); // Persistance pour F5
@@ -26895,7 +26997,7 @@ const MoodBoard = {
                     ctx.drawImage(img, 0, 0, 800, 600);
                     DrawingEditor.redraw();
                 };
-                img.src = element.src;
+                img.src = Utils.signedUrlFor(element.src);
             }
         }, 100);
     },
@@ -27512,7 +27614,7 @@ const MoodBoardExport = {
                 await new Promise(resolve => {
                     img.onload = () => { item.el.imgLoaded = img; resolve(); };
                     img.onerror = () => resolve();
-                    img.src = item.el.src;
+                    img.src = Utils.signedUrlFor(item.el.src);
                 });
             } else if(item.type === 'shape') {
                 const shape = MoodBoard.shapes.find(s => s.id === item.el.shapeId);
@@ -28162,7 +28264,7 @@ const Storyboard = {
                         // [Phase C.2.6 fix] crossOrigin obligatoire pour pouvoir convertir le canvas en PDF
                         if(typeof zone.imageUrl === 'string' && zone.imageUrl.startsWith('http')) im.crossOrigin = 'anonymous';
                         im.onload = () => { octx.drawImage(im, 0, 0, overlayCanvas.width, overlayCanvas.height); };
-                        im.src = zone.imageUrl;
+                        im.src = Utils.signedUrlFor(zone.imageUrl);
                     } else if(zone.drawingData) {
                         DrawingEditor.renderDrawingData(octx, zone.drawingData);
                     }
@@ -28391,7 +28493,7 @@ const Storyboard = {
                         // [Phase C.2.6 fix] crossOrigin obligatoire pour pouvoir convertir le canvas en PDF
                         if(typeof zone.imageUrl === 'string' && zone.imageUrl.startsWith('http')) im.crossOrigin = 'anonymous';
                         im.onload = () => { octx.drawImage(im, 0, 0, overlayCanvas.width, overlayCanvas.height); };
-                        im.src = zone.imageUrl;
+                        im.src = Utils.signedUrlFor(zone.imageUrl);
                     } else if(zone.drawingData) {
                         DrawingEditor.renderDrawingData(octx, zone.drawingData);
                     }
@@ -28666,7 +28768,7 @@ const Storyboard = {
             Storyboard._svgImageCache[cacheKey].ready = true;
             Storyboard._svgImageCache[cacheKey].failed = true;
         };
-        img.src = imageData;
+        img.src = Utils.signedUrlFor(imageData);
         
         return null;
     },
@@ -29059,7 +29161,8 @@ const StoryboardExport = {
                 };
                 // Cache-buster pour forcer un rechargement avec crossOrigin
                 // (l'image originale peut être en cache navigateur sans crossOrigin)
-                loaderImg.src = src + (src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+                const _suSrc = Utils.signedUrlFor(src);
+                loaderImg.src = _suSrc + (_suSrc.includes('?') ? '&' : '?') + 'cb=' + Date.now();
                 setTimeout(() => resolve(null), 5000);
             });
             
@@ -29229,7 +29332,7 @@ const StoryboardExport = {
             layerImg.onload = () => { 
                 ctx.drawImage(layerImg, 0, 0, ctx.canvas.width, ctx.canvas.height); 
             };
-            layerImg.src = techZone.imageUrl;
+            layerImg.src = Utils.signedUrlFor(techZone.imageUrl);
         } else if(techZone.drawingData) {
             // Dessine les calques DrawingEditor du zone tech par dessus (renderDrawingData fait drawImage async)
             DrawingEditor.renderDrawingData(ctx, techZone.drawingData);
@@ -29278,7 +29381,7 @@ const StoryboardExport = {
                 // Puis dessiner le calque technique par-dessus (après le load)
                 Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer);
             };
-            img.src = shot.imageUrl;
+            img.src = Utils.signedUrlFor(shot.imageUrl);
             hasContent = true;
         } else if(shot.imageType === 'drawing' && shot.drawingData) {
             // Rendu du dessin (renderDrawingData gère ses async via crossOrigin)
@@ -29613,7 +29716,7 @@ const DrawingEditor = {
                         img.onerror = () => {
                             console.warn('[DrawingEditor] Erreur chargement calque depuis Storage:', layer.imageData?.substring(0, 80));
                         };
-                        img.src = layer.imageData;
+                        img.src = Utils.signedUrlFor(layer.imageData);
                         layer.canvas = canvas;
                     } else {
                         layer.canvas = document.createElement('canvas');
@@ -29688,7 +29791,7 @@ const DrawingEditor = {
                                 };
                                 // [Phase C.2.6 fix] crossOrigin obligatoire pour pouvoir convertir le canvas en PDF
                                 if(typeof layer.imageData === 'string' && layer.imageData.startsWith('http')) im.crossOrigin = 'anonymous';
-                                im.src = layer.imageData;
+                                im.src = Utils.signedUrlFor(layer.imageData);
                             });
                         }
                     }
@@ -29700,7 +29803,7 @@ const DrawingEditor = {
                     // [Phase C.2.6 fix] crossOrigin obligatoire pour pouvoir convertir le canvas en PDF
                     if(typeof originalUrl === 'string' && originalUrl.startsWith('http')) img.crossOrigin = 'anonymous';
                     img.onload = () => { DrawingEditor.redraw(); };
-                    img.src = originalUrl;
+                    img.src = Utils.signedUrlFor(originalUrl);
                     DrawingEditor.originalBgImage = img;
                 }
             }
@@ -31246,7 +31349,7 @@ const DrawingEditor = {
             if(typeof layerState.imageData === 'string' && layerState.imageData.startsWith('http')) {
                 img.crossOrigin = 'anonymous';
             }
-            img.src = layerState.imageData;
+            img.src = Utils.signedUrlFor(layerState.imageData);
             img.onload = () => {
                 ctx.drawImage(img, 0, 0);
                 DrawingEditor.redraw();
@@ -31426,7 +31529,7 @@ const DrawingEditor = {
             img.onload = () => {
                 ctx.drawImage(img, 0, 0);
             };
-            img.src = layerData.imageData;
+            img.src = Utils.signedUrlFor(layerData.imageData);
         });
     }
 };
@@ -48014,7 +48117,7 @@ const MoteurArchive = {
                 progress.update(`Téléchargement: ${fileName}`, downloaded, totalImages);
                 
                 try {
-                    const response = await fetch(item.url);
+                    const response = await fetch(Utils.signedUrlFor(item.url));
                     if(!response.ok) throw new Error('HTTP ' + response.status);
                     const blob = await response.blob();
                     zip.file(localPath, blob);
@@ -51357,7 +51460,7 @@ const History = {
     downloadImage: async (url, label) => {
         try {
             Utils.toast('Téléchargement...', 'info', 1500);
-            const response = await fetch(url, { mode: 'cors' });
+            const response = await fetch(Utils.signedUrlFor(url), { mode: 'cors' });
             if(!response.ok) throw new Error('HTTP ' + response.status);
             const blob = await response.blob();
             // Déterminer l'extension
@@ -51640,7 +51743,7 @@ const Presentation = {
         const imgPlaceholder = document.getElementById('project-image-placeholder');
         if(imgInput) imgInput.value = p.image || '';
         if(p.image) {
-            if(imgPreview) { imgPreview.src = p.image; imgPreview.style.display = 'block'; }
+            if(imgPreview) { imgPreview.src = Utils.signedUrlFor(p.image); imgPreview.style.display = 'block'; }
             if(imgPlaceholder) imgPlaceholder.style.display = 'none';
         }
         
@@ -52381,7 +52484,7 @@ const Presentation = {
             
             input.value = publicUrl;
             if(preview) {
-                preview.src = publicUrl;
+                preview.src = Utils.signedUrlFor(publicUrl);
                 preview.style.display = 'block';
             }
             if(placeholder) { placeholder.style.display = 'none'; placeholder.innerHTML = '🎬'; }
@@ -58687,7 +58790,7 @@ const UniverseProfileModal = {
             };
             img.onerror = () => resolve(null);
             setTimeout(() => resolve(null), 5000);
-            img.src = url;
+            img.src = Utils.signedUrlFor(url);
         });
         
         // ===== HELPER : Section colorée =====
@@ -66343,7 +66446,7 @@ const Synopsis = {
                         // Calcul dimensions : on récupère via Image native
                         const imgEl = new Image();
                         imgEl.crossOrigin = 'anonymous';
-                        imgEl.src = block.src;
+                        imgEl.src = Utils.signedUrlFor(block.src);
                         // Attendre le chargement (déjà chargé si dataURL ou cache)
                         if(!imgEl.complete) {
                             // skip async loading dans ce contexte sync - on retourne
@@ -66538,7 +66641,7 @@ const FichesPDF = {
                 console.warn('[FichesPDF] Image chargement échoué :', url);
                 resolve(null);
             };
-            img.src = url;
+            img.src = Utils.signedUrlFor(url);
         });
     },
     
@@ -66609,7 +66712,7 @@ const FichesPDF = {
     _drawPhotoOrPlaceholder: (doc, dataUrl, x, y, w, h) => {
         if(dataUrl) {
             try {
-                doc.addImage(dataUrl, 'JPEG', x, y, w, h);
+                doc.addImage(Utils.signedUrlFor(dataUrl), 'JPEG', x, y, w, h);
                 // Cadre fin autour
                 doc.setDrawColor(...PdfTheme.COLORS.BORDER);
                 doc.setLineWidth(0.3);
