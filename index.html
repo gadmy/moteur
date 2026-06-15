@@ -32,8 +32,8 @@ A1 [X] (C) XSS stocké forum : échapper titre / contenu / nom d'auteur des
        threads et réponses au rendu + sécuriser les <img src> (v530)
 A2 [X] (C) XSS stocké profils publics : échapper services, actualités,
        champs libres des fiches Univers affichées aux autres (v530)
-A3 [~] (C) SRI + crossorigin + defer faits sur 7/8 CDN (v530). Reste supabase-js
-       (alias de version sans nom de fichier -> SRI à faire via URL UMD exacte)
+A3 [X] (C) SRI + crossorigin + defer sur 7/8 CDN (v530). supabase-js couvert
+       via URL UMD exacte (dist/umd/supabase.js) + integrity sha384 (v534)
 A4 [X] (C) Neutraliser , ( ) * dans les valeurs des filtres PostgREST .or()
        via Utils.pgSafe, appliqué aux 7 call sites dont la recherche ilike (v530)
 A5 [X] Audit RLS complet (11/06). Buckets tous public=true (lecture par URL
@@ -103,6 +103,43 @@ D6 [X] Buckets privés + URLs signées :
        - Buckets 'projects' + 'minichat' en Private.
        - Lot 4 [X] FAIT : migration hygiène URLs publiques 'projects' → paths (Utils.migrateProjPathsInData : one-shot idempotent gated par flag _mediaPathsMigrated, branché dans loadProject après la baseline ; ne touche que le bucket projects, persisté au prochain save).
 
+PHASE E — AUDIT FIN (2e passe, juin 2026). Priorité P1 > P2 > P3.
+E1 [X] (C) P1 XSS annuaire — Contacts ET GlobalSearch (modules jumeaux) :
+       cartes + modales de profil entièrement échappées (Utils.escape sur les
+       champs inter-utilisateurs, String() sur les numériques, safeUrl + noopener
+       sur href website, safeMediaUrl sur les src photo/galerie). getEmbedUrl
+       déjà sûr (vérifié). node --check OK. (v534)
+E2 [X] (C) P1 XSS fenêtres d'impression : 4 fenêtres document.write sécurisées —
+       plan de travail (titre), lecteur de fichier MoodBoard (fileName), feuille
+       de service (titre + lieu/horaires/scènes/convocations/dépts/items/notes).
+       La fenêtre FDS (40563) avait déjà son titre échappé. node --check OK. (v534)
+E3 [X] (C) P2 images en src — option 2 (ciblé inter-utilisateurs) retenue :
+       safeMediaUrl appliqué aux src affichant des médias d'autrui (annuaire via
+       E1, openProfileModal, showProfileModal, createMapMarker, renderPartners,
+       displayResults/openProjectModal, searchTeamMember, checkAndLinkPublicProfile,
+       renderPendingClaims). Médias du projet propre + cartes Univers
+       (createFanCard) laissés : URLs Storage, risque négligeable. node --check OK. (v534)
+E4 [X] (C) P2 target _blank : rel=noopener sur 100% des liens (vérifié : 0 lien
+       _blank sans noopener). Faits via E1 (website asso/entreprise) + E4 (GitHub
+       landing/footer, bouton Google Maps, pièce jointe). node --check OK. (v534)
+E5 [X] (C) P3 forEach(async) corrigé (MatchingEngine.displayResults) : passé en
+       for...of séquentiel, displayResults rendue async, return -> continue. Le
+       géocodage est désormais attendu (et sérialisé pour Nominatim). node --check OK. (v534)
+E6 [X] (C) P3 audité : 109 catch silencieux (62 catch(e){} + 47 catch(_){}) tous
+       best-effort intentionnel (localStorage, cache URLs signées, src DOM, addImage
+       PDF, parse notes JSON avec fallback) -> aucun ne masque d'erreur métier, rien modifié. (v534)
+E7 [X] (C) P3 console.log triés : tous outils volontaires conservés (migrations,
+       analyse state.data, snapshots, ErrorLogger, easter egg). Seul bruit auto retiré :
+       bloc DIAG GEL SESSION temporaire (sbDiag, log [SB auth] auto, Ctrl+Alt+D, log boot),
+       gel réglé. node --check OK. (v534)
+E8 [X] (C) P3 listeners audités : drags ont leur up->remove, menus remove ou once,
+       globaux gardés par flag ou one-time. Seule fuite réelle corrigée :
+       ColorWheel.setupEvents ré-attachait document mousemove/mouseup à chaque open
+       -> posés une seule fois via ColorWheel._docBound. node --check OK. (v534)
+E9 [X] (C) P3 NON corrigé (volontaire) : 16 == null idiomatiques ; les autres == sont
+       des comparaisons DOM/mémoire requises (id, value option, dataset.sceneId chaîne
+       vs id numérique) -> un === casserait. Aucun bug. (v534)
+
 DÉCISIONS ACTÉES
 - MiniChat (talkie-walkie éphémère par projet, texte + fichiers) : CONSERVÉ.
   Seuls l'onglet chat et la messagerie interne ont été supprimés (v524-525).
@@ -117,6 +154,7 @@ DÉCISIONS ACTÉES
 v534 (15 Juin 2026)
   - GUIDE — sections manquantes ajoutées (D1, fin) : deux nouvelles sections dans le guide intégré (Tutorial) — « 🪟 Fenêtres flottantes » (détacher un sous-onglet, interrupteur Consultation/Modification, verrou de domaine, pile de badges rouge/bleu/gris) et « 🏛️ Asso / Entreprises » (fiche structure à parité comédiens/techniciens, instantané depuis l'Univers, verrou des fiches liées, section « Sur ce projet » toujours éditable, resync auto). Le mapping « ❓ Aide sur cet onglet » de l'onglet orgs pointe désormais sur la bonne section au lieu du début du guide.
   - STOCKAGE — migration hygiène URLs → paths (D6, lot 4) : nouveau helper Utils.migrateProjPathsInData qui convertit en place, dans les données du projet, les URLs publiques/signées du bucket privé « projects » en paths bruts. One-shot idempotent (drapeau _mediaPathsMigrated), exécuté au chargement du projet après la capture de baseline pour que la différence soit persistée au prochain enregistrement. Ne touche que le bucket projects (avatars, gallery et minichat intacts) ; le rendu reste servi en URLs signées. Aucun changement SQL/RLS, purement client.
+  - SÉCURITÉ / DETTE — fin de l'audit Phase E (E6-E9). E6 (catch silencieux) et E9 (==/!= non stricts) audités sans modification : les premiers sont tous du best-effort intentionnel (localStorage, cache d'URLs signées, src DOM, addImage PDF, parse de notes JSON avec repli) et aucun ne masque d'erreur métier ; les seconds sont soit des == null idiomatiques, soit des comparaisons DOM/mémoire nécessaires (id, value d'option, dataset.sceneId en chaîne contre id numérique) qu'un === casserait. E7 : retrait du bloc « DIAG GEL DE SESSION » temporaire (outil sbDiag, log [SB auth] automatique sur onAuthStateChange, raccourci Ctrl+Alt+D, log de boot), le gel de session étant résolu ; les console.log restants sont l'interface console volontaire des outils (migrations, analyse de state.data, snapshots, ErrorLogger) et sont conservés. E8 : correction de la seule fuite réelle de listeners — ColorWheel.setupEvents ré-attachait les écouteurs document mousemove/mouseup à chaque ouverture de la roue chromatique, désormais posés une seule fois via le drapeau ColorWheel._docBound ; tous les autres écouteurs sont soit nettoyés (drags up->remove, menus remove/once), soit posés une fois (gardes appListenersAttached / _ctxDelegated / cleanerListenerAttached, DOMContentLoaded).
 v533 — Sécurité : buckets de stockage privés (audit juin 2026, chantier D6)
 - Bucket 'projects' passé en privé : images projet (photos, galeries, storyboard, fiches) servies via URLs signées expirantes (TTL 1 h), re-signées par cache, accès réservé aux membres du projet (RLS).
 - Bucket 'minichat' passé en privé : fichiers du talkie-walkie servis via URL signée (TTL 24 h), accès réservé aux membres.
@@ -7379,7 +7417,7 @@ body.presentation-mode .presentation-bar {
     <nav class="landing-nav">
       <a href="#features">Fonctionnalités</a>
       <a href="#screenshots">Aperçu</a>
-      <a href="https://github.com/gadmy/moteur" target="_blank">GitHub</a>
+      <a href="https://github.com/gadmy/moteur" target="_blank" rel="noopener">GitHub</a>
       <button class="landing-btn landing-btn-outline" onclick="app.Landing.showAuth()">Se connecter</button>
       <button class="landing-btn landing-btn-primary" onclick="app.Landing.showAuth('signup')">S'inscrire</button>
     </nav>
@@ -7476,7 +7514,7 @@ body.presentation-mode .presentation-bar {
   </section>
 
   <footer class="landing-footer">
-    <p>© 2026 Moteur — Fait avec ❤️ pour les cinéastes — <a href="https://github.com/gadmy/moteur" target="_blank">GitHub</a></p>
+    <p>© 2026 Moteur — Fait avec ❤️ pour les cinéastes — <a href="https://github.com/gadmy/moteur" target="_blank" rel="noopener">GitHub</a></p>
   </footer>
 </div>
 
@@ -7488,7 +7526,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv533</p>
+      <p>vv534</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -12131,27 +12169,7 @@ const app = (function(){
                   });
                   supabase = client;
                   window.supabase = client;
-                  // === DIAG GEL DE SESSION (temporaire) — sbDiag() ou Ctrl+Alt+D ===
-                  try {
-                      window.sbDiag = async () => {
-                          console.log('=== SB DIAG ===');
-                          console.log('visibilite:', document.visibilityState, '| online:', navigator.onLine, '| depuis chargement:', Math.round(performance.now() / 1000) + 's');
-                          try {
-                              const res = await Promise.race([client.auth.getSession(), new Promise(r => setTimeout(() => r({ __timeout: true }), 3000))]);
-                              if(res && res.__timeout) console.warn('getSession() ne repond pas en 3s -> AUTH BLOQUE');
-                              else { const sess = res && res.data && res.data.session; console.log('session:', sess ? ('token expire dans ' + Math.round((sess.expires_at * 1000 - Date.now()) / 1000) + 's') : 'NULL'); }
-                          } catch(e) { console.warn('getSession err:', e && e.message); }
-                          try { console.log('realtime:', client.realtime && client.realtime.connectionState ? client.realtime.connectionState() : '?', '| channels:', client.getChannels().map(c => c.topic + ':' + c.state)); } catch(_) {}
-                          const inf = window.__sbInflight ? [...window.__sbInflight.values()] : [];
-                          console.log('requetes EN COURS:', inf.length);
-                          inf.forEach(x => console.log('   ' + ((performance.now() - x.t0) / 1000).toFixed(1) + 's : ' + x.label));
-                          console.log('=== fin diag ===');
-                      };
-                      client.auth.onAuthStateChange((e, sess) => { try { console.log('[SB auth]', e, sess ? ('exp dans ' + Math.round((sess.expires_at * 1000 - Date.now()) / 1000) + 's') : 'no session'); } catch(_) {} });
-                      window.addEventListener('keydown', (ev) => { if(ev.ctrlKey && ev.altKey && (ev.key === 'd' || ev.key === 'D')) { ev.preventDefault(); window.sbDiag(); } });
-                      console.log('Diag gel actif : en cas de gel, ouvre la console et tape sbDiag() (ou Ctrl+Alt+D).');
-                  } catch(_) {}
-                  if(isFileProtocol) {
+                      if(isFileProtocol) {
                       // Mode fichier local détecté
                       supabase.realtime.disconnect();
                       supabase.removeAllChannels();
@@ -23258,7 +23276,7 @@ const tabToSection = {
                   modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
                   
                   const photoHtml = existingProfile.photo 
-                      ? `<img src="${existingProfile.photo}" alt="Photo de profil" style="width:80px;height:80px;border-radius:50%;object-fit:cover;margin-bottom:10px;">` 
+                      ? `<img src="${Utils.safeMediaUrl(existingProfile.photo)}" alt="Photo de profil" style="width:80px;height:80px;border-radius:50%;object-fit:cover;margin-bottom:10px;">` 
                       : `<div style="width:80px;height:80px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:2rem;color:white;margin-bottom:10px;">${(existingProfile.name || '?')[0].toUpperCase()}</div>`;
                   
                   modal.innerHTML = `
@@ -25374,13 +25392,15 @@ const ColorWheel = {
             ColorWheel.handleDrag(e);
         });
         
-        document.addEventListener('mousemove', (e) => {
-            if(ColorWheel.isDragging) ColorWheel.handleDrag(e);
-        });
-        
-        document.addEventListener('mouseup', () => {
-            ColorWheel.isDragging = false;
-        });
+        if(!ColorWheel._docBound) {
+            ColorWheel._docBound = true;
+            document.addEventListener('mousemove', (e) => {
+                if(ColorWheel.isDragging) ColorWheel.handleDrag(e);
+            });
+            document.addEventListener('mouseup', () => {
+                ColorWheel.isDragging = false;
+            });
+        }
     },
     
     handleDrag: (e) => {
@@ -27542,9 +27562,9 @@ const MoodBoard = {
         if(element.fileType.includes('pdf')) {
             win.document.write(`<iframe src="${element.fileData}" style="width:100%;height:100%;border:none;"></iframe>`);
         } else {
-            win.document.write(`<html><head><title>${element.fileName}</title></head><body>
-                <p>Fichier: <strong>${element.fileName}</strong></p>
-                <p><a href="${element.fileData}" download="${element.fileName}">📥 Télécharger</a></p>
+            win.document.write(`<html><head><title>${Utils.escape(element.fileName)}</title></head><body>
+                <p>Fichier: <strong>${Utils.escape(element.fileName)}</strong></p>
+                <p><a href="${element.fileData}" download="${Utils.escape(element.fileName)}">📥 Télécharger</a></p>
             </body></html>`);
         }
     },
@@ -35703,7 +35723,7 @@ const ProfileGallery = {
             return `
                 <div style="background: rgba(255,255,255,0.15); border-radius: 8px; padding: 15px; display: flex; align-items: center; gap: 15px;">
                     <div style="width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 1.5rem; overflow: hidden;">
-                        ${claim.photo ? `<img src="${claim.photo}" alt="Photo de profil" class="img-cover">` : typeIcon}
+                        ${claim.photo ? `<img src="${Utils.safeMediaUrl(claim.photo)}" alt="Photo de profil" class="img-cover">` : typeIcon}
                     </div>
                     <div class="flex-1">
                         <div class="fw-bold">${Utils.escape(claim.name)}</div>
@@ -38448,7 +38468,7 @@ const GlobalSearch = {
         
         results.forEach((person, idx) => {
             const photoHTML = person.photo 
-                ? `<img src="${person.photo}" alt="${person.name || person.title}">`
+                ? `<img src="${Utils.safeMediaUrl(person.photo)}" alt="${Utils.escape(person.name || person.title || '')}">`
                 : defaultIcon;
             
             let metaHTML = '';
@@ -38456,31 +38476,31 @@ const GlobalSearch = {
             
             if(isActors) {
                 const details = [];
-                if(person.age) details.push(person.age + ' ans');
-                if(person.height) details.push(person.height + ' cm');
-                if(person.city) details.push('📍 ' + person.city);
+                if(person.age) details.push(Utils.escape(person.age + ' ans'));
+                if(person.height) details.push(Utils.escape(person.height + ' cm'));
+                if(person.city) details.push('📍 ' + Utils.escape(person.city));
                 metaHTML = details.join(' • ');
                 
                 if(person.collabType === 'pro') tagsHTML += `<span class="global-search-card-tag" style="background:#4CAF50;color:white;">🎬 Pro</span>`;
                 if(person.collabType === 'semi-pro') tagsHTML += `<span class="global-search-card-tag" style="background:#FF9800;color:white;">⚡ Semi-pro</span>`;
                 if(person.collabType === 'benevole') tagsHTML += `<span class="global-search-card-tag" style="background:#E91E63;color:white;">❤️ Bénévole</span>`;
-                if(person.dailyRate) tagsHTML += `<span class="global-search-card-tag">💰 ${person.dailyRate}${person.rateCurrency || '€'}</span>`;
-                if(person.sports) tagsHTML += `<span class="global-search-card-tag">🏃 ${person.sports}</span>`;
-                if(person.languages) tagsHTML += `<span class="global-search-card-tag">🗣️ ${person.languages}</span>`;
+                if(person.dailyRate) tagsHTML += `<span class="global-search-card-tag">💰 ${Utils.escape(String(person.dailyRate))}${Utils.escape(person.rateCurrency || '€')}</span>`;
+                if(person.sports) tagsHTML += `<span class="global-search-card-tag">🏃 ${Utils.escape(person.sports)}</span>`;
+                if(person.languages) tagsHTML += `<span class="global-search-card-tag">🗣️ ${Utils.escape(person.languages)}</span>`;
                 if(person.hasVehicle) tagsHTML += `<span class="global-search-card-tag">🚗 Véhicule</span>`;
                 if(person.demoreel) tagsHTML += `<span class="global-search-card-tag">🎬 Démo</span>`;
                 if(person.galleryPhotos && person.galleryPhotos.length > 0) tagsHTML += `<span class="global-search-card-tag">📸 ${person.galleryPhotos.length} photos</span>`;
             } else {
                 const deptLabels = { image: '📹 Image', lumiere: '💡 Lumière', realisation: '🎬 Réalisation', son: '🎤 Son', decoration: '🎨 Décoration', costumes: '👗 Costumes', maquillage: '💄 Maquillage', regie: '🎭 Régie', production: '💼 Production', postprod: '🎞️ Post-prod' };
-                metaHTML = (person.role || '') + (person.department ? ' • ' + (deptLabels[person.department] || person.department) : '');
-                if(person.city) metaHTML += ' • 📍 ' + person.city;
+                metaHTML = Utils.escape(person.role || '') + (person.department ? ' • ' + (deptLabels[person.department] || Utils.escape(person.department)) : '');
+                if(person.city) metaHTML += ' • 📍 ' + Utils.escape(person.city);
                 
                 if(person.collabType === 'pro') tagsHTML += `<span class="global-search-card-tag" style="background:#4CAF50;color:white;">🎬 Pro</span>`;
                 if(person.collabType === 'semi-pro') tagsHTML += `<span class="global-search-card-tag" style="background:#FF9800;color:white;">⚡ Semi-pro</span>`;
                 if(person.collabType === 'benevole') tagsHTML += `<span class="global-search-card-tag" style="background:#E91E63;color:white;">❤️ Bénévole</span>`;
-                if(person.dailyRate) tagsHTML += `<span class="global-search-card-tag">💰 ${person.dailyRate}${person.rateCurrency || '€'}</span>`;
+                if(person.dailyRate) tagsHTML += `<span class="global-search-card-tag">💰 ${Utils.escape(String(person.dailyRate))}${Utils.escape(person.rateCurrency || '€')}</span>`;
                 if(person.cameras && person.cameras.length > 0) {
-                    person.cameras.slice(0, 3).forEach(c => tagsHTML += `<span class="global-search-card-tag">📷 ${c}</span>`);
+                    person.cameras.slice(0, 3).forEach(c => tagsHTML += `<span class="global-search-card-tag">📷 ${Utils.escape(c)}</span>`);
                     if(person.cameras.length > 3) tagsHTML += `<span class="global-search-card-tag">+${person.cameras.length - 3}</span>`;
                 }
                 if(person.hasVehicle) tagsHTML += `<span class="global-search-card-tag">🚗 Véhicule</span>`;
@@ -38520,21 +38540,21 @@ const GlobalSearch = {
         let detailsHTML = '';
         if(isActors) {
             detailsHTML = `
-                <p><strong>Âge:</strong> ${person.age || 'N/A'} ans</p>
-                <p><strong>Taille:</strong> ${person.height || 'N/A'} cm</p>
-                <p><strong>Yeux:</strong> ${person.eyeColor || 'N/A'}</p>
-                <p><strong>Cheveux:</strong> ${person.hairColor || 'N/A'} (${person.hairLength || 'N/A'})</p>
-                <p><strong>Origine:</strong> ${person.ethnicity || 'N/A'}</p>
-                ${person.sports ? `<p><strong>Sports:</strong> ${person.sports}</p>` : ''}
-                ${person.languages ? `<p><strong>Langues:</strong> ${person.languages}</p>` : ''}
+                <p><strong>Âge:</strong> ${Utils.escape(String(person.age || 'N/A'))} ans</p>
+                <p><strong>Taille:</strong> ${Utils.escape(String(person.height || 'N/A'))} cm</p>
+                <p><strong>Yeux:</strong> ${Utils.escape(person.eyeColor || 'N/A')}</p>
+                <p><strong>Cheveux:</strong> ${Utils.escape(person.hairColor || 'N/A')} (${Utils.escape(person.hairLength || 'N/A')})</p>
+                <p><strong>Origine:</strong> ${Utils.escape(person.ethnicity || 'N/A')}</p>
+                ${person.sports ? `<p><strong>Sports:</strong> ${Utils.escape(person.sports)}</p>` : ''}
+                ${person.languages ? `<p><strong>Langues:</strong> ${Utils.escape(person.languages)}</p>` : ''}
             `;
         } else {
             detailsHTML = `
-                <p><strong>Département:</strong> ${person.department || 'N/A'}</p>
-                <p><strong>Fonction:</strong> ${person.role || 'N/A'}</p>
-                ${person.cameras && person.cameras.length > 0 ? `<p><strong>Caméras:</strong> ${person.cameras.join(', ')}</p>` : ''}
-                ${person.lenses && person.lenses.length > 0 ? `<p><strong>Objectifs:</strong> ${person.lenses.join(', ')}</p>` : ''}
-                ${person.otherEquipment && person.otherEquipment.length > 0 ? `<p><strong>Autre matériel:</strong> ${person.otherEquipment.join(', ')}</p>` : ''}
+                <p><strong>Département:</strong> ${Utils.escape(person.department || 'N/A')}</p>
+                <p><strong>Fonction:</strong> ${Utils.escape(person.role || 'N/A')}</p>
+                ${person.cameras && person.cameras.length > 0 ? `<p><strong>Caméras:</strong> ${Utils.escape(person.cameras.join(', '))}</p>` : ''}
+                ${person.lenses && person.lenses.length > 0 ? `<p><strong>Objectifs:</strong> ${Utils.escape(person.lenses.join(', '))}</p>` : ''}
+                ${person.otherEquipment && person.otherEquipment.length > 0 ? `<p><strong>Autre matériel:</strong> ${Utils.escape(person.otherEquipment.join(', '))}</p>` : ''}
             `;
         }
         
@@ -38546,11 +38566,11 @@ const GlobalSearch = {
             <div class="modal-panel">
                 <div style="display:flex;align-items:center;gap:15px;margin-bottom:20px;">
                     <div class="n8-avatar-4">
-                        ${person.photo ? `<img src="${person.photo}" alt="Photo de profil" style="width:100%;height:100%;object-fit:cover;">` : '👤'}
+                        ${person.photo ? `<img src="${Utils.safeMediaUrl(person.photo)}" alt="Photo de profil" style="width:100%;height:100%;object-fit:cover;">` : '👤'}
                     </div>
                     <div>
                         <h2 class="m-0">${Utils.escape(person.name)}</h2>
-                        <p style="margin:5px 0 0;color:var(--text-sec);">📍 ${person.city || 'Non précisé'}</p>
+                        <p style="margin:5px 0 0;color:var(--text-sec);">📍 ${Utils.escape(person.city || 'Non précisé')}</p>
                     </div>
                 </div>
                 ${person.bio ? `<p class="mb-15">${Utils.escape(person.bio)}</p>` : ''}
@@ -38558,15 +38578,15 @@ const GlobalSearch = {
                     ${detailsHTML}
                 </div>
                 <div class="box-bg">
-                    <p><strong>💰 Tarif:</strong> ${person.dailyRate || 'N/A'} ${person.rateCurrency || '€'}/${person.rateType || 'jour'}</p>
-                    ${person.hasVehicle ? `<p><strong>🚗 Véhicule:</strong> ${person.vehicleType || 'Oui'} (${person.vehicleSeats || '?'} places)</p>` : ''}
-                    ${person.availabilityText ? `<p><strong>📅 Disponibilités:</strong> ${person.availabilityText}</p>` : ''}
+                    <p><strong>💰 Tarif:</strong> ${Utils.escape(String(person.dailyRate || 'N/A'))} ${Utils.escape(person.rateCurrency || '€')}/${Utils.escape(person.rateType || 'jour')}</p>
+                    ${person.hasVehicle ? `<p><strong>🚗 Véhicule:</strong> ${Utils.escape(person.vehicleType || 'Oui')} (${Utils.escape(String(person.vehicleSeats || '?'))} places)</p>` : ''}
+                    ${person.availabilityText ? `<p><strong>📅 Disponibilités:</strong> ${Utils.escape(person.availabilityText)}</p>` : ''}
                 </div>
                 ${(person.galleryPhotos && person.galleryPhotos.length > 0) || (person.crewGalleryPhotos && person.crewGalleryPhotos.length > 0) ? `
                 <div class="box-bg">
                     <p class="mb-10"><strong>📸 Galerie Photos</strong></p>
                     <div style="display:flex;gap:10px;flex-wrap:wrap;">
-                        ${(person.galleryPhotos || person.crewGalleryPhotos || []).map(url => url ? `<img src="${url}" alt="Photo de la galerie" style="width:80px;height:80px;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="window.open('${url}','_blank')">` : '').join('')}
+                        ${(person.galleryPhotos || person.crewGalleryPhotos || []).map(url => url ? `<img src="${Utils.safeMediaUrl(url)}" alt="Photo de la galerie" style="width:80px;height:80px;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="window.open('${Utils.safeMediaUrl(url)}','_blank')">` : '').join('')}
                     </div>
                 </div>` : ''}
                 ${person.demoreel ? `
@@ -39028,26 +39048,26 @@ if(isActors) {
             let defaultIcon = '👤';
             if(tab === 'actors') {
                 const details = [];
-                if(person.age) details.push(person.age + ' ans');
-                if(person.city) details.push('📍 ' + person.city);
+                if(person.age) details.push(Utils.escape(person.age + ' ans'));
+                if(person.city) details.push('📍 ' + Utils.escape(person.city));
                 metaHTML = details.join(' • ');
                 defaultIcon = '🎭';
             } else if(tab === 'crew') {
-                metaHTML = person.role || '';
-                if(person.city) metaHTML += ' • 📍 ' + person.city;
+                metaHTML = Utils.escape(person.role || '');
+                if(person.city) metaHTML += ' • 📍 ' + Utils.escape(person.city);
                 defaultIcon = '🎥';
             } else if(tab === 'projects') {
-                metaHTML = person.projectType || '';
-                if(person.genre) metaHTML += ' • ' + person.genre;
-                if(person.city) metaHTML += ' • 📍 ' + person.city;
+                metaHTML = Utils.escape(person.projectType || '');
+                if(person.genre) metaHTML += ' • ' + Utils.escape(person.genre);
+                if(person.city) metaHTML += ' • 📍 ' + Utils.escape(person.city);
                 defaultIcon = '🎬';
             } else if(tab === 'associations') {
-                metaHTML = person.activity || '';
-                if(person.city) metaHTML += ' • 📍 ' + person.city;
+                metaHTML = Utils.escape(person.activity || '');
+                if(person.city) metaHTML += ' • 📍 ' + Utils.escape(person.city);
                 defaultIcon = '🏛️';
             } else if(tab === 'enterprises') {
-                metaHTML = person.activity || '';
-                if(person.city) metaHTML += ' • 📍 ' + person.city;
+                metaHTML = Utils.escape(person.activity || '');
+                if(person.city) metaHTML += ' • 📍 ' + Utils.escape(person.city);
                 defaultIcon = '🏢';
             }
             
@@ -39064,8 +39084,8 @@ if(isActors) {
                     </div>
                 </div>
                 <div class="contact-card-info">
-                    ${person.email ? `📧 ${person.email}<br>` : ''}
-                    ${person.phone ? `📱 ${person.phone}<br>` : ''}
+                    ${person.email ? `📧 ${Utils.escape(person.email)}<br>` : ''}
+                    ${person.phone ? `📱 ${Utils.escape(person.phone)}<br>` : ''}
                     ${person.hasVehicle ? '🚗 Véhicule disponible' : ''}
                 </div>
                 <div class="contact-card-actions">
@@ -39090,45 +39110,45 @@ if(isActors) {
         if(tab === 'actors') {
             defaultIcon = '🎭';
             detailsHTML = `
-                <p><strong>Âge:</strong> ${person.age || 'N/A'} ans</p>
-                <p><strong>Taille:</strong> ${person.height || 'N/A'} cm</p>
-                <p><strong>Yeux:</strong> ${person.eyeColor || 'N/A'}</p>
-                <p><strong>Cheveux:</strong> ${person.hairColor || 'N/A'}</p>
-                <p><strong>Origine:</strong> ${person.ethnicity || 'N/A'}</p>
-                ${person.sports ? `<p><strong>Sports:</strong> ${person.sports}</p>` : ''}
-                ${person.languages ? `<p><strong>Langues:</strong> ${person.languages}</p>` : ''}
+                <p><strong>Âge:</strong> ${Utils.escape(String(person.age || 'N/A'))} ans</p>
+                <p><strong>Taille:</strong> ${Utils.escape(String(person.height || 'N/A'))} cm</p>
+                <p><strong>Yeux:</strong> ${Utils.escape(person.eyeColor || 'N/A')}</p>
+                <p><strong>Cheveux:</strong> ${Utils.escape(person.hairColor || 'N/A')}</p>
+                <p><strong>Origine:</strong> ${Utils.escape(person.ethnicity || 'N/A')}</p>
+                ${person.sports ? `<p><strong>Sports:</strong> ${Utils.escape(person.sports)}</p>` : ''}
+                ${person.languages ? `<p><strong>Langues:</strong> ${Utils.escape(person.languages)}</p>` : ''}
             `;
         } else if(tab === 'crew') {
             defaultIcon = '🎥';
             detailsHTML = `
-                <p><strong>Département:</strong> ${person.department || 'N/A'}</p>
-                <p><strong>Fonction:</strong> ${person.role || 'N/A'}</p>
-                ${person.cameras && person.cameras.length > 0 ? `<p><strong>Caméras:</strong> ${person.cameras.join(', ')}</p>` : ''}
-                ${person.lenses && person.lenses.length > 0 ? `<p><strong>Objectifs:</strong> ${person.lenses.join(', ')}</p>` : ''}
-                ${person.otherEquipment && person.otherEquipment.length > 0 ? `<p><strong>Matériel:</strong> ${person.otherEquipment.join(', ')}</p>` : ''}
+                <p><strong>Département:</strong> ${Utils.escape(person.department || 'N/A')}</p>
+                <p><strong>Fonction:</strong> ${Utils.escape(person.role || 'N/A')}</p>
+                ${person.cameras && person.cameras.length > 0 ? `<p><strong>Caméras:</strong> ${Utils.escape(person.cameras.join(', '))}</p>` : ''}
+                ${person.lenses && person.lenses.length > 0 ? `<p><strong>Objectifs:</strong> ${Utils.escape(person.lenses.join(', '))}</p>` : ''}
+                ${person.otherEquipment && person.otherEquipment.length > 0 ? `<p><strong>Matériel:</strong> ${Utils.escape(person.otherEquipment.join(', '))}</p>` : ''}
             `;
         } else if(tab === 'projects') {
             defaultIcon = '🎬';
             detailsHTML = `
-                <p><strong>Type:</strong> ${person.projectType || 'N/A'}</p>
-                <p><strong>Genre:</strong> ${person.genre || 'N/A'}</p>
-                ${person.director ? `<p><strong>Réalisateur:</strong> ${person.director}</p>` : ''}
-                ${person.producer ? `<p><strong>Producteur:</strong> ${person.producer}</p>` : ''}
-                ${person.status ? `<p><strong>Statut:</strong> ${person.status}</p>` : ''}
+                <p><strong>Type:</strong> ${Utils.escape(person.projectType || 'N/A')}</p>
+                <p><strong>Genre:</strong> ${Utils.escape(person.genre || 'N/A')}</p>
+                ${person.director ? `<p><strong>Réalisateur:</strong> ${Utils.escape(person.director)}</p>` : ''}
+                ${person.producer ? `<p><strong>Producteur:</strong> ${Utils.escape(person.producer)}</p>` : ''}
+                ${person.status ? `<p><strong>Statut:</strong> ${Utils.escape(person.status)}</p>` : ''}
             `;
         } else if(tab === 'associations') {
             defaultIcon = '🏛️';
             detailsHTML = `
-                <p><strong>Activité:</strong> ${person.activity || 'N/A'}</p>
-                ${person.members ? `<p><strong>Membres:</strong> ${person.members}</p>` : ''}
-                ${person.website ? `<p><strong>Site web:</strong> <a href="${person.website}" target="_blank">${person.website}</a></p>` : ''}
+                <p><strong>Activité:</strong> ${Utils.escape(person.activity || 'N/A')}</p>
+                ${person.members ? `<p><strong>Membres:</strong> ${Utils.escape(person.members)}</p>` : ''}
+                ${person.website ? `<p><strong>Site web:</strong> <a href="${Utils.safeUrl(person.website)}" target="_blank" rel="noopener">${Utils.escape(person.website)}</a></p>` : ''}
             `;
         } else if(tab === 'enterprises') {
             defaultIcon = '🏢';
             detailsHTML = `
-                <p><strong>Activité:</strong> ${person.activity || 'N/A'}</p>
-                ${person.siret ? `<p><strong>SIRET:</strong> ${person.siret}</p>` : ''}
-                ${person.website ? `<p><strong>Site web:</strong> <a href="${person.website}" target="_blank">${person.website}</a></p>` : ''}
+                <p><strong>Activité:</strong> ${Utils.escape(person.activity || 'N/A')}</p>
+                ${person.siret ? `<p><strong>SIRET:</strong> ${Utils.escape(person.siret)}</p>` : ''}
+                ${person.website ? `<p><strong>Site web:</strong> <a href="${Utils.safeUrl(person.website)}" target="_blank" rel="noopener">${Utils.escape(person.website)}</a></p>` : ''}
             `;
         }
         
@@ -39143,11 +39163,11 @@ if(isActors) {
             <div class="modal-panel">
                 <div style="display:flex;align-items:center;gap:15px;margin-bottom:20px;">
                     <div class="n8-avatar-4">
-                        ${person.photo ? `<img src="${person.photo}" alt="Photo de profil" style="width:100%;height:100%;object-fit:cover;">` : defaultIcon}
+                        ${person.photo ? `<img src="${Utils.safeMediaUrl(person.photo)}" alt="Photo de profil" style="width:100%;height:100%;object-fit:cover;">` : defaultIcon}
                     </div>
                     <div>
                         <h2 class="m-0">${Utils.escape(displayName)}</h2>
-                        <p style="margin:5px 0 0;color:var(--text-sec);">📍 ${person.city || 'Non précisé'}</p>
+                        <p style="margin:5px 0 0;color:var(--text-sec);">📍 ${Utils.escape(person.city || 'Non précisé')}</p>
                     </div>
                 </div>
                 ${person.bio || person.description ? `<p class="mb-15">${Utils.escape(person.bio || person.description)}</p>` : ''}
@@ -39155,10 +39175,10 @@ if(isActors) {
                     ${detailsHTML}
                 </div>
                 <div class="box-bg">
-                    <p><strong>📧 Email:</strong> ${person.email || 'N/A'}</p>
-                    <p><strong>📱 Téléphone:</strong> ${person.phone || 'N/A'}</p>
-                    <p><strong>💰 Tarif:</strong> ${person.dailyRate || 'N/A'} ${person.rateCurrency || '€'} / jour</p>
-                    ${person.hasVehicle ? `<p><strong>🚗 Véhicule:</strong> ${person.vehicleType || 'Oui'}</p>` : ''}
+                    <p><strong>📧 Email:</strong> ${Utils.escape(person.email || 'N/A')}</p>
+                    <p><strong>📱 Téléphone:</strong> ${Utils.escape(person.phone || 'N/A')}</p>
+                    <p><strong>💰 Tarif:</strong> ${Utils.escape(String(person.dailyRate || 'N/A'))} ${Utils.escape(person.rateCurrency || '€')} / jour</p>
+                    ${person.hasVehicle ? `<p><strong>🚗 Véhicule:</strong> ${Utils.escape(person.vehicleType || 'Oui')}</p>` : ''}
                 </div>
                 <div style="display:flex;gap:10px;">
                     <button onclick="this.closest('div[style*=fixed]').remove()" style="flex:1;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;cursor:pointer;">Fermer</button>
@@ -40340,7 +40360,7 @@ callsheetHTML += `<tr class="bg-base"><td colspan="5" class="th-primary">🎭 ${
             locationHTML += `
                 <div id="fds-map-container" class="fds-map-container"></div>
                 <div class="fds-location-actions">
-                    <a href="${gmapsUrl}" target="_blank" class="fds-gmaps-btn">📍 Ouvrir dans Google Maps</a>
+                    <a href="${gmapsUrl}" target="_blank" rel="noopener" class="fds-gmaps-btn">📍 Ouvrir dans Google Maps</a>
                 </div>
                 <p class="fds-gmaps-link-print" style="display: none; font-size: 10px; color: #666; word-break: break-all; margin-top: 5px;">🗺️ ${gmapsUrl}</p>`;
         }
@@ -41056,22 +41076,22 @@ ${projectName}`;
             <body>
                 <h1>📋 FEUILLE DE SERVICE</h1>
                 <div style="text-align:center; margin-bottom:20px;">
-                    <strong style="font-size:1.2rem;">${projectTitle}</strong><br>
+                    <strong style="font-size:1.2rem;">${Utils.escape(projectTitle)}</strong><br>
                     <span>Jour ${shootDay.dayNumber} - ${dateFormatted}</span>
                 </div>
                 
                 <h2>📍 Lieu de Tournage</h2>
                 <div class="info-grid">
-                    <div class="info-item"><span class="info-label">Lieu:</span> ${shootDay.location || 'Non défini'}</div>
-                    <div class="info-item"><span class="info-label">Adresse:</span> ${shootDay.locationAddress || 'Non définie'}</div>
+                    <div class="info-item"><span class="info-label">Lieu:</span> ${Utils.escape(shootDay.location || 'Non défini')}</div>
+                    <div class="info-item"><span class="info-label">Adresse:</span> ${Utils.escape(shootDay.locationAddress || 'Non définie')}</div>
                 </div>
                 
                 <h2>⏰ Horaires</h2>
                 <div class="info-grid">
-                    <div class="info-item"><span class="info-label">Convocation équipe:</span> ${shootDay.crewCall || '--:--'}</div>
-                    <div class="info-item"><span class="info-label">Prêt à tourner:</span> ${shootDay.readyToShoot || '--:--'}</div>
-                    <div class="info-item"><span class="info-label">Pause déjeuner:</span> ${shootDay.lunchStart || '--:--'} - ${shootDay.lunchEnd || '--:--'}</div>
-                    <div class="info-item"><span class="info-label">Fin estimée:</span> ${shootDay.estimatedWrap || '--:--'}</div>
+                    <div class="info-item"><span class="info-label">Convocation équipe:</span> ${Utils.escape(shootDay.crewCall || '--:--')}</div>
+                    <div class="info-item"><span class="info-label">Prêt à tourner:</span> ${Utils.escape(shootDay.readyToShoot || '--:--')}</div>
+                    <div class="info-item"><span class="info-label">Pause déjeuner:</span> ${Utils.escape(shootDay.lunchStart || '--:--')} - ${Utils.escape(shootDay.lunchEnd || '--:--')}</div>
+                    <div class="info-item"><span class="info-label">Fin estimée:</span> ${Utils.escape(shootDay.estimatedWrap || '--:--')}</div>
                 </div>
                 
                 <h2>🎬 Scènes à Tourner</h2>`;
@@ -41081,9 +41101,9 @@ ${projectName}`;
                 const scene = state.data.scenes.find(s => s.id === sceneRef.sceneId);
                 if(scene) {
                     printContent += `<div class="scene-item">
-                        <strong>${scene.title}</strong><br>
-                        <span class="text-muted">Personnages: ${scene.perso || 'N/A'}</span><br>
-                        <span class="text-muted">Heure prévue: ${sceneRef.startTime || 'Non définie'}</span>
+                        <strong>${Utils.escape(scene.title)}</strong><br>
+                        <span class="text-muted">Personnages: ${Utils.escape(scene.perso || 'N/A')}</span><br>
+                        <span class="text-muted">Heure prévue: ${Utils.escape(sceneRef.startTime || 'Non définie')}</span>
                     </div>`;
                 }
             });
@@ -41110,10 +41130,10 @@ ${projectName}`;
                 }
                 if(person) {
                     printContent += `<tr>
-                        <td>${person.name}</td>
-                        <td>${role}</td>
-                        <td>${call.callTime || '--:--'}</td>
-                        <td>${call.notes || ''}</td>
+                        <td>${Utils.escape(person.name)}</td>
+                        <td>${Utils.escape(role)}</td>
+                        <td>${Utils.escape(call.callTime || '--:--')}</td>
+                        <td>${Utils.escape(call.notes || '')}</td>
                     </tr>`;
                 }
             });
@@ -41172,11 +41192,11 @@ ${projectName}`;
                     const namesStr = data.names.join(', ');
                     
                     printContent += `<div style="margin-bottom: 15px; padding: 10px; background: #f9f9f9; border-radius: 6px; border-left: 3px solid #ff9800;">
-                        <strong>${dept}</strong> <span class="text-muted">(${namesStr})</span>
+                        <strong>${Utils.escape(dept)}</strong> <span class="text-muted">(${Utils.escape(namesStr)})</span>
                         <ul style="margin: 10px 0 0 20px; padding: 0;">`;
                     
                     data.items.forEach(item => {
-                        printContent += `<li>${item.item} <span class="text-muted">(Sc.${item.sceneNum})</span></li>`;
+                        printContent += `<li>${Utils.escape(item.item)} <span class="text-muted">(Sc.${Utils.escape(String(item.sceneNum))})</span></li>`;
                     });
                     
                     printContent += '</ul></div>';
@@ -41185,7 +41205,7 @@ ${projectName}`;
         }
         
         if(shootDay.notes) {
-            printContent += `<h2>📝 Notes</h2><p>${shootDay.notes}</p>`;
+            printContent += `<h2>📝 Notes</h2><p>${Utils.escape(shootDay.notes)}</p>`;
         }
         
         printContent += '</body></html>';
@@ -43614,7 +43634,7 @@ closeModal: () => {
             <!DOCTYPE html>
             <html>
             <head>
-                <title>Plan de Travail - ${state.data.title || 'Film'}</title>
+                <title>Plan de Travail - ${Utils.escape(state.data.title || 'Film')}</title>
                 <style>
                     body { font-family: Arial, sans-serif; margin: 20px; }
                     .workplan-wrapper { background: white; }
@@ -51936,7 +51956,7 @@ const Presentation = {
                  style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; cursor: pointer; border-radius: 6px; transition: background 0.2s;"
                  onmouseover="this.style.background='var(--primary-light)'" onmouseout="this.style.background='transparent'">
                 <div style="width: 35px; height: 35px; border-radius: 50%; background: var(--border); display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                    ${r.photo ? `<img src="${r.photo}" alt="Photo du membre" class="img-cover">` : r.name?.charAt(0).toUpperCase() || '?'}
+                    ${r.photo ? `<img src="${Utils.safeMediaUrl(r.photo)}" alt="Photo du membre" class="img-cover">` : r.name?.charAt(0).toUpperCase() || '?'}
                 </div>
                 <div>
                     <div style="font-weight: 500;">${Utils.escape(r.name || 'Sans nom')}</div>
@@ -52631,7 +52651,7 @@ const Presentation = {
                 assoList.innerHTML = associations.map((a, i) => `
                     <div class="n8-flex-3">
                         <div class="n8-avatar-2">
-                            ${a.photo ? `<img src="${a.photo}" alt="Logo de l'association" class="img-cover">` : '🏛️'}
+                            ${a.photo ? `<img src="${Utils.safeMediaUrl(a.photo)}" alt="Logo de l'association" class="img-cover">` : '🏛️'}
                         </div>
                         <span class="fs-09">${Utils.escape(a.name)}</span>
                         <button onclick="app.Presentation.removePartner('association', '${a.id}', ${i})" style="background: none; border: none; cursor: pointer; color: var(--danger); font-size: 0.8rem;">✖</button>
@@ -52650,7 +52670,7 @@ const Presentation = {
                 entList.innerHTML = enterprises.map((e, i) => `
                     <div class="n8-flex-3">
                         <div class="n8-avatar-2">
-                            ${e.photo ? `<img src="${e.photo}" alt="Logo de l'entreprise" class="img-cover">` : '🏢'}
+                            ${e.photo ? `<img src="${Utils.safeMediaUrl(e.photo)}" alt="Logo de l'entreprise" class="img-cover">` : '🏢'}
                         </div>
                         <span class="fs-09">${Utils.escape(e.name)}</span>
                         <button onclick="app.Presentation.removePartner('enterprise', '${e.id}', ${i})" style="background: none; border: none; cursor: pointer; color: var(--danger); font-size: 0.8rem;">✖</button>
@@ -55525,7 +55545,7 @@ await supabase.functions.invoke('super-action', { body: {
                     if(att.type === 'photo' || src?.startsWith('data:image')) {
                         attachmentsHtml += `<img src="${src}" alt="Pièce jointe" style="width: 60px; height: 60px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); cursor: pointer;" onclick="window.open('${src}', '_blank')" onerror="this.style.display='none'">`;
                     } else {
-                        attachmentsHtml += `<a href="${src}" target="_blank" style="width: 60px; height: 60px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 1.5rem; text-decoration: none;">📄</a>`;
+                        attachmentsHtml += `<a href="${src}" target="_blank" rel="noopener" style="width: 60px; height: 60px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 1.5rem; text-decoration: none;">📄</a>`;
                     }
                 });
                 if(allAttachments.length > 4) {
@@ -56125,7 +56145,7 @@ const MatchingEngine = {
 
     // ===================== AFFICHAGE & OUVERTURE =====================
 	    // Afficher les résultats sur la carte
-    displayResults: () => {
+    displayResults: async () => {
         if(!Universe.map) return;
         
         // Supprimer l'ancien layer de matching s'il existe
@@ -56140,12 +56160,12 @@ const MatchingEngine = {
         const positionOffsets = {};
         
         // Ajouter les projets matchés comme marqueurs
-        MatchingEngine.matchedProjects.forEach(async (project, index) => {
+        for(const project of MatchingEngine.matchedProjects) {
             const city = project.location || project.city || '';
-            if(!city) return;
+            if(!city) continue;
             
             const coords = await Universe.geocodeCity(city);
-            if(!coords) return;
+            if(!coords) continue;
             
             // Décalage pour éviter superposition
             const key = `${coords.lat.toFixed(3)},${coords.lng.toFixed(3)}`;
@@ -56168,7 +56188,7 @@ const MatchingEngine = {
                     <div style="position: relative; cursor: pointer;" onclick="app.MatchingEngine.openMatchedProject('${project.id}')">
                         <div style="width: 70px; height: 95px; border-radius: 6px; overflow: hidden; border: 3px solid ${scoreColor}; box-shadow: 0 4px 12px rgba(0,0,0,0.4); background: #1a1a2e;">
                             ${hasImage 
-                                ? `<img src="${project.image}" alt="Affiche du projet" class="img-cover">` 
+                                ? `<img src="${Utils.safeMediaUrl(project.image)}" alt="Affiche du projet" class="img-cover">` 
                                 : `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 2rem;">🎬</div>`
                             }
                         </div>
@@ -56181,7 +56201,7 @@ const MatchingEngine = {
             
             const marker = L.marker([finalLat, finalLng], { icon });
             MatchingEngine.matchingLayer.addLayer(marker);
-        });
+        }
         
         Universe.map.addLayer(MatchingEngine.matchingLayer);
         
@@ -58464,9 +58484,9 @@ const UniverseProfileModal = {
         const structLogo = isAssociation ? (fullProfile.assoLogo || extraD.assoLogo || '')
                           : (isEnterprise ? (fullProfile.entLogo || extraD.entLogo || '') : '');
         if(structLogo) {
-            photoEl.innerHTML = `<img src="${structLogo}" alt="Logo" onerror="this.parentElement.innerHTML='${defaultIcon}'">`;
+            photoEl.innerHTML = `<img src="${Utils.safeMediaUrl(structLogo)}" alt="Logo" onerror="this.parentElement.innerHTML='${defaultIcon}'">`;
         } else if(photo && !isAssociation && !isEnterprise) {
-            photoEl.innerHTML = `<img src="${photo}" alt="${Utils.escape(fullProfile.name || fullProfile.title || '')}" onerror="this.parentElement.innerHTML='${defaultIcon}'">`;
+            photoEl.innerHTML = `<img src="${Utils.safeMediaUrl(photo)}" alt="${Utils.escape(fullProfile.name || fullProfile.title || '')}" onerror="this.parentElement.innerHTML='${defaultIcon}'">`;
         } else {
             photoEl.innerHTML = defaultIcon; // casquette asso/entreprise : logo si fourni, sinon icône de la structure
         }
@@ -59483,7 +59503,7 @@ const UniverseMap = {
         const iconHtml = `
             <div class="${markerClass}">
                 ${facetBadges}
-                ${photoUrl ? `<img src="${photoUrl}" alt="${Utils.escape(name)}" onerror="this.parentElement.innerHTML='<div style=\\'width:100%;height:40px;display:flex;align-items:center;justify-content:center;background:var(--panel-bg);border-radius:6px;font-size:20px;\\'>${defaultIcon}</div>'">` : `<div style="width:100%;height:40px;display:flex;align-items:center;justify-content:center;background:var(--panel-bg);border-radius:6px;border:2px solid var(--primary);font-size:20px;">${defaultIcon}</div>`}
+                ${photoUrl ? `<img src="${Utils.safeMediaUrl(photoUrl)}" alt="${Utils.escape(name)}" onerror="this.parentElement.innerHTML='<div style=\\'width:100%;height:40px;display:flex;align-items:center;justify-content:center;background:var(--panel-bg);border-radius:6px;font-size:20px;\\'>${defaultIcon}</div>'">` : `<div style="width:100%;height:40px;display:flex;align-items:center;justify-content:center;background:var(--panel-bg);border-radius:6px;border:2px solid var(--primary);font-size:20px;">${defaultIcon}</div>`}
                 <div class="marker-label">${Utils.escape(name)}</div>
             </div>
         `;
@@ -59628,7 +59648,7 @@ const UniverseMap = {
                 <div style="margin:15px 0;">
                     <strong>BIO</strong>
                     <div style="display:flex; gap:10px; margin-top:10px; overflow-x:auto; padding:5px 0;">
-                        ${photos.slice(0, 5).map(p => `<img src="${p}" alt="Photo de la galerie" style="width:80px; height:80px; object-fit:cover; border-radius:8px; cursor:pointer;" onclick="window.open('${p}', '_blank')">`).join('')}
+                        ${photos.slice(0, 5).map(p => `<img src="${Utils.safeMediaUrl(p)}" alt="Photo de la galerie" style="width:80px; height:80px; object-fit:cover; border-radius:8px; cursor:pointer;" onclick="window.open('${p}', '_blank')">`).join('')}
                     </div>
                 </div>
             `;
@@ -59659,7 +59679,7 @@ const UniverseMap = {
                 
                 <div style="text-align:center; padding:30px 20px 20px;">
                     <div style="width:120px; height:120px; border-radius:50%; margin:0 auto 15px; overflow:hidden; border:4px solid ${typeColor}; background:var(--bg); display:flex; align-items:center; justify-content:center;">
-                        ${photo ? `<img src="${photo}" alt="Visuel" class="img-cover">` : `<span style="font-size:3rem;">${isProject ? '🎬' : (isActor ? '🎭' : (isCrew ? '🎥' : (isAssociation ? '🏛️' : '🏢')))}</span>`}
+                        ${photo ? `<img src="${Utils.safeMediaUrl(photo)}" alt="Visuel" class="img-cover">` : `<span style="font-size:3rem;">${isProject ? '🎬' : (isActor ? '🎭' : (isCrew ? '🎥' : (isAssociation ? '🏛️' : '🏢')))}</span>`}
                     </div>
                     <h2 style="margin:0 0 5px; color:var(--text-main);">${Utils.escape(name)}</h2>
                     <span style="color:${typeColor}; font-weight:500;">${typeLabel}</span>
@@ -60352,7 +60372,7 @@ hoverCard: null,
                         <button class="favorite-btn ${isFav ? 'active' : ''}" id="project-favorite-btn" onclick="app.Universe.toggleProjectFavorite()" style="position: absolute; top: 15px; left: 15px; background: rgba(255,255,255,0.2); border: none; font-size: 1.5rem; cursor: pointer; padding: 5px 10px; border-radius: 8px; color: ${isFav ? '#f59e0b' : 'white'};" title="Ajouter aux favoris">${isFav ? '★' : '☆'}</button>
                         <button class="report-btn" onclick="app.Universe.reportProject('${project.id || project.projectId}')" style="position: absolute; top: 15px; left: 60px; background: rgba(255,255,255,0.2); border: none; font-size: 1.2rem; cursor: pointer; padding: 5px 10px; border-radius: 8px; color: white; opacity: 0.7;" title="Signaler ce projet">🚩</button>
                         <button class="profile-modal-close" onclick="this.closest('.profile-modal-overlay').remove()" style="color: white;">✕</button>
-                        ${project.image ? `<img src="${project.image}" alt="Affiche du projet" style="width: 150px; height: 200px; object-fit: cover; border-radius: 8px; margin-bottom: 15px; border: 2px solid #e94560;">` : '<div style="font-size: 4rem; margin-bottom: 15px;">🎬</div>'}
+                        ${project.image ? `<img src="${Utils.safeMediaUrl(project.image)}" alt="Affiche du projet" style="width: 150px; height: 200px; object-fit: cover; border-radius: 8px; margin-bottom: 15px; border: 2px solid #e94560;">` : '<div style="font-size: 4rem; margin-bottom: 15px;">🎬</div>'}
                         <div class="profile-modal-name">${Utils.escape(project.title || 'Sans titre')}</div>
                         <div style="color: #e94560; font-weight: bold;">${Utils.escape(typeText)}${genreText ? ' • ' + genreText : ''}</div>
                         ${project.city ? `<div style="margin-top: 5px; opacity: 0.8;">📍 ${Utils.escape(project.city)}${project.region ? ', ' + project.region : ''}</div>` : ''}
