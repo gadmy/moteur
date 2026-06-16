@@ -67,6 +67,9 @@ DÉCISIONS ACTÉES
                          HISTORIQUE DES VERSIONS
 ================================================================================
 v535 (16 Juin 2026)
+  - HUB — dossiers de classement : les projets de l'accueil peuvent être organisés dans des dossiers imbriqués (créer / renommer / couleur / importance / supprimer) avec fil d'Ariane de navigation. Rangement par glisser-déposer d'une carte sur un dossier ou via le menu « 📁 Déplacer vers… » ; un projet vit dans un seul dossier. Classement personnel à chaque utilisateur (propriétaire comme invité), stocké dans les préférences synchronisées (module ProjectFolders, clé moteur_project_folders, zéro SQL).
+  - MOODBOARD — format « Libre (infini) » retiré des sélecteurs de format : il n'est plus proposé (les nouvelles planches sont cadrées). Les planches déjà créées en Libre conservent leur rendu.
+  - GUIDE — section Univers : le bloc « Contacter » décrivait une messagerie directe supprimée ; corrigé pour refléter le contact public réel (liens mailto: / tel: exposés par la personne, sans messagerie interne, l'adresse de compte n'étant jamais dévoilée).
   - UNIVERS — carte : les profils s'affichent désormais dès la première ouverture de la carte (auparavant il fallait rebasculer pour les voir). UniverseMap.setViewMode attend la fin de l'initialisation Leaflet (lazy-load) avant de poser les marqueurs, et l'appel d'initialisation redondant du point d'entrée a été retiré pour éviter une double création de carte.
   - THÈME — le dernier mode choisi est désormais retenu de façon fiable : le choix de thème est poussé immédiatement vers le serveur (auparavant différé de 2 s, ce push pouvait être perdu lors d'un rechargement rapide, et la valeur serveur périmée réimposait l'ancien thème à la connexion suivante).
   - ADMIN / MODÉRATION — suppression des signalements réparée : côté client, deleteReport et updateReportStatus passent par .select() et signalent explicitement un blocage RLS au lieu d'un faux succès silencieux ; côté SQL, ajout de la policy DELETE « Admins can delete reports » manquante sur la table reports (l'UPDATE existait déjà).
@@ -10445,7 +10448,6 @@ body.presentation-mode .presentation-bar {
             <span class="text-sec-sm2">💡 Clic droit sur le canvas pour ajouter des éléments</span>
             <div style="border-left: 1px solid var(--border); height: 30px; margin: 0 10px;"></div>
             <select id="moodboardFormat" onchange="app.MoodBoard.changeFormat(this.value)">
-              <option value="free">📐 Libre (infini)</option>
               <option value="a4-landscape">A4 Paysage</option>
               <option value="a4-portrait">A4 Portrait</option>
               <option value="a3-landscape">A3 Paysage</option>
@@ -12074,9 +12076,23 @@ const app = (function(){
                           // corrompait l'état interne de supabase-js et gelait getSession() définitivement).
                           lock: (() => {
                               let chain = Promise.resolve();
+                              let seq = 0;
+                              const log = (window.__sbLock = window.__sbLock || []);
                               return (name, acquireTimeout, fn) => {
-                                  const run = chain.then(() => fn(), () => fn());
-                                  chain = run.then(() => {}, () => {});
+                                  const op = { id: ++seq, name: name, acquireTimeout: acquireTimeout, queuedAt: Date.now(), state: 'queued' };
+                                  log.push(op); if(log.length > 40) log.shift();
+                                  const run = chain.then(() => { op.state = 'running'; op.startAt = Date.now(); return fn(); },
+                                                         () => { op.state = 'running'; op.startAt = Date.now(); return fn(); });
+                                  const warn = setTimeout(() => {
+                                      if(op.state !== 'done' && op.state !== 'error') {
+                                          op.state = op.state + '+STUCK';
+                                          console.warn('[LOCK] op #' + op.id + ' "' + name + '" bloquee >8s (acquireTimeout=' + acquireTimeout + ') — ne se relache pas. Ops recentes:', log.map(o => '#' + o.id + ' ' + o.name + ':' + o.state).join(' | '));
+                                      }
+                                  }, 8000);
+                                  run.then(() => { clearTimeout(warn); op.state = 'done'; op.ms = Date.now() - (op.startAt || op.queuedAt); },
+                                           (e) => { clearTimeout(warn); op.state = 'error'; op.err = e && e.message; });
+                                  // Filet anti-deadlock : la file ne reste jamais coincee plus de 8 s derriere une op qui pend.
+                                  chain = Promise.race([ run.then(() => {}, () => {}), new Promise(res => setTimeout(res, 8000)) ]);
                                   return run;
                               };
                           })()
@@ -26979,7 +26995,6 @@ const MoodBoard = {
                 <div class="info-row">
                     <label>Format</label>
                     <select onchange="app.MoodBoard.changeFormat(this.value)">
-                        ${board.format === 'free' ? '<option value="free" selected>Libre (planche existante)</option>' : ''}
                         <option value="a4-landscape" ${board.format === 'a4-landscape' ? 'selected' : ''}>A4 Paysage</option>
                         <option value="a4-portrait" ${board.format === 'a4-portrait' ? 'selected' : ''}>A4 Portrait</option>
                         <option value="a3-landscape" ${board.format === 'a3-landscape' ? 'selected' : ''}>A3 Paysage</option>
@@ -61492,7 +61507,7 @@ ${window.location.origin}${window.location.pathname}
           
           <h3>Interactions sur une fiche</h3>
           <p><strong>☆ Favori :</strong> Ajoute la personne ou le projet à tes favoris. Retrouve-les dans <em>Contacts</em>.</p>
-          <p><strong>✉️ Contacter :</strong> Envoie un message direct. Le destinataire reçoit ton message sur le profil précis que tu consultes (pas "Guillaume en général", mais bien "Guillaume comédien" par exemple).</p>
+          <p><strong>📧 Contacter :</strong> La fiche affiche le contact public (email, téléphone) que la personne a choisi d'exposer, sous forme de liens mailto: / tel:. Tu la joins par ton propre outil (mail, SMS) : il n'y a pas de messagerie interne, et l'adresse de ton compte n'est jamais dévoilée.</p>
           <p><strong>🚩 Signaler :</strong> Si un contenu est inapproprié, signale le profil. L'équipe de modération est alertée.</p>
           
           <h3>Projets dans l'Univers</h3>
