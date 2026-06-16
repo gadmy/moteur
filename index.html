@@ -29370,6 +29370,18 @@ const Storyboard = {
 };
 
 const StoryboardExport = {
+    _printCapturing: false,
+    _printImgPromises: [],
+    // [2b] Enregistre une image de print : si une capture PDF est en cours, sa promesse
+    // (resolue au load OU error, filet 8s) est trackee pour que exportPDF attende le dessin reel.
+    _awaitPrintImg: (img, draw) => {
+        if(!StoryboardExport._printCapturing) { img.onload = draw; return; }
+        StoryboardExport._printImgPromises.push(new Promise(res => {
+            img.onload = () => { try { draw(); } catch(e) {} res(); };
+            img.onerror = () => res();
+            setTimeout(res, 8000);
+        }));
+    },
     printDirect: async () => {
         // [Phase C.2.6 fix] Vider le cache d'images pour forcer un rechargement avec crossOrigin
         if(Storyboard._svgImageCache) {
@@ -29609,9 +29621,7 @@ const StoryboardExport = {
             if(typeof techZone.imageUrl === 'string' && techZone.imageUrl.startsWith('http')) {
                 layerImg.crossOrigin = 'anonymous';
             }
-            layerImg.onload = () => { 
-                ctx.drawImage(layerImg, 0, 0, ctx.canvas.width, ctx.canvas.height); 
-            };
+            StoryboardExport._awaitPrintImg(layerImg, () => { ctx.drawImage(layerImg, 0, 0, ctx.canvas.width, ctx.canvas.height); });
             layerImg.src = Utils.signedUrlFor(techZone.imageUrl);
         } else if(techZone.drawingData) {
             // Dessine les calques DrawingEditor du zone tech par dessus (renderDrawingData fait drawImage async)
@@ -29650,7 +29660,7 @@ const StoryboardExport = {
             // Charger l'image avec crossOrigin et la dessiner dans le canvas
             const img = new Image();
             if(shot.imageUrl.startsWith('http')) img.crossOrigin = 'anonymous';
-            img.onload = () => {
+            StoryboardExport._awaitPrintImg(img, () => {
                 // Garder l'aspect ratio : dessiner centré dans le canvas
                 const ratio = Math.min(composedCanvas.width / img.naturalWidth, composedCanvas.height / img.naturalHeight);
                 const w = img.naturalWidth * ratio;
@@ -29660,7 +29670,7 @@ const StoryboardExport = {
                 composedCtx.drawImage(img, x, y, w, h);
                 // Puis dessiner le calque technique par-dessus (après le load)
                 Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer);
-            };
+            });
             img.src = Utils.signedUrlFor(shot.imageUrl);
             hasContent = true;
         } else if(shot.imageType === 'drawing' && shot.drawingData) {
@@ -29776,6 +29786,8 @@ if(hasContent) {
         document.body.appendChild(offscreen);
         
         // ===== 2. Appeler renderPrintPreview qui sait déjà tout rendre =====
+        StoryboardExport._printCapturing = true;
+        StoryboardExport._printImgPromises = [];
         try {
             Storyboard.renderPrintPreview('storyboardOffscreenPreview');
         } catch(e) {
@@ -29797,32 +29809,12 @@ if(hasContent) {
                 setTimeout(() => resolve(), 5000);
             });
         }));
-        // [2b] Pré-charger les <img> Storage en base64 (comme printDirect) : html2canvas
-        // ne peut pas rasteriser une image cross-origin sans en-tete CORS exploitable
-        // -> sans ca les vignettes du storyboard ressortent vides dans le PDF.
-        await Promise.all(Array.from(allImgs).map(async (img) => {
-            const src = img.getAttribute('src');
-            if(!src || src.startsWith('data:') || src.startsWith('blob:')) return;
-            const dataUrl = await new Promise((resolve) => {
-                const loaderImg = new Image();
-                loaderImg.crossOrigin = 'anonymous';
-                loaderImg.onload = () => {
-                    try {
-                        const cv = document.createElement('canvas');
-                        cv.width = loaderImg.naturalWidth || 800;
-                        cv.height = loaderImg.naturalHeight || 600;
-                        cv.getContext('2d').drawImage(loaderImg, 0, 0);
-                        resolve(cv.toDataURL('image/png'));
-                    } catch(e) { resolve(null); }
-                };
-                loaderImg.onerror = () => resolve(null);
-                const _su = Utils.signedUrlFor(src);
-                loaderImg.src = _su + (_su.includes('?') ? '&' : '?') + 'cb=' + Date.now();
-                setTimeout(() => resolve(null), 5000);
-            });
-            if(dataUrl) img.setAttribute('src', dataUrl);
-        }));
-        // Laisser le temps aux canvas (drawings + tech layers) de finir leur composition
+        // [2b] Attendre le dessin reel de toutes les images de print (layers, upload, calque
+        // technique) avant la rasterisation : les canvas sont peints via img.onload async,
+        // un delai fixe ne suffit pas -> sans ca les vignettes ressortent vides.
+        try { await Promise.all(StoryboardExport._printImgPromises); } catch(e) {}
+        StoryboardExport._printCapturing = false;
+        // Laisser le temps aux objets vectoriels (setTimeout) de finir leur composition
         await new Promise(r => setTimeout(r, 500));
         
         // ===== 3. Récupérer toutes les pages générées =====
@@ -31831,9 +31823,7 @@ const DrawingEditor = {
             if(typeof layerData.imageData === 'string' && layerData.imageData.startsWith('http')) {
                 img.crossOrigin = 'anonymous';
             }
-            img.onload = () => {
-                ctx.drawImage(img, 0, 0);
-            };
+            StoryboardExport._awaitPrintImg(img, () => { ctx.drawImage(img, 0, 0); });
             img.src = Utils.signedUrlFor(layerData.imageData);
         });
     }
