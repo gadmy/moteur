@@ -45,7 +45,7 @@ T5 [X] (C) Univers : carte vide à la première ouverture réglée (v535).
        setViewMode passe en async et attend initMap (lazy-load Leaflet) avant de
        charger les marqueurs ; appel initMap redondant du point d'entrée retiré
        (plus de double init Leaflet).
-T6 [~] (C) Hub projet : dossiers de classement. CADRÉ : dossiers IMBRIQUÉS
+T6 [X] (C) Hub projet : dossiers de classement (v535, testé OK v536). CADRÉ : dossiers IMBRIQUÉS
        (parentId), 1 seul dossier par projet, rangement par drag-drop + menu
        « Déplacer vers… ». Champs dossier : nom, couleur libre, importance (même
        liste que les projets). Classement PERSONNEL par utilisateur (propriétaire
@@ -68,17 +68,11 @@ T9 [ ] (C) Export PDF global — 3 correctifs distincts :
           envoyé à doc.text() (latin1), à passer par PdfTheme.cleanText /
           Utils.stripPdfUnsafe (déjà corrigé ailleurs).
 
-DÉCISIONS ACTÉES
-- MiniChat (talkie-walkie éphémère par projet, texte + fichiers) : CONSERVÉ.
-  Seuls l'onglet chat et la messagerie interne ont été supprimés (v524-525).
-- Modération forum : UNIQUEMENT ga.dmy@ikmail.com. ga.demauroy@gmail.com :
-  visibilité des faux profils seulement, pas de pouvoirs de modération.
-- Accueil : option P1 "Projets d'abord" retenue (refonte B3).
-- Design : "Lavande" (icônes duotone) retenu comme unique (chantier C2).
-
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v536 (16 Juin 2026)
+  - HUB — barre d'actions unifiée : « + Nouveau projet », « + Nouveau dossier » et « 📂 Importer » sont désormais regroupés en boutons dans la barre des dossiers (folder-bar). Les anciennes cartes « Nouveau projet » et « Importer » de la grille ont été retirées, l'accueil ne mélange plus tuiles-actions et tuiles-projets.
 v535 (16 Juin 2026)
   - SESSION — gel d'authentification : filet anti-deadlock sur le verrou d'auth maison. Si une opération d'auth (refresh de token) ne relâche pas le verrou, la file des opérations suivantes ne reste plus bloquée indéfiniment — getSession() ne pend plus pour toujours (attente bornée à 8 s). Verrou instrumenté temporairement (journaux [LOCK] + window.__sbLock) pour identifier la cause racine au prochain gel.
   - HUB — dossiers de classement : les projets de l'accueil peuvent être organisés dans des dossiers imbriqués (créer / renommer / couleur / importance / supprimer) avec fil d'Ariane de navigation. Rangement par glisser-déposer d'une carte sur un dossier ou via le menu « 📁 Déplacer vers… » ; un projet vit dans un seul dossier. Classement personnel à chaque utilisateur (propriétaire comme invité), stocké dans les préférences synchronisées (module ProjectFolders, clé moteur_project_folders, zéro SQL).
@@ -7486,7 +7480,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv535</p>
+      <p>vv536</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -29803,6 +29797,31 @@ if(hasContent) {
                 setTimeout(() => resolve(), 5000);
             });
         }));
+        // [2b] Pré-charger les <img> Storage en base64 (comme printDirect) : html2canvas
+        // ne peut pas rasteriser une image cross-origin sans en-tete CORS exploitable
+        // -> sans ca les vignettes du storyboard ressortent vides dans le PDF.
+        await Promise.all(Array.from(allImgs).map(async (img) => {
+            const src = img.getAttribute('src');
+            if(!src || src.startsWith('data:') || src.startsWith('blob:')) return;
+            const dataUrl = await new Promise((resolve) => {
+                const loaderImg = new Image();
+                loaderImg.crossOrigin = 'anonymous';
+                loaderImg.onload = () => {
+                    try {
+                        const cv = document.createElement('canvas');
+                        cv.width = loaderImg.naturalWidth || 800;
+                        cv.height = loaderImg.naturalHeight || 600;
+                        cv.getContext('2d').drawImage(loaderImg, 0, 0);
+                        resolve(cv.toDataURL('image/png'));
+                    } catch(e) { resolve(null); }
+                };
+                loaderImg.onerror = () => resolve(null);
+                const _su = Utils.signedUrlFor(src);
+                loaderImg.src = _su + (_su.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+                setTimeout(() => resolve(null), 5000);
+            });
+            if(dataUrl) img.setAttribute('src', dataUrl);
+        }));
         // Laisser le temps aux canvas (drawings + tech layers) de finir leur composition
         await new Promise(r => setTimeout(r, 500));
         
@@ -39915,6 +39934,7 @@ const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
             return '—';
         };
         
+        const pdfSafe = (s) => Utils.stripPdfUnsafe(String(s == null ? '' : s).replace(/[—–]/g, '-').replace(/…/g, '...'));
         let y = margin;
         const ensureSpace = (space) => {
             if(y + space > pageHeight - margin - 8) {
@@ -39941,7 +39961,7 @@ const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(8);
             doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
-            doc.text(text, margin + 2, y + 3.2);
+            doc.text(pdfSafe(text), margin + 2, y + 3.2);
             y += 4.5 + 1;
         };
         
@@ -39957,9 +39977,9 @@ const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
             doc.setTextColor(opts.color || 50, opts.color || 50, opts.color || 50);
             cells.forEach((cell, i) => {
                 const col = cols[i];
-                let txt = String(cell || '');
+                let txt = pdfSafe(cell);
                 while(doc.getTextWidth(txt) > col.w - 2 && txt.length > 3) {
-                    txt = txt.substring(0, txt.length - 2) + '…';
+                    txt = txt.substring(0, txt.length - 2) + '...';
                 }
                 const tx = col.align === 'right' ? col.x + col.w - 1 : col.x + 1;
                 doc.text(txt, tx, y + rowH - 1.4, { align: col.align || 'left' });
@@ -39979,7 +39999,7 @@ const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
             doc.setFont('helvetica', opts.italic ? 'italic' : 'normal');
             doc.setFontSize(opts.fontSize || 8.5);
             doc.setTextColor(opts.color || 60, opts.color || 60, opts.color || 60);
-            const lines = doc.splitTextToSize(String(text), usableWidth - 2);
+            const lines = doc.splitTextToSize(pdfSafe(text), usableWidth - 2);
             lines.forEach(line => {
                 ensureSpace(4);
                 doc.text(line, margin + 1, y + 3);
@@ -40077,7 +40097,7 @@ doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
             doc.setFontSize(10);
             doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
             ensureSpace(5);
-            doc.text(locName, margin + 1, y + 3.5);
+            doc.text(pdfSafe(locName), margin + 1, y + 3.5);
             y += 5;
             if(shootDay.locationAddress) drawTextBlock('Adresse : ' + shootDay.locationAddress);
             if(shootDay.contactName || shootDay.contactPhone) {
