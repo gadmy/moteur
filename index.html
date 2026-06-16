@@ -21,52 +21,74 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 7. Mettre à jour l'historique quand l'utilisateur le demande. 
 
 ================================================================================
-                    PLAN DE TRAVAIL — POST-AUDIT (JUIN 2026)
+              PLAN DE TRAVAIL EN COURS : VISITE GUIDEE (TOUR / ONBOARDING)
 ================================================================================
-Mis à jour au fil des sessions. Statuts : [ ] à faire, [~] en cours,
-[X] fait. (G) = action Guillaume (SQL Supabase), (C) = action Claude
-(patches index.html).
 
-Audit A–E : CLOS. Détail dans HISTORIQUE DES VERSIONS (v529 à v534).
+OBJECTIF
+  Retour terrain : les nouveaux sont « perdus par la densite ». On ajoute une
+  visite guidee interactive (option B retenue) : voile sombre + surbrillance de
+  l'element REEL + infobulle explicative + bouton « Suivant » pilote par
+  l'utilisateur (PAS d'animation auto / fausse souris). Doit marcher desktop ET
+  mobile. Parcours impose :
+    1) Mon Espace (Profil / Contacts)
+    2) Communaute (Univers / Forum)
+    3) Aide (Cours / Guide)
+    4) Hub projet (grille + Nouveau projet)
 
-T1 [X] (C) Thème au login réglé (v535) : le choix de thème est poussé
-       immédiatement au serveur (le push différé de 2 s pouvait être perdu sur un
-       rechargement rapide, et la valeur serveur périmée réimposait l'ancien thème
-       à la connexion). fmp_theme_pref.
-T2 [X] (C) Vérification complète du guide intégré : sections, mapping
-       tabToSection, liens morts, cohérence avec les modules actuels. Lot dédié.
-T3 [X] (C+G) Admin : suppression des signalements réparée (v535). JS : deleteReport
-       et updateReportStatus passent par .select() et signalent un blocage RLS au
-       lieu d'un faux succès. SQL : policy DELETE « Admins can delete reports »
-       ajoutée sur reports (l'UPDATE existait déjà).
-T4 [X] (C) Hub, en-tête : ne garder que l'adresse mail du compte sous le titre
-       Moteur (noms de profils retirés). renderUserWelcome simplifiée.
-T5 [X] (C) Univers : carte vide à la première ouverture réglée (v535).
-       setViewMode passe en async et attend initMap (lazy-load Leaflet) avant de
-       charger les marqueurs ; appel initMap redondant du point d'entrée retiré
-       (plus de double init Leaflet).
-T6 [X] (C) Hub projet : dossiers de classement (v535, testé OK v536). CADRÉ : dossiers IMBRIQUÉS
-       (parentId), 1 seul dossier par projet, rangement par drag-drop + menu
-       « Déplacer vers… ». Champs dossier : nom, couleur libre, importance (même
-       liste que les projets). Classement PERSONNEL par utilisateur (propriétaire
-       comme invité organise sa propre vue), stocké dans les préférences via
-       PreferencesSync — zéro SQL. Lots : 1) module ProjectFolders (modèle + CRUD
-       + persistance) ; 2) UI hub (arborescence, fil d'Ariane, tuiles dossiers,
-       intégration renderProjectList) ; 3) rangement projets (menu + drag-drop).
-T7 [X] (C) Remplacer l'ancien plan A–E par ce plan de suivi (ce bloc).
+REPERES ARCHI (fichier courant, a reverifier a chaque session)
+  - IIFE : `const app = (function(){` (~L12020) ; objet `return { ... }` (~L71270) ;
+    `})();` juste apres. Tout nouveau module se declare avant le return ET s'ajoute
+    a l'objet return.
+  - Nav : #dashboard-view > .dash-header, 3 blocs .nav-dropdown. Boutons .hub-nav-btn :
+    « Mon Espace » (~L7514), « Communaute » (~L7521), « Aide » (~L7528). Les items
+    sont des <div onclick> dans .dropdown-menu (Profil/Contacts, Univers/Forum,
+    Cours/Guide). Les boutons n'ont PAS d'id -> a baliser (data-tour).
+  - Hub projet : #hub-content / #project-list (~L7853).
+  - Modele de placement d'un module : pres de `const Tutorial` (~L61475).
+  - Persistance flag : via PreferencesSync (cles type localStorage 'moteur_*').
 
-(Suite v536)
-T8 [X] (C) Hub : « + Nouveau projet », « + Nouveau dossier » et « 📂 Importer »
-       regroupés en boutons dans la barre dossiers (folder-bar) ; anciennes cartes
-       Nouveau projet / Importer retirées de la grille.
-T9 [ ] (C) Export PDF global — 3 correctifs distincts :
-       a) Résumés : mots collés (espaces perdus) ET manque d'aération (interligne /
-          paragraphes) -> revoir la conversion HTML riche vers PDF.
-       b) Storyboard : images absentes du PDF -> vérifier le pipeline html2canvas /
-          addImage du storyboard.
-       c) Feuilles de service, Convocations : symboles parasites -> emoji/icône
-          envoyé à doc.text() (latin1), à passer par PdfTheme.cleanText /
-          Utils.stripPdfUnsafe (déjà corrigé ailleurs).
+LOTS
+
+  T1 — Squelette module Tour + CSS overlay
+    - `const Tour = { ... }` (PAS d'IIFE async) declare avant le return, ajoute a
+      l'objet return.
+    - CSS : voile plein ecran, « trou » spotlight sur la cible, infobulle, boutons
+      Precedent / Suivant / Quitter, compteur d'etapes, z-index au-dessus de tout.
+    - API : Tour.start() / next() / prev() / stop() / goTo(i).
+    - Test : Tour.start() en console -> voile + etape 1 OK.
+
+  T2 — Parcours (donnees d'etapes) + ciblage
+    - Poser data-tour="..." sur les cibles nav (pas d'id existant).
+    - steps[] = { target, title, body, placement, onEnter/onLeave }.
+    - Chaque etape nav ouvre le dropdown concerne (.show) pour montrer les items,
+      puis le referme en quittant l'etape.
+    - Parcours complet dans l'ordre impose ci-dessus.
+    - Test : les 4 etapes s'enchainent, surbrillance + infobulle bien placees.
+
+  T3 — Robustesse / responsive / accessibilite
+    - Repositionnement au resize + scroll ; infobulle qui ne deborde pas (mobile).
+    - Echap = quitter ; gestion du focus ; pas de conflit z-index avec modales /
+      notif-panel.
+    - Comportement des dropdowns sur petit ecran.
+    - Test multi-tailles (desktop + ~380px).
+
+  T4 — Declencheurs (bouton + premier login)
+    - Bouton « Visite guidee » dans le menu Aide (a cote de Cours/Guide) ->
+      app.Tour.start().
+    - Auto-lancement au 1er login UNIQUEMENT : flag persistant (PreferencesSync,
+      cle type 'moteur_tour_done') ; ne pas rejouer ensuite ; toujours relancable
+      via le bouton.
+    - Test : 1er login declenche / relogin ne declenche pas / bouton relance.
+
+  T5 — Finitions
+    - Redaction finale des infobulles (court, oriente « a quoi ca sert / quoi faire »).
+    - Transition douce entre etapes.
+    - Verifs : node --check sur le dernier <script>, equilibre des div,
+      non-regression de la nav.
+    - Versioning / changelog : geres par le dev.
+
+ETAT : non demarre. Source de verite a relire en debut de session. 
+
 
 ================================================================================
                          HISTORIQUE DES VERSIONS
@@ -7484,7 +7506,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv536</p>
+      <p>vv536.1</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -12090,24 +12112,34 @@ const app = (function(){
                           lock: (() => {
                               let chain = Promise.resolve();
                               let seq = 0;
+                              let lockHeld = false;
                               const log = (window.__sbLock = window.__sbLock || []);
                               return (name, acquireTimeout, fn) => {
                                   const op = { id: ++seq, name: name, acquireTimeout: acquireTimeout, queuedAt: Date.now(), state: 'queued' };
                                   log.push(op); if(log.length > 40) log.shift();
+                                  // Reentrance : supabase-js re-acquiert le verrou alors qu'il le detient deja
+                                  // (initialize -> _onVisibilityChanged -> _acquireLock au reveil de visibilite).
+                                  // La serialiser deadlock (l'op parente attend cette sous-op, qui attend la file).
+                                  // On l'execute donc directement, hors file.
+                                  if(lockHeld) {
+                                      op.state = 'reentrant'; op.startAt = Date.now();
+                                      const r = Promise.resolve().then(fn);
+                                      r.then(() => { op.state = 'done'; op.ms = Date.now() - op.startAt; },
+                                             (e) => { op.state = 'error'; op.err = e && e.message; });
+                                      return r;
+                                  }
                                   const exec = () => {
-                                      op.state = 'running'; op.startAt = Date.now();
+                                      lockHeld = true; op.state = 'running'; op.startAt = Date.now();
                                       let to;
-                                      // Borne DURE : si fn() ne repond pas en 15 s, on REJETTE le run (fn n'est PAS
-                                      // annule, il poursuit en arriere-plan) pour que supabase-js debloque getSession()
-                                      // au lieu de pendre indefiniment. Aucun motif abort-puis-rejeu.
+                                      // Filet ultime : si fn() ne repond pas en 15 s, on REJETTE le run (fn n'est PAS
+                                      // annule, il poursuit en arriere-plan) pour ne jamais geler. Pas d'abort-puis-rejeu.
                                       const guard = new Promise((_, rej) => { to = setTimeout(() => { op.timedOut = true; rej(new Error('auth lock op #' + op.id + ' timeout')); }, 15000); });
-                                      return Promise.race([ Promise.resolve().then(fn), guard ]).finally(() => clearTimeout(to));
+                                      return Promise.race([ Promise.resolve().then(fn), guard ]).finally(() => { clearTimeout(to); lockHeld = false; });
                                   };
                                   const run = chain.then(exec, exec);
                                   run.then(() => { op.state = 'done'; op.ms = Date.now() - (op.startAt || op.queuedAt); },
                                            (e) => { op.state = op.timedOut ? 'timeout' : 'error'; op.err = e && e.message; console.warn('[LOCK] op #' + op.id + ' "' + name + '" ' + op.state + ' : ' + op.err); });
-                                  // Chain STRICTE : la file attend la VRAIE fin de l'op (resolue OU rejetee),
-                                  // jamais un timeout parallele qui chevaucherait l'op (source de la desync supabase-js).
+                                  // Chain STRICTE : la file attend la VRAIE fin de l'op (resolue OU rejetee).
                                   chain = run.then(() => {}, () => {});
                                   return run;
                               };
@@ -61509,6 +61541,239 @@ ${window.location.origin}${window.location.pathname}
 };
 
   // === MODULE TUTORIEL & AIDE CONTEXTUELLE ===
+  // ===================== VISITE GUIDEE (TOUR / ONBOARDING) =====================
+  // Moteur generique de visites guidees multi-chapitres (spotlight + infobulle,
+  // pilote par l'utilisateur). Chapitres dans Tour.chapters. API : start/next/prev/stop/goTo.
+  const Tour = {
+    _active: false,
+    _steps: [],
+    _idx: 0,
+    _els: {},
+    _onReflow: null,
+    _onKey: null,
+    _openedMenu: null,
+
+    chapters: {
+      general: {
+        titre: 'Orientation generale',
+        steps: [
+          {
+            title: 'Bienvenue sur Moteur',
+            body: "Petit tour rapide pour ne pas etre perdu. Tu peux quitter a tout moment (touche Echap) et le relancer depuis le menu Aide.",
+            target: null
+          },
+          {
+            title: 'Mon Espace',
+            body: "Ton profil public (pour apparaitre dans l'Univers) et ton carnet de contacts.",
+            target: function () {
+              var d = Tour._navDropdown(0);
+              return d ? [d.querySelector('.hub-nav-btn'), d.querySelector('.dropdown-menu')] : [];
+            },
+            onEnter: function () { Tour._openMenu(0); }
+          },
+          {
+            title: 'Communaute',
+            body: "L'Univers (la carte des projets et profils publics) et le Forum pour echanger.",
+            target: function () {
+              var d = Tour._navDropdown(1);
+              return d ? [d.querySelector('.hub-nav-btn'), d.querySelector('.dropdown-menu')] : [];
+            },
+            onEnter: function () { Tour._openMenu(1); }
+          },
+          {
+            title: 'Aide',
+            body: "Les cours, le guide complet, et cette visite guidee (que tu pourras relancer ici).",
+            target: function () {
+              var d = Tour._navDropdown(2);
+              return d ? [d.querySelector('.hub-nav-btn'), d.querySelector('.dropdown-menu')] : [];
+            },
+            onEnter: function () { Tour._openMenu(2); }
+          },
+          {
+            title: 'Tes projets',
+            body: "C'est ici que tu crees et retrouves tes films. Lance-toi avec un nouveau projet quand tu es pret.",
+            target: '#hub-content'
+          }
+        ]
+      }
+    },
+
+    // ---- helpers ciblage nav ----
+    _navDropdown: function (i) {
+      var list = document.querySelectorAll('#dashboard-view .dash-header .nav-dropdown');
+      return list[i] || null;
+    },
+    _openMenu: function (i) {
+      var d = this._navDropdown(i);
+      if (!d) return;
+      var m = d.querySelector('.dropdown-menu');
+      if (m) { m.classList.add('show'); this._openedMenu = m; }
+    },
+    _closeMenu: function () {
+      if (this._openedMenu) { this._openedMenu.classList.remove('show'); this._openedMenu = null; }
+    },
+
+    // ---- CSS injecte une seule fois ----
+    _ensureStyle: function () {
+      if (document.getElementById('tour-styles')) return;
+      var st = document.createElement('style');
+      st.id = 'tour-styles';
+      st.textContent = [
+        '.tour-overlay{position:fixed;inset:0;z-index:100000;pointer-events:auto;}',
+        '.tour-hole{position:fixed;top:0;left:0;width:0;height:0;border-radius:8px;box-shadow:0 0 0 9999px rgba(0,0,0,.62);outline:2px solid #e94560;outline-offset:2px;transition:all .25s ease;pointer-events:none;}',
+        '.tour-tooltip{position:fixed;z-index:100001;max-width:330px;background:var(--panel-bg,#1e1e2a);color:var(--text-main,#fff);border:1px solid var(--border,#333);border-radius:10px;padding:16px 18px;box-shadow:0 10px 40px rgba(0,0,0,.5);font-size:.92rem;line-height:1.45;transition:top .2s ease,left .2s ease;}',
+        '.tour-tooltip h4{margin:0 0 8px;font-size:1.05rem;}',
+        '.tour-tooltip p{margin:0 0 14px;}',
+        '.tour-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;}',
+        '.tour-count{font-size:.78rem;opacity:.6;white-space:nowrap;}',
+        '.tour-btns{display:flex;gap:8px;}',
+        '.tour-btns button{border:none;border-radius:6px;padding:7px 12px;font-weight:bold;cursor:pointer;font-size:.85rem;}',
+        '.tour-skip{background:transparent;color:var(--text-main,#fff);opacity:.55;}',
+        '.tour-prev{background:var(--border,#333);color:var(--text-main,#fff);}',
+        '.tour-prev:disabled{opacity:.35;cursor:default;}',
+        '.tour-next{background:linear-gradient(135deg,#e94560,#8b5cf6);color:#fff;}',
+        '@media(max-width:600px){.tour-tooltip{max-width:calc(100vw - 24px);}}'
+      ].join('');
+      document.head.appendChild(st);
+    },
+
+    start: function (chapterId) {
+      if (this._active) this.stop();
+      var ch = this.chapters[chapterId];
+      if (!ch || !ch.steps || !ch.steps.length) return;
+      this._ensureStyle();
+      this._steps = ch.steps;
+      this._idx = 0;
+      this._active = true;
+      this._build();
+      this._render();
+      var self = this;
+      this._onReflow = function () { self._position(); };
+      window.addEventListener('resize', this._onReflow, true);
+      window.addEventListener('scroll', this._onReflow, true);
+      this._onKey = function (e) {
+        if (e.key === 'Escape') { self.stop(); }
+        else if (e.key === 'ArrowRight') { self.next(); }
+        else if (e.key === 'ArrowLeft') { self.prev(); }
+      };
+      document.addEventListener('keydown', this._onKey, true);
+    },
+
+    _build: function () {
+      var ov = document.createElement('div');
+      ov.className = 'tour-overlay';
+      var hole = document.createElement('div');
+      hole.className = 'tour-hole';
+      var tip = document.createElement('div');
+      tip.className = 'tour-tooltip';
+      ov.appendChild(hole);
+      ov.appendChild(tip);
+      document.body.appendChild(ov);
+      this._els = { overlay: ov, hole: hole, tip: tip };
+    },
+
+    _render: function () {
+      var step = this._steps[this._idx];
+      this._closeMenu();
+      if (step && typeof step.onEnter === 'function') { try { step.onEnter(this); } catch (e) {} }
+      var last = this._idx === this._steps.length - 1;
+      var first = this._idx === 0;
+      var t = this._els.tip;
+      t.innerHTML =
+        '<h4></h4><p></p>' +
+        '<div class="tour-foot">' +
+          '<span class="tour-count"></span>' +
+          '<div class="tour-btns">' +
+            '<button class="tour-skip" onclick="app.Tour.stop()">Quitter</button>' +
+            '<button class="tour-prev" onclick="app.Tour.prev()"' + (first ? ' disabled' : '') + '>Precedent</button>' +
+            '<button class="tour-next" onclick="app.Tour.next()">' + (last ? 'Terminer' : 'Suivant') + '</button>' +
+          '</div>' +
+        '</div>';
+      t.querySelector('h4').textContent = step ? (step.title || '') : '';
+      t.querySelector('p').textContent = step ? (step.body || '') : '';
+      t.querySelector('.tour-count').textContent = (this._idx + 1) + ' / ' + this._steps.length;
+      this._position();
+    },
+
+    _targets: function (step) {
+      var els = [];
+      if (!step) return els;
+      if (typeof step.target === 'function') { var r = step.target(); if (r) els = els.concat(r); }
+      else if (step.target) { var e = document.querySelector(step.target); if (e) els.push(e); }
+      return els.filter(function (x) { return x && x.getBoundingClientRect; });
+    },
+
+    _position: function () {
+      if (!this._active) return;
+      var step = this._steps[this._idx];
+      var hole = this._els.hole, tip = this._els.tip;
+      var vw = window.innerWidth, vh = window.innerHeight;
+      var els = this._targets(step);
+      var pad = 6, margin = 14;
+      var tr = tip.getBoundingClientRect();
+
+      if (!els.length) {
+        hole.style.width = '0px'; hole.style.height = '0px';
+        hole.style.left = (vw / 2) + 'px'; hole.style.top = (vh / 2) + 'px';
+        tip.style.left = Math.round((vw - tr.width) / 2) + 'px';
+        tip.style.top = Math.round((vh - tr.height) / 2) + 'px';
+        return;
+      }
+
+      var x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+      els.forEach(function (el) {
+        var r = el.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) return;
+        x1 = Math.min(x1, r.left); y1 = Math.min(y1, r.top);
+        x2 = Math.max(x2, r.right); y2 = Math.max(y2, r.bottom);
+      });
+      if (x1 === Infinity) { x1 = vw / 2; y1 = vh / 2; x2 = x1; y2 = y1; }
+
+      hole.style.left = Math.round(x1 - pad) + 'px';
+      hole.style.top = Math.round(y1 - pad) + 'px';
+      hole.style.width = Math.round((x2 - x1) + pad * 2) + 'px';
+      hole.style.height = Math.round((y2 - y1) + pad * 2) + 'px';
+
+      var top = y2 + pad + margin;
+      if (top + tr.height > vh - 8) top = Math.max(8, y1 - pad - margin - tr.height);
+      var left = x1;
+      if (left + tr.width > vw - 8) left = vw - 8 - tr.width;
+      if (left < 8) left = 8;
+      tip.style.left = Math.round(left) + 'px';
+      tip.style.top = Math.round(top) + 'px';
+    },
+
+    next: function () {
+      if (!this._active) return;
+      if (this._idx < this._steps.length - 1) { this._idx++; this._render(); }
+      else { this.stop(); }
+    },
+    prev: function () {
+      if (!this._active) return;
+      if (this._idx > 0) { this._idx--; this._render(); }
+    },
+    goTo: function (i) {
+      if (!this._active) return;
+      if (i >= 0 && i < this._steps.length) { this._idx = i; this._render(); }
+    },
+
+    stop: function () {
+      if (!this._active) return;
+      this._active = false;
+      this._closeMenu();
+      if (this._onReflow) {
+        window.removeEventListener('resize', this._onReflow, true);
+        window.removeEventListener('scroll', this._onReflow, true);
+        this._onReflow = null;
+      }
+      if (this._onKey) { document.removeEventListener('keydown', this._onKey, true); this._onKey = null; }
+      if (this._els.overlay && this._els.overlay.parentNode) {
+        this._els.overlay.parentNode.removeChild(this._els.overlay);
+      }
+      this._els = {};
+    }
+  };
+
   const Tutorial = {
     // ===================== DONNÉES (sections & aides) =====================
     sections: [
@@ -71304,7 +71569,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, ContractsTemplates, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tutorial, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders };
+  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, ContractsTemplates, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Tutorial, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders };
 })();
 </script>
 
