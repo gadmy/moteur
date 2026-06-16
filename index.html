@@ -29,16 +29,16 @@ Mis à jour au fil des sessions. Statuts : [ ] à faire, [~] en cours,
 
 Audit A–E : CLOS. Détail dans HISTORIQUE DES VERSIONS (v529 à v534).
 
-T1 [ ] (C) Thème au login : retenir le dernier mode choisi (fmp_theme_pref).
-       Symptôme : ouverture souvent en sombre. Défaut sombre volontaire pour les
-       nouveaux comptes. EN ATTENTE Guillaume : ça arrive sur le navigateur
-       habituel, ou en contexte neuf (privé / cache vidé / autre appareil) ?
+T1 [X] (C) Thème au login réglé (v535) : le choix de thème est poussé
+       immédiatement au serveur (le push différé de 2 s pouvait être perdu sur un
+       rechargement rapide, et la valeur serveur périmée réimposait l'ancien thème
+       à la connexion). fmp_theme_pref.
 T2 [ ] (C) Vérification complète du guide intégré : sections, mapping
        tabToSection, liens morts, cohérence avec les modules actuels. Lot dédié.
-T3 [ ] (C/G?) Admin : suppression des signalements sans effet. Le code JS existe
-       (delete + statut résolu + contrôle des lignes touchées, v533). Suspect n.1 :
-       policies RLS DELETE/UPDATE sur 'reports' jamais appliquées côté Supabase.
-       EN ATTENTE Guillaume : retour console lors d'une suppression.
+T3 [X] (C+G) Admin : suppression des signalements réparée (v535). JS : deleteReport
+       et updateReportStatus passent par .select() et signalent un blocage RLS au
+       lieu d'un faux succès. SQL : policy DELETE « Admins can delete reports »
+       ajoutée sur reports (l'UPDATE existait déjà).
 T4 [X] (C) Hub, en-tête : ne garder que l'adresse mail du compte sous le titre
        Moteur (noms de profils retirés). renderUserWelcome simplifiée.
 T5 [ ] (C) Univers : carte vide à la première ouverture (profils absents tant
@@ -60,6 +60,12 @@ DÉCISIONS ACTÉES
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v535 (16 Juin 2026)
+  - THÈME — le dernier mode choisi est désormais retenu de façon fiable : le choix de thème est poussé immédiatement vers le serveur (auparavant différé de 2 s, ce push pouvait être perdu lors d'un rechargement rapide, et la valeur serveur périmée réimposait l'ancien thème à la connexion suivante).
+  - ADMIN / MODÉRATION — suppression des signalements réparée : côté client, deleteReport et updateReportStatus passent par .select() et signalent explicitement un blocage RLS au lieu d'un faux succès silencieux ; côté SQL, ajout de la policy DELETE « Admins can delete reports » manquante sur la table reports (l'UPDATE existait déjà).
+  - ACCUEIL — en-tête du hub : seule l'adresse mail du compte est affichée sous l'icône et le titre Moteur (les noms de profils publics ont été retirés).
+  - DIAGNOSTIC — réactivation de l'outil « gel de session » retiré à tort en E7 : commande console sbDiag() (visibilité, blocage éventuel de getSession via Promise.race 4 s, état Realtime, requêtes en cours), journal [SB auth] automatique et raccourci Ctrl+Alt+D ; le fetch instrumenté qui l'alimente était resté en place.
+  - INTERNE — plan de travail de l'en-tête remplacé : audit A–E (clos) archivé dans ce changelog, remplacé par un plan de suivi T1–T7 des chantiers en cours.
 v534 (15 Juin 2026)
   - MOODBOARD — formats d'impression cadrés à l'écran : le canvas adopte désormais la taille et le ratio du format choisi (A4/A3/A2/A0 × paysage/portrait, ratio √2), affiché comme une feuille blanche cadrée, alignée sur ce que produit l'export PDF. Le mode « Libre (infini) » est retiré du sélecteur ; les nouvelles planches naissent en A4 portrait. Les planches déjà créées en mode Libre restent fonctionnelles (option « Libre (planche existante) » conservée pour elles seules, non proposée aux nouvelles). Dimensions centralisées dans MoodBoard.FORMATS (source unique partagée par l'affichage et l'export, qui pointe dessus) et appliquées via le helper MoodBoard.applyCanvasFormat (classe + width/height).
   - GUIDE — sections manquantes ajoutées (D1, fin) : deux nouvelles sections dans le guide intégré (Tutorial) — « 🪟 Fenêtres flottantes » (détacher un sous-onglet, interrupteur Consultation/Modification, verrou de domaine, pile de badges rouge/bleu/gris) et « 🏛️ Asso / Entreprises » (fiche structure à parité comédiens/techniciens, instantané depuis l'Univers, verrou des fiches liées, section « Sur ce projet » toujours éditable, resync auto). Le mapping « ❓ Aide sur cet onglet » de l'onglet orgs pointe désormais sur la bonne section au lieu du début du guide.
@@ -7436,7 +7442,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv535.2</p>
+      <p>vv535</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -59781,7 +59787,7 @@ const UniverseMap = {
     },
 
     // Changer le mode de vue
-    setViewMode: (mode) => {
+    setViewMode: async (mode) => {
         Universe.viewMode = mode;
         
         const mapBtn = document.getElementById('view-mode-map');
@@ -59810,18 +59816,18 @@ const UniverseMap = {
                 // Réinitialiser la carte
                 Universe.map = null;
                 Universe.markersLayer = null;
-                UniverseMap.initMap();
             }
             
             mapContainer.style.display = 'block';
             
-            // Rafraîchir la carte et charger les marqueurs (filtrés ou non)
-            setTimeout(() => {
-                if(Universe.map) {
-                    Universe.map.invalidateSize();
-                    UniverseMap.loadMapMarkers();
-                }
-            }, 100);
+            // Init si besoin (attendre le lazy-load Leaflet) PUIS charger les marqueurs.
+            // #universe-map existe en dur dans le HTML : sans cet await, le 1er affichage
+            // tombait sur Universe.map encore null (Leaflet pas pret en 100 ms) -> carte vide.
+            if(!Universe.map) await UniverseMap.initMap();
+            if(Universe.map) {
+                Universe.map.invalidateSize();
+                await UniverseMap.loadMapMarkers();
+            }
         } else {
             fanBtn.style.background = 'var(--primary)';
             fanBtn.style.color = 'white';
@@ -60013,9 +60019,7 @@ hoverCard: null,
         if(document.getElementById('universe-filters-enterprise')) document.getElementById('universe-filters-enterprise').style.display = 'none';
         if(document.getElementById('universe-filters-project')) document.getElementById('universe-filters-project').style.display = 'none';
         
-// Initialiser la carte monde
-        Universe.initMap();
-        Universe.setViewMode('map');
+Universe.setViewMode('map');
     },
     
     // Charge tous les profils publics et projets
