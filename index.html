@@ -3667,6 +3667,7 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
   .folder-sep { color: var(--text-sec); }
   .folder-tile { background: var(--panel-bg); border: 1px solid var(--border); border-left: 5px solid #9E9E9E; border-radius: 12px; padding: 16px; min-height: 200px; cursor: pointer; display: flex; flex-direction: column; gap: 10px; position: relative; transition: transform 0.2s ease, border-color 0.2s; }
   .folder-tile:hover { transform: translateY(-2px); }
+  .folder-tile.folder-drop { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary) inset; }
   .folder-tile-icon { font-size: 2rem; }
   .folder-tile-name { font-weight: bold; }
   .folder-tile-meta { color: var(--text-sec); font-size: 0.8rem; margin-top: 4px; }
@@ -20415,6 +20416,46 @@ initCategoriesDragDrop: () => {
         await UIDashboard.renderProjectList();
     },
     
+    // T6 : menu "Deplacer vers..." sur une carte projet (liste arborescente des dossiers).
+    showMoveMenu: (e, projectId) => {
+        e.stopPropagation();
+        document.querySelectorAll('.priority-menu').forEach(m => m.remove());
+        const current = ProjectFolders.folderOf(projectId);
+        const items = [{ id: '', name: '🏠 Racine (aucun dossier)', depth: 0, color: '' }];
+        const walk = (parentId, depth) => {
+            ProjectFolders.children(parentId).forEach(f => { items.push({ id: f.id, name: f.name, depth: depth, color: f.color }); walk(f.id, depth + 1); });
+        };
+        walk(null, 0);
+        const menu = document.createElement('div');
+        menu.className = 'priority-menu';
+        menu.style.maxHeight = '300px';
+        menu.style.overflowY = 'auto';
+        menu.innerHTML = items.map(it => `
+            <div class="priority-menu-item" onclick="app.UIDashboard.moveToFolder('${projectId}', '${it.id}')">
+                <span style="display:inline-block; width:${it.depth * 14}px;"></span>
+                ${it.id ? `<span class="dot" style="background:${it.color || '#9E9E9E'}"></span>` : ''}
+                ${Utils.escape(it.name)}${it.id === (current || '') ? ' ✓' : ''}
+            </div>`).join('');
+        const rect = e.target.getBoundingClientRect();
+        menu.style.position = 'fixed';
+        menu.style.top = (rect.bottom + 5) + 'px';
+        menu.style.left = rect.left + 'px';
+        document.body.appendChild(menu);
+        setTimeout(() => {
+            document.addEventListener('click', function closeMenu(ev) {
+                if(!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', closeMenu); }
+            });
+        }, 10);
+    },
+
+    moveToFolder: (projectId, folderId) => {
+        document.querySelectorAll('.priority-menu').forEach(m => m.remove());
+        ProjectFolders.assign(projectId, folderId || null);
+        const f = folderId ? ProjectFolders.get(folderId) : null;
+        Utils.toast(f ? `Déplacé dans « ${f.name} »` : 'Sorti du dossier', 'success');
+        UIDashboard.renderProjectList();
+    },
+
     showPriorityMenu: (e, projectId) => {
         e.stopPropagation();
         // Fermer menu existant
@@ -20591,6 +20632,9 @@ initCategoriesDragDrop: () => {
                 + `<button class="p-btn-del" onclick="app.UIDashboard.deleteFolder('${f.id}')" title="Supprimer">🗑️</button></div>`;
             tile.onclick = (e) => { if(!e.target.closest('.folder-tile-actions')) UIDashboard.openFolder(f.id); };
             tile.setAttribute('role', 'button'); tile.setAttribute('tabindex', '0');
+            tile.addEventListener('dragover', (e) => { e.preventDefault(); tile.classList.add('folder-drop'); });
+            tile.addEventListener('dragleave', (e) => { if(!tile.contains(e.relatedTarget)) tile.classList.remove('folder-drop'); });
+            tile.addEventListener('drop', (e) => { e.preventDefault(); tile.classList.remove('folder-drop'); const pid = e.dataTransfer.getData('text/plain'); if(pid) { ProjectFolders.assign(pid, f.id); Utils.toast('Déplacé dans « ' + f.name + ' »', 'success'); UIDashboard.renderProjectList(); } });
             els.projectList.appendChild(tile);
         });
     },
@@ -20717,7 +20761,7 @@ initCategoriesDragDrop: () => {
                     ? `<div class="p-series-line"><span class="p-series-badge" title="Projet série">📺 ${p.episodeCount} épisode${p.episodeCount>1?'s':''}</span></div>`
                     : '';
                 
-                card.innerHTML = `<span class="p-role-badge" style="color:${badgeColor}; border-color:${badgeColor}">${badgeText}</span><div><div class="p-title">${Utils.escape(p.title)}</div>${seriesBadge}<div class="p-meta">Modifié : ${p.date} ${priorityBadge}</div></div><div class="p-actions"><button class="p-btn-priority" onclick="app.UIDashboard.showPriorityMenu(event, '${p.id}')" title="Priorité">🏷️</button><button class="p-btn-del" onclick="app.Store.deleteProject('${p.id}', '${p.role}', event)">🗑️</button></div>`; 
+                card.innerHTML = `<span class="p-role-badge" style="color:${badgeColor}; border-color:${badgeColor}">${badgeText}</span><div><div class="p-title">${Utils.escape(p.title)}</div>${seriesBadge}<div class="p-meta">Modifié : ${p.date} ${priorityBadge}</div></div><div class="p-actions"><button class="p-btn-priority" onclick="app.UIDashboard.showMoveMenu(event, '${p.id}')" title="Déplacer vers un dossier">📁</button><button class="p-btn-priority" onclick="app.UIDashboard.showPriorityMenu(event, '${p.id}')" title="Priorité">🏷️</button><button class="p-btn-del" onclick="app.Store.deleteProject('${p.id}', '${p.role}', event)">🗑️</button></div>`; 
                 card.onclick = (e) => { if(!e.target.closest('.p-actions')) Store.loadProject(p.id); };
                 card.setAttribute('role', 'button'); card.setAttribute('tabindex', '0');
                 
