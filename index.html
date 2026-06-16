@@ -29399,6 +29399,8 @@ const StoryboardExport = {
         }
         
         // 1. Force le rendu à jour dans le conteneur plein écran
+        StoryboardExport._printCapturing = true;
+        StoryboardExport._printImgPromises = [];
         Storyboard.renderPrintPreview('sbFullscreenContent');
         const layout = (Storyboard.printConfig && Storyboard.printConfig.layout) || 'standard';
         const isLandscape = (layout === 'large' || layout === 'compact');
@@ -29417,6 +29419,9 @@ const StoryboardExport = {
             });
         }));
         // 4. Cloner le contenu et convertir TOUS les canvas en images data URL
+        // [2b] attendre le dessin reel des images (CORS frais) avant de lire les canvas
+        try { await Promise.all(StoryboardExport._printImgPromises); } catch(e) {}
+        StoryboardExport._printCapturing = false;
         const clone = sourceContent.cloneNode(true);
         const sourceCanvases = sourceContent.querySelectorAll('canvas');
         const cloneCanvases = clone.querySelectorAll('canvas');
@@ -29626,9 +29631,7 @@ const StoryboardExport = {
         // 3 cas : image uploadée, drawingData (calques de dessin), objects (objets vectoriels)
         if(techZone.imageType === 'upload' && techZone.imageUrl) {
             const layerImg = new Image();
-            if(typeof techZone.imageUrl === 'string' && techZone.imageUrl.startsWith('http')) {
-                layerImg.crossOrigin = 'anonymous';
-            }
+            layerImg.crossOrigin = 'anonymous'; // [2b] toujours pose (path brut depuis D6)
             StoryboardExport._awaitPrintImg(layerImg, () => { ctx.drawImage(layerImg, 0, 0, ctx.canvas.width, ctx.canvas.height); });
             layerImg.src = StoryboardExport._printSrc(techZone.imageUrl);
         } else if(techZone.drawingData) {
@@ -29667,7 +29670,7 @@ const StoryboardExport = {
         if(shot.imageType === 'upload' && shot.imageUrl) {
             // Charger l'image avec crossOrigin et la dessiner dans le canvas
             const img = new Image();
-            if(shot.imageUrl.startsWith('http')) img.crossOrigin = 'anonymous';
+            img.crossOrigin = 'anonymous'; // [2b] toujours pose : path brut depuis D6, URL resolue via signedUrlFor
             StoryboardExport._awaitPrintImg(img, () => {
                 // Garder l'aspect ratio : dessiner centré dans le canvas
                 const ratio = Math.min(composedCanvas.width / img.naturalWidth, composedCanvas.height / img.naturalHeight);
@@ -31844,9 +31847,7 @@ const DrawingEditor = {
             const img = new Image();
             // [Phase C.2.6 fix CRITIQUE] crossOrigin obligatoire sur les calques HTTP Storage
             // sinon le canvas est tainted et toDataURL() échoue lors de l'export PDF storyboard
-            if(typeof layerData.imageData === 'string' && layerData.imageData.startsWith('http')) {
-                img.crossOrigin = 'anonymous';
-            }
+            img.crossOrigin = 'anonymous'; // [2b] images de print toujours servies via Storage (cross-origin)
             StoryboardExport._awaitPrintImg(img, () => { ctx.drawImage(img, 0, 0); });
             img.src = StoryboardExport._printSrc(layerData.imageData);
         });
