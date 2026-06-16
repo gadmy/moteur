@@ -73,6 +73,10 @@ T9 [ ] (C) Export PDF global — 3 correctifs distincts :
 ================================================================================
 v536 (16 Juin 2026)
   - HUB — barre d'actions unifiée : « + Nouveau projet », « + Nouveau dossier » et « 📂 Importer » sont désormais regroupés en boutons dans la barre des dossiers (folder-bar). Les anciennes cartes « Nouveau projet » et « Importer » de la grille ont été retirées, l'accueil ne mélange plus tuiles-actions et tuiles-projets.
+  - EXPORT PDF — Feuilles de service / convocations : caractères parasites corrigés. Tout le texte (lieu, horaires, programme, convocations) passe désormais par un nettoyage latin1 avant doc.text() : les emojis et symboles hors latin1 saisis dans les noms / rôles / notes ne ressortent plus en symboles parasites ; tirets et points de suspension typographiques convertis en ASCII.
+  - EXPORT PDF — Storyboard : les dessins et images des plans s'affichent enfin dans le PDF. Cause : crossOrigin n'était plus posé sur les images de print (la condition testait une URL http alors que le stockage renvoie des chemins bruts depuis la migration D6), d'où des canvas « tainted » illisibles par html2canvas. crossOrigin est maintenant posé systématiquement, avec cache-buster en mode capture pour éviter une réponse de cache sans en-tête CORS, et l'export attend le dessin réel de toutes les images (calques, image importée, calque technique) avant la rastérisation. L'impression directe bénéficie du même correctif.
+  - EXPORT PDF — Storyboard : le bouton « Générer PDF » ne tombe plus en « html2canvas non chargé » au premier clic (la librairie est chargée avant la vérification).
+  - EXPORT PDF — Résumés (synopsis / court / long) : mots collés et interlignes écrasés corrigés. Les blocs de texte à style uniforme sont rendus via le découpage natif de jsPDF (splitTextToSize) au lieu du rendu mot-à-mot manuel qui chevauchait les lignes quand la mesure de largeur dérivait.
 v535 (16 Juin 2026)
   - SESSION — gel d'authentification : filet anti-deadlock sur le verrou d'auth maison. Si une opération d'auth (refresh de token) ne relâche pas le verrou, la file des opérations suivantes ne reste plus bloquée indéfiniment — getSession() ne pend plus pour toujours (attente bornée à 8 s). Verrou instrumenté temporairement (journaux [LOCK] + window.__sbLock) pour identifier la cause racine au prochain gel.
   - HUB — dossiers de classement : les projets de l'accueil peuvent être organisés dans des dossiers imbriqués (créer / renommer / couleur / importance / supprimer) avec fil d'Ariane de navigation. Rangement par glisser-déposer d'une carte sur un dossier ou via le menu « 📁 Déplacer vers… » ; un projet vit dans un seul dossier. Classement personnel à chaque utilisateur (propriétaire comme invité), stocké dans les préférences synchronisées (module ProjectFolders, clé moteur_project_folders, zéro SQL).
@@ -19889,8 +19893,8 @@ openBoardPrintEpisodeChooser: () => {
             'storyboard': 'storyboard',
             'chars': 'casting',
             'actors': 'casting',
-            'locs': 'depouillement',
-            'resources': 'depouillement',
+            'locs': 'lieux',
+            'resources': 'ressources',
             'crew': 'equipe',
             'orgs': 'orgs',
             'breakdown': 'depouillement',
@@ -61637,6 +61641,17 @@ ${window.location.origin}${window.location.pathname}
         `
       },
       {
+        id: 'ressources',
+        title: '📦 Ressources',
+        content: `
+          <h3>Tout ce qu'il faut réunir</h3>
+          <p>L'onglet <strong>Ressources</strong> agrège ce que ton dépouillement a identifié : accessoires, costumes, véhicules, matériel... Chaque élément devient une ligne à préparer et à suivre.</p>
+          <p>Tu vois dans quelles scènes chaque ressource est utilisée, et tu peux noter qui l'apporte, son coût ou son statut (à trouver / réservé / obtenu).</p>
+          <div class="tuto-tip"><strong>🔄 Alimenté par le dépouillement :</strong> chaque tag posé dans le Dépouillement (accessoire, costume, véhicule, FX...) remonte ici automatiquement. Plus tu dépouilles, plus ta liste de préparation se construit toute seule.</div>
+          <p>Export PDF : la liste complète des ressources, idéale pour la régie et la préparation.</p>
+        `
+      },
+      {
         id: 'storyboard',
         title: '🎨 Storyboard',
         content: `
@@ -61650,7 +61665,7 @@ ${window.location.origin}${window.location.pathname}
       },
       {
         id: 'moodboard',
-        title: '🎭 MoodBoard',
+        title: '🖼️ MoodBoard',
         content: `
           <h3>Ton tableau d'inspiration</h3>
           <p>Ambiances, couleurs, références visuelles... Crée plusieurs planches : décors, costumes, éclairage...</p>
@@ -61662,13 +61677,25 @@ ${window.location.origin}${window.location.pathname}
       },
       {
         id: 'casting',
-        title: '🎭 Casting',
+        title: '🎭 Comédiens & Casting',
         content: `
           <h3>Gère tous tes comédiens</h3>
           <p>Deux vues : par Personnages du scénario, ou par Comédiens avec fiches complètes.</p>
           <p>Chaque personnage peut être lié à un comédien. Tu vois qui joue qui en un coup d'œil.</p>
           <p><strong>Fiche comédien :</strong> Photo, contact, mensurations, compétences, disponibilités. Jusqu'à 3 photos pour la galerie (essais costumes !).</p>
           <div class="tuto-tip"><strong>💡 Contrats :</strong> Le bouton Contrat sur chaque fiche génère directement le document. Les jours de tournage sont calculés depuis le planning.</div>
+        `
+      },
+      {
+        id: 'lieux',
+        title: '📍 Lieux & Décors',
+        content: `
+          <h3>Tous les décors de ton film</h3>
+          <p>L'onglet <strong>Lieux</strong> recense les décors de ton tournage : intérieurs, extérieurs, studios... Chaque lieu a sa fiche avec adresse, contact du propriétaire, autorisations, photos de repérage et notes d'accès.</p>
+          <p>Les décors mentionnés dans tes scènes (le « INT. / EXT. » du scénario) peuvent être rattachés à un lieu réel : tu sais ainsi où se tourne chaque scène.</p>
+          <div class="tuto-tip"><strong>📍 Carte :</strong> Ajoute les coordonnées d'un lieu pour l'afficher sur une mini-carte avec lien Google Maps — pratique pour le repérage et la feuille de service.</div>
+          <p><strong>Vers la feuille de service :</strong> le lieu d'un jour de tournage reprend automatiquement l'adresse, la carte et le contact saisis ici.</p>
+          <p>Export PDF : la liste des décors avec photos et coordonnées, ou une fiche détaillée par lieu.</p>
         `
       },
       {
