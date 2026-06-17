@@ -2480,6 +2480,24 @@ V1.0 - Base solide (Déc. 2024)
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 
+<!-- Structured data : résultats enrichis Google -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Moteur",
+  "url": "https://moteur.studio/",
+  "applicationCategory": "MultimediaApplication",
+  "applicationSubCategory": "Logiciel d'écriture de scénario et de gestion de production audiovisuelle",
+  "operatingSystem": "Web",
+  "inLanguage": "fr",
+  "description": "Application tout-en-un pour la pré-production cinéma et audiovisuel : écriture de scénario, séquencier, storyboard, casting, planning, budget et contrats. Le continuum de l'écriture à la production.",
+  "image": "https://moteur.studio/og-image.png",
+  "author": { "@type": "Person", "name": "Guillaume de Mauroy" },
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
+}
+</script>
+
 <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
 
 <!-- Supabase SDK -->
@@ -17908,6 +17926,26 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                       state.data._mediaPathsMigrated = true;
                       if(_migN > 0) needsMigrationSave = true;
                   } catch(e) { console.warn('migrateProjPathsInData:', e); }
+              }
+              // Resync nom du propriétaire : le nom est figé dans data.crew/actors à la création.
+              // On le réaligne sur user_profiles.name (via owner_profile_id) pour refléter un renommage de profil.
+              if(project.owner_profile_id) {
+                  try {
+                      const { data: ownerProf } = await supabase
+                          .from('user_profiles').select('name').eq('id', project.owner_profile_id).maybeSingle();
+                      const freshName = ((ownerProf && ownerProf.name) || '').trim();
+                      if(freshName) {
+                          const ownerEmail = (project.owner_email || '').toLowerCase();
+                          ['crew', 'actors'].forEach(k => {
+                              (state.data[k] || []).forEach(p => {
+                                  if(p.isOwner && (p.email || '').toLowerCase() === ownerEmail && p.name !== freshName) {
+                                      p.name = freshName;
+                                      needsMigrationSave = true;
+                                  }
+                              });
+                          });
+                      }
+                  } catch(e) { console.warn('[Owner resync]', e && e.message); }
               }
               await Utils.refreshSignedCache(state.data); // Lot D6 : pré-signe les médias 'projects' avant rendu
               Utils.startImgResolver(); // Lot D6 : résolveur DOM des <img> signées
