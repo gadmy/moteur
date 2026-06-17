@@ -3766,12 +3766,12 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
       scrollbar-width: none; 
   }
   #quick-nav::-webkit-scrollbar { display: none; }
-  /* Déplacer quick-nav à gauche quand les onglets sont à droite */
+  /* quick-nav TOUJOURS a droite (la position "droite" du menu est desactivee, cf setTabsPosition) */
   body.tabs-right #quick-nav {
-      right: auto;
-      left: 0;
-      border-left: none;
-      border-right: 1px solid var(--border);
+      right: 0;
+      left: auto;
+      border-left: 1px solid var(--border);
+      border-right: none;
   }
   /* Ajuster quick-nav quand les onglets sont à gauche (décaler après la barre d'onglets) */
   body.tabs-left #quick-nav {
@@ -9568,7 +9568,7 @@ body.presentation-mode .presentation-bar {
                 <div class="position-menu-item nav-item" onclick="app.UI.setTabsPosition('top')" data-pos="top">⬆️ Haut</div>
                 <div class="position-menu-item nav-item" onclick="app.UI.setTabsPosition('bottom')" data-pos="bottom">⬇️ Bas</div>
                 <div class="position-menu-item nav-item" onclick="app.UI.setTabsPosition('left')" data-pos="left">⬅️ Gauche</div>
-                <div class="position-menu-item nav-item" onclick="app.UI.setTabsPosition('right')" data-pos="right">➡️ Droite</div>
+                (ligne supprimée, rien)
                 <div id="tabs-mode-section" style="border-top:1px solid var(--border); margin-top:5px;">
                     <div class="n8-misc-1">MODE</div>
                     <div class="position-menu-item nav-item" onclick="app.UI.setTabsModeFromMenu('scroll')" data-mode="scroll">↔️ Défilant</div>
@@ -15339,21 +15339,16 @@ crewRoles: {
                   // Authentifier la connexion temps réel (sinon Realtime ne délivre ni présence ni changements)
                   try { if(session.access_token) supabase.realtime.setAuth(session.access_token); } catch(_) {}
 
-                  // Logger la connexion (seulement sur SIGNED_IN, pas les refresh)
+                  // Logger la connexion - DIFFERE hors du verrou d'auth (aucun appel Supabase dans onAuthStateChange, sinon deadlock)
                   if (event === 'SIGNED_IN') {
-                      try {
-                          await supabase.from('user_logins').insert({ user_email: session.user.email.toLowerCase() });
-                      } catch(e) { console.warn('Login log error:', e); }
+                      setTimeout(() => { supabase.from('user_logins').insert({ user_email: session.user.email.toLowerCase() }).then(null, e => console.warn('Login log error:', e)); }, 0);
                   }
                   // Ne pas rediriger si déjà dans un projet ou sur le dashboard
                   if(els.appView.style.display === 'flex' || els.dashboardView.style.display === 'flex') {
                       return;
                   }
-                  // Vérifier la session unique
-                  const sessionOk = await SessionManager.startSessionCheck(session.user.id);
-                  if(sessionOk) {
-                      Auth.showDashboard(); 
-                  }
+                  // Verifier la session unique - DIFFERE hors du verrou d'auth (anti-deadlock onAuthStateChange)
+                  setTimeout(async () => { const sessionOk = await SessionManager.startSessionCheck(session.user.id); if(sessionOk) Auth.showDashboard(); }, 0);
               } 
               else { 
                   // En file://, ignorer les events de refresh échoués si déjà connecté
@@ -15362,7 +15357,7 @@ crewRoles: {
                       return;
                   }
                   state.currentUser = null; 
-                  SessionManager.cleanup();
+                  setTimeout(() => SessionManager.cleanup(), 0);
                   Auth.showAuth(); 
               } 
           });
@@ -20916,6 +20911,9 @@ initCategoriesDragDrop: () => {
     
     // Position des onglets (haut, bas, gauche, droite)
     setTabsPosition: (position) => {
+        // Position "droite" desactivee : le menu a droite faisait basculer la quick-nav a gauche
+        // (recouvrement des panneaux). On la convertit en "gauche".
+        if(position === 'right') position = 'left';
         const tabsNav = document.getElementById('tabsNav');
         const body = document.body;
         const main = document.querySelector('main');
