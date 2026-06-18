@@ -12880,6 +12880,15 @@ crewRoles: {
 
   const Utils = {
       sanitizeEmail: (email) => email.replace(/\./g, ','),
+      // Poids d'un projet : octets -> "X Ko (Y Mo)"
+      formatWeight: (bytes) => {
+          const b = bytes || 0;
+          const ko = b / 1024;
+          const mo = ko / 1024;
+          const koStr = ko.toLocaleString('fr-FR', { maximumFractionDigits: ko < 10 ? 1 : 0 });
+          const moStr = mo.toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+          return koStr + ' Ko (' + moStr + ' Mo)';
+      },
       escape: (s) => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'),
       // Sanitize du HTML riche inter-utilisateurs (forum, actualites) : allowlist de balises, zero attribut
       sanitizeRich: (html) => {
@@ -17283,7 +17292,8 @@ const LockManager = {
                   project_type: p.project_type || 'film',
                   episodeCount: p.episode_count || 0,
                   priority: p.data?.priority || null,
-                  order: p.data?.order
+                  order: p.data?.order,
+                  weightBytes: new TextEncoder().encode(JSON.stringify(p.data || {})).length
               }));
           }
           
@@ -17306,7 +17316,8 @@ const LockManager = {
                   project_type: p.project_type || 'film',
                   episodeCount: p.episode_count || 0,
                   priority: p.data?.priority || null,
-                  order: p.data?.order
+                  order: p.data?.order,
+                  weightBytes: new TextEncoder().encode(JSON.stringify(p.data || {})).length
               };
           });
       },
@@ -20765,7 +20776,7 @@ initCategoriesDragDrop: () => {
                     ? `<div class="p-series-line"><span class="p-series-badge" title="Projet série">📺 ${p.episodeCount} épisode${p.episodeCount>1?'s':''}</span></div>`
                     : '';
                 
-                card.innerHTML = `<span class="p-role-badge" style="color:${badgeColor}; border-color:${badgeColor}">${badgeText}</span><div><div class="p-title">${Utils.escape(p.title)}</div>${seriesBadge}<div class="p-meta">Modifié : ${p.date} ${priorityBadge}</div></div><div class="p-actions"><button class="p-btn-priority" onclick="app.UIDashboard.showMoveMenu(event, '${p.id}')" title="Déplacer vers un dossier">📁</button><button class="p-btn-priority" onclick="app.UIDashboard.showPriorityMenu(event, '${p.id}')" title="Priorité">🏷️</button><button class="p-btn-del" onclick="app.Store.deleteProject('${p.id}', '${p.role}', event)">🗑️</button></div>`; 
+                card.innerHTML = `<span class="p-role-badge" style="color:${badgeColor}; border-color:${badgeColor}">${badgeText}</span><div><div class="p-title">${Utils.escape(p.title)}</div>${seriesBadge}<div class="p-meta">Modifié : ${p.date} ${priorityBadge}</div><div class="p-meta" style="margin-top:2px;" title="Poids des données du projet">💾 ${Utils.formatWeight(p.weightBytes)}</div></div><div class="p-actions"><button class="p-btn-priority" onclick="app.UIDashboard.showMoveMenu(event, '${p.id}')" title="Déplacer vers un dossier">📁</button><button class="p-btn-priority" onclick="app.UIDashboard.showPriorityMenu(event, '${p.id}')" title="Priorité">🏷️</button><button class="p-btn-del" onclick="app.Store.deleteProject('${p.id}', '${p.role}', event)">🗑️</button></div>`; 
                 card.onclick = (e) => { if(!e.target.closest('.p-actions')) Store.loadProject(p.id); };
                 card.setAttribute('role', 'button'); card.setAttribute('tabindex', '0');
                 
@@ -57213,7 +57224,7 @@ const Admin = {
             // Charger tous les projets
             const { data: projects } = await supabase
                 .from('projects')
-                .select('title, owner_email, created_at')
+                .select('title, owner_email, created_at, data')
                 .order('created_at', { ascending: false });
             
             // Associer les projets aux utilisateurs
@@ -57265,6 +57276,7 @@ const Admin = {
                             ? u.projects.map(p => `<div style="font-size: 0.8rem; margin-bottom: 3px;">
                                 <span style="color: var(--text-main);">${Utils.escape(p.title || 'Sans titre')}</span>
                                 <span style="color: var(--text-sec); font-size: 0.75rem;">(${new Date(p.created_at).toLocaleDateString('fr-FR')})</span>
+                                <span style="color: var(--text-sec); font-size: 0.75rem;"> — 💾 ${Utils.formatWeight(new TextEncoder().encode(JSON.stringify(p.data || {})).length)}</span>
                             </div>`).join('')
                             : '<span style="color: var(--text-sec); font-size: 0.8rem;">-</span>';
                         
