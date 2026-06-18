@@ -23,6 +23,15 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v540 (18 Juin 2026)
+  - ADMIN / CGU — la modale de conditions d'utilisation réapparaissait à chaque connexion sous le compte d'administration contact@moteur.studio. Cause : ce compte n'a pas de fiche user_profiles dédiée (volontaire — login admin pur, le contenu reste rattaché à ga.dmy@), donc Terms.check ne trouvait jamais d'acceptation et la modale rebouclait. Les comptes admin (CONFIG.adminEmails, via Admin.isAdmin()) sont désormais exemptés de la CGU end-user en tête de Terms.check, sans création de profil fantôme. Correctif purement client, aucune modification de données.
+v539 (18 Juin 2026)
+  - ADMIN / COMPTE — migration du compte d'administration de ga.dmy@ikmail.com (adresse perso) vers contact@moteur.studio (adresse de l'entreprise). Côté client, CONFIG.adminEmails ne contient plus que contact@moteur.studio ; contact@ ajouté à internalEmails (exclusion des stats), ga.dmy@ et ga.demauroy@ conservés dans internalEmails. Les projets perso restent la propriété de ga.dmy@ (aucun transfert). L'expéditeur des emails était déjà contact@moteur.studio (Edge Function super-action + Brevo, domaine authentifié) : rien à changer côté envoi.
+  - ADMIN / RLS — l'accès admin étant gardé côté Postgres (et pas seulement côté client), les 10 policies qui testaient l'email en dur ont été migrées : ajout de contact@moteur.studio (user_profiles « Admins can update any profile » et « Profiles viewable except demo », reports view/update/delete, app_config, user_logins, suppressions forum threads/replies/votes), puis retrait de ga.dmy@ikmail.com une fois contact@ validé en lecture et écriture. ga.demauroy@ conservé sur la visibilité des profils démo.
+  - ADMIN / PROJETS — nouvelle policy SELECT « Admins can view all projects ». Le panneau admin n'affichait aucun projet sous un compte non-membre : la lecture des projets passe par can_view_project(id), limitée aux membres/propriétaires (l'ancien admin voyait tout uniquement parce qu'il était membre de presque tous les projets). Les admins (tableau d'emails) lisent désormais l'ensemble des projets ; comportement inchangé pour les autres utilisateurs.
+  - ADMIN / UTILISATEURS — colonne « Types » réparée : elle lisait un champ profile_data inexistant sur user_profiles (donc toujours vide). Rebranchée sur le vrai système de casquettes via PublicProfile._normalizeFacets (facettes actor / crew / asso / ent, avec repli automatique sur profile_type pour les profils sans facettes) ; les casquettes réelles s'affichent à nouveau.
+  - INSCRIPTIONS — ouverture à tous : la limite de 150 comptes (qui s'appliquait indépendamment de enabled) est levée — preAlpha.maxUsers passé à null — et la whitelist de testeurs est vidée (retrait de ga.dmy@ikmail.com, contact@quentin-etienne.com, ga.demauroy@gmail.com, martinez.jeanremy@gmail.com). Le mécanisme preAlpha (enabled / whitelist / maxUsers) est conservé comme interrupteur : repasser enabled à true et remplir la whitelist, ou réenregistrer une limite depuis l'admin, suffit à re-fermer les inscriptions.
+  - COMMUNAUTÉ — invitations débloquées : le garde-fou whitelist de Invitations.sendInvitation, qui n'autorisait l'envoi qu'aux adresses de la whitelist et restait actif même hors phase privée, est retiré. Toute adresse valide peut désormais être invitée — cohérent avec le panneau d'accueil Univers (v538) qui incite à inviter comédiens et techniciens.
 v538 (18 Juin 2026)
   - SYNOPSIS — barre d'outils figée en haut (sticky) au défilement, pour les trois éditeurs (synopsis / résumé court / résumé long). Le wrapper .synopsis-editor-wrapper était en overflow:hidden, ce qui neutralisait le collage ; il repasse en overflow:visible et .synopsis-toolbar prend position:sticky (top:0, coins supérieurs arrondis). Plus besoin de remonter en haut de la feuille A4 pour formater.
   - SYNOPSIS — curseur qui revenait au début du texte à chaque enregistrement corrigé. Le canal Realtime (project_<id>) ré-rendait les trois éditeurs sur chaque UPDATE, y compris l'écho de la propre sauvegarde de l'utilisateur, ce qui réécrivait innerHTML et replaçait le curseur. L'éditeur en cours de saisie (activeElement) est désormais épargné du re-rendu, comme l'étaient déjà le champ titre et les lignes de scénario.
@@ -7461,7 +7470,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv539</p>
+      <p>vv540</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -12181,22 +12190,17 @@ const app = (function(){
 const CONFIG = { 
     themeKey: 'fmp_theme_pref',
     // ========== ADMIN ==========
-    adminEmails: ['contact@moteur.studio', 'ga.dmy@ikmail.com'],  // Emails ayant accès au tableau de bord admin (perso gardé le temps de la transition)
+    adminEmails: ['contact@moteur.studio'],  // Emails ayant accès au tableau de bord admin
     internalEmails: ['contact@moteur.studio', 'ga.dmy@ikmail.com', 'ga.demauroy@gmail.com'],  // B4 : connexions internes (exclues des stats)
     
-    // ========== PRÉ-ALPHA OUVERTE ==========
-    // Inscriptions ouvertes à tous (avec limite)
+    // ========== INSCRIPTIONS ==========
+    // Ouvertes à tous. maxUsers: null => aucune limite. enabled/whitelist
+    // conservés comme interrupteur : repasser enabled à true + remplir la
+    // whitelist pour re-fermer les inscriptions si besoin.
     preAlpha: {
-        enabled: false,  // false = inscriptions ouvertes à tous
-        maxUsers: 150,   // Limite maximum d'utilisateurs pour la pré-alpha
-        whitelist: [
-            // Ajouter ici les emails des testeurs autorisés (en minuscules)
-            // 'exemple@gmail.com',
-            'ga.dmy@ikmail.com',
-            'contact@quentin-etienne.com',
-			'ga.demauroy@gmail.com',
-			'martinez.jeanremy@gmail.com',
-        ]
+        enabled: false,
+        maxUsers: null,
+        whitelist: []
     },
     
     // Types de journées de travail
@@ -57270,12 +57274,12 @@ const Admin = {
                 </thead>
                 <tbody>
                     ${users.map(u => {
-                        const data = u.profile_data || {};
+                        const facets = PublicProfile._normalizeFacets((u.data || {}).facets || u.facets, u);
                         const profileTypes = [];
-                        if(data.actor) profileTypes.push('<span title="Comédien">🎭</span>');
-                        if(data.crew) profileTypes.push('<span title="Technicien">🎥</span>');
-                        if(data.association) profileTypes.push('<span title="Association">🏛️</span>');
-                        if(data.enterprise) profileTypes.push('<span title="Entreprise">🏢</span>');
+                        if(facets.actor.enabled) profileTypes.push('<span title="Comédien">🎭</span>');
+                        if(facets.crew.enabled) profileTypes.push('<span title="Technicien">🎥</span>');
+                        if(facets.asso.enabled) profileTypes.push('<span title="Association">🏛️</span>');
+                        if(facets.ent.enabled) profileTypes.push('<span title="Entreprise">🏢</span>');
                         
                         // Projets de l'utilisateur
                         const projectsHtml = u.projects && u.projects.length > 0 
@@ -61241,12 +61245,6 @@ const Invitations = {
         
         if(!email || !email.includes('@')) {
             Utils.toast('Veuillez entrer un email valide.', 'warning');
-            return;
-        }
-        
-        // Si l'email n'est pas dans la whitelist, bloquer
-        if(!CONFIG.preAlpha.whitelist.includes(email)) {
-            Utils.toast('🚧 Fonction limitée en pré-alpha. Seuls les utilisateurs de la whitelist peuvent être invités.', 'warning', 5000);
             return;
         }
         
@@ -71837,6 +71835,8 @@ const Weather = {
       },
       
       check: async () => {
+          // Comptes admin : exemptés de la CGU end-user (login admin sans profil dédié)
+          try { if(typeof Admin !== 'undefined' && Admin.isAdmin && Admin.isAdmin()) return true; } catch(_) {}
           // Vérifier si l'utilisateur a déjà accepté (sur le profil courant)
           if(state.userProfile && state.userProfile.terms_accepted) {
               return true;
