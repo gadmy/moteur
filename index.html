@@ -21,8 +21,160 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 7. Mettre à jour l'historique quand l'utilisateur le demande. 
 
 ================================================================================
+                         PLAN DE TRAVAIL
+================================================================================
+========================================================================
+AUDIT v540 — PLAN DE TRAVAIL SÉCURITÉ/QUALITÉ (par ordre d'importance)
+Croisé v529→v540 (fix A1/A2/E1-E5/D6-D7/RLS non re-listés). Statut [ ] à faire.
+Échelle : 🔴 critique · 🟠 élevé · 🟡 moyen · 🟢 faible · ⚪ info
+========================================================================
+
+──────────────────────────── P0 — CRITIQUE ────────────────────────────
+[x] S1 · 🔴 · XSS panneau de signalements → ESCALADE DE PRIVILÈGE  (=L6-01) — FAIT v541
+    Où   : Admin.loadReports, l.57019, 57023-57024, 57011-57012, 57033-57036
+    Pb   : reporter_email/reported_email bruts (57023-57024), reason brut en
+           fallback (57019) ; escName/escEmail n'échappent que ' (57011-12)
+           puis injectés dans onclick="…('${escName}'…)" → un " casse l'attribut.
+           reported_name = nom de profil libre (60899). Un user au nom
+           "><img onerror=…> signalé → l'admin ouvre le panneau → exécution
+           dans SA session (suppression contenu, badges, vol JWT admin).
+           NB : r.details est déjà échappé (57025), pas le reste.
+    Fix  : Utils.escape() sur reporter_email/reported_email/reason ; et
+           SUPPRIMER les nom/email des onclick → passer r.id aux handlers
+           (applyBadgeFromReport(id, badge) résout en interne).
+    Effort : moyen (3 escapes + refonte 4 handlers id-based)
+
+──────────────── P1 — ÉLEVÉ (max d'impact / quick wins) ────────────────
+[ ] S2 · 🟠/🟡 · Chokepoints UI : toast + ConfirmModal en innerHTML  (=L2-04 + L5-01)
+    Où   : Utils.toast l.13027 (🟠) · ConfirmModal l.12672-12673 (🟡)
+    Pb   : ${message}/${title} rendus en innerHTML sans escape. 16 toasts +
+           18 confirms interpolent un nom/titre user, plusieurs inter-user
+           (claim.name 36030, person.name 23594/38926/55663, profile.name 59560…).
+    Fix  : 1 correction par chokepoint — Utils.escape(message)/(title) OU
+           pose via .toast-message/.confirm-modal-message .textContent.
+           → ~34 call-sites neutralisés sans toucher les appelants.
+    Effort : TRÈS FAIBLE (meilleur ratio impact/effort de tout l'audit)
+
+[ ] S3 · 🟠 · Corps de contrat = HTML brut non sanitisé  (=L4-01)
+    Où   : doc.innerHTML = ct.body (l.49916) + tempDiv export PDF (l.50115)
+    Pb   : Contracts n'a AUCUN sanitizeRich. body (HTML libre, contenteditable)
+           stocké dans state.data.contracts (49398, SYNCHRONISÉ aux membres).
+           En projet partagé, un collaborateur stocke <img onerror=…> → à
+           l'ouverture/export par un autre membre → exécution.
+    Fix  : ct.body = Utils.sanitizeRich(...) au rendu (49916) et idéalement à
+           la sauvegarde (50023). L'allowlist préserve la mise en forme.
+    Effort : faible (1 ligne au rendu)
+
+[ ] S4 · 🟠 · createFanCard : src photo/image brut (carte Univers VIVANTE)  (=L2-01)
+    Où   : l.58184 (item.image), 58202 (item.photo)  [+ createCard 58248/58285 MORT]
+    Pb   : alt échappé mais src brut. photo/image écrits par tout user
+           (#profile-photo hidden, 36809 ; project-image-input 52358), rendus
+           bruts chez tous les visiteurs de l'Univers. La modale, elle, fait
+           safeMediaUrl (58776) → c'est le jumeau carte oublié (exclusion E3).
+    Fix  : src="${Utils.safeMediaUrl(item.photo)}" (et item.image), ×2 ;
+           appliquer aussi à createCard (mort) par cohérence.
+    Effort : faible
+
+[ ] S5 · 🟠 · Contacts renderDirectory + favoris : src + alt nom bruts  (=L2-02)
+    Où   : l.39326 (renderDirectory) · 39580 (favoris)
+    Pb   : <img src="${person.photo}" alt="${person.name}"> brut. results =
+           profils is_public d'AUTRES users (39254). E1 a échappé le texte de
+           la carte (nom/email/rôle) mais a LAISSÉ la balise <img>. L'alt=nom
+           (texte libre) est le vecteur le plus simple.
+    Fix  : src="${Utils.safeMediaUrl(person.photo)}" alt="${Utils.escape(person.name)}"
+           aux deux endroits.
+    Effort : faible
+
+[ ] S6 · 🟠 · getEmbedUrl branche YouTube : ID non échappé → breakout iframe  (=L2-03)
+    Où   : ProfileRenderer.getEmbedUrl l.13958-13968
+    Pb   : la branche YouTube retourne …/embed/${ytMatch[1]} où ([^&\s]+)
+           autorise " < > . Démoréel d'un autre user (modale Univers 59041,
+           annuaire 38877) → <iframe src="${…}"> → breakout. (Vimeo \d+ et la
+           branche https→escape sont OK.)
+    Fix  : restreindre l'ID à ([A-Za-z0-9_-]{6,}), ou Utils.escape la sortie.
+    Effort : faible
+
+─────────────────────────── P2 — MOYEN ────────────────────────────────
+[ ] S7 · 🟡 · BroadcastChannel recréé avec mauvais nom + sans onmessage  (=L1-01)
+    Où   : création l.15002 ('moteur_session') vs recréation l.15079
+           ('moteur_session_'+projectId, sans .onmessage)
+    Pb   : après invalidation du channel, la sync inter-onglets (SESSION_CLAIMED,
+           LOGOUT, DATA_UPDATED, SYNC_STATE) cesse silencieusement.
+    Fix  : recréer avec 'moteur_session' + réattacher
+           channel.onmessage = SessionManager.handleChannelMessage.
+    Effort : trivial (bug fonctionnel, pas sécu)
+
+[ ] S8 · 🟡 · Éditeurs en projet partagé : champs texte bruts dans value=  (=L3-02)
+    Où   : éditeur jour FDS l.43196-43279 + notes convoc 43097/43136/43171
+           (pattern aussi en 21278-21955, 52576-52719…)
+    Pb   : value="${shootDay.contactName/locationAddress/name…}" sans escape.
+           En projet partagé, un collaborateur injecte → breakout à l'ouverture
+           de l'éditeur par un autre membre. (L'affichage de ces données, lui,
+           est échappé — c'est le formulaire d'édition qui ne l'est pas.)
+    Fix  : Utils.escape() sur ces value (round-trip OK, l'input re-décode).
+           Cadrer d'abord sur l'éditeur FDS, puis étendre.
+    Effort : moyen (beaucoup de sites)
+
+[ ] S9 · 🟠* · DÉCISION — Callsheet « publique » non délivrée aux destinataires  (=L3-01)
+    Où   : Planning.loadPublicCallSheet l.41092 (lit state.data, pas le serveur)
+    Pb   : le lien ?callsheet=token ne marche que pour qui a déjà chargé le
+           projet ; les convoqués externes voient « introuvable ». Le mail
+           (41277) envoie pourtant « voir la feuille complète ». Workflow cassé.
+           (Pas un trou sécu ; le token Math.random n'est PAS exploitable car
+           rien n'est requêtable par token.)
+    Option A (faible) : retirer le lien « voir la feuille complète » du mail.
+    Option B (élevé)  : table public_callsheets + RLS lecture anon par token +
+                        requête serveur dans loadPublicCallSheet.
+    Effort : à arbitrer (A rapide / B vrai chantier)
+
+[ ] S10 · 🟡 · VÉRIF SUPABASE (pas un patch fichier) — RLS modération  (=L6-02)
+    Pb   : isAdmin est client-side (56527). Les deletes forum_threads/replies
+           (57182-57187) et reports (57191-57206) ne sont des frontières que
+           si le RLS le garantit.
+    À faire : dans l'éditeur SQL, vérifier (a) qu'une policy autorise l'admin à
+           supprimer les posts d'AUTRUI (sinon modération KO silencieuse), et
+           (b) qu'elle n'est pas trop large (sinon n'importe qui supprime).
+           Quota signalements (60867) client-side = anti-spam contournable, ok.
+
+─────────────────── P3 — FAIBLE / HYGIÈNE (quand tu veux) ───────────────
+[ ] S11 · 🟢 · Double-init dashboard au boot (L1-02) — onAuthStateChange + getSession
+          appellent tous deux showDashboard (15284/15322). Lectures redondantes ;
+          inits critiques idempotentes. Fix : flag Auth._dashboardShown.
+[ ] S12 · 🟢 · electLeader setInterval jamais nettoyé (L1-03, l.15097) + élection
+          localStorage non atomique. Fix : stocker l'id + clearInterval dans cleanup.
+[ ] S13 · 🟢 · ProfileGallery éditeur src brut (L2-05, l.35540) — self-XSS, URL
+          d'upload contrôlée. Cohérence : safeMediaUrl.
+[ ] S14 · 🟢 · Deux chemins de convocation dupliqués/divergents (L3-03, 40952/41277)
+          — l'un a le lien public, l'autre non. Fusionner (dette).
+[ ] S15 · 🟢 · MoodBoard preview iframe src brut (L4-02, l.27815) — résiduel E2,
+          non exploitable (fileData = data/URL signée). Cohérence : safeMediaUrl.
+[ ] S16 · 🟢 · IDs dupliqués #report-reason/#report-details (L6-03, 60852/60949)
+          — bénin si une seule modale affichée. À surveiller.
+[ ] S17 · ⚪ · Retirer l'instrumentation diag quand la stabilité est confirmée
+          (sbDiag, fetch instrumenté, [SB auth], Ctrl+Alt+D — l.12118-12168). Lot dédié.
+[ ] S18 · ⚪ · Cosmétique : actualité de profil rendue 2× (59063) ; U+2550 dans
+          bandeaux/commentaires + corps email FDS (hors zones sensibles).
+
+────────────────────────── CONSTATS POSITIFS ──────────────────────────
+node --check OK (2 scripts) · <div> statique delta 0 · 0 emoji doc.text() ·
+0 IIFE async réelle · 0 handler app.X.y manquant · 0 secret client (emails via
+Edge Function super-action). Fix qui TIENNENT : forum A1 (sanitizeRich/safeMediaUrl
+65551-52), profils Univers A2, Contacts/GlobalSearch modales E1, impression E2
+(titres échappés), taint canvas storyboard Phase C.2.6 (crossOrigin+useCORS+signedUrl),
+deadlock auth (verrou réentrant), Comments (texte+auteur échappés), MiniChat
+(escape+URL signée), Notifications (message échappé 51076).
+
+FIL ROUGE : les helpers (escape/safeMediaUrl/safeUrl/sanitizeRich) couvrent les
+surfaces d'AFFICHAGE public, mais pas : les CARTES (img src), les ÉDITEURS (value=),
+les CONTRATS, et 2 chokepoints UI (toast, ConfirmModal). S2→S6 ferment l'essentiel.
+========================================================================
+
+
+================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v540 (18 Juin 2026)v541 (19 Juin 2026) — Sécurité (audit v540, chantier S)
+  - SÉCURITÉ / ADMIN (S1) — XSS stocké du panneau de signalements corrigé (escalade de privilège : un signalement dont le nom/email du profil contenait du HTML exécutait du JS dans la session admin à l'ouverture du panneau, via le breakout de l'attribut onclick). Désormais reporter_email, reported_email et reason sont échappés à l'affichage ; les boutons de badge passent r.id (identifiant contrôlé) aux handlers au lieu d'interpoler nom/email dans onclick ; applyBadgeFromReport(reportId, badge) et removeBadgeFromReport(reportId) résolvent le profil via Admin.allReports. Correctif purement client, aucune donnée modifiée.
 v540 (18 Juin 2026)
   - ADMIN / CGU — la modale de conditions d'utilisation réapparaissait à chaque connexion sous le compte d'administration contact@moteur.studio. Cause : ce compte n'a pas de fiche user_profiles dédiée (volontaire — login admin pur, le contenu reste rattaché à ga.dmy@), donc Terms.check ne trouvait jamais d'acceptation et la modale rebouclait. Les comptes admin (CONFIG.adminEmails, via Admin.isAdmin()) sont désormais exemptés de la CGU end-user en tête de Terms.check, sans création de profil fantôme. Correctif purement client, aucune modification de données.
 v539 (18 Juin 2026)
@@ -7470,7 +7622,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv540</p>
+      <p>vv54</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -57008,20 +57160,18 @@ const Admin = {
                 const emailKey = (r.reported_email || '').toLowerCase();
                 const currentBadge = badgeByEmail[emailKey];
                 const hasBadge = currentBadge && currentBadge.badge;
-                const escEmail = (r.reported_email || '').replace(/'/g, "\\'");
-                const escName = (r.reported_name || '').replace(/'/g, "\\'");
                 
                 return `
                 <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 15px; display: flex; justify-content: space-between; align-items: flex-start; gap: 15px;">
                     <div class="flex-1">
                         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap;">
                             <span style="background: ${statusLabels[r.status]?.color || '#6b7280'}; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.75rem;">${statusLabels[r.status]?.label || r.status}</span>
-                            <span class="fw-bold">${reasonLabels[r.reason] || r.reason}</span>
+                            <span class="fw-bold">${reasonLabels[r.reason] || Utils.escape(r.reason)}</span>
                             <span class="text-sec-sm2">• ${r.reported_type === 'forum_thread' ? 'Sujet forum' : r.reported_type === 'forum_reply' ? 'Réponse forum' : r.reported_type === 'profile' ? 'Profil' : r.reported_type}</span>
                             ${hasBadge ? `<span style="background:${currentBadge.badge === 'yellow' ? '#f59e0b' : currentBadge.badge === 'red' ? '#dc2626' : '#1f2937'}; color:white; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Badge ${badgeDotLabels[currentBadge.badge]}</span>` : ''}
                         </div>
-                        <div style="margin-bottom: 5px;"><strong>Signalé :</strong> ${Utils.escape(r.reported_name || 'Inconnu')} ${r.reported_email ? `(${r.reported_email})` : ''}</div>
-                        <div style="margin-bottom: 5px; color: var(--text-sec); font-size: 0.85rem;"><strong>Par :</strong> ${r.reporter_email}</div>
+                        <div style="margin-bottom: 5px;"><strong>Signalé :</strong> ${Utils.escape(r.reported_name || 'Inconnu')} ${r.reported_email ? `(${Utils.escape(r.reported_email)})` : ''}</div>
+                        <div style="margin-bottom: 5px; color: var(--text-sec); font-size: 0.85rem;"><strong>Par :</strong> ${Utils.escape(r.reporter_email)}</div>
                         ${r.details ? `<div style="margin-top: 8px; padding: 10px; background: var(--panel-bg); border-radius: 6px; font-size: 0.9rem;">${Utils.escape(r.details)}</div>` : ''}
                         ${hasBadge && currentBadge.reason ? `<div style="margin-top: 8px; padding: 10px; background: var(--panel-bg); border-left: 3px solid ${currentBadge.badge === 'yellow' ? '#f59e0b' : currentBadge.badge === 'red' ? '#dc2626' : '#1f2937'}; border-radius: 4px; font-size: 0.85rem;"><strong>Raison du badge :</strong> ${Utils.escape(currentBadge.reason)}</div>` : ''}
                         <div style="margin-top: 8px; color: var(--text-sec); font-size: 0.8rem;">📅 ${new Date(r.created_at).toLocaleDateString('fr-FR')} à ${new Date(r.created_at).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'})}</div>
@@ -57030,10 +57180,10 @@ const Admin = {
                         <div style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border);">
                             <div style="font-size: 0.75rem; color: var(--text-sec); margin-bottom: 6px; font-weight: bold;">MODÉRATION DU PROFIL</div>
                             <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                                <button onclick="app.Admin.applyBadgeFromReport('${escEmail}', '${escName}', 'yellow')" style="padding: 5px 10px; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: bold;" ${currentBadge?.badge === 'yellow' ? 'disabled style="padding:5px 10px; background:#f59e0b99; color:white; border:none; border-radius:4px; font-size:0.75rem; font-weight:bold; cursor:not-allowed;"' : ''}>🟡 Jaune</button>
-                                <button onclick="app.Admin.applyBadgeFromReport('${escEmail}', '${escName}', 'red')" style="padding: 5px 10px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: bold;" ${currentBadge?.badge === 'red' ? 'disabled style="padding:5px 10px; background:#dc262699; color:white; border:none; border-radius:4px; font-size:0.75rem; font-weight:bold; cursor:not-allowed;"' : ''}>🔴 Rouge</button>
-                                <button onclick="app.Admin.applyBadgeFromReport('${escEmail}', '${escName}', 'black')" style="padding: 5px 10px; background: #1f2937; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: bold;" ${currentBadge?.badge === 'black' ? 'disabled style="padding:5px 10px; background:#1f293799; color:white; border:none; border-radius:4px; font-size:0.75rem; font-weight:bold; cursor:not-allowed;"' : ''}>⚫ Noir</button>
-                                ${hasBadge ? `<button onclick="app.Admin.removeBadgeFromReport('${escEmail}', '${escName}')" style="padding: 5px 10px; background: var(--border); color: var(--text-main); border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">⚪ Retirer le badge</button>` : ''}
+                                <button onclick="app.Admin.applyBadgeFromReport('${r.id}', 'yellow')" style="padding: 5px 10px; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: bold;" ${currentBadge?.badge === 'yellow' ? 'disabled style="padding:5px 10px; background:#f59e0b99; color:white; border:none; border-radius:4px; font-size:0.75rem; font-weight:bold; cursor:not-allowed;"' : ''}>🟡 Jaune</button>
+                                <button onclick="app.Admin.applyBadgeFromReport('${r.id}', 'red')" style="padding: 5px 10px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: bold;" ${currentBadge?.badge === 'red' ? 'disabled style="padding:5px 10px; background:#dc262699; color:white; border:none; border-radius:4px; font-size:0.75rem; font-weight:bold; cursor:not-allowed;"' : ''}>🔴 Rouge</button>
+                                <button onclick="app.Admin.applyBadgeFromReport('${r.id}', 'black')" style="padding: 5px 10px; background: #1f2937; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: bold;" ${currentBadge?.badge === 'black' ? 'disabled style="padding:5px 10px; background:#1f293799; color:white; border:none; border-radius:4px; font-size:0.75rem; font-weight:bold; cursor:not-allowed;"' : ''}>⚫ Noir</button>
+                                ${hasBadge ? `<button onclick="app.Admin.removeBadgeFromReport('${r.id}')" style="padding: 5px 10px; background: var(--border); color: var(--text-main); border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">⚪ Retirer le badge</button>` : ''}
                             </div>
                         </div>
                         ` : ''}
@@ -57098,7 +57248,11 @@ const Admin = {
     },
     
     // Demande confirmation + raison, puis applique le badge
-    applyBadgeFromReport: async (reportedEmail, reportedName, badge) => {
+    applyBadgeFromReport: async (reportId, badge) => {
+        const r = (Admin.allReports || []).find(x => String(x.id) === String(reportId));
+        if(!r) return;
+        const reportedEmail = r.reported_email;
+        const reportedName = r.reported_name;
         if(!reportedEmail) {
             Utils.toast('Ce profil n\'a pas d\'email enregistré, impossible d\'appliquer un badge', 'warning');
             return;
@@ -57131,7 +57285,11 @@ const Admin = {
     },
     
     // Retire le badge d'un profil
-    removeBadgeFromReport: async (reportedEmail, reportedName) => {
+    removeBadgeFromReport: async (reportId) => {
+        const r = (Admin.allReports || []).find(x => String(x.id) === String(reportId));
+        if(!r) return;
+        const reportedEmail = r.reported_email;
+        const reportedName = r.reported_name;
         if(!reportedEmail) return;
         const confirmed = await ConfirmModal.show({
             title: 'Retirer le badge ?',
