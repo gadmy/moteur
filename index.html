@@ -57219,7 +57219,8 @@ const Admin = {
         }
         
         try {
-            const { error } = await supabase
+            const badgeFilter = `email.eq.${Utils.pgSafe(reportedEmail.toLowerCase())},owner_email.eq.${Utils.pgSafe(reportedEmail.toLowerCase())}`;
+            const { data, error } = await supabase
                 .from('user_profiles')
                 .update({
                     moderation_badge: badge,
@@ -57227,9 +57228,15 @@ const Admin = {
                     badge_set_at: badge ? new Date().toISOString() : null,
                     badge_set_by: badge ? state.currentUser.email.toLowerCase() : null
                 })
-                .eq('email', reportedEmail.toLowerCase());
+                .or(badgeFilter)
+                .select('id');
             
             if(error) throw error;
+            if(!data || data.length === 0) {
+                Utils.toast('Badge non enregistré : profil introuvable ou écriture bloquée (RLS user_profiles ?)', 'error');
+                console.warn('[Admin] setProfileBadge : 0 ligne touchée pour', reportedEmail, '— email/owner_email absent ou policy RLS UPDATE manquante');
+                return false;
+            }
             
             // G5b: invalider le cache de modération
             Moderation.invalidateCache(reportedEmail);
