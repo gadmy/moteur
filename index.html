@@ -7638,7 +7638,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv54</p>
+      <p>vv542</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -14126,8 +14126,8 @@ crewRoles: {
       getEmbedUrl: (url) => {
           if(!url) return '';
           // YouTube
-          const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s]+)/);
-          if(ytMatch) return `https://www.youtube.com/embed/${ytMatch[1]}`;
+          const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
+          if(ytMatch) return `https://www.youtube.com/embed/${Utils.escape(ytMatch[1])}`;
           // Vimeo
           const vimeoMatch = url.match(/vimeo\.com\/(\d+)/);
           if(vimeoMatch) return `https://player.vimeo.com/video/${vimeoMatch[1]}`;
@@ -39491,7 +39491,7 @@ if(isActors) {
         
         results.forEach((person, idx) => {
             const photoHTML = person.photo 
-                ? `<img src="${person.photo}" alt="${person.name}">`
+                ? `<img src="${Utils.safeMediaUrl(person.photo)}" alt="${Utils.escape(person.name)}">`
                 : '👤';
             
             let metaHTML = '';
@@ -49835,6 +49835,27 @@ const Contracts = {
         legal: '<p class="ctr-legal" contenteditable="false">Modèle de contrat fourni à titre purement indicatif. Il ne constitue pas un conseil juridique. Avant toute signature, vérifiez sa conformité au droit applicable (Code du travail, convention collective, etc.) auprès d\u2019un professionnel du droit. moteur.studio décline toute responsabilité quant à l\u2019usage de ce document.</p>'
     },
     _escapeAttr: (s) => (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'),
+    _sanitizeBody: (html) => {
+        const okTag = ['P','DIV','SPAN','BR','STRONG','B','EM','I','U','H1','H2','H3','TABLE','THEAD','TBODY','TR','TD','TH','SMALL','UL','OL','LI','A','IMG'];
+        const okAttr = ['class','contenteditable','alt','colspan','rowspan','data-field','data-snippet','data-hash'];
+        const drop = ['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','NOSCRIPT','LINK','META'];
+        const root = new DOMParser().parseFromString('<div>' + (html || '') + '</div>', 'text/html').body.firstChild;
+        const walk = (node) => {
+            [...node.children].forEach(child => {
+                if(drop.includes(child.tagName)) { child.remove(); return; }
+                walk(child);
+                if(!okTag.includes(child.tagName)) { child.replaceWith(...child.childNodes); return; }
+                [...child.attributes].forEach(a => {
+                    const n = a.name.toLowerCase();
+                    if(n === 'src') { const u = Utils.safeMediaUrl(a.value); if(u) { child.setAttribute('src', u); } else { child.removeAttribute('src'); } }
+                    else if(n === 'href') { const u = Utils.safeUrl(a.value); if(u) { child.setAttribute('href', u); } else { child.removeAttribute('href'); } }
+                    else if(!okAttr.includes(n)) { child.removeAttribute(a.name); }
+                });
+            });
+        };
+        walk(root);
+        return root.innerHTML;
+    },
 
     // Agrégat de la feuille de service (jours triés, période, lieux, convocations)
     _callsheet: (party) => {
@@ -50081,7 +50102,7 @@ const Contracts = {
             + '</div>';
         const doc = document.getElementById('ctr-doc');
         if(doc) {
-            doc.innerHTML = ct.body || '';
+            doc.innerHTML = Contracts._sanitizeBody(ct.body);
             const frozen = (ct.status === 'signed' || ct.status === 'archived');
             if(!frozen) { Contracts.refreshSnippets(doc, ct); Contracts.resolveFields(doc); }
             Contracts._stampSnippets(doc);
@@ -50188,7 +50209,7 @@ const Contracts = {
     },
     _persist: () => {
         const ct = Contracts.store.get(Contracts._editing); if(!ct) return;
-        const doc = document.getElementById('ctr-doc'); if(doc) { Contracts.renumberArticles(); ct.body = doc.innerHTML; }
+        const doc = document.getElementById('ctr-doc'); if(doc) { Contracts.renumberArticles(); ct.body = Contracts._sanitizeBody(doc.innerHTML); }
         const t = document.getElementById('ctr-title'); if(t) ct.title = t.value;
         const s = document.getElementById('ctr-status'); if(s) ct.status = s.value;
         Contracts.store.upsert(ct);
@@ -50268,6 +50289,7 @@ const Contracts = {
         if(!ct) return;
         let body = ct.body || '';
         if(ct.id === Contracts._editing) { const live = document.getElementById('ctr-doc'); if(live) body = live.innerHTML; }
+        body = Contracts._sanitizeBody(body);
         if(typeof html2canvas === 'undefined' || !window.jspdf) { Utils.toast('Librairie PDF indisponible', 'error'); return; }
         Utils.toast('Génération du PDF…', 'info');
         const tempDiv = document.createElement('div');
@@ -58362,7 +58384,7 @@ const UniverseFan = {
         
         if(isProject) {
             const photoHtml = item.image 
-                ? `<img src="${item.image}" alt="${Utils.escape(item.title)}" onerror="this.parentElement.innerHTML='🎬'">`
+                ? `<img src="${Utils.safeMediaUrl(item.image)}" alt="${Utils.escape(item.title)}" onerror="this.parentElement.innerHTML='🎬'">`
                 : '🎬';
             
             card.innerHTML = `
@@ -58380,7 +58402,7 @@ const UniverseFan = {
                                item.type === 'enterprise' ? '🏢' : '👤';
             
             const photoHtml = item.photo 
-                ? `<img src="${item.photo}" alt="${Utils.escape(item.name)}" onerror="this.parentElement.innerHTML='${defaultIcon}'">`
+                ? `<img src="${Utils.safeMediaUrl(item.photo)}" alt="${Utils.escape(item.name)}" onerror="this.parentElement.innerHTML='${defaultIcon}'">`
                 : defaultIcon;
             
             // Rôle/description selon le type
