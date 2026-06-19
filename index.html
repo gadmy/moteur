@@ -173,7 +173,8 @@ les CONTRATS, et 2 chokepoints UI (toast, ConfirmModal). S2→S6 ferment l'essen
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
-v540 (18 Juin 2026)v541 (19 Juin 2026) — Sécurité (audit v540, chantier S)
+v541 (18 Juin 2026)v541 (19 Juin 2026) — Sécurité (audit v540, chantier S)
+  - FORUM / MODÉRATION — le badge de modération (🟡/🔴/⚫) s'affiche désormais à côté du pseudo dans le forum (liste des sujets, fil ouvert, réponses). Pré-chargement groupé des badges des auteurs visibles (Forum._loadBadges) au chargement des fils et à l'ouverture d'un fil, puis pastille rendue de façon synchrone (Forum._badgeDot) — cohérent avec l'affichage déjà présent sur le profil Univers.
   - SÉCURITÉ / ADMIN (S1) — XSS stocké du panneau de signalements corrigé (escalade de privilège : un signalement dont le nom/email du profil contenait du HTML exécutait du JS dans la session admin à l'ouverture du panneau, via le breakout de l'attribut onclick). Désormais reporter_email, reported_email et reason sont échappés à l'affichage ; les boutons de badge passent r.id (identifiant contrôlé) aux handlers au lieu d'interpoler nom/email dans onclick ; applyBadgeFromReport(reportId, badge) et removeBadgeFromReport(reportId) résolvent le profil via Admin.allReports. Correctif purement client, aucune donnée modifiée.
 v540 (18 Juin 2026)
   - ADMIN / CGU — la modale de conditions d'utilisation réapparaissait à chaque connexion sous le compte d'administration contact@moteur.studio. Cause : ce compte n'a pas de fiche user_profiles dédiée (volontaire — login admin pur, le contenu reste rattaché à ga.dmy@), donc Terms.check ne trouvait jamais d'acceptation et la modale rebouclait. Les comptes admin (CONFIG.adminEmails, via Admin.isAdmin()) sont désormais exemptés de la CGU end-user en tête de Terms.check, sans création de profil fantôme. Correctif purement client, aucune modification de données.
@@ -65338,6 +65339,25 @@ const Forum = {
         Forum.renderThreads();
     },
     
+    _badgeByEmail: {},
+    _loadBadges: async (emails) => {
+        const uniq = [...new Set((emails || []).filter(Boolean).map(e => e.toLowerCase()))];
+        if(uniq.length === 0) return;
+        try {
+            const { data } = await supabase
+                .from('user_profiles')
+                .select('email, moderation_badge')
+                .in('email', uniq)
+                .not('moderation_badge', 'is', null);
+            (data || []).forEach(p => { Forum._badgeByEmail[(p.email || '').toLowerCase()] = p.moderation_badge; });
+        } catch(e) { /* affichage du badge non bloquant */ }
+    },
+    _badgeDot: (email) => {
+        const b = Forum._badgeByEmail[(email || '').toLowerCase()];
+        const dot = { yellow: '🟡', red: '🔴', black: '⚫' }[b];
+        if(!dot) return '';
+        return ` <span title="Profil sous avertissement de modération" style="font-size:0.8em; vertical-align:middle;">${dot}</span>`;
+    },
     loadThreads: async () => {
         try {
             const { data: threads, error } = await supabase
@@ -65363,6 +65383,8 @@ const Forum = {
             }));
             
             Forum.updateCounts();
+            Forum._badgeByEmail = {};
+            await Forum._loadBadges(Forum.threads.map(t => t.authorEmail));
             Forum.renderThreads();
         } catch(e) {
             console.error('Erreur chargement forum:', e);
@@ -65428,7 +65450,7 @@ const Forum = {
                         <span class="score">${t.votes || 0}</span>
                         <span class="downvote" onclick="event.stopPropagation(); app.Forum.vote('${t.id}', -1)">▼</span>
                     </div>
-                    <span>👤 ${Utils.escape(t.authorName || 'Anonyme')}</span>
+                    <span>👤 ${Utils.escape(t.authorName || 'Anonyme')}${Forum._badgeDot(t.authorEmail)}</span>
                     <span>💬 ${t.replyCount || 0} réponses</span>
                     <span>🕐 ${Utils.timeAgo(t.createdAt)}</span>
                     ${q ? `<span>📂 ${(Forum.categories[t.category] && Forum.categories[t.category].name) || t.category}</span>` : ''}
@@ -65679,6 +65701,7 @@ const Forum = {
                 createdAt: r.created_at
             }));
             
+            await Forum._loadBadges([thread.authorEmail, ...replies.map(r => r.authorEmail)]);
             Forum.showThreadModal(thread, replies);
         } catch(e) {
             console.error('Erreur chargement réponses:', e);
@@ -65702,7 +65725,7 @@ const Forum = {
                         <div class="forum-post-header">
                             <div class="forum-post-avatar">${Utils.escape((thread.authorName || '?')[0].toUpperCase())}</div>
                             <div>
-                                <div class="forum-post-author">${Utils.escape(thread.authorName || 'Anonyme')}</div>
+                                <div class="forum-post-author">${Utils.escape(thread.authorName || 'Anonyme')}${Forum._badgeDot(thread.authorEmail)}</div>
                                 <div class="forum-post-date">${Utils.timeAgo(thread.createdAt)}</div>
                             </div>
                         </div>
@@ -65722,7 +65745,7 @@ const Forum = {
                                 <div class="forum-post-header">
                                     <div class="forum-post-avatar" style="width:32px; height:32px; font-size:0.9rem;">${Utils.escape((r.authorName || '?')[0].toUpperCase())}</div>
                                     <div>
-                                        <div class="forum-post-author fs-09">${Utils.escape(r.authorName || 'Anonyme')}</div>
+                                        <div class="forum-post-author fs-09">${Utils.escape(r.authorName || 'Anonyme')}${Forum._badgeDot(r.authorEmail)}</div>
                                         <div class="forum-post-date" style="font-size:0.8rem;">${Utils.timeAgo(r.createdAt)}</div>
                                     </div>
                                 </div>
