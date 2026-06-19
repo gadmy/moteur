@@ -45,7 +45,7 @@ Croisé v529→v540 (fix A1/A2/E1-E5/D6-D7/RLS non re-listés). Statut [ ] à fa
     Effort : moyen (3 escapes + refonte 4 handlers id-based)
 
 ──────────────── P1 — ÉLEVÉ (max d'impact / quick wins) ────────────────
-[ ] S2 · 🟠/🟡 · Chokepoints UI : toast + ConfirmModal en innerHTML  (=L2-04 + L5-01)
+[x] S2 · 🟠/🟡 · Chokepoints UI : toast + ConfirmModal en innerHTML  (=L2-04 + L5-01)
     Où   : Utils.toast l.13027 (🟠) · ConfirmModal l.12672-12673 (🟡)
     Pb   : ${message}/${title} rendus en innerHTML sans escape. 16 toasts +
            18 confirms interpolent un nom/titre user, plusieurs inter-user
@@ -155,6 +155,20 @@ Croisé v529→v540 (fix A1/A2/E1-E5/D6-D7/RLS non re-listés). Statut [ ] à fa
 [ ] S18 · ⚪ · Cosmétique : actualité de profil rendue 2× (59063) ; U+2550 dans
           bandeaux/commentaires + corps email FDS (hors zones sensibles).
 
+──────────────── HORS AUDIT — TODO BADGES DE MODÉRATION (reporté) ────────────────
+[ ] T-BADGE-1 · Écriture badge-personne CASSÉE : setProfileBadge fait .eq('email',…)
+    et touche 0 ligne (SQL : aucun moderation_badge stocké). Fix prêt = matcher
+    email OU owner_email + .select() pour détecter le 0-ligne (sinon faux succès).
+    Si 0-ligne persiste → policy RLS UPDATE admin manquante sur user_profiles (cf S10).
+[ ] T-BADGE-2 · Modèle voulu (hybride) : profil signalé → badge PERSONNE (cascade
+    profil + ses posts forum) ; message signalé → badge sur CE thread/réponse seul.
+[ ] T-BADGE-3 · Pour le niveau message : migration SQL (colonnes moderation_badge sur
+    forum_threads + forum_replies + policy RLS admin UPDATE), nouveau setPostBadge(type,id,badge),
+    brancher applyBadgeFromReport sur r.reported_type. Affichage = gratuit (le badge
+    voyage sur la ligne du post, déjà chargée par select('*')).
+[ ] T-BADGE-4 · L'affichage forum déjà posé (Forum._badgeDot / _loadBadges) reste valide
+    pour le cas PROFIL — à conserver.
+
 ────────────────────────── CONSTATS POSITIFS ──────────────────────────
 node --check OK (2 scripts) · <div> statique delta 0 · 0 emoji doc.text() ·
 0 IIFE async réelle · 0 handler app.X.y manquant · 0 secret client (emails via
@@ -174,6 +188,7 @@ les CONTRATS, et 2 chokepoints UI (toast, ConfirmModal). S2→S6 ferment l'essen
                          HISTORIQUE DES VERSIONS
 ================================================================================
 v541 (18 Juin 2026)v541 (19 Juin 2026) — Sécurité (audit v540, chantier S)
+  - SÉCURITÉ / UI (S2) — neutralisation XSS des deux chokepoints d'interface : Utils.toast et ConfirmModal rendaient message/titre en innerHTML sans échappement (un nom/titre piégé exécutait du JS au moment d'un toast ou d'une confirmation). toast.message et ConfirmModal.title sont désormais échappés au point de rendu (couvre tous les appels) ; les 14 messages de confirmation interpolant une donnée utilisateur (noms de scène/profil/membre/contact, destinataires de convocation) l'échappent désormais. Correctif purement client.
   - FORUM / MODÉRATION — le badge de modération (🟡/🔴/⚫) s'affiche désormais à côté du pseudo dans le forum (liste des sujets, fil ouvert, réponses). Pré-chargement groupé des badges des auteurs visibles (Forum._loadBadges) au chargement des fils et à l'ouverture d'un fil, puis pastille rendue de façon synchrone (Forum._badgeDot) — cohérent avec l'affichage déjà présent sur le profil Univers.
   - SÉCURITÉ / ADMIN (S1) — XSS stocké du panneau de signalements corrigé (escalade de privilège : un signalement dont le nom/email du profil contenait du HTML exécutait du JS dans la session admin à l'ouverture du panneau, via le breakout de l'attribut onclick). Désormais reporter_email, reported_email et reason sont échappés à l'affichage ; les boutons de badge passent r.id (identifiant contrôlé) aux handlers au lieu d'interpoler nom/email dans onclick ; applyBadgeFromReport(reportId, badge) et removeBadgeFromReport(reportId) résolvent le profil via Admin.allReports. Correctif purement client, aucune donnée modifiée.
 v540 (18 Juin 2026)
@@ -12822,7 +12837,7 @@ crewRoles: {
               overlay.innerHTML = `
                   <div class="confirm-modal-box">
                       <div class="confirm-modal-icon">${icon}</div>
-                      <div class="confirm-modal-title">${title}</div>
+                      <div class="confirm-modal-title">${Utils.escape(title)}</div>
                       <div class="confirm-modal-message">${message}</div>
                       ${inputHtml}
                       <div class="confirm-modal-buttons">
@@ -13177,7 +13192,7 @@ crewRoles: {
           const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
           toast.innerHTML = `
               <span class="toast-icon">${icons[type] || icons.info}</span>
-              <span class="toast-message">${message}</span>
+              <span class="toast-message">${Utils.escape(message)}</span>
               <button class="toast-close" onclick="this.parentElement.remove()">✖</button>
           `;
           container.appendChild(toast);
@@ -20876,7 +20891,7 @@ initCategoriesDragDrop: () => {
     deleteFolder: async (id) => {
         const f = ProjectFolders.get(id);
         if(!f) return;
-        const ok = await ConfirmModal.show({ title: 'Supprimer le dossier ?', message: `« ${f.name} » sera supprimé. Ses sous-dossiers et projets remonteront d'un niveau (aucun projet n'est supprimé).`, icon: '🗑️', confirmText: 'Supprimer' });
+        const ok = await ConfirmModal.show({ title: 'Supprimer le dossier ?', message: `« ${Utils.escape(f.name)} » sera supprimé. Ses sous-dossiers et projets remonteront d'un niveau (aucun projet n'est supprimé).`, icon: '🗑️', confirmText: 'Supprimer' });
         if(!ok) return;
         ProjectFolders.remove(id);
         UIDashboard.renderProjectList();
@@ -23161,7 +23176,7 @@ const tabToSection = {
           
           const confirmed = await ConfirmModal.show({
               title: '✅ Finaliser cette scène ?',
-              message: `Le texte de "${scene.title}" sera considéré comme définitif et vous pourrez commencer le dépouillement.\n\nVous pourrez toujours repasser en brouillon plus tard (le dépouillement sera réinitialisé).`,
+              message: `Le texte de "${Utils.escape(scene.title)}" sera considéré comme définitif et vous pourrez commencer le dépouillement.\n\nVous pourrez toujours repasser en brouillon plus tard (le dépouillement sera réinitialisé).`,
               icon: '✅',
               confirmText: 'Finaliser'
           });
@@ -23197,7 +23212,7 @@ const tabToSection = {
           // UX-3 — Étape 1 : confirmation simple "repasser en brouillon ?"
           const confirmed = await ConfirmModal.show({
               title: '📝 Repasser en brouillon ?',
-              message: `"${scene.title}" repassera en mode brouillon. Vous pourrez à nouveau modifier le texte.`,
+              message: `"${Utils.escape(scene.title)}" repassera en mode brouillon. Vous pourrez à nouveau modifier le texte.`,
               icon: '📝',
               confirmText: 'Repasser en brouillon'
           });
@@ -23744,7 +23759,7 @@ const tabToSection = {
                   // Proposer de notifier
                   const person = dataArray[idx];
                   setTimeout(async () => {
-                      if(await ConfirmModal.show({ title: 'Prévenir cette personne ?', message: `Envoyer une notification à ${person.name} pour l'informer qu'il/elle a été ajouté(e) au projet ?`, icon: '📧', confirmText: 'Envoyer' })) {
+                      if(await ConfirmModal.show({ title: 'Prévenir cette personne ?', message: `Envoyer une notification à ${Utils.escape(person.name)} pour l'informer qu'il/elle a été ajouté(e) au projet ?`, icon: '📧', confirmText: 'Envoyer' })) {
                           Actions.notifyNewProfile(person, type);
                       }
                   }, 300);
@@ -24012,7 +24027,7 @@ const tabToSection = {
                           // Pas de profil existant, proposer de notifier pour créer
                           const actor = state.data.actors[idx];
                           setTimeout(async () => {
-                              if(await ConfirmModal.show({ title: 'Envoyer une invitation ?', message: `Aucun profil comédien trouvé pour ${val}.\n\nEnvoyer une invitation à ${actor.name} pour créer son profil ?`, icon: '📨', confirmText: 'Inviter' })) {
+                              if(await ConfirmModal.show({ title: 'Envoyer une invitation ?', message: `Aucun profil comédien trouvé pour ${val}.\n\nEnvoyer une invitation à ${Utils.escape(actor.name)} pour créer son profil ?`, icon: '📨', confirmText: 'Inviter' })) {
                                   Actions.notifyNewProfile(actor, 'actor');
                               }
                           }, 300);
@@ -26300,7 +26315,7 @@ const MoodBoard = {
         
         const confirmed = await ConfirmModal.show({
             title: 'Supprimer la planche ?',
-            message: `Voulez-vous vraiment supprimer "${board.name}" et tous ses éléments ?`,
+            message: `Voulez-vous vraiment supprimer "${Utils.escape(board.name)}" et tous ses éléments ?`,
             type: 'danger',
             confirmText: 'Supprimer'
         });
@@ -34062,7 +34077,7 @@ const DrawingEditor = {
           if(usedInScenes.length > 0) {
               const alsoDelete = await ConfirmModal.show({
                   title: '🗑️ Supprimer la ressource',
-                  message: `"${resource.name}" est utilisée dans ${usedInScenes.length} scène(s). Voulez-vous aussi la supprimer du dépouillement ?`,
+                  message: `"${Utils.escape(resource.name)}" est utilisée dans ${usedInScenes.length} scène(s). Voulez-vous aussi la supprimer du dépouillement ?`,
                   icon: '🗑️',
                   dangerous: true,
                   confirmText: 'Supprimer partout',
@@ -35256,7 +35271,7 @@ const DrawingEditor = {
                     // Pas de profil existant, proposer de notifier pour créer
                     const member = state.data.crew[idx];
                     setTimeout(async () => {
-                        if(await ConfirmModal.show({ title: 'Envoyer une invitation ?', message: `Aucun profil technicien trouvé pour ${value}.\n\nEnvoyer une invitation à ${member.name} pour créer son profil ?`, icon: '📨', confirmText: 'Inviter' })) {
+                        if(await ConfirmModal.show({ title: 'Envoyer une invitation ?', message: `Aucun profil technicien trouvé pour ${value}.\n\nEnvoyer une invitation à ${Utils.escape(member.name)} pour créer son profil ?`, icon: '📨', confirmText: 'Inviter' })) {
                             Actions.notifyNewProfile(member, 'crew');
                         }
                     }, 300);
@@ -36180,7 +36195,7 @@ const ProfileGallery = {
         const claim = ProfileClaims.pendingClaims.find(c => c.id === claimId);
         if(!claim) return;
         
-        if(!await ConfirmModal.show({ title: 'Revendiquer ce profil ?', message: `Le profil "${claim.name}" deviendra votre profil public que vous pourrez compléter.`, icon: '✋', confirmText: 'Revendiquer' })) return;
+        if(!await ConfirmModal.show({ title: 'Revendiquer ce profil ?', message: `Le profil "${Utils.escape(claim.name)}" deviendra votre profil public que vous pourrez compléter.`, icon: '✋', confirmText: 'Revendiquer' })) return;
         
         const emailKey = Utils.sanitizeEmail(state.currentUser.email);
         
@@ -39076,7 +39091,7 @@ if(isActors) {
         // Proposer d'avertir la personne si elle a un email
         if(person.email) {
             setTimeout(async () => {
-                if(await ConfirmModal.show({ title: 'Prévenir cette personne ?', message: `Envoyer une notification à ${person.name} pour l'informer qu'il/elle a été ajouté(e) au projet ?`, icon: '📧', confirmText: 'Envoyer' })) {
+                if(await ConfirmModal.show({ title: 'Prévenir cette personne ?', message: `Envoyer une notification à ${Utils.escape(person.name)} pour l'informer qu'il/elle a été ajouté(e) au projet ?`, icon: '📧', confirmText: 'Envoyer' })) {
                     GlobalSearch.notifyPerson(person);
                 }
             }, 300);
@@ -41095,7 +41110,7 @@ return;
             return;
         }
         
-        if(!await ConfirmModal.show({ title: 'Envoyer la feuille de service ?', message: `${recipients.length} destinataire(s) :\n\n${recipients.map(r => '• ' + r.name).join('\n')}`, icon: '📧', confirmText: 'Envoyer' })) {
+        if(!await ConfirmModal.show({ title: 'Envoyer la feuille de service ?', message: `${recipients.length} destinataire(s) :\n\n${recipients.map(r => '• ' + Utils.escape(r.name)).join('\n')}`, icon: '📧', confirmText: 'Envoyer' })) {
             return;
         }
         
@@ -41410,7 +41425,7 @@ ${projectName}`;
             return;
         }
         
-        if(!await ConfirmModal.show({ title: `Envoyer la feuille de service J${shootDay.dayNumber} ?`, message: `${recipients.length} destinataire(s) :\n\n${recipients.map(r => '• ' + r.name).join('\n')}`, icon: '📧', confirmText: 'Envoyer' })) {
+        if(!await ConfirmModal.show({ title: `Envoyer la feuille de service J${shootDay.dayNumber} ?`, message: `${recipients.length} destinataire(s) :\n\n${recipients.map(r => '• ' + Utils.escape(r.name)).join('\n')}`, icon: '📧', confirmText: 'Envoyer' })) {
             return;
         }
         
@@ -50616,7 +50631,7 @@ const Contracts = {
                 data: {
                     subject: `🎬 ${projectTitle} - Infos requises pour ton contrat`,
                     title: 'Informations requises pour ton contrat',
-                    message: `Salut ${p.name} ! 👋\n\nLe projet "${projectTitle}" a besoin de quelques informations pour générer ton ${contractType}.\n\nIl manque : ${issues.join(', ')}\n\nPeux-tu mettre à jour ton profil sur moteur.studio quand tu as 2 minutes ?\n\nMerci ! 🎬`
+                    message: `Salut ${Utils.escape(p.name)} ! 👋\n\nLe projet "${projectTitle}" a besoin de quelques informations pour générer ton ${contractType}.\n\nIl manque : ${issues.join(', ')}\n\nPeux-tu mettre à jour ton profil sur moteur.studio quand tu as 2 minutes ?\n\nMerci ! 🎬`
                 }
             } });
             
@@ -55813,7 +55828,7 @@ await supabase.functions.invoke('super-action', { body: {
                 data: {
                     subject: `🎬 ${projectTitle} - Informations manquantes sur ton profil`,
                     title: 'Informations manquantes sur ton profil',
-                    message: `Salut ${person.name} ! 👋\n\nLe projet "${projectTitle}" a besoin de quelques informations pour compléter ta fiche et préparer les contrats/salaires.\n\nIl manque : ${issues.join(', ')}\n\nPeux-tu mettre à jour ton profil sur moteur.studio quand tu as 2 minutes ?\n\nMerci ! 🎬`
+                    message: `Salut ${Utils.escape(person.name)} ! 👋\n\nLe projet "${projectTitle}" a besoin de quelques informations pour compléter ta fiche et préparer les contrats/salaires.\n\nIl manque : ${issues.join(', ')}\n\nPeux-tu mettre à jour ton profil sur moteur.studio quand tu as 2 minutes ?\n\nMerci ! 🎬`
                 }
             } });
             
