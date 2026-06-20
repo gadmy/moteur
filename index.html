@@ -41193,7 +41193,7 @@ ${projectName}`;
     
     publishCallSheet: async (shootDay) => {
         // Générer un token unique pour cette feuille
-        const token = 'fds_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11);
+        const token = (crypto.randomUUID ? crypto.randomUUID() : 'fds_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11));
         
         const projectName = state.data.title || 'Projet';
         const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -41251,11 +41251,15 @@ ${projectName}`;
             createdBy: state.currentUser?.email || ''
         };
         
-        // Sauvegarder dans le projet (les callsheets publiques sont stockées dans data)
+        // Sauvegarder la feuille publique dans la table dédiée public_callsheets
         try {
-            if(!state.data.publicCallsheets) state.data.publicCallsheets = {};
-            state.data.publicCallsheets[token] = publicData;
-            await Store.save();
+            const { error } = await supabase.from('public_callsheets').insert({
+                token: token,
+                project_id: state.currentProjectId || null,
+                data: publicData,
+                created_by: state.currentUser?.email || ''
+            });
+            if(error) throw error;
             return token;
         } catch(e) {
             console.error('❌ Erreur publication feuille:', e);
@@ -41265,8 +41269,9 @@ ${projectName}`;
     
     loadPublicCallSheet: async (token) => {
         try {
-            // Chercher dans les données du projet actuel
-            const data = state.data?.publicCallsheets?.[token];
+            // Lire la feuille publique depuis le serveur (table dédiée, accès par token)
+            const { data, error } = await supabase.rpc('get_public_callsheet', { p_token: token });
+            if(error) throw error;
             if(!data) {
                 document.getElementById('public-callsheet-content').innerHTML = '<p style="text-align:center; color:#c00;">❌ Feuille de service introuvable ou expirée.</p>';
                 return;
