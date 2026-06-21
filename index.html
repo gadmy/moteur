@@ -143,14 +143,14 @@ Croisé v529→v540 (fix A1/A2/E1-E5/D6-D7/RLS non re-listés). Statut [ ] à fa
 [x] S11 · 🟢 · Double-init dashboard au boot (L1-02) — onAuthStateChange + getSession — FAIT v545
           appellent tous deux showDashboard (15284/15322). Lectures redondantes ;
           inits critiques idempotentes. Fix : flag Auth._dashboardShown.
-[ ] S12 · 🟢 · electLeader setInterval jamais nettoyé (L1-03, l.15097) + élection
-          localStorage non atomique. Fix : stocker l'id + clearInterval dans cleanup.
-[ ] S13 · 🟢 · ProfileGallery éditeur src brut (L2-05, l.35540) — self-XSS, URL
-          d'upload contrôlée. Cohérence : safeMediaUrl.
-[ ] S14 · 🟢 · Deux chemins de convocation dupliqués/divergents (L3-03, 40952/41277)
-          — l'un a le lien public, l'autre non. Fusionner (dette).
-[ ] S15 · 🟢 · MoodBoard preview iframe src brut (L4-02, l.27815) — résiduel E2,
-          non exploitable (fileData = data/URL signée). Cohérence : safeMediaUrl.
+[x] S12 · 🟢 · electLeader setInterval jamais nettoyé (L1-03, l.15097) + élection
+          localStorage non atomique. Fix : handle leaderInterval + clearInterval dans cleanup. FAIT v546
+[x] S13 · 🟢 · ProfileGallery éditeur src brut (L2-05) — self-XSS, URL d'upload
+          contrôlée. Fix : safeMediaUrl sur les 2 src (updateGallery + updateCrewGallery). FAIT v547
+[x] S14 · 🟢 · Deux chemins de convocation dupliqués/divergents (L3-03) — l'un a le
+          lien public, l'autre non. Fix : sendFDS délègue à sendCallSheet (lien public garanti), ~100 lignes mortes purgées. FAIT v547
+[x] S15 · 🟢 · MoodBoard preview iframe src brut (L4-02) — résiduel E2. Fix : allowlist
+          schéma strict PDF (data:application/pdf|https) + escape jumeau href. PAS safeMediaUrl (casserait data:pdf). FAIT v547
 [ ] S16 · 🟢 · IDs dupliqués #report-reason/#report-details (L6-03, 60852/60949)
           — bénin si une seule modale affichée. À surveiller.
 [ ] S17 · ⚪ · Retirer l'instrumentation diag quand la stabilité est confirmée
@@ -200,6 +200,11 @@ les CONTRATS, et 2 chokepoints UI (toast, ConfirmModal). S2→S6 ferment l'essen
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v547 (21 Juin 2026) — Sécurité (audit v540, chantier S, suite)
+  - SÉCURITÉ / GALERIE PROFIL (S13) — l'éditeur de galerie (profil + technicien) réinjectait l'URL de la photo dans un src brut au rendu de l'aperçu (updateGallery et updateCrewGallery). Self-XSS uniquement (l'URL provient de l'upload Supabase de l'utilisateur lui-même) ; les deux src passent désormais par Utils.safeMediaUrl (data:image/ ou https://), par cohérence avec le reste du fichier.
+  - DETTE / CONVOCATIONS (S14) — deux chemins divergents envoyaient la feuille de service par mail : sendCallSheet publiait la feuille et transmettait le lien public, tandis que sendFDS (bouton « Envoyer » de la modale FDS) ne publiait pas et omettait publicLink — le destinataire recevait alors un lien vers la home (repli 'https://moteur.studio') au lieu de sa feuille. sendFDS délègue désormais à PlanningCallSheets.sendCallSheet (chemin unique, lien public garanti) ; le corps mort dupliqué (~100 lignes, météo/GPS jamais réellement envoyés) a été purgé.
+  - SÉCURITÉ / MOODBOARD (S15) — l'aperçu de fichier PDF (MoodBoard.openFile) réinjectait element.fileData dans un src d'iframe brut (résiduel E2) : en projet partagé, un membre pouvait empoisonner l'état synchronisé pour provoquer un breakout d'attribut ou exécuter du data:text/html dans l'iframe. Allowlist de schéma strict (data:application/pdf ou https:// uniquement, guillemet neutralisé), safeMediaUrl volontairement écarté car il aurait vidé les data:application/pdf légitimes ; tout schéma non conforme retombe sur un message d'indisponibilité. Le lien de téléchargement jumeau (branche non-PDF) passe par Utils.escape.
+  - PERF / FUITE TIMER (S12) — le setInterval d'élection du leader entre onglets (electLeader, intervalle de 2 s) n'était jamais capturé ni arrêté : après déconnexion il continuait d'écrire dans localStorage indéfiniment. Nouveau handle SessionManager.leaderInterval (même pattern que heartbeatInterval) : l'id est stocké, une garde évite le doublon si electLeader est ré-appelé, et cleanup fait clearInterval, remet le handle à null et isLeaderTab à false. Volet « élection localStorage non atomique » laissé en l'état (risque mineur, pas de compare-and-set atomique disponible côté localStorage).
 v545 (20 Juin 2026) — Sécurité (audit v540, chantier S, suite)
   - SÉCURITÉ / MODÉRATION FORUM (S10) — vérification RLS (aucun patch fichier) : les policies DELETE admin (forum_threads_admin_delete, forum_replies_admin_delete) autorisent bien la suppression des posts d'autrui sur sujets ET réponses, et la table reports dispose des droits admin SELECT/UPDATE/DELETE — la modération est réellement arbitrée côté Postgres, pas seulement masquée côté client. Aucun DELETE trop large ; INSERT des signalements borné (reporter_email = email du JWT, pas d'usurpation du signaleur).
   - SÉCURITÉ / RLS (S19) — retrait de deux policies DELETE redondantes sur le forum (« Threads/Replies deletable by author », égalité stricte sensible à la casse), entièrement couvertes par les policies *_author_delete (comparaison insensible à la casse). Nettoyage sans changement de droit : l'auteur garde la suppression de ses posts, l'admin la sienne.
@@ -7666,7 +7671,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv546</p>
+      <p>vv547</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -28017,11 +28022,17 @@ const MoodBoard = {
         // Ouvrir le fichier dans un nouvel onglet
         const win = window.open();
         if(element.fileType.includes('pdf')) {
-            win.document.write(`<iframe src="${element.fileData}" style="width:100%;height:100%;border:none;"></iframe>`);
+            const pdfSrc = String(element.fileData);
+            const safePdf = /^(data:application\/pdf[;,]|https:\/\/)/i.test(pdfSrc) ? pdfSrc.replace(/"/g, '%22') : '';
+            if(safePdf) {
+                win.document.write(`<iframe src="${safePdf}" style="width:100%;height:100%;border:none;"></iframe>`);
+            } else {
+                win.document.write('<p style="font-family:sans-serif;padding:20px;">Aperçu PDF indisponible.</p>');
+            }
         } else {
             win.document.write(`<html><head><title>${Utils.escape(element.fileName)}</title></head><body>
                 <p>Fichier: <strong>${Utils.escape(element.fileName)}</strong></p>
-                <p><a href="${element.fileData}" download="${Utils.escape(element.fileName)}">📥 Télécharger</a></p>
+                <p><a href="${Utils.escape(element.fileData)}" download="${Utils.escape(element.fileName)}">📥 Télécharger</a></p>
             </body></html>`);
         }
     },
@@ -35742,7 +35753,7 @@ const ProfileGallery = {
         
         if(url && url.trim()) {
             item.innerHTML = `
-                <img src="${url}" alt="Photo ${index + 1}" onerror="this.parentElement.innerHTML='<span class=\\'gallery-placeholder\\'>+</span>'">
+                <img src="${Utils.safeMediaUrl(url)}" alt="Photo ${index + 1}" onerror="this.parentElement.innerHTML='<span class=\\'gallery-placeholder\\'>+</span>'">
                 <button class="gallery-remove" onclick="event.stopPropagation(); app.ProfileGallery.removeCrewGalleryPhoto(${index})">✕</button>
             `;
         } else {
@@ -36572,7 +36583,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         
         if(url && url.trim()) {
             item.innerHTML = `
-                <img src="${url}" alt="Photo ${index + 1}" onerror="this.parentElement.innerHTML='<span class=\\'gallery-placeholder\\'>+</span>'">
+                <img src="${Utils.safeMediaUrl(url)}" alt="Photo ${index + 1}" onerror="this.parentElement.innerHTML='<span class=\\'gallery-placeholder\\'>+</span>'">
                 <button class="gallery-remove" onclick="event.stopPropagation(); app.PublicProfile.removeGalleryPhoto(${index})">✕</button>
             `;
         } else {
@@ -41097,111 +41108,10 @@ callsheetHTML += `<tr class="bg-base"><td colspan="5" class="th-primary">🎭 ${
         const shootDay = PlanningFDS.currentFDSDay;
         if(!shootDay) {
             Utils.toast('Aucune feuille de service chargée', 'error');
-return;
-        }
-        
-        const projectName = state.data.title || 'Projet';
-        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        const senderName = state.userProfile?.displayName || state.currentUser?.email?.split('@')[0] || 'La production';
-        
-        // Récupérer météo et lien GPS
-        let weatherInfo = '';
-        let gmapsLink = '';
-        if(shootDay.locationLat && shootDay.locationLng) {
-            gmapsLink = `\n🗺️ GPS : https://www.google.com/maps/search/?api=1&query=${shootDay.locationLat},${shootDay.locationLng}`;
-            const weather = await Weather.fetch(shootDay.locationLat, shootDay.locationLng, shootDay.date);
-            if(weather) {
-                weatherInfo = `\n\n🌤️ Météo : ${weather.icon} ${weather.description}, ${weather.tempMin}°C - ${weather.tempMax}°C`;
-                if(weather.precipitationProb > 30) weatherInfo += ` (${weather.precipitationProb}% pluie)`;
-                weatherInfo += `\n🌅 Soleil : ${weather.sunrise} - ${weather.sunset}`;
-            }
-        }
-        
-        // Collecter toutes les personnes à notifier
-        const recipients = [];
-        
-        // Parcourir la callSheet
-        if(shootDay.callSheet && shootDay.callSheet.length > 0) {
-            for(const call of shootDay.callSheet) {
-                let person = null;
-                
-                if(call.type === 'actor') {
-                    person = state.data.actors.find(a => a.id === call.personId);
-                } else if(call.type === 'crew') {
-                    person = state.data.crew.find(c => c.id === call.personId);
-                }
-                
-                if(person && person.email) {
-                    recipients.push({
-                        name: person.name || 'Inconnu',
-                        email: person.email,
-                        callTime: call.callTime || shootDay.crewCall || 'À confirmer',
-                        notes: call.notes || ''
-                    });
-                }
-            }
-        }
-        
-        if(recipients.length === 0) {
-            Utils.toast('Aucune personne avec email dans cette feuille de service', 'warning');
             return;
         }
-        
-        if(!await ConfirmModal.show({ title: 'Envoyer la feuille de service ?', message: `${recipients.length} destinataire(s) :\n\n${recipients.map(r => '• ' + Utils.escape(r.name)).join('\n')}`, icon: '📧', confirmText: 'Envoyer' })) {
-            return;
-        }
-        
-        let sent = 0;
-        let errors = 0;
-        
-        for(const recipient of recipients) {
-            const subject = `🎬 Feuille de Service J${shootDay.dayNumber} - ${projectName}`;
-            const content = `Bonjour ${recipient.name},
-
-Vous avez reçu une feuille de service pour le projet "${projectName}" :
-
-📅 Date : ${dateFormatted}
-🎬 Jour de tournage : J${shootDay.dayNumber}
-📍 Lieu : ${shootDay.location || 'À confirmer'}${shootDay.locationAddress ? '\n📌 Adresse : ' + shootDay.locationAddress : ''}${gmapsLink}${weatherInfo}
-
-⏰ Votre convocation : ${recipient.callTime}
-🎬 Prêt à tourner : ${shootDay.readyToShoot || 'À confirmer'}
-🍽️ Repas : ${shootDay.lunchStart || '?'} - ${shootDay.lunchEnd || '?'}
-🏁 Fin estimée : ${shootDay.estimatedWrap || 'À confirmer'}
-${recipient.notes ? '\n📝 Notes vous concernant : ' + recipient.notes : ''}
-${shootDay.notes ? '\n📋 Notes générales : ' + shootDay.notes : ''}
-
-Merci de confirmer votre présence.
-
-Cordialement,
-${senderName}
-${projectName}`;
-
-            try {
-                
-                // Envoyer email
-                await Messages.sendEmailPing(recipient.email, recipient.name, 'callsheet', {
-                    projectName: projectName,
-                    shootDate: dateFormatted,
-                    location: shootDay.location || 'À confirmer',
-                    callTime: recipient.callTime,
-                    senderName: senderName
-                });
-                
-                sent++;
-                // Convocation envoyée
-            } catch(e) {
-                console.error(`❌ Erreur envoi à ${recipient.name}:`, e);
-                errors++;
-            }
-        }
-        
-        if(sent > 0) {
-            Utils.toast(`${sent} convocation(s) envoyée(s) !`, 'success');
-        }
-        if(errors > 0) {
-            Utils.toast(`${errors} erreur(s) d'envoi`, 'warning');
-        }
+        // Fusion S14 : un seul chemin d'envoi (avec lien public) - delegue a sendCallSheet
+        return PlanningCallSheets.sendCallSheet(shootDay.id);
     },
   };
 
