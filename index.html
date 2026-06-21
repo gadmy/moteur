@@ -115,29 +115,32 @@ Croisé v529→v540 (fix A1/A2/E1-E5/D6-D7/RLS non re-listés). Statut [ ] à fa
            Cadrer d'abord sur l'éditeur FDS, puis étendre.
     Effort : moyen (beaucoup de sites)
 
-[ ] S9 · 🟠* · DÉCISION — Callsheet « publique » non délivrée aux destinataires  (=L3-01)
-    Où   : Planning.loadPublicCallSheet l.41092 (lit state.data, pas le serveur)
-    Pb   : le lien ?callsheet=token ne marche que pour qui a déjà chargé le
-           projet ; les convoqués externes voient « introuvable ». Le mail
-           (41277) envoie pourtant « voir la feuille complète ». Workflow cassé.
-           (Pas un trou sécu ; le token Math.random n'est PAS exploitable car
-           rien n'est requêtable par token.)
-    Option A (faible) : retirer le lien « voir la feuille complète » du mail.
-    Option B (élevé)  : table public_callsheets + RLS lecture anon par token +
-                        requête serveur dans loadPublicCallSheet.
-    Effort : à arbitrer (A rapide / B vrai chantier)
+[x] S9 · 🟠* · DÉCISION — Callsheet « publique » non délivrée aux destinataires  (=L3-01) — FAIT v544
+    Où   : publishCallSheet l.41194 + loadPublicCallSheet l.41266
+    Pb   : la feuille était stockée dans state.data (ligne projet, RLS) et
+           relue depuis state.data → un convoqué externe (anon, hors projet)
+           voyait toujours « introuvable », alors que le mail promet le contraire.
+    Fix  : Option B retenue. SQL (Lot 1) : table public_callsheets, RLS tout
+           bloqué + INSERT authenticated (created_by = auth.email()) ; lecture
+           publique via RPC SECURITY DEFINER get_public_callsheet(p_token) ouverte
+           à anon, NON énumérable. Fichier (Lot 2) : publishCallSheet → insert
+           dans la table ; token Math.random → crypto.randomUUID() ;
+           loadPublicCallSheet → supabase.rpc('get_public_callsheet').
+           Testé : lien ouvert en navigation privée (déconnecté) affiche la feuille.
+    Effort : chantier (SQL + RLS + RPC + 3 patchs fichier)
 
-[ ] S10 · 🟡 · VÉRIF SUPABASE (pas un patch fichier) — RLS modération  (=L6-02)
-    Pb   : isAdmin est client-side (56527). Les deletes forum_threads/replies
-           (57182-57187) et reports (57191-57206) ne sont des frontières que
-           si le RLS le garantit.
-    À faire : dans l'éditeur SQL, vérifier (a) qu'une policy autorise l'admin à
-           supprimer les posts d'AUTRUI (sinon modération KO silencieuse), et
-           (b) qu'elle n'est pas trop large (sinon n'importe qui supprime).
-           Quota signalements (60867) client-side = anti-spam contournable, ok.
+[x] S10 · 🟡 · VÉRIF SUPABASE (pas un patch fichier) — RLS modération  (=L6-02) — FAIT v545
+    Constat (pg_policies) : frontière admin OK — forum_threads_admin_delete +
+           forum_replies_admin_delete autorisent l'admin (lower(jwt email) =
+           contact@moteur.studio) à supprimer les posts d'AUTRUI, sujets ET
+           réponses ; reports a SELECT + UPDATE + DELETE admin. (a) OK ; (b)
+           aucun DELETE en using=true → pas trop large. INSERT reports borné
+           (jwt email = reporter_email) → pas d'usurpation du signaleur.
+           Deux résidus d'hygiène extraits → S19, S20.
+    PATCH 2 — journal : ajouter S19 / S20
 
 ─────────────────── P3 — FAIBLE / HYGIÈNE (quand tu veux) ───────────────
-[ ] S11 · 🟢 · Double-init dashboard au boot (L1-02) — onAuthStateChange + getSession
+[x] S11 · 🟢 · Double-init dashboard au boot (L1-02) — onAuthStateChange + getSession — FAIT v545
           appellent tous deux showDashboard (15284/15322). Lectures redondantes ;
           inits critiques idempotentes. Fix : flag Auth._dashboardShown.
 [ ] S12 · 🟢 · electLeader setInterval jamais nettoyé (L1-03, l.15097) + élection
@@ -154,6 +157,16 @@ Croisé v529→v540 (fix A1/A2/E1-E5/D6-D7/RLS non re-listés). Statut [ ] à fa
           (sbDiag, fetch instrumenté, [SB auth], Ctrl+Alt+D — l.12118-12168). Lot dédié.
 [ ] S18 · ⚪ · Cosmétique : actualité de profil rendue 2× (59063) ; U+2550 dans
           bandeaux/commentaires + corps email FDS (hors zones sensibles).
+[x] S19 · 🟢 · VÉRIF SUPABASE (FAIT v545) — doublons de policy DELETE auteur sur forum. Les
+          policies « Threads/Replies deletable by author » (stricte, sensible
+          casse) sont entièrement couvertes par *_author_delete (lower/lower).
+          Poids mort RLS, inoffensif. Fix : DROP des 2 policies strictes.
+[x] S20 · 🟢 · VÉRIF SUPABASE (FAIT v545) — quota signalements INERTE (pas juste
+          contournable). reports SELECT = admin-only ; le compteur client revenait
+          0 pour un user normal (RLS masque tout) → quota jamais déclenché. Option C
+          retenue : RPC SECURITY DEFINER count_my_reports() (filtre auth.email() en
+          dur, fenêtre 7 j, renvoie un entier) ; reportPost appelle la RPC au lieu
+          du SELECT, fail-open conservé.
 
 ──────────────── HORS AUDIT — TODO BADGES DE MODÉRATION (reporté) ────────────────
 [ ] T-BADGE-1 · Écriture badge-personne CASSÉE : setProfileBadge fait .eq('email',…)
@@ -187,6 +200,13 @@ les CONTRATS, et 2 chokepoints UI (toast, ConfirmModal). S2→S6 ferment l'essen
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v545 (20 Juin 2026) — Sécurité (audit v540, chantier S, suite)
+  - SÉCURITÉ / MODÉRATION FORUM (S10) — vérification RLS (aucun patch fichier) : les policies DELETE admin (forum_threads_admin_delete, forum_replies_admin_delete) autorisent bien la suppression des posts d'autrui sur sujets ET réponses, et la table reports dispose des droits admin SELECT/UPDATE/DELETE — la modération est réellement arbitrée côté Postgres, pas seulement masquée côté client. Aucun DELETE trop large ; INSERT des signalements borné (reporter_email = email du JWT, pas d'usurpation du signaleur).
+  - SÉCURITÉ / RLS (S19) — retrait de deux policies DELETE redondantes sur le forum (« Threads/Replies deletable by author », égalité stricte sensible à la casse), entièrement couvertes par les policies *_author_delete (comparaison insensible à la casse). Nettoyage sans changement de droit : l'auteur garde la suppression de ses posts, l'admin la sienne.
+  - SÉCURITÉ / ANTI-SPAM SIGNALEMENTS (S20) — le quota de 5 signalements par semaine était inerte : la table reports n'étant lisible que par l'admin, le décompte côté client renvoyait toujours 0 pour un utilisateur normal (la RLS masquait toutes les lignes), si bien que la limite ne se déclenchait jamais. Nouvelle fonction RPC SECURITY DEFINER count_my_reports() comptant côté serveur les seuls signalements de l'appelant (filtre sur auth.email() en dur, fenêtre glissante de 7 jours) et ne renvoyant qu'un entier, sans jamais exposer le contenu des signalements. reportPost interroge désormais la RPC au lieu d'un SELECT sur reports (fail-open conservé : si la RPC échoue, le signalement n'est pas bloqué).
+  - PERF / BOOT (S11) — double initialisation du tableau de bord au démarrage supprimée : onAuthStateChange (différé après startSessionCheck) et getSession appelaient tous deux Auth.showDashboard, déclenchant deux chargements du profil utilisateur. Garde idempotente par drapeau Auth._dashboardShown, posé en tête de showDashboard et réinitialisé dans showAuth pour préserver la reconnexion après déconnexion dans le même onglet.
+v544 (20 Juin 2026) — Sécurité (audit v540, chantier S, suite)
+  - SÉCURITÉ / FEUILLE DE SERVICE PUBLIQUE (S9) — la feuille de service « publique » envoyée par mail aux convoqués n'était jamais délivrée : publishCallSheet la stockait dans state.data (ligne projet protégée par RLS) et loadPublicCallSheet relisait state.data, si bien qu'un destinataire externe (non connecté, hors projet) voyait toujours « introuvable » alors que le mail promettait « voir la feuille complète ». Refonte serveur : nouvelle table public_callsheets (RLS active, tout bloqué par défaut, INSERT réservé aux comptes connectés pour eux-mêmes via created_by = auth.email()), lecture publique par une fonction RPC SECURITY DEFINER get_public_callsheet(p_token) exécutable par anon — non énumérable, on ne récupère que la ligne dont on détient déjà le token. Côté fichier : publishCallSheet insère désormais dans la table, le token passe de Math.random à crypto.randomUUID(), et loadPublicCallSheet interroge la RPC. Le lien fonctionne maintenant pour un visiteur déconnecté.
 v543 (19 Juin 2026) — Sécurité (audit v540, chantier S, suite)
   - SÉCURITÉ / ÉDITEURS EN PROJET PARTAGÉ (S8) — de nombreux formulaires d'édition interpolaient des données de projet collaboratif directement dans des attributs value="${…}" sans échappement : en projet partagé, un collaborateur pouvait y déposer une charge (breakout d'attribut) exécutée à l'ouverture de l'éditeur par un autre membre. Échappement via Utils.escape() sur la feuille de service (nom, lieu réel, adresse, contact, coordonnées), les notes de convocation (acteurs + techniciens), l'éditeur de lieu du séquencier, et les fiches acteurs (21 champs) et techniciens (11 champs). En complément, le preview photo des ressources interpolait resource.photo dans un src brut, désormais passé par Utils.safeMediaUrl. L'affichage de ces données était déjà échappé ; c'étaient les formulaires d'édition qui ne l'étaient pas.
   - SESSION / MULTI-ONGLETS (S7) — après invalidation du BroadcastChannel (onglet inactif puis réveillé), la recréation utilisait un nom de canal erroné ('moteur_session_'+projectId au lieu de 'moteur_session') et ne réattachait pas le gestionnaire onmessage : la synchronisation inter-onglets (SESSION_CLAIMED, LOGOUT, DATA_UPDATED, SYNC_STATE) cessait silencieusement. Recréation sur le bon canal + réattache de SessionManager.handleChannelMessage. Bug fonctionnel, pas une faille.
@@ -7646,7 +7666,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv544</p>
+      <p>vv546</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -15165,6 +15185,7 @@ crewRoles: {
       tabId: null,
       channel: null,
       heartbeatInterval: null,
+      leaderInterval: null,         // S12 : id du setInterval d'élection (clearInterval au cleanup)
       isLeaderTab: false,
       missedChecks: 0,           // compteur de tolérance avant kick (anti faux-positif)
       
@@ -15271,7 +15292,8 @@ crewRoles: {
           }
           
           // Vérifier périodiquement si le leader est toujours actif
-          setInterval(() => {
+          if(SessionManager.leaderInterval) clearInterval(SessionManager.leaderInterval);   // S12 : pas de doublon si ré-appelé
+          SessionManager.leaderInterval = setInterval(() => {
               const currentLeader = localStorage.getItem(leaderKey);
               if(currentLeader === SessionManager.tabId) {
                   // Mettre à jour le timestamp
@@ -15407,6 +15429,11 @@ crewRoles: {
           if(SessionManager.heartbeatInterval) {
               clearInterval(SessionManager.heartbeatInterval);
           }
+          if(SessionManager.leaderInterval) {   // S12 : stopper l'élection (sinon le timer fuit après déconnexion)
+              clearInterval(SessionManager.leaderInterval);
+              SessionManager.leaderInterval = null;
+          }
+          SessionManager.isLeaderTab = false;
           SessionManager.deleteOwnSession();
       }
   };
@@ -15508,8 +15535,9 @@ crewRoles: {
               Auth.showAuth();
           }
       },
-      showAuth: () => { Landing.show(); els.dashboardView.style.display = 'none'; els.appView.style.display = 'none'; if(Notifications._channel) { try { supabase.removeChannel(Notifications._channel); } catch(e) {} Notifications._channel = null; } },
+      showAuth: () => { Auth._dashboardShown = false; Landing.show(); els.dashboardView.style.display = 'none'; els.appView.style.display = 'none'; if(Notifications._channel) { try { supabase.removeChannel(Notifications._channel); } catch(e) {} Notifications._channel = null; } },
 showDashboard: async () => { 
+    if(Auth._dashboardShown) return; Auth._dashboardShown = true;   // S11 anti double-init boot
     els.authView.style.display = 'none'; 
     // Charger le profil utilisateur depuis Supabase
     try {
@@ -65720,9 +65748,8 @@ const Forum = {
         const reason = document.getElementById('forum-report-reason')?.value || 'other';
         const freeText = document.getElementById('forum-report-details')?.value || '';
         try {
-            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-            const { count, error: cErr } = await supabase.from('reports').select('id', { count: 'exact', head: true }).eq('reporter_email', reporterEmail).gte('created_at', sevenDaysAgo);
-            if(!cErr && count !== null && count >= 5) { Utils.toast('Limite de 5 signalements par semaine atteinte.', 'warning', 6000); return; }
+            const { data: myReportCount, error: cErr } = await supabase.rpc('count_my_reports');
+            if(!cErr && typeof myReportCount === 'number' && myReportCount >= 5) { Utils.toast('Limite de 5 signalements par semaine atteinte.', 'warning', 6000); return; }
         } catch(_) {}
         const excerpt = String(post.content || '').replace(/<[^>]*>/g, '').slice(0, 240);
         const header = '[' + (isThread ? 'SUJET' : 'RÉPONSE') + (isThread && post.title ? ' « ' + post.title + ' »' : '') + '] ';
