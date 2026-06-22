@@ -35,8 +35,38 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
     forum_threads + forum_replies + policy RLS admin UPDATE), nouveau setPostBadge(type,id,badge),
     brancher applyBadgeFromReport sur r.reported_type. Affichage = gratuit (le badge
     voyage sur la ligne du post, déjà chargée par select('*')).
+REMPLACE
 [ ] T-BADGE-4 · L'affichage forum déjà posé (Forum._badgeDot / _loadBadges) reste valide
     pour le cas PROFIL — à conserver.
+
+──────────────────────────── À FAIRE — ROADMAP ────────────────────────────
+💳 PRICING - À FINALISER
+  • Intégration Stripe Checkout (paiement réel) ❌
+  • Webhooks Stripe → Firebase (confirmation paiement) ❌
+  • Cloud Functions (cron jobs essais/suppressions) ❌
+  • Emails automatiques (rappels, expirations) ❌
+  • Sécurité Firebase Rules (bloquer si impayé) ❌
+  • Portail client Stripe (gestion abonnement) ❌
+
+📋 DOCUMENTS NON IMPLÉMENTÉS
+  C) Liste des Véhicules nécessaires
+     - Récapitulatif par jour de tournage ❌
+  D) Feuille de Continuité / Rapport Scripte
+     - Raccords, chronométrage, notes ✅ (V1.9.9.1)
+  E) Listing des Figurants par jour
+     - Nombre, costumes, horaires ❌
+  F) Récapitulatif Costumes/Maquillage par personnage ❌
+
+🔗 LIAISONS MANQUANTES
+  1) Dépenses ↔ Catégorie dépouillement
+  2) Scène → Version/Révision (pages colorées)
+
+📊 STATISTIQUES MANQUANTES
+  • Coût moyen par jour ❌
+
+📤 EXPORTS
+  • Rapport prod PDF ✅ (V1.9.8)
+  • ZIP complet avec PDFs ✅ (V1.9.9)
 
 ────────────────────────── CONSTATS POSITIFS ──────────────────────────
 node --check OK (2 scripts) · <div> statique delta 0 · 0 emoji doc.text() ·
@@ -59,7 +89,6 @@ les CONTRATS, et 2 chokepoints UI (toast, ConfirmModal). S2→S6 ferment l'essen
 v549 (22 Juin 2026) — Profils multi-casquettes découplés + feuille de service unifiée (PDF)
   - PROFILS / MULTI-CASQUETTES — un compte purement association ou entreprise ne pouvait pas être enregistré : la validation réclamait des champs « personne physique » communs (ville, téléphone) qui n'étaient même pas affichés sur ces onglets, héritage d'un modèle de profil historiquement centré sur une personne. Découplage par casquette : comédien et technicien conservent nom complet, sexe, téléphone et ville ; association et entreprise se valident désormais sur leurs seuls champs dédiés (nom, type, mission ou description), sans aucun champ personne-physique requis. Le seul lien entre les quatre faces d'un compte reste l'email (owner_email). Le drapeau profileComplete est recalculé par casquette pour que les fiches morales apparaissent dans les recherches.
   - FEUILLE DE SERVICE / PDF UNIQUE — il existait trois rendus divergents de la feuille de service (page web publique reçue par mail, PDF du bouton « Imprimer », PDF de la section Planning du Dossier de Production). Unification sur le seul rendu du Dossier de Production (exportPlanningPDF) : le bouton de la feuille génère ce PDF, et à l'envoi le PDF du jour est produit côté client, déposé dans un nouveau bucket public callsheets (nom = UUID non devinable) puis le mail pointe directement vers ce PDF, ouvrable par un destinataire déconnecté. Suppression de printCallSheet, de toute la page web publique (loadPublicCallSheet, sa modale, le routage ?callsheet=) et de l'ancien instantané. SQL associé : création du bucket callsheets (public, PDF, policy INSERT réservée aux éditeurs du projet) et suppression de la table public_callsheets et de la RPC get_public_callsheet (dispositif S9 remplacé).
-v548 (22 Juin 2026) — Sécurité / hygiène (audit v540, chantier S, fin)
 v548 (22 Juin 2026) — Sécurité / hygiène (audit v540, chantier S, fin)
   - HYGIÈNE / SIGNALEMENTS (S16) — les modales de signalement de profil (reportProfile) et de projet (reportProject) réutilisaient les mêmes id DOM (report-reason, report-details), créant des doublons d'identifiants dans la page. Bénin tant qu'une seule modale est affichée à la fois, mais incorrect ; les identifiants sont désormais préfixés par contexte (report-profile-* et report-project-*) pour le select, le textarea et les lectures getElementById. Les id forum-report-* étaient déjà distincts. Aucun changement fonctionnel.
   - DETTE / DIAGNOSTIC (S17) — retrait de l'instrumentation temporaire « gel de session », la stabilité étant confirmée : outil console sbDiag(), journal automatique [SB auth] sur onAuthStateChange, raccourci Ctrl+Alt+D, et fetch instrumenté (compteurs __sbReqSeq / __sbInflight, journaux [SB] PENDING/LENT/ECHEC) qui l'alimentait. Le client Supabase retombe sur son fetch natif. Le verrou d'authentification en mémoire (chaîne de promesses, garde anti-gel) est intégralement conservé — seule subsiste son instrumentation légère (tableau __sbLock + avertissement [LOCK]), gardée volontairement comme filet de diagnostic.
@@ -292,358 +321,57 @@ v517 (3 Juin 2026)
   - Univers : les projets publics sont désormais chargés via une fonction RPC get_public_projects qui n'expose que la fiche publique (publicProjectData) — jamais le projet entier (casting, planning, budget, scénario).
   - Effet : une personne non invitée ne peut plus accéder au projet d'autrui, et un membre révoqué perd immédiatement l'accès en lecture.
 v516 (3 Juin 2026)
-HISTORIQUE DES VERSIONS
-  - « Gérer les accès » refondu en 3 onglets : Comédien·nes, Équipe technique, Invités.
-  - Onglet Invités : liste les personnes invitées au projet (hors casting et équipe) avec leur matrice de permissions par section, nom de profil résolu depuis user_profiles, et bouton Révoquer.
-  - Bouton « Révoquer » désormais présent dans les trois onglets, affiché uniquement en face des personnes ayant réellement un accès ; révocation par email (retire l'accès au projet, sans toucher au rôle créatif dans le casting).
-  - Sécurité : le propriétaire ne peut pas se révoquer lui-même (bouton masqué sur sa propre ligne). La propriété reste ancrée à owner_email, indépendante du casting et des accès — supprimer son profil d'acteur ne fait pas perdre le projet.
-  - Tableau de permissions : suppression des icônes d'en-tête et recentrage du texte vertical (Synopsis, Scénario…) sur ses colonnes.
+  - « Gérer les accès » refondu en 3 onglets : Comédien·nes, Équipe technique, Invités (matrice de permissions par section, nom résolu depuis user_profiles, bouton Révoquer dans les trois onglets).
+  - Révocation par email (retire l'accès au projet sans toucher au rôle créatif) ; le propriétaire ne peut pas se révoquer lui-même. Propriété ancrée à owner_email, indépendante du casting.
+  - Tableau de permissions : icônes d'en-tête retirées, texte vertical recentré.
 v514 (2 Juin 2026)
-  - Dashboard : la carte d'un projet disparaît immédiatement après suppression (rafraîchissement de la liste qui manquait).
-  - Profils Publics : correction de l'enregistrement qui échouait silencieusement à partir de 3 profils (description physique, galerie photo, langues, sports).
-    Cause = trigger Supabase "LIMIT_3_PROFILES" déclenché à tort lors de l'upsert d'un profil existant (le trigger BEFORE INSERT se lance avant la détection du conflit d'id).
-    Corrigé côté Supabase : décompte excluant la ligne en cours (id <> NEW.id), + faux message « Profil sauvegardé » supprimé en cas d'erreur (le vrai message s'affiche désormais).
-  - Feuille de service : export PDF aligné sur l'aperçu écran (carte météo en grille avec dégradé + sous-classes, fonds colorés imprimés via print-color-adjust).
-  - Storyboard : la colonne des plans s'aligne sur la hauteur de la scène sélectionnée (plus besoin de remonter) + recalcul auto au redimensionnement.
-  - Scénario : 2e clic sur "Storyboard" ou "Commentaires" referme le panneau ouvert (bascule).
-v513 — Cohérence pages de garde sur 7 exports onglet (Synopsis, Scénario, Planning, Stats, Personnages, Acteurs, Lieux) alignés sur le Dossier global + refonte "Mes Profils Publics" : galerie de profils en cercles photo (nom + fonction + projets liés avec rôle propriétaire/invité),
- formulaire affiché seulement au clic + fix compteur de caractères du synopsis qui affichait 0 à l'ouverture du projet (recalcul immédiat désormais) (2 Juin 2026)
-v512 — Séquencier : export PDF enrichi (statut, tag, perso, n° formaté) + choix des saisons + suppression du bouton "Imprimer/PDF" redondant (2 Juin 2026)
-v511 — Axe 1 (suite) : déduplications CSS (états actifs, flex, tab-close, curseur) + conflit empty-state (2 Juin 2026)
-
-================================================================================
-NETTOYAGE CSS (déduplication + résolution de conflit, sans changement visuel)
-
-1) CLUSTER « état actif/survol -> primary » (21 règles)
-Corps strictement identique (background et border-color en primary, color blanc)
-réuni en une règle groupée auto-documentée. Surfaces : tabs (contacts/courses/
-forum-sort/messages... .active), boutons de toolbars (editor-toolbar, synopsis-
-toolbar/-nav, script fmt-btn, focus-btn, brush-btn), view-toggles (res-filter,
-view-toggle, planning-view, moodboard-board-tab, sb-toggle, sr-nav). Placement
-calculé pour rester APRÈS tous les :hover concurrents de même spécificité.
-
-2) CONFLIT .empty-state (résolution)
-2 règles concurrentes (composant flex/centré vs texte simple) : la 2e écrasait
-silencieusement le padding de la 1re. Fusion en une règle reproduisant le rendu
-effectif actuel (flex colonne centré, padding 40, couleur secondaire).
-(empty-state-sm/-lg laissés intacts : autonomes.)
-
-3) CONTENEURS FLEX (6 règles)
-Corps « display:flex; align-items:center; gap:10px » réuni : editor-actions-left,
-permissions-user-info, focus-toolbar-left/-right, crew-rate-row, planning-nav.
-Écartés : project-info (2e définition width:100%) et flex-row-gap10 (doublon exact
-de la classe utilitaire, à nettoyer en axe 2).
-
-4) TAB-CLOSE (2 groupes de 3 règles)
-Boutons de fermeture d'onglets, identiques sur tab-btn / tab-subbtn / tab-category :
-- reveal au survol du parent (opacity 0.6) -> 1 règle ;
-- survol du bouton (opacity 1, fond danger, texte blanc) -> 1 règle.
-Ordre reveal-avant-hover préservé ; les bases (positions propres) non touchées.
-
-5) CURSEUR DE GLISSEMENT (11 règles)
-Corps « cursor: grabbing » réuni (états :active / .dragging des éléments
-draggables : onglets, cartes, planning, moodboard/beatboard canvas, color-wheel,
-exp-drag-handle...). Aucun concurrent -> placement libre.
-
-6) DOUBLONS EXACTS SUPPRIMÉS
-Suppression de définitions strictement redondantes (même sélecteur, même style,
-déclaré 2 fois dans la même cascade) : .flex-row-gap10 (2e déclaration) et un
-bloc de 4 utilitaires recopiés en fin de <style> (.text-muted, .mt-5, .min-w-200,
-.fs-11). Aucune incidence (les déclarations conservées sont identiques).
-
-GARDE-FOUS : pour chaque fusion, vérification mono-définition / hors @media,
-contrôle des concurrents de même spécificité, et choix du pivot = dernier
-sélecteur du bloc (porteur du corps) pour éviter qu'un sélecteur soit à la fois
-terminaison et cible de suppression.
-
-CONSTATS : familles *-content / *-meta évaluées -> pas de regroupement propre
-(display:block trop générique ; les *-meta identiques sont dans des templates JS
-d'export/impression, hors cascade -> intouchables).
-
-RESTE (volontairement non fait) : groupe « primary sans border » (~13) écarté
-(membres disparates -> faux abstrait + cascades incompatibles) ; le ×2
-card-edit-modal-close = color-wheel-close laissé (composants sans rapport ->
-couplage indésirable). Axe 2 (surcharges éparpillées) : à traiter au cas par cas.
-
-================================================================================
-
-v510 — Axe 1 : déduplication de règles CSS par regroupement de sélecteurs (2 Juin 2026)
-
-================================================================================
-NETTOYAGE CSS (déduplication de règles, sans changement visuel)
-Suite de l'audit dette CSS (cf. v508). Fusion de règles au corps strictement
-identique via regroupement de sélecteurs. Aucune touche au HTML : tous les noms
-de classes sont conservés, donc zéro changement d'apparence. Variante de la
-méthode v509 (boutons), mais sans création de classe : on réunit les sélecteurs
-existants devant un bloc de déclarations commun.
-
-6 groupes fusionnés (29 sélecteurs réunis, 23 règles dupliquées supprimées) :
-
-- En-têtes de modales (6) :
-  message-detail-header = global-search-header = permissions-header =
-  scene-versions-header = contracts-header = history-header.
-- En-têtes de vues (3) : forum-header = feed-header = courses-header.
-  (contacts-header et public-profile-header écartés : overrides responsive propres)
-- États vides / chargement (4) :
-  history-empty = message-empty = global-search-empty = global-search-loading.
-- Grilles auto-fill (3) :
-  global-search-results-grid = episodes-grid = seasons-grid.
-  (data-grid écarté : override media propre)
-- Photos rondes (9) : contact-card-photo img + floating-card/fan-card .card-photo
-  img + profile-modal-photo / global-search-card-photo / permissions-user-photo /
-  chat-member-photo / resource-card-photo / compact-card-photo img.
-- Vues plein écran (4) :
-  forum-view = feed-view = courses-view = public-profile-view.
-
-GARDE-FOUS
-Sélecteurs ayant des multi-définitions ou des overrides @media systématiquement
-écartés (vérifiés par comptage avant chaque fusion) : pas de fusion qui
-masquerait une surcharge responsive. Ancres extraites du fichier courant avant
-chaque opération (un groupe avait nécessité une réparation suite à une ancre
-approximative, corrigé).
-
-RESTE À FAIRE sur l'axe 1 : gros cluster d'environ 24 sélecteurs (états
-actif/hover de toolbars), familles *-content / *-close / *-meta, conteneurs
-flex répétés (editor-actions-left et co). Puis axe 2 : sélecteurs définis
-plusieurs fois (environ 30 réels hors keyframes) à consolider.
-
-================================================================================
-
-v509 — Système unifié de boutons d'action (1 Juin 2026)
-
-================================================================================
-REFONTE CSS — boutons d'action
-Introduction d'un système de boutons unifié, en remplacement des ~17 classes
-d'action quasi-dupliquées (variantes de padding/radius accumulées au fil du
-temps : -sm, -sm2, -sm-r6, -r4, -r8, -compact, n8-btn-*…).
-
-Nouveau système (base + modificateurs) :
-  .btn              base commune (flex centré, padding 10/20, radius 6, etc.)
-  .btn--primary / --success / --danger / --secondary / --outline   couleurs
-  .btn--sm          petite taille (padding 8/15)
-  .btn--r8          variante radius 8px
-
-Migration des classes existantes vers ce système (dans le HTML/JS) :
-  btn-primary / -sm / -sm2 / -sm-r6 / -r4 / -r8   -> btn btn--primary (+ --sm/--r8)
-  btn-success / -compact / -compact2              -> btn btn--success
-  btn-outline / -compact / -r6                    -> btn btn--outline
-  btn-secondary                                   -> btn btn--secondary btn--sm
-  btn-border / -r8                                -> btn btn--secondary (+ --r8)
-  n8-btn-1 / n8-btn-3 / n8-btn-5 (restes maquette) -> mappés sur le système
-~79 boutons migrés ; 18 anciennes règles CSS supprimées.
-
-Couleurs sémantiques conservées (primary/success/danger). Harmonisation assumée
-des micro-écarts de padding (1-2px) et de radius (4px->6px). Aucune référence JS
-logique sur ces classes (vérifié), donc migration sans impact comportemental.
-
-NON CONCERNÉS (boutons contextuels, conservés tels quels) : tab-btn, tab-subbtn,
-synopsis-toolbar-btn, fmt-btn, brush-btn, btn-tool(-print), icon-btn,
-visibility-btn, collab-type-btn, flex-row-btn, btn-edit/-delete/-merge/-tag,
-btn-sm (modif. d'onglet), et les familles landing-/editor-/contract-btn-*.
-
-================================================================================
-
-v508 — Audit dette CSS : fusion de styles dupliqués (1 Juin 2026)
-
-================================================================================
-NETTOYAGE CSS (déduplication de règles, sans changement visuel)
-Audit de la dette CSS (boutons, modales, classes mortes). Fusion des règles
-strictement identiques via sélecteurs groupés (les noms de classes sont tous
-conservés → aucun changement d'apparence dans le HTML) :
-
-- Boutons identiques (7 paires) :
-  contract-btn-secondary = expense-btn-edit ; episode-action-btn = season-action-btn ;
-  modal-btns = exp-modal-btns ; btn-border = n8-btn-3 ;
-  btn-outline-compact = btn-outline-r6 ; btn-primary-r8 = n8-btn-5 ;
-  btn-success-compact = n8-btn-1.
-  (Les classes n8-btn-* étaient des restes de maquette.)
-- Modale identique (1 paire) : contracts-modal = history-modal.
-
-Soit 8 blocs CSS dupliqués supprimés.
-
-CONSTATS DE L'AUDIT (pour mémoire)
-- CSS mort : aucun à supprimer. Les classes signalées par l'analyse
-  (app-header, dash-card, sc-card, sb-card, element-actions, une-idée…) ne sont
-  plus que des mentions dans le présent changelog ; elles n'ont plus de règle
-  active. Le bug historique une-idée/une-idee est déjà résolu (CSS et JS
-  cohérents sur une-idee).
-- Les autres boutons « quasi-identiques » diffèrent volontairement (couleur
-  sémantique, état display:none) et n'ont pas été fusionnés.
-- Les 18 autres overlays de modales ont des z-index/fonds propres
-  (empilement) → pas de base commune factorisable sans risque.
-
-Pistes restantes (chantiers à part) : refonte du système de boutons
-(base + modificateurs), migration des styles inline répétés vers des classes,
-élagage prudent des délégations rétrocompat.
-
-================================================================================
-
-v507 — Balisage des derniers modules comportementaux (1 Juin 2026)
-
-================================================================================
-BALISAGE (bannières internes, pas d'éclatage — modules cohérents)
-Les 11 derniers modules jamais organisés ont été balisés en sections internes :
-MatchingEngine (4 sections), Forum (4), Invitations (3), Importer (3),
-SessionManager (3), Feed (3), ColorWheel (3), Pricing (3), Notifications (3),
-Tutorial (2), Episodes (1) — soit 32 sections au total.
-Aucun éclatage : ce sont des modules cohérents (un seul domaine, état partagé)
-ou surtout des données (Tutorial.sections), pour lesquels une découpe en
-sous-modules n'apporterait rien.
-
-À ce stade, tous les modules comportementaux du fichier sont organisés —
-soit éclatés en sous-modules, soit balisés en sections.
-
-================================================================================
-
-v506 — Modularisation Admin/Contracts + balisage Messages/Contacts + nettoyage bannières (1 Juin 2026)
-
-================================================================================
-MODULARISATION
-- Admin : extraction du sous-module AdminEmail (campagnes emails — updateEmailFilter,
-  showRecipientsList, loadEmailTemplate, previewEmail, sendEmails ; ~290 l).
-  emailRecipients reste dans le cœur (lu/écrit via Admin.emailRecipients).
-  Cœur Admin balisé en 7 sections.
-- Contracts : extraction du sous-module ContractsTemplates (generateContractHTML +
-  generateBenevoleHTML, ~435 l de génération HTML quasi pure). 2 délégations dans le
-  cœur. Cœur Contracts balisé en 4 sections.
-- Messages (~830 l) : balisé en 6 sections (module cohérent, état partagé → pas
-  d'éclatage).
-- Contacts (~745 l) : balisé en 5 sections (annuaire / mes contacts / sauvegarde /
-  import).
-
-NETTOYAGE
-- Bannières en double : d'anciens bandeaux (styles court/encadré) coexistaient avec
-  les nouveaux dans 9 endroits (UI, MoodBoard, Actions, Admin). Les redondants ont
-  été retirés — un seul bandeau par section. Audit de balisage désormais fiable
-  (détecte tous les styles de bandeaux).
-- Commentaire orphelin remis au-dessus de sa vraie méthode dans Messages
-  (sendEmailPing).
-
-================================================================================
-
-v505 — Modularisation Storyboard (extraction StoryboardExport + balisage) (1 Juin 2026)
-
-================================================================================
-MODULARISATION — module Storyboard
-Extraction du sous-module StoryboardExport : toute la chaîne d'impression et
-d'export PDF du storyboard (printDirect, renderPrintPreview, createPrintPage,
-_drawTechLayerOnTop, createPrintShot, exportPDF), soit ~530 lignes, sortie du
-cœur Storyboard. Le cœur conserve 6 délégations rétrocompatibles ; les méthodes
-déplacées continuent de lire les membres restés dans le cœur (printConfig,
-extractAcronym, renderObjectsOnCanvas…). StoryboardExport ajouté au return.
-Le cœur Storyboard (~1040 l) est balisé en 5 sections : État, scènes & plans /
-Images & objets canvas / Modale d'édition de plan / Vues & config d'impression /
-Impression & export (délégué à StoryboardExport).
-
-================================================================================
-
-v504 — Modularisation Actions (extraction ActionsExport + balisage) (1 Juin 2026)
-
-================================================================================
-MODULARISATION — module Actions
-Extraction du sous-module ActionsExport : toute la modale d'export PDF universel
-(openExportModal, confirmExportPDF, les toggles, la gestion d'ordre des sections
-expSaveOrder/expRestoreOrder/expResetOrder/expSetupDragAndDrop, et les données
-_expDefaultOrder/_EXP_ORDER_STORAGE_KEY), soit ~400 lignes, sortie du cœur
-Actions. Le cœur conserve des forwarders rétrocompatibles (délégations pour les
-méthodes, getters pour les 2 données) ; ActionsExport ajouté au return.
-Le cœur Actions (~1270 l) est balisé en 8 sections : Scènes / Synchronisation
-personnages & lieux / Données & groupes / Liaison profils publics / Acteurs /
-Lieux / Notifications & tags / Export PDF (délégué à ActionsExport).
-
-================================================================================
-
-v503 — Finalisation modularisation UI/onglets + suppression code mort (1 Juin 2026)
-
-================================================================================
-MODULARISATION — finalisation du module UI (onglets)
-Fin de l'éclatement de UI : les 6 méthodes d'ordre et de drag-drop des onglets
-et catégories (initCategoriesDragDrop, saveCategoriesOrder, loadCategoriesOrder,
-loadCategoryTabsOrder, initTabsDragDrop, updateTabNumbers), restées dans le cœur,
-ont été déplacées dans UICategories (avec délégations rétrocompatibles).
-UI est désormais entièrement éclaté : UIPrint, UIHidden, UICategories,
-UIDashboard, UITheme, UIData. Le cœur UI (~890 l) est balisé en 5 sections :
-Calendrier de disponibilités / Permissions, verrous & délégations onglets /
-Vues, modes & tableau de bord / Navigation onglets & statuts de scènes /
-Rendu, modales & divers.
-
-NETTOYAGE — code mort
-Analyse AST (acorn) du code mort sur tout le fichier : sur ~1700 méthodes, une
-seule jamais appelée nulle part — PlanningCallSheets.sendCallSheetEmail — a été
-supprimée. Les autres "suspects" sont des délégations orphelines (shims de
-rétrocompatibilité issus de la modularisation), conservées pour l'instant.
-
-================================================================================
-
-v502 — Organisation DrawingEditor + déduplication Courses (1 Juin 2026)
-
-================================================================================
-MODULARISATION — module DrawingEditor (~1890 l)
-Module canvas (état fortement couplé) organisé en 7 sections internes, sans
-éclatement ni extraction (pas d'export propre, même logique que BeatBoard) :
-État / Ouverture, canvas & couleurs / Images & calques / Dessin /
-Objets placés & interactions / Outils, calques & historique / Sauvegarde & rendu.
-
-DÉDUPLICATION — module Courses (glossaire de notions)
-Audit des clés dupliquées via parseur AST (acorn) sur tout le fichier :
-3 vraies clés en double trouvées (override silencieux), toutes dans les données
-du glossaire. Nettoyées :
-- 'surround-51' : copie strictement identique supprimée.
-- Ancienne section morte 'pre-production' / 'post-production' supprimée (la
-  version active et complète des phases de production est conservée).
-Aucune perte d'affichage (les entrées supprimées étaient déjà masquées).
-Vérification post-nettoyage : 0 vrai doublon restant dans le fichier (seules
-subsistent les paires get/set légitimes des forwarders de migration).
-
-================================================================================
-
-v501 — Modularisation MoodBoard (1 Juin 2026)
-
-================================================================================
-MODULARISATION — module MoodBoard (~2560 l)
-- Nettoyage : doublon de la méthode startRotate supprimé (deux définitions
-  strictement identiques).
-- Extraction du sous-module MoodBoardExport (exportPNG + exportPDF, ~440 l).
-  Le cœur conserve 2 délégations ; MoodBoardExport ajouté au return global.
-- Cœur (~2100 l) organisé en 6 sections internes — l'état canvas est trop
-  couplé pour un éclatement sain (même logique que BeatBoard) :
-  État / Init, canvas & viewport / Planches (CRUD) / Éléments /
-  Panneaux & menus / Dessin, texte, formes & fichiers.
-
-================================================================================
-
-v500 — Modularisation Expenses & Planning + passage au versioning entier + fix Budget (1 Juin 2026)
-
-================================================================================
-NUMÉROTATION
-Abandon du schéma vX.X.X au profit d'un entier simple. Cette version = v500.
-Les trous de numérotation sont normaux et assumés.
-
-MODULARISATION — module Expenses (2641 l) éclaté en 4 sous-modules
-- ExpensesExport : exportPDF + exportExcel (CSV)
-- ExpensesSalaries : calcul / rendu / génération des salaires
-  (doublon "render" supprimé au passage)
-- ExpensesBudget : budget, TVA, managers, paramètres financiers (19 méthodes)
-- ExpensesCRUD : CRUD dépenses, modale, pièces jointes (18 méthodes)
-Le cœur Expenses (~480 l) délègue vers les sous-modules et conserve l'état,
-les constantes CNC, les helpers et l'orchestration (init / render / filtres).
-Organisé en 5 sections internes : État & config / Catégories CNC, TVA &
-migration / Helpers / Init, mode & rendu / Rappels & infos manquantes.
-
-MODULARISATION — module Planning organisé en 6 sections internes
-État & config / Plan de travail & kanban / Vues calendrier (mois, semaine,
-jour) / CRUD jours de tournage / Adresse & carte / Sélecteurs de disponibilités.
-
-FIX — Budget : restauration de 4 méthodes du cœur Expenses
-Lors de l'éclatement d'Expenses, saveBudgetSimple, populateCategories,
-populateDepartments et populateManager avaient été supprimées par erreur (ni
-déplacées vers un sous-module, ni déléguées), provoquant l'erreur
-"Expenses.populateCategories is not a function" à l'ouverture de l'onglet
-Budget. Les 4 méthodes ont été restaurées à l'identique depuis une version
-de référence antérieure (v4.8.2).
-
-================================================================================
-
+  - Dashboard : la carte d'un projet disparaît immédiatement après suppression (rafraîchissement manquant).
+  - Profils Publics : correction de l'enregistrement qui échouait silencieusement au-delà de 3 profils (trigger Supabase LIMIT_3_PROFILES déclenché à tort sur upsert) ; corrigé côté Supabase (décompte excluant la ligne en cours) + faux message de succès retiré en cas d'erreur.
+  - Feuille de service : export PDF aligné sur l'aperçu écran (météo en grille, fonds colorés via print-color-adjust).
+  - Storyboard : colonne des plans alignée sur la hauteur de la scène sélectionnée + recalcul au redimensionnement.
+  - Scénario : 2e clic sur Storyboard/Commentaires referme le panneau (bascule).
+v513 (2 Juin 2026) — Cohérence des pages de garde sur 7 exports + refonte « Mes Profils Publics »
+  - Pages de garde des 7 exports onglet (Synopsis, Scénario, Planning, Stats, Personnages, Acteurs, Lieux) alignées sur le Dossier global.
+  - « Mes Profils Publics » : galerie en cercles photo (nom + fonction + projets liés avec rôle), formulaire affiché au clic.
+  - Fix : compteur de caractères du synopsis qui affichait 0 à l'ouverture (recalcul immédiat).
+v512 (2 Juin 2026) — Séquencier : export PDF enrichi
+  - Export PDF enrichi (statut, tag, perso, n° formaté) + choix des saisons + suppression du bouton « Imprimer/PDF » redondant.
+v511 (2 Juin 2026) — Axe 1 (suite) : déduplications CSS
+  - Déduplication CSS sans changement visuel : cluster « état actif/survol vers primary » (21 règles) regroupé, conteneurs flex (6), tab-close (2x3), curseur grabbing (11), doublons exacts supprimés (.flex-row-gap10, 4 utilitaires recopiés).
+  - Conflit .empty-state résolu (2 règles concurrentes fusionnées sur le rendu effectif).
+v510 (2 Juin 2026) — Axe 1 : déduplication de règles CSS par regroupement de sélecteurs
+  - Suite de l'audit dette CSS : 6 groupes fusionnés (29 sélecteurs réunis, 23 règles dupliquées supprimées) — en-têtes de modales (6), en-têtes de vues (3), états vides/chargement (4), grilles auto-fill (3), photos rondes (9), vues plein écran (4). Aucun changement d'apparence (noms de classes conservés).
+  - Garde-fous : sélecteurs à multi-définitions ou overrides @media systématiquement écartés.
+v509 (1 Juin 2026) — Système unifié de boutons d'action
+  - Refonte CSS : système .btn (base + modificateurs --primary/--success/--danger/--secondary/--outline, --sm, --r8) en remplacement des ~17 classes d'action quasi-dupliquées.
+  - ~79 boutons migrés, 18 anciennes règles supprimées ; couleurs sémantiques conservées, micro-écarts de padding/radius harmonisés, aucun impact comportemental.
+v508 (1 Juin 2026) — Audit dette CSS : fusion de styles dupliqués
+  - Fusion de règles strictement identiques via sélecteurs groupés (8 blocs CSS dupliqués supprimés : 7 paires de boutons dont les restes de maquette n8-btn-*, 1 paire de modales). Aucun changement d'apparence.
+  - Constat : pas de CSS mort à supprimer (les classes signalées ne sont plus que des mentions de changelog).
+v507 (1 Juin 2026) — Balisage des derniers modules comportementaux
+  - 11 derniers modules balisés en sections internes (MatchingEngine, Forum, Invitations, Importer, SessionManager, Feed, ColorWheel, Pricing, Notifications, Tutorial, Episodes), soit 32 sections. Pas d'éclatage (modules cohérents). Tous les modules comportementaux sont désormais organisés.
+v506 (1 Juin 2026) — Modularisation Admin/Contracts + balisage Messages/Contacts
+  - Admin : extraction d'AdminEmail (campagnes emails, ~290 l), cœur balisé en 7 sections.
+  - Contracts : extraction de ContractsTemplates (génération HTML, ~435 l), cœur balisé en 4 sections.
+  - Messages (~830 l) et Contacts (~745 l) balisés en sections (pas d'éclatage).
+  - Nettoyage : bandeaux en double retirés (9 endroits), un seul par section.
+v505 (1 Juin 2026) — Modularisation Storyboard
+  - Extraction de StoryboardExport (chaîne d'impression/export PDF : printDirect, renderPrintPreview, createPrintPage, exportPDF…, ~530 l), 6 délégations rétrocompatibles. Cœur (~1040 l) balisé en 5 sections.
+v504 (1 Juin 2026) — Modularisation Actions
+  - Extraction d'ActionsExport (modale d'export PDF universel, gestion d'ordre des sections, ~400 l), forwarders rétrocompatibles. Cœur (~1270 l) balisé en 8 sections.
+v503 (1 Juin 2026) — Finalisation modularisation UI + suppression code mort
+  - Fin de l'éclatement de UI : 6 méthodes d'ordre/drag-drop des onglets déplacées dans UICategories. UI entièrement éclaté (UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData), cœur (~890 l) balisé en 5 sections.
+  - Nettoyage code mort (analyse AST acorn) : une seule méthode jamais appelée supprimée (PlanningCallSheets.sendCallSheetEmail) ; les autres « suspects » sont des délégations rétrocompat conservées.
+v502 (1 Juin 2026) — Organisation DrawingEditor + déduplication Courses
+  - DrawingEditor (~1890 l) organisé en 7 sections internes (état canvas trop couplé pour un éclatage).
+  - Courses : audit AST des clés dupliquées, 3 vraies clés en double nettoyées (glossaire) ; 0 doublon restant, aucune perte d'affichage.
+v501 (1 Juin 2026) — Modularisation MoodBoard
+  - Extraction de MoodBoardExport (exportPNG + exportPDF, ~440 l), 2 délégations ; doublon startRotate supprimé. Cœur (~2100 l) organisé en 6 sections internes.
+v500 (1 Juin 2026) — Modularisation Expenses & Planning + versioning entier + fix Budget
+  - Passage du schéma vX.X.X à un entier simple (v500) ; trous de numérotation assumés.
+  - Expenses (2641 l) éclaté en 4 sous-modules (Export, Salaries, Budget, CRUD), cœur (~480 l) en 5 sections.
+  - Planning organisé en 6 sections internes.
+  - Fix Budget : restauration de 4 méthodes (saveBudgetSimple, populateCategories/Departments/Manager) supprimées par erreur lors de l'éclatement.
 v4.8.1 — Modularisation Phases A & B + UX collaboratif + fixes (28 Mai 2026)
 
 ================================================================================
@@ -754,1774 +482,210 @@ FAUX POSITIFS CONSERVÉS (NE PAS TOUCHER)
 - marker-cluster-large/medium/small : classes injectées par lib Leaflet
   marker cluster
 - sb-print-page--compact : utilisée dans une string CSS template injectée
-  dans une nouvelle fenêtre d'impression (export Storyboard)
-- une-idée : règle .priority-badge.une-idée conservée mais bug détecté
-  (le code JS utilise class:'une-idee' sans accent — le CSS attend
-  'une-idée' avec accent, donc règle non matchée. À fixer côté JS.)
-
-DÉCISIONS DE PRÉSERVATION
-- Sélecteurs composés mixtes (orphelin + vivant) : on retire UNIQUEMENT
-  la partie orpheline, le sélecteur entier reste pour les vivants
-  (ex: ".sc-card, .sb-card, .dash-card, .expense-card, ..." devient
-   ".expense-card, ..." en gardant les transitions sur les cards vivantes)
-- Classes vivantes même 1x : conservées (ex: presentation-mode utilisée
-  2x dans setTab, conservée; ses sous-sélecteurs project-* orphelins
-  retirés)
-- @media print : nettoyage des classes orphelines listées (format-bar,
-  scene-color-indicator, synopsis-history retirés des sélecteurs groupés)
-
-BILAN V8
-- 141 classes orphelines supprimées sur 180 identifiées (78%)
-- -470 lignes économisées (-0.68% du fichier)
-- 7 orphelines restantes (toutes faux positifs ou bugs séparés)
-- Aucune régression visuelle ni fonctionnelle constatée
-- Méthode chirurgicale : 19 lots de 1-13 patches, vérification d'unicité
-  Python + node --check après chaque lot
-- Détection robuste : recherche du mot exact avec délimiteurs non-word
-  (évite faux positifs comme .add méthode vs .add classe)
-
-================================================================================
-v4.5.7 — R4 Centralisation couleurs PDF complète - 337 occurrences migrées (22 Mai 2026)
-
-R4 — Centralisation de TOUTES les couleurs PDF sur PdfTheme.COLORS
-Palette sémantique unique (16 couleurs nommées) source de vérité pour tous les exports.
-Permet maintenant de re-thématiser tous les PDFs en un seul endroit.
-
-PALETTE DÉFINIE (PdfTheme.COLORS, ~l.44256)
-- TEXT_DARK/PRIMARY/BODY/MUTED/SECONDARY/LIGHT/FAINT (gradients de gris)
-- BANNER_DARK/BANNER_BLUE, BG_LIGHT/LIGHTER, BORDER/LIGHT/DARK
-- WHITE, BLACK
-- SUCCESS, WARNING, STAT_GREEN (statuts)
-Usage : doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK) (spread du tableau [r,g,b])
-
-SECTIONS MIGRÉES (337 occurrences au total)
-- R4.1 BONUS : Cleanup bloc mort if(false) dans Storyboard.exportPDF (-182 lignes !)
-- R4.2 MoodBoard.exportPDF (3 couleurs)
-- R4.3 Breakdown.exportPDF (15 couleurs)
-- R4.4 Stats.exportPDF (26 couleurs + ajout STAT_GREEN à la palette)
-- R4.5 Crew.exportPDF (36 couleurs)
-- R4.6 Resources.exportPDF (32 couleurs)
-- R4.7 TitlePage.exportPDF (6 couleurs)
-- R4.8 Expenses.exportPDF (30 couleurs statiques ; statusColors dynamiques conservés)
-- R4.9 Presentation.exportPDF (5 couleurs)
-- R4.10 FichesPDF complet : helpers + Characters + Actors + Locations (93 couleurs)
-- R4.11 scenarioToPDF (8 couleurs + simplification prevFillColor)
-- R4.12 exportPlanningPDF (19 couleurs)
-- R4.13 productionReport (5 couleurs)
-- R4.14 exportProfilePDF (14 couleurs)
-- R4.15 synopsisToPDF (9 couleurs)
-- R4.16 ScriptReport.generatePDF + BeatBoard.exportSequencerPDF (26 couleurs)
-- R4.17 PdfTheme helpers : coverPage + applyFooters (5 couleurs)
-
-UNIFICATIONS APPLIQUÉES (couleurs proches fusionnées pour simplicité)
-- Variantes de noir (20,20,20)/(30,30,30) → TEXT_DARK
-- Variantes de gris (70,70,70)/(80,80,80)/(85,85,85)/(90,90,90) → TEXT_MUTED
-- Variantes de fond clair (235,235,240)/(245,245,248)/(248,248,250)/(230,230,235) → BORDER_LIGHT
-- Bandeaux navy/dark variantes (40,60,100)/(50,50,70)/(35,35,55)/(55,55,65) → BANNER_DARK
-- Couleurs sémantiques unifiées : véhicule vert→STAT_GREEN, tarif brun→WARNING
-
-COULEURS DYNAMIQUES CONSERVÉES (intentionnellement non migrées)
-- statusColors dictionnaire (Expenses) : pending/approved/rejected/done/escalated/returned
-- Ternaires de signe (Expenses, Stats) : ecart < 0 ? rouge : vert
-- opts.color dans helpers (Planning, Synopsis, Profile) : passé en paramètre
-- Couleurs de section addSection(title, rgb) dans Profile : rgb par appel
-
-BILAN R4
-- 337 usages PdfTheme.COLORS.* dans le fichier
-- 0 couleur RGB statique restante dans les exports PDF
-- Aucune régression fonctionnelle constatée
-- Bug de duplication détecté et corrigé sur 2 sections (Actors + BeatBoard)
-
-================================================================================
-v4.4.5 — Grand nettoyage code mort R3 (PASSE 2 + PASSE 3) - 75 méthodes supprimées (20 Mai 2026)
-
-R3 PASSE 2 — 50 méthodes mortes supprimées (~1147 lignes)
-Groupe A - Modules périphériques (13 méthodes, ~180 lignes) :
-- ConfirmModal.alert
-- ProfileRenderer : renderSelect, renderInput, renderTextarea, renderPhysicalSection,
-  renderVehicleSection, renderRateSection, renderProfessionalStatus, renderCollabType,
-  renderDemoReel (9 méthodes, selectOptions + getEmbedUrl conservés)
-- ActiveProfile.getCurrent
-- SessionManager.showKickedModal, SessionManager.logoutAll
-
-Groupe C - MoodBoard / Storyboard / Importer (9 méthodes, ~255 lignes) :
-- MoodBoard : addElement, showTextEditPanel, uploadImage, palettePresets,
-  showPaletteSubmenu, addPaletteByIndex, addCustomPalette
-- Storyboard.chooseImport
-- Importer.trigger
-
-Groupe D - Crew / Planning / Permissions / Expenses (12 méthodes, ~466 lignes) :
-- Crew : confirmDeleteMember, addAvailabilityDate, addUnavailabilityDate
-- Planning : getShootDayByStartDate, renderShootDayCard (209 lignes !),
-  notifyCallSheet, updateSceneSelection
-- Permissions.initForNewMember
-- Expenses : canValidateExpense, editEnvelope, saveEnvelope (cascade),
-  getAllSubcategories
-
-Groupe E - ScriptEditor ancien système (5 méthodes, ~6 lignes minifiées) :
-- format, handleKey, setFormatDirect, cycleFormatSmart, cycleFormatReverse
-- Remplacées par les versions *Continuous qui gèrent les 2 modes (Vue Script + Vue Scènes)
-
-Groupe B - UI.* (11 méthodes, ~240 lignes) :
-- cycleDesign, initDesign, toggleDropdown, toggleMobileSidebar, showShortcuts
-- toggleHiddenTabsCatMenu, closeHiddenTabsCatMenu, showAllTabsInCategory (cascade)
-- showAllCategories, getAppearances (72 lignes)
-
-R3 PASSE 3 — 25 méthodes mortes supprimées (~558 lignes)
-Lot 1 - Suppressions évidentes (5 méthodes, ~234 lignes) :
-- MoodBoard._legacy_exportPDF_orphan_to_remove (179 lignes, le nom dit tout !)
-- Storyboard.handleImageUpload (caller chooseImport supprimé en C)
-- Hub.getCardIcon, BeatBoard.clearSelection, Universe.showUniverse (duplicate de openFromMenu)
-
-Lot 2 - Cascade Planning Weather (3 méthodes, ~79 lignes) :
-- Planning.loadWeather, displayWeather, weatherCache
-- Tout le système météo abandonné, caller renderShootDayCard mort en D
-
-Lot 3 - Editor + Synopsis helpers (6 méthodes, ~42 lignes) :
-- Editor : initEditor, fontSize, getContent, setContent, clear (Editor.format
-  et updateToolbarState conservés, utilisés par Feed et Forum)
-- Synopsis.getFullText
-
-Lot 4 - MoteurArchive helper (1 méthode, ~13 lignes) :
-- MoteurArchive.detectMoteurArchive
-
-Lot 5 - Cas ambigus investigués (10 méthodes, ~190 lignes) :
-- Store.shareProject (remplacé par Invitations.sendInvitation)
-- Presentation.togglePublicVisibility (wrapper trivial)
-- Presentation.updateImage (remplacé par uploadImage)
-- Expenses.addAttachmentUrl (feature non finie)
-- Expenses.openValidateModal (système obsolète, validateExpense direct utilisé)
-- Universe.showDemoProfile (feature démo non câblée)
-- Courses.hideNotion (helper non utilisé)
-- ScriptExport : toggleExportMenu, closeExportMenu (menu HTML inexistant)
-- ScriptExport.openTitlePageModal (remplacé par onglet Titre)
-
-BILAN R3 (PASSE 2 + PASSE 3)
-- 75 méthodes mortes supprimées
-- ~1740 lignes économisées (70 469 → 68 729)
-- Aucune régression fonctionnelle constatée
-
-BUGS DÉCOUVERTS PENDANT R3 + TOUS CORRIGÉS DANS LA FOULÉE
-B4 — Cleanup modale expense-validate-modal + cascade (FAIT, -47 lignes)
-  - Suppression approveExpense + rejectExpense (orphelins, callers étaient dans la modale)
-  - Suppression currentExpenseId (propriété cascade)
-  - Suppression de la modale HTML expense-validate-modal (14 lignes)
-  - Note : openValidateModal avait été supprimé en R3.3.L5.5
-
-B5 — Cleanup modale title-page-modal + cascade (FAIT, -95 lignes)
-  - Suppression closeTitlePageModal + saveTitlePage (22 lignes JS)
-  - Suppression de la modale HTML title-page-modal (73 lignes)
-  - L'édition de la page de titre se fait maintenant exclusivement via l'onglet Titre
-
-B6 — Input expense-attachment-url avec placeholder mensonger (FAIT, -4 lignes)
-  - Suppression de l'input HTML (était UI-mort depuis suppression addAttachmentUrl en L5.4)
-  - Layout simplifié (suppression div.flex-row-gap10 inutile)
-  - Suppression de la ligne JS orpheline de réinitialisation
-
-B3 — Bouton suppression Crew sans confirmation (FAIT, +2 lignes)
-  - Ajout d'un ConfirmModal.confirmDelete() en tête de Crew.deleteMember
-  - Message explicite : "X sera retiré du projet, ainsi que ses convocations et dépenses"
-  - Pattern aligné avec les autres modules (Actors, Locations, Planning, etc.)
-
-B1 — Vue Script ↔ Vue Scènes : contenu non propagé (FAIT, +2 lignes)
-  - Bug : écrire en Vue Script → contenu absent en Vue Scènes même après F5
-  - Cause : setViewMode appelait renderContinuous() pour le mode 'continuous'
-    mais ne rafraîchissait pas scriptContainer pour le mode 'scenes'
-  - Fix : ajout d'un else if(mode === 'scenes') UI.renderScript() dans setViewMode
-
-B2 — Session unique multi-navigateur (FAIT, ~+150 lignes utiles)
-  - Architecture : max 2 sessions actives simultanées par utilisateur
-  - Multi-onglets du même navigateur = 1 seule session (token partagé via localStorage)
-  - Au-delà de 2 sessions, la plus ancienne est supprimée → kick au prochain heartbeat
-  - Nettoyage auto des sessions zombies (> 2 min sans heartbeat)
-  - Modale "Session terminée" avec bouton "Reconnecter"
-  - Robuste aux JWT révoqués / timeouts (withTimeout 10s sur toutes les requêtes)
-  - Table Supabase active_sessions avec RLS (user voit/modifie que ses sessions)
-
-Fix C — Guard state.data null dans TitlePage.save (FAIT, +1 ligne)
-  - Bug latent : si state.data est null (kick/déconnexion), TitlePage.save plantait
-  - Fix : if(!state.data) return; en tête de save()
-
-FAUX POSITIFS (rien à faire, vérification effectuée)
-- B7 : Expenses.calculateTTC/calculateHT sont vivants (appelés par calculateTTCFromHT/
-  calculateHTFromTTC qui sont des wrappers UI). Architecture saine en réalité.
-- B8 : Permissions auto-init non câblée mais système robuste via fallback dynamique
-  dans Permissions.getCurrentUserPermissions (cherche dans actors/crew automatiquement).
-
-BILAN B1-B8 (bugs)
-- 6 bugs réellement corrigés (B1, B2, B3, B4, B5, B6) + Fix C
-- 2 faux positifs identifiés (B7, B8)
-- 2 bugs UX critiques résolus (B1 propagation Vue Script, B3 confirmation Crew)
-- 1 feature de sécurité ajoutée (B2 max 2 sessions, +infra Supabase)
-- ~-7 lignes nettes (mais code beaucoup plus propre + plus de fonctionnalités)
-
-================================================================================
-v4.3.3 — Uniformisation complète Dossier de Production + refonte page de titre (20 Mai 2026)
-
-PAGES DE GARDE UNIFIÉES (Modèle B "label SECTION")
-- PdfTheme.coverPage réécrit au modèle B : titre film souligné + LABEL SECTION
-  majuscules + "Établi par X" + "Basé sur X" italique + "Document établi le DATE"
-  centré bas + contact/copyright bas-gauche
-- FichesPDF._drawCoverPage délègue à PdfTheme.coverPage avec sélection contextuelle
-  d'auteur (Personnages → Scénariste, Comédiens → Casting, Décors → Repéreur, etc.)
-- Synopsis.synopsisToPDF : page de garde custom remplacée par PdfTheme.coverPage
-- Mention "moteur.studio" retirée des pages de garde
-
-BANDEAUX DE CATÉGORIE UNIFORMISÉS EN GRIS FONCÉ (40,40,40)
-- Resources, Crew (Équipe), productionReport, Presentation
-- Expenses (3 bandeaux : en-tête tableau, catégories CNC, total)
-- Synopsis : titre de section converti en bandeau gris pleine largeur
-- Planning : titre H1 "PLANNING DE TOURNAGE" → bandeau gris
-- Stats : titre H1 "RAPPORT DE STATISTIQUES" → bandeau gris
-- Préservés en bleu identitaire : en-têtes de page MoodBoard, Storyboard, Breakdown
-
-MOODBOARD : ROTATION PAYSAGE PROPREMENT GÉRÉE
-- En-tête bleu remplacé par bandeau gris foncé avec marges latérales
-- En mode paysage (planches tournées 270°) : bandeau VERTICAL sur le bord droit
-  logique = bord HAUT visuel après rotation phase 7quater
-- Texte tourné angle:270 avec ancrages adaptés :
-  * nom de planche à gauche visuel (ancré à y=margin+4)
-  * titre projet à droite visuel (ancré à y=pageH-margin-4-largeurTexte)
-- Offset vertical empirique (textOffset=2.7) pour centrer le glyphe dans le bandeau
-  malgré l'inversion baseline/rotation
-- Cover MoodBoard toujours en portrait (même si planches en paysage)
-
-PAGE DE TITRE — REFONTE (SOURCE DE VÉRITÉ UNIFIÉE)
-- TitlePage retirée du Dossier de Production (redondante avec la cover Dossier)
-- Reste accessible en export solo via l'onglet Titre
-- Exporter.scenarioToPDF lit en priorité state.data.titlePage pour la cover Final
-  Draft (mapping coauthor→coAuthor, date→draftDate), fallback sur scriptMeta
-- L'onglet Titre devient ainsi la source de vérité pour les métadonnées du film
-- Checkbox dos-titlepage et ligne réordonnable "Page de titre" retirées de la
-  modale Export
-
-PHASE 7TER & 7QUATER — NUMÉROTATION GLOBALE & ROTATION PAYSAGE
-- buildDossierProd : import degrees depuis pdf-lib (fix bug qui plantait la
-  pagination après MoodBoard)
-- Phase 7ter : bande blanche 40pt en bas, gère portrait + paysage, footer
-  "X / N — Sommaire" avec lien cliquable retour au sommaire
-- Phase 7quater : setRotation(degrees(270)) sur les pages paysage pour cohérence
-  à l'impression et à la lecture
-- forDossier:true propagé à tous les modules pour skip de la pagination locale
-
-FOOTER UNIFIÉ (X / N — Sommaire)
-- PdfTheme.applyFooters : style minimaliste centré, zone réservée 14mm
-- Skip si forDossier:true (la phase 7ter écrit la pagination globale)
-- 13 modules propagent forDossier: !!opts.returnBlob
-- Synopsis.synopsisToPDF intègre maintenant applyFooters
-
-BUGS CORRIGÉS
-- addKeyValue overflow : "Nombre de plans (storyboard) : 45" ne se chevauche
-  plus (calcul largeur clé adaptatif via Math.max(45, keyW+3))
-- PdfTheme.cleanText durci avec filtre charCodeAt(0) <= 0xFF pour éliminer les
-  caractères "þ" parasites (caractères unicode mal encodés en latin1)
-- Bug page de garde Synopsis qui mélangeait deux modèles (résolu via délégation
-  à PdfTheme.coverPage)
-
-================================================================================
-v4.2.4 — Refonte complète Export PDF + Dossier de Production fusionné (18 Mai 2026)
-- Modale Export PDF unique avec drag & drop 2 niveaux (groupes + sous-sections)
-- Persistance ordre custom en localStorage + bouton "Réinitialiser l'ordre"
-- 3 toggles à 2 états : Tout cocher / Toutes les pages de garde / PDF fusionné
-- Sous-options par section : Synopsis (court/long/principal), Scénario (n° scènes/notes), 
-  Storyboard (image seule/calque), Personnages/Comédiens/Lieux/Crew/Resources (detailed/list/card), 
-  Budget (simple/détaillé), Planning (feuille de service)
-- Mode "PDF fusionné" via pdf-lib : page de garde "Dossier de Production", sommaire 
-  cliquable avec n° de pages, numérotation globale "X/N" sur chaque page, lien "Sommaire" 
-  retour en bas droite
-- Rotation 270° auto des pages paysage pour cohérence à l'impression
-- MoodBoard.exportPDF refondu : rasterisation HTML via html2canvas + canvas hors-écran 
-  (marche depuis n'importe quel onglet, toutes les planches du projet exportées)
-- Storyboard.exportPDF refondu : rasterisation de renderPrintPreview via html2canvas, 
-  4 plans/page max en mode standard
-- Séquencier : résumé des scènes correctement affiché (scene.resume au lieu de scene.synopsis)
-- Fixes emojis corrompus en latin1 (🔗, 🎬, 📝, 🎭, ⚙️, •) → caractères ASCII partout
-- 17 modules supportent maintenant opts.returnBlob et opts.includeCover de façon homogène
-- Page de garde optionnelle par section (toggle individuel dans la modale)
-- pdf-lib et html2canvas ajoutés via CDN
-
-================================================================================
-v3.5.7 — Clic droit dépouillement reportable dans le scénario + raccourci Shift (05 Mai 2026)
-- Bloc 3b : reporter le mécanisme de dépouillement par clic droit (existant dans onglet Dépouillement) sur l'éditeur Scénario
-- Breakdown.handleRightClickFromScript(e, sceneId) : variante de handleRightClick adaptée au contexte scénario
-  * sceneId passé en paramètre (pas state.activeBdSceneId)
-  * pas de check finalisation (plus permissif : on peut dépouiller pendant qu'on écrit)
-  * respect du toggle state.scriptBdEnabled : si OFF, return sans preventDefault → clic droit standard
-  * pas de Breakdown.init() à la fin (l'onglet Dépouillement n'est pas affiché)
-- Breakdown.addItemFromScript : variante de addItem sans réinitialisation de l'onglet, avec toast de confirmation
-- Greffé sur .script-editor-box (vue scènes) ET .script-continuous-content (vue script continu)
-- Toggle 🟢/⚪ "Dépouillement" ajouté dans les deux sidebars, à côté du toggle Autocomplétion
-- state.scriptBdEnabled persisté en localStorage ('moteur_scriptBd_enabled'), ON par défaut
-- Raccourci Shift + clic droit : force le menu navigateur natif (correction orthographique, copier/coller) même si le toggle est ON — pratique pour ne pas avoir à toggle à chaque correction
-- Note explicative sous les toggles dans les deux sidebars : "💡 Shift + clic droit = menu navigateur"
-
-================================================================================
-v3.5.5 — Refonte exports PDF (toutes sections), bugs latents, autocomplétion scénario, esthétique boutons (05 Mai 2026)
-- Suite de la refonte storyboard : généralisation "1 fenêtre Blob URL par section" aux 4 autres sections
-- Séquencier : 2 colonnes A4 portrait, multi-saisons via popup pour séries, bandeaux saison + sous-titres épisode
-- Personnages : 2 modes (Détaillé 1 col / Liste 2 col), regroupé par groupe, photo comédien lié
-- Comédiens : 3 modes (Détaillé / Liste / Fiche casting paysage 1 page A4 par comédien)
-- Lieux : 3 modes (Détaillé / Liste / Fiche multi-pages avec galerie photos 4/page)
-- Chaque section : popup multi-saisons pour séries, filtrage WYSIWYG ou par scope selon contexte
-- Bug latent fixé : Actions.addDataItem (référencé mais inexistant) — boutons "+ Ajouter X" plantaient
-- Bug latent fixé : UI.showModal (référencé mais inexistant) — bouton "+ Nouvelle Ressource" plantait
-- Boutons permanents "+ Nouveau Personnage" et "+ Nouveau Décor" en haut des onglets
-- Esthétique : classes .btn-tool (minimaliste) et .btn-tool-print (bleu primary) appliquées partout
-- Autocomplétion scénario étendue : multi-catégories (perso/décor/ressource) en colonnes côte à côte
-- Détection contextuelle : .sc-perso = persos seuls / .sc-action et .sc-dial = 3 catégories sur dernier mot, seuil 3 chars
-- Navigation : ↑↓ dans colonne, ←→ entre colonnes, Enter/Tab pour insérer
-- Toggle ON/OFF persisté en localStorage, bouton 🟢/⚪ dans sidebar du scénario
-- Autocomplétion lieu dans la barre du séquencier (champ inpLoc) — Utils.setupAutocomplete généralisé avec opts {source, listEl, multi, transform}
-
-================================================================================
-v3.4.2 — Storyboard : refonte complète impression PDF + 3 modes de mise en page (04 Mai 2026)
-- Print storyboard ne passe plus par window.print() du document principal (héritage CSS du scénario qui parasitait : marges 35mm, Courier monospace, page de garde dupliquée)
-- Nouveau pipeline : window.open(Blob URL) avec @page A4 dédié, complètement isolé
-- 3 modes radio mutuellement exclusifs (remplace les 8 cases à cocher) :
-  * Standard (portrait, 4-6 plans/page) : layout dessin gauche / texte droite
-  * Image en grand (paysage, 1 plan/page) : image ~70% hauteur, texte dessous, plancher 80mm
-  * Compact (paysage, 16 plans/page) : grille 4×4 dense, infos minimales
-- Storyboard.printDirect() : re-render → attente 350ms (objets vectoriels) → wait images load → clone DOM avec canvas convertis en data URL → Blob HTML autonome → window.open
-- Auto-print via <script> injecté dans la fenêtre Blob, déclenché à load+300ms
-- Pourquoi Blob URL et pas document.write : Firefox ignore @page landscape sinon
-- Cleanup : suppression des @page storyboard du @media print global, devenues inutiles
-- Bouton "📄 Imprimer / PDF" ajouté dans la barre principale + bouton dans la modale plein écran appelle aussi printDirect()
-
-================================================================================
-v3.2.7 — DrawingEditor : drag layers, suppr objets, insertion image compressée - Phase 4B v2 (30 Avr. 2026)
-
-===== Phase 4B v2 — DrawingEditor : ergonomie + insertion d'images =====
-
-Ajout de quatre fonctionnalités majeures sur l'éditeur de dessin du storyboard,
-avec correction d'un bug de détection d'annotation et d'un timeout Supabase
-sur la sauvegarde quand des images étaient insérées.
-
---- Champs numériques Taille / Opacité avec snap à 5 ---
-Les sliders Taille du trait et Opacité disposent maintenant d'un champ numérique
-synchronisé. Saisie clavier directe, et snap automatique au multiple de 5 le
-plus proche au blur (ex. 23 → 25, 47 → 45). Synchronisation bidirectionnelle :
-slider ↔ input. Permet la précision quand le slider seul n'est pas pratique.
-
---- Drag-and-drop des calques ---
-Réordonnancement à la souris des calques pixel ET des objets placés directement
-depuis la sidebar gauche. Indicateur visuel de drop pendant le drag, animation
-fluide. Helper privé DrawingEditor._reorderLayers(fromIdx, toIdx) qui gère le
-déplacement dans le tableau et redéclenche un redraw + markAsDirty.
-
---- Touche Suppr / Backspace pour effacer un objet sélectionné ---
-Listener clavier global au niveau du DrawingEditor : quand un objet est
-sélectionné (selectedObjectId non null) et que l'éditeur est ouvert, Suppr ou
-Backspace retire l'objet du tableau objects[] de la zone courante. Ne déclenche
-rien si on est en train de taper dans un input/textarea (filtre sur e.target).
-
---- Insertion d'images comme objets déplaçables ---
-Bouton "Insérer une image" dans la sidebar gauche du DrawingEditor (zone Original
-+ zones sémantiques). Ouvre un sélecteur de fichier, charge l'image, la compresse
-(voir ci-dessous), puis l'ajoute comme objet de type 'image' dans objects[]. 
-L'objet image se comporte comme tous les autres : drag, clic droit pour
-transformer (scale/rotation), suppression au clavier, mini-aperçu dans la liste
-"Placés". Position par défaut : centre du canvas. Scale par défaut : max 50% de
-la largeur/hauteur du canvas.
-
-Architecture stockage : l'image compressée est stockée en base64 (JPEG) dans le
-champ imageData de l'objet, avec width/height natifs après compression. Les
-dimensions natives servent au rendu canvas et au calcul de la bounding box pour
-la sélection / le clic droit / le transform.
-
---- Compression d'image avant stockage (fix timeout Supabase 57014) ---
-Problème : insérer une image non compressée (~5 Mo) ajoutait ~6.7 Mo de base64
-au JSON du storyboard, ce qui faisait timeout Supabase à la sauvegarde
-(code 57014 — canceling statement due to statement timeout) car le payload
-dépassait les limites raisonnables d'un UPDATE sur la table.
-
-Solution pragmatique (sans refactor Supabase Storage pour l'instant) :
-compression locale avant stockage via DrawingEditor._compressImage(img, 1280, 720, 0.8).
-- Redimensionnement canvas avec conservation du ratio (jamais d'upscale)
-- imageSmoothingQuality = 'high' pour un downscale propre
-- Export JPEG qualité 0.8 (pas PNG : pas de canal alpha mais ~10x plus compact)
-- Cible : ~150-300 Ko en base64 pour une photo 4000×3000 d'origine
-
-Logging dans la console au moment de l'insertion :
-[insertImage] 4000×3000 → 1280×960 | 6700 Ko → 230 Ko (3%)
-
-Limite de taille en amont : 5 Mo max sur le fichier source pour éviter les
-abus / les fichiers absurdes.
-
---- Bug 1 corrigé : toggleDrawingVisibility ratait les images-objets ---
-Avant : la fonction qui détecte "y a-t-il une annotation à cacher/afficher ?"
-ne regardait que drawingData (les traits pixel). Si la zone ne contenait QUE
-des objets placés (incluant des images insérées), le toast "aucune annotation"
-s'affichait à tort. Correction : ajout de la condition objects.length > 0 dans
-la détection. Marqué dans le code par "Phase 4B v2 : aussi considérer la
-présence d'objets/images insérées comme une annotation".
-
---- Détails techniques ---
-- Nouvelles fonctions DrawingEditor : _compressImage, _addImageObject,
-  _reorderLayers, insertImageFromFile.
-- Cache d'images étendu : Storyboard._svgImageCache gère maintenant aussi les
-  objets de type 'image' (lazy-load via getOrCreateUserImage).
-- Compatibilité ascendante : les anciens storyboards sans tableau objects[] sur
-  certaines zones reçoivent une initialisation à [] à la première interaction.
-  Les structures drawings.{kind} manquantes sont créées avec la forme complète
-  { imageType, imageUrl, drawingData, objects: [] }.
-
-================================================================================
-v3.2.1 — Storyboard : icônes SVG plan technique (45 objets dessinés à la main) - Phase 4B (29 Avr. 2026)
-
-===== Phase 4B — Refonte visuelle des objets storyboard =====
-
-Remplacement complet des emojis Unicode par des icônes SVG dessinées à la main
-dans un style "plan technique de production" (vue de dessus, lignes fines 1.5px,
-stroke="currentColor" pour s'adapter au thème clair/sombre, viewBox 48×48).
-
---- Restructuration des catégories ---
-Avant : 4 catégories (lighting, camera, actors, machinery), machinery commune.
-Après : 5 catégories avec règles de visibilité par palette :
-  * lighting (10 objets) : palette Lumière uniquement
-  * camera (8 objets) : palette Caméra uniquement
-  * actors (9 objets) : palette Acteurs uniquement
-  * tools (10 objets) : NOUVELLE catégorie, visible dans toutes les palettes
-    (outils électriques + grip : pied, pont, multiprise, sandbag, apple_box,
-     cstand, gaffer, boîte à outils + praticable et échelle migrés depuis machinery)
-  * machinery (7 objets) : visible UNIQUEMENT dans palette Caméra
-    (mouvements caméra : dolly, rail droit, rail 45°, grue, steadicam, gimbal, drone)
-
-Total : 44 objets dans le catalogue (vs 35 avant), tous avec SVG.
-
---- Architecture du rendu SVG ---
-- CONFIG.annotationObjects étendu : chaque entrée a maintenant un champ `svg`
-  contenant le SVG complet en string. L'`emoji` est conservé comme fallback.
-- Storyboard._svgImageCache : cache key=type+couleur, valeur={img, ready}
-  pour éviter de reconvertir le SVG à chaque frame de drag.
-- Storyboard.getOrCreateSvgImage(type, color) : retourne l'Image() chargée
-  depuis le SVG (lazy-loaded). Convertit le SVG via Blob + createObjectURL.
-  Déclenche un redraw automatique quand l'image est prête.
-- Storyboard.renderObjectsOnCanvas modifié : tente le SVG en priorité, fallback
-  emoji pendant le chargement initial OU si def.svg manquant. Compat ascendante
-  totale pour les anciens objets sans champ SVG.
-
---- Catalogue détaillé ---
-Lumière : spot (faisceau étroit), projecteur (lentille+volets+faisceau large),
-  kino flo (3 tubes parallèles), PAR (cercles concentriques), Fresnel (lentille
-  striée caractéristique), néon/LED (bande + diffusion), drapeau noir (panneau
-  rempli + tige + base), réflecteur (disque + flèches rebond), gélatine (feuille
-  + hachures diagonales), lumière d'ambiance (boîte diffuse + halos rayonnants).
-
-Caméra : caméra principale (boîtier + chiffre 1 + champ large), caméra secondaire
-  (chiffre 2 + champ étroit), axe de vue (œil + flèche directionnelle), zoom
-  (optique extensible + flèches in/out), pano horizontal (arc rotation gauche-
-  droite), tilt vertical (arc rotation haut-bas), trépied (Y vue de dessus),
-  caméra épaule (silhouette + caméra + champ).
-
-Acteurs : homme (épaules carrées), femme (épaules en cloche + cheveux longs),
-  assis (chaise visible), couché (silhouette horizontale), marque au sol (croix X),
-  déplacement (trajectoire courbe pointillée), entrée (cadre + flèche entrante),
-  sortie (silhouette + flèche sortante + cadre), regard (cône de vision 120°).
-
-Outils : pied (Y simple), pont/truss (structure triangulaire répétée), multiprise
-  (3 prises + câble), sandbag (sac + poignée + grains), apple box (caisse iso 3/4
-  + trou de prise), c-stand (tripode + bras + knuckles), gaffer (rouleau + bande),
-  boîte à outils (corps + couvercle + poignée + serrure), praticable (caisse
-  perspective), échelle (2 montants + 4 barreaux).
-
-Machinerie : dolly (plateau 4 roues vue dessus), rail droit (2 rails + traverses
-  + chariot), rail 45° courbe (arc + traverses + chariot incliné), grue (m
-
-===== Phase 3 — Objets vectoriels sur les calques sémantiques =====
-
---- Phase 3A : fondations (structure data + rendu) ---
-- CONFIG.annotationObjects : catalogue de 35 objets pré-remplis avec emoji,
-  label et catégorie ('lighting' / 'camera' / 'actors' / 'machinery').
-  La catégorie 'machinery' est commune à toutes les palettes.
-- shot.drawings[kind].objects : nouveau tableau d'objets vectoriels
-  { id, type, x, y, scale, rotation } persistés avec le dessin pixel.
-- Migration douce : objects: [] ajouté aux zones existantes au chargement projet.
-- DrawingEditor.save / saveVersion : préservation du tableau objects existant
-  lors de l'écriture (correction du bug d'écrasement).
-- Storyboard.renderObjectsOnCanvas : helper de rendu utilisé partout
-  (modale d'édition, vue compacte, DrawingEditor pendant l'édition).
-- hasZone (createShotCard + createCompactCard) : une zone est considérée
-  "non vide" si elle a un dessin/image OU au moins 1 objet vectoriel.
-
---- Phase 3B : palette d'objets dans l'éditeur ---
-- Sidebar enrichie avec un groupe "🎯 Objets" affiché uniquement pour les
-  zones sémantiques (lighting/camera/actors). Filtrage par catégorie
-  (catégorie correspondant au kind + machinery).
-- Liste des objets placés visible dans la sidebar avec bouton 🗑️ par objet.
-
---- Phase 3C : drag-and-drop natif + transform via clic droit ---
-- Drag-and-drop HTML5 natif depuis la palette vers le canvas
-  (handlePaletteDragStart + handleCanvasDragOver + handleCanvasDrop).
-- Clic gauche maintenu sur objet → drag pour déplacer (findObjectAt + setup
-  transform) ; sortie du drag actualise la liste "Placés".
-- Clic droit sur objet → handleContextMenu active le mode transform :
-  cadre pointillé bleu + 8 poignées blanches + cercle rotation ↻ au-dessus
-  (drawSelectionHandles dans redraw).
-- Drag d'une poignée de coin/milieu → resize (clamp 0.25 ≤ scale ≤ 5).
-- Drag du cercle ↻ → rotation (atan2, 0° = haut).
-- Clic droit dans le vide → désélection des poignées.
-- Clic gauche dans le vide → dessin libre normal.
-- Filtre e.button !== 0 dans startDrawing pour ignorer le clic droit côté drag.
-
---- Nettoyage code mort post-refonte ---
-- Suppression de selectObjectType, exitPlacementMode, placeObjectAt,
-  handleDoubleClick, closeContextMenu, rotateObject, scaleObject,
-  duplicateObject (~250 lignes). Mode placement par clic remplacé par
-  drag-and-drop, menu contextuel remplacé par poignées.
-
-===== Phase 4A — Palette de couleurs avancée =====
-- Sélecteur de couleur libre via <input type="color"> natif, rendu compact
-  dans la sidebar à côté d'un bouton 💧 pipette.
-- DrawingEditor.recentColors : tableau des 10 dernières couleurs custom
-  utilisées, persisté dans localStorage (clé 'moteur_drawing_recent_colors').
-- Section "Récentes" affichée sous les couleurs prédéfinies, masquée si vide.
-- DrawingEditor.selectColor : nouvelle fonction centralisant la sélection
-  d'une couleur ; ajoute aux récentes seulement si pas déjà dans les
-  prédéfinies, retire les doublons et limite à 10.
-- Pipette (toggleEyedropper + pickColorFromCanvas) :
-  * Bouton 💧 en mode toggle (devient bleu quand actif)
-  * Curseur crosshair sur le canvas en mode pipette
-  * Lecture du pixel via ctx.getImageData (clamp aux limites du canvas)
-  * Conversion RGB → hex, sélection auto + ajout aux récentes
-  * Pixel transparent → blanc par défaut + toast informatif
-  * Sortie automatique du mode après le clic
-- DrawingEditor.open : chargement des recentColors depuis localStorage
-  + reset eyedropperActive + re-render de la palette.
-
-===== Fixes =====
-- SessionManager.broadcast : try-catch + recréation auto du BroadcastChannel
-  quand l'objet devient invalide (cas onglets inactifs).
-
-À venir :
-- Phase 4B : icônes SVG dessinées à la main pour les 35 objets pré-remplis
-  (remplacement des emojis Unicode actuels par un rendu pro et homogène).
-- Phase 5 : liaison automatique avec la feuille de service par jour de tournage
-  (matériel ajouté dans un plan → cumulé dans le matériel du jour).
-
-v3.0.7 — Storyboard : permissions par zone + UI tableau permissions Excel-like - Phase 2 (27 Avr. 2026)
-
-===== Phase 2 — Permissions par zone d'annotation =====
-- 3 nouvelles sections dans CONFIG.permissionSections :
-  * storyboard_lighting (💡 Lumière)
-  * storyboard_camera (🎥 Caméra)
-  * storyboard_actors (🎭 Acteurs)
-- Mise à jour des 11 profils dans CONFIG.defaultPermissions :
-  * Owner : write sur les 3 zones
-  * Tous les autres : read par défaut (sauf rôles avec storyboard='none' qui restent à 'none')
-  * Owner peut attribuer manuellement les write dans "Gérer les accès"
-- Storyboard.chooseAnnotation : vérifie Permissions.canEdit('storyboard_'+kind)
-  avant d'ouvrir l'éditeur. Toast d'erreur si refus.
-- Storyboard.openImageMenu : boutons 💡🎥🎭 grisés à 40% + filter grayscale 60%
-  + cadenas 🔒 + tooltip "Permission insuffisante" quand permission absente.
-  Idem pour les boutons "🎨 Dessiner" et "📷 Importer une image" du dessin
-  original (basés sur la permission `storyboard` existante).
-- DrawingEditor.save : garde-fou de permission au moment de la sauvegarde,
-  pour empêcher tout contournement (ex: appel direct depuis la console).
-
-===== Refonte UI du tableau "Gérer les accès" (style Excel) =====
-- En-têtes de colonnes en mode vertical (writing-mode: vertical-rl + rotate(180deg))
-  pour gérer 14 colonnes dans un espace réduit.
-- Structure de chaque th : emoji droit en haut (zone fixe 22px) + texte vertical
-  en dessous, séparés par une bordure horizontale.
-- Cellules strictement à 32px (36px sur écran ≥1100px) avec table-layout libre.
-- Selects natifs compacts : appearance:none, font-size 0.7rem, padding 3px 1px.
-- Hauteur d'en-tête à 200px pour accueillir les longs labels comme
-  "Lumière (storyboard)" sans chevauchement.
-- thead position: sticky pour ne plus jamais perdre les en-têtes au scroll.
-- Bordures verticales entre cellules (style grille Excel).
-- Tooltip natif (title HTML) sur chaque th et chaque select pour rappeler le label
-  complet quand on survole.
-
-À venir :
-- Phase 3 : bibliothèque d'objets pré-remplis (spots, caméras, accessoires)
-  pour faciliter l'ajout d'éléments standards dans les calques sémantiques
-- Phase 4 : liaison automatique avec la feuille de service par jour de tournage
-  (matériel ajouté dans un plan → cumulé dans le matériel du jour)
-
-v2.9.8 — Storyboard : calques sémantiques (Lumière/Caméra/Acteurs) - Phase 1 (27 Avr. 2026)
-
-===== Phase 1 — Calques sémantiques par plan =====
-- Architecture : chaque shot a maintenant `drawings: { original, lighting, camera, actors }`
-  + `drawingsVisibility: { original, lighting, camera, actors }` (toggles)
-- Migration douce : les plans existants reçoivent automatiquement la nouvelle
-  structure à l'ouverture du projet, le dessin existant est cloné dans
-  `drawings.original` (compat backwards préservée via shot.drawingData/imageUrl)
-- DrawingEditor.open accepte un 3e paramètre `kind` (default: 'original')
-  pour éditer la zone correspondante. Lit/écrit depuis `shot.drawings[kind]`.
-- DrawingEditor.save écrit dans `shot.drawings[kind]`. Pour 'original',
-  continue d'alimenter `shot.drawingData`/`imageType` (compat aperçu compact, PDF).
-- DrawingEditor.saveVersion ajoute le `kind` dans chaque version sauvegardée.
-- Arrière-plan original verrouillé : quand on édite lighting/camera/actors,
-  le dessin original s'affiche à 40% d'opacité en fond, non modifiable
-  (composé depuis les calques visibles ou l'image importée).
-- Menu image enrichi (Storyboard.openImageMenu) :
-  * Section "Dessin original" : 🎨 Dessiner / 📷 Importer
-  * Section "Annotations techniques" : 💡 Lumière / 🎥 Caméra / 🎭 Acteurs
-- Storyboard.chooseAnnotation(shotId, kind) : ouvre l'éditeur sur la zone
-  sémantique et active automatiquement la visibilité après édition.
-- Storyboard.toggleDrawingVisibility(shotId, kind) : inverse l'état du toggle,
-  sauvegarde et rafraîchit la grille + modale.
-- Modale d'édition (createShotCard) : 3 boutons toggle au-dessus de l'image,
-  grisés à 35% si zone vide. Overlay canvas par-dessus l'image originale qui
-  superpose les zones visibles (avec leur drawingData ou imageUrl).
-- Vue compacte (createCompactCard) : indicateurs 💡🎥🎭 dans le coin de la
-  vignette (badge translucide noir) + overlay canvas avec les zones visibles.
-- Tous les exports PDF storyboard inchangés (utilisent toujours shot.drawingData).
-
-À venir :
-- Phase 2 : permissions par utilisateur dans "Gérer les accès"
-  (cases à cocher : peut éditer Original / Lumière / Caméra / Acteurs)
-- Phase 3 : bibliothèque d'objets pré-remplis (spots, caméras, accessoires)
-- Phase 4 : liaison automatique avec la feuille de service par jour de tournage
-
-v2.9.7 — Stats filtrables par saison/épisode + badges niveau projet (27 Avr. 2026)
-
-===== Filtrage de l'onglet Statistiques =====
-- Sélecteur de scope en haut de l'onglet (séries uniquement, films inchangés)
-  3 niveaux : Tout le projet / Saison X / Épisode X
-- state.statsFilter = { scope, seasonId, episodeId } init au chargement projet
-- Helper Stats.getFilteredScenes() centralise l'accès aux scènes filtrées
-- Branchement dans render() + renderLieuxStats + renderIntExt
-  + renderJourNuit + renderTimeTags
-- Sections non-filtrables (Équipe Technique, Budget, Scènes planifiées,
-  Jours de tournage) : badge "— niveau projet" affiché quand un filtre
-  saison/épisode est actif, via Stats.refreshScopeBadges()
-- Marquage HTML : data-stats-scope="project" sur les éléments concernés
-- Nouvelle section "📺 Stats par saison" (table comparative) visible
-  uniquement en mode "Tout le projet", masquée quand un filtre est actif
-- Exports PDF de Stats inchangés (toujours niveau projet entier)
-
-v2.9.4 — Séries multi-saisons : filtrage, saisons, numérotation (24 Avr. 2026)
-
-===== S4 — Scénario par épisode =====
-- Sélecteur d'épisode placé dans le header global (📺 S01 / 🎬 E01)
-  après expérimentations dans scénario/séquencier : plus pratique,
-  visible depuis toutes les vues, un seul source of truth
-- state.currentEpisodeId et ScriptEditor.switchEpisode gèrent l'état
-- Création de scène : episodeId auto-rattaché à l'épisode actif
-- Filtrage de l'affichage dans 4 vues :
-  * Scénario Vue Scènes (UI.renderScript)
-  * Scénario Vue Script continu (ScriptEditor.renderContinuous)
-  * Séquencier (UI.renderBoard)
-  * Storyboard (Storyboard.renderScenesList)
-- Helper UI.getScenesForCurrentView : filtre selon épisode actif
-- Messages adaptés pour les épisodes vides ("Aucune scène dans cet épisode")
-
-===== S6 — BeatBoard par épisode =====
-- BeatBoard.render utilise UI.getScenesForCurrentView
-- Rafraîchi automatiquement au switch d'épisode via switchEpisode
-
-===== S7 — Saisons multi-niveaux =====
-- Architecture : data.seasons = [{id, number, title, description}]
-  Chaque épisode a un seasonId obligatoire
-- Migration automatique douce : à l'ouverture d'une série sans saisons,
-  création de Saison 1 et rattachement de tous les épisodes existants
-  (setTimeout + Store.save pour persister la migration en DB)
-
-- S7.2 Header : double sélecteur 📺 S01 ▼ 🎬 E01 ▼
-  Episodes.switchSeason + ScriptEditor.switchEpisode synchronisés
-  Le dropdown épisode est filtré par saison active
-
-- S7.3 Onglet '📺 Saisons' :
-  * Module Seasons complet (render, add, remove, setTitle, openSeason,
-    drag&drop pour réordonner)
-  * CSS gradient violet/rose pour distinguer visuellement des épisodes
-  * Badge "N épisodes" sur chaque carte saison
-  * Suppression en cascade avec confirmation (saison + épisodes + scènes)
-  * Re-numérotation automatique après suppression/drag&drop
-  * Protection : impossible de supprimer la dernière saison
-
-- S7.4 Onglet Épisodes filtré par saison active :
-  * Episodes.render filtre par state.currentSeasonId
-  * Compteur affiche "N épisodes (S01 — Titre)"
-  * Ajout d'épisode rattaché à la saison active (numéro = epsInSeason+1)
-  * Suppression re-numérote uniquement les eps de la même saison
-  * Drag & drop limité à la saison active (bloqué sinon avec toast)
-
-- S7.5 Création projet Série :
-  * Modale : 2 champs "Nombre de saisons" + "Épisodes par saison"
-  * doCreateProject crée N saisons × M épisodes
-  * _pendingSeasonCount et _pendingEpisodeCount
-
-- S7 Numérotation des scènes :
-  * Helper UI.formatSceneNumber(scene, idx)
-    - Film : "#17"
-    - Série : "S01E03-SC05" (saison + épisode + index dans l'épisode)
-  * Appliqué dans 5 vues : séquencier, scénario (2 vues), storyboard,
-    beatboard
-
-- S7 Fiches personnage/acteur/décor :
-  * Section "Apparaît dans" modernisée avec format S01E01-SC01
-  * Nouvelle section "🎬 Joue dans" pour les comédiens
-    (via breakdown.COMEDIENS)
-  * CSS .appearance-tag : pilules monospace pour les numéros de scène
-
-v2.7.8 — Projets Séries — Phases S1 à S3 (24 Avr. 2026)
-
-v2.7.8 — Projets Séries — Phases S1 à S3 (24 Avr. 2026)
-- Nouvelle architecture : un projet peut être un film OU une série
-  Les séries partagent nativement casting/décors/ressources/planning
-  entre leurs épisodes (pas de duplication de données)
-  Seules les parties "écriture" (scénario, séquencier, beatboard) ont
-  une dimension épisode — les phases S4-S7 restent à implémenter
-
-- S1 Fondation :
-  * SQL : colonne projects.project_type ('film' | 'series', défaut 'film')
-  * CHECK constraint et index sur project_type
-  * JS : data.episodes = [] ajouté à Store.getEmpty()
-  * Compatibilité : projets existants restent en 'film', comportement inchangé
-
-- S2 Création projet Film / Série :
-  * Nouvelle modale affichée au clic "Nouveau projet"
-  * Radio Film / Série avec descriptions
-  * Si Série : champ "Nombre d'épisodes" (1 par défaut, max 50)
-  * Enchaînement sur la modale profil propriétaire existante
-  * À la création : episodes[] initial selon le nombre choisi
-  * project_type stocké en DB au moment de l'INSERT
-
-- S3 Onglet Épisodes (manager complet) :
-  * Module Episodes exporté (render, add, remove, setTitle, setStatus,
-    uploadThumb, openEpisode, drag&drop)
-  * CSS dédié : cartes avec vignette, badges numéro/statut, drag states
-  * Ajout dans categoryTabs.ecriture (premier onglet écriture)
-  * 3 statuts : brouillon, en cours, terminé (avec badges colorés)
-  * Vignette : upload image base64 (max 2 Mo)
-  * Drag & drop pour réordonner (renumérote automatiquement)
-  * Suppression avec confirmation et comptage des scènes liées
-
-- S3.4 Affichage conditionnel :
-  * state.currentProjectType stocké au chargement du projet
-  * UI.switchCategory filtre 'episodes' si project_type !== 'series'
-  * Onglet invisible pour les films (comportement inchangé), visible séries
-
-- S3.5 Badge Série dans Mes Projets :
-  * getProjectsList renvoie project_type + episodeCount
-  * Badge gradient violet/rose "📺 N épisodes" sous le titre
-  * Placé sous le titre (pas inline) pour éviter chevauchement avec
-    le badge PROPRIÉTAIRE sur les petites cartes
-
-v2.7.2 — Finalisation modération badge noir + guide complet (23 Avr. 2026)
-- G5b (finalisation) : module Moderation était déjà présent mais son
-  canCommunicate ne déclenchait pas les blocages car getBadge utilisait
-  .maybeSingle() qui échouait en multi-profils (plusieurs lignes par email)
-- Fix Moderation.getBadge : requête .or(email,owner_email) + .not('null')
-  prend le badge le plus restrictif (black > red > yellow > null)
-- Export de Moderation dans l'IIFE (pour test console + propre)
-- Blocages effectifs :
-  * Contact depuis Universe.contactProfile (avant ouverture modale)
-  * Envoi via Messages.send (avec toast d'erreur)
-  * Invitation via Invitations.sendInvitation
-- Logique : un profil badge noir ne peut pas contacter de nouvelles
-  personnes (sans message passé ni projet commun), mais peut continuer
-  à échanger avec ceux qu'il connaît déjà (Moderation.haveRelation)
-
-- Guide/Tutoriel entièrement revu et complété :
-  * 7 sections existantes mises à jour (intro, univers, synopsis,
-    depouillement, profil, collaboration)
-  * 3 nouvelles sections : multi-profils, messages & notifications,
-    rapports de script
-  * Contenu aligné avec l'état actuel de l'app (v2.6.x multi-profils)
-
-v2.6.9 — Lignes acteurs → personnages dans le dépouillement (23 Avr. 2026)
-
-v2.6.9 — Lignes acteurs → personnages dans le dépouillement (23 Avr. 2026)
-- Survol d'un tag COMEDIENS dans le dépouillement trace une ligne jaune
-  vers le personnage que l'acteur joue dans le script
-- Match "flou" : les noms raccourcis dans le script ("NORA") sont liés
-  aux fiches personnage complètes ("Nora Bellamy") via le prénom
-- Breakdown.setupLinkHovers : ajout paramètre charTerm
-- drawLink : chaîne de fallback (nom complet → prénom → startsWith)
-- data-linked-char ajouté sur les tags cat=COMEDIENS via state.data.actors
-
-v2.6.8 — Guide / Tutoriel mis à jour (23 Avr. 2026)
-- Nouvelle section Multi-profils dans le guide
-- (Détails à compléter par le dev selon les choix finaux)
-
-v2.6.7 — Fix ajout de prise dans rapports de script (23 Avr. 2026)
-- Bug : + Prise n'affichait pas la nouvelle prise, il fallait basculer
-  vers un autre rapport puis revenir pour la voir
-- Cause : key = sceneId + '_' + shotId, mais shotId contient déjà un
-  underscore (Utils.generateUniqueId = timestamp + '_' + hash), donc
-  key.split('_') retournait un shotId tronqué
-- Fix : nouveau helper ScriptReport.splitKey qui split sur le PREMIER _
-  Utilisé dans addTake, setTakeStar, deleteTake et l'export PDF
-
-v2.6.6 — Fix Séquencier invisible à l'arrivée (23 Avr. 2026)
-- hideAllViews masquait à tort beatboard-view et sequencer-view qui
-  sont des sous-vues de l'onglet Séquencier d'un projet (pas top-level)
-- Symptôme : scènes invisibles sur l'onglet, obligation de basculer
-  Beat Board puis Séquencier pour les voir
-- Fix : suppression des 2 lignes fautives dans UI.hideAllViews
-
-v2.6.5 — Page Synopsis en 2 colonnes (23 Avr. 2026)
-- Sidebar gauche avec 3 boutons : Synopsis / Résumé court / Résumé long
-- Une seule section affichée à la fois (plus de scroll long)
-- Compteurs de caractères dans chaque bouton (mis à jour au switch)
-- Synopsis.switchSection(target) et Synopsis.updateCounts()
-- Layout cohérent avec BeatBoard/Moodboard (pattern .board-sidebar)
-- Responsive : sidebar passe en colonne sur écrans < 900px
-
-v2.6.4 — Polices & erreurs console (23 Avr. 2026)
-- Retrait de 'Roboto' dans body font-family (n'était pas chargée en CDN
-  Firefox strict la bloquait anti-fingerprinting)
-- Liste finale : system-ui, -apple-system, BlinkMacSystemFont, Segoe UI,
-  Helvetica Neue, Arial, sans-serif (toutes polices système natives)
-- Aucun impact visuel (system-ui résout vers Roboto sur Android)
-
-v2.6.3 — Fix PreferencesSync multi-profils (23 Avr. 2026)
-- Erreur "JSON object requested, multiple (or no) rows returned"
-  causée par .maybeSingle() sur user_profiles qui ramène maintenant N lignes
-- Load : requête .or(owner_email,email) avec .limit(1) pour prendre
-  les préférences du premier profil qui en a
-- pushAll : update avec .or(owner_email,email) pour synchroniser les
-  préférences sur tous les profils du compte
-
-v2.6.2 — Fix CGU multi-profils (23 Avr. 2026)
-- La modale CGU s'affichait à chaque connexion car Terms.check regardait
-  state.userProfile.terms_accepted qui pouvait être sur un profil non accepté
-- Terms.check vérifie maintenant tous les profils du compte :
-  accepté si AU MOINS UN des profils a terms_accepted = true
-- SQL régularisation : UPDATE terms_accepted=true sur tous les profils
-  de chaque user qui avait accepté sur au moins un
-
-v2.6.1 — Multi-profils bout-en-bout (22 Avr. 2026)
-
-v2.6.7 — Fix ajout de prise dans les rapports de script (23 Avr. 2026)
-- Bug : après clic "+ Prise", la nouvelle prise ne s'affichait pas
-  (il fallait basculer vers un autre rapport puis revenir)
-- Cause : key = sceneId + '_' + shotId, mais shotId contient déjà des
-  underscores (Utils.generateUniqueId = timestamp + '_' + hash)
-  donc key.split('_') retournait un shotId tronqué et renderSheet
-  ne trouvait pas les bons reports
-- Fix : nouveau helper ScriptReport.splitKey qui split sur le PREMIER _
-  uniquement. Utilisé dans addTake, setTakeStar, deleteTake, et export PDF
-
-v2.6.6 — Fix Séquencier invisible (23 Avr. 2026)
-- hideAllViews masquait à tort beatboard-view et sequencer-view qui sont
-  des sous-vues de l'onglet Séquencier d'un projet (pas des vues top-level)
-- Symptôme : scènes invisibles à l'arrivée sur l'onglet Séquencier
-  obligeait à faire "Beat Board" puis "Séquencier" pour voir les cartes
-- Fix : suppression des 2 lignes fautives dans UI.hideAllViews
-
-v2.6.5 — Page Synopsis en 2 colonnes (23 Avr. 2026)
-- Sidebar gauche avec 3 boutons : Synopsis / Résumé court / Résumé long
-- Une seule section affichée à la fois (plus de scroll long)
-- Compteurs de caractères dans chaque bouton (mis à jour au switch)
-- Synopsis.switchSection(target) et Synopsis.updateCounts()
-- Layout cohérent avec BeatBoard/Moodboard (pattern .board-sidebar)
-- Responsive : sidebar passe en colonne sur écrans < 900px
-
-v2.6.4 — Polices & erreurs console (23 Avr. 2026)
-- Retrait de 'Roboto' dans body font-family (n'était pas chargée en CDN
-  Firefox strict la bloquait anti-fingerprinting)
-- Liste finale : system-ui, -apple-system, BlinkMacSystemFont, Segoe UI,
-  Helvetica Neue, Arial, sans-serif (toutes polices système natives)
-- Aucun impact visuel (system-ui résout vers Roboto sur Android)
-
-v2.6.3 — Fix PreferencesSync multi-profils (23 Avr. 2026)
-- Erreur "JSON object requested, multiple (or no) rows returned"
-  causée par .maybeSingle() sur user_profiles qui ramène maintenant N lignes
-- Load : requête .or(owner_email,email) avec .limit(1) pour prendre
-  les préférences du premier profil qui en a
-- pushAll : update avec .or(owner_email,email) pour synchroniser les
-  préférences sur tous les profils du compte
-
-v2.6.2 — Fix CGU multi-profils (23 Avr. 2026)
-- La modale CGU s'affichait à chaque connexion car Terms.check regardait
-  state.userProfile.terms_accepted qui pouvait être sur un profil non accepté
-- Terms.check vérifie maintenant tous les profils du compte :
-  accepté si AU MOINS UN des profils a terms_accepted = true
-- SQL régularisation : UPDATE terms_accepted=true sur tous les profils
-  de chaque user qui avait accepté sur au moins un
-
-v2.6.1 — Multi-profils bout-en-bout (22 Avr. 2026)
-- I1 SQL : colonne owner_email sur user_profiles, contrainte UNIQUE email supprimée
-- I1 SQL : trigger check_max_profiles_per_user (limite 3 profils par compte)
-- I1 SQL : RLS policies mises à jour (viewable/insertable/updatable + admin override)
-- I2 : refactor save/load, crypto.randomUUID(), upsert par id, loadProfiles charge
-       tous les profils via owner_email (tableau au lieu de maybeSingle)
-- I2 : bouton "+ Nouveau profil" affiche compteur N/3 et se désactive à 3
-- I3 : module ActiveProfile (localStorage moteur_active_profile_id)
-       sélecteur "Profil actif" global injecté à côté de chaque bouton Mode
-       menu déroulant si plusieurs profils, bouton disabled si 1 seul
-- I3 : ActiveProfile.clear() à la déconnexion
-- I4a SQL : colonnes from_profile_id, to_profile_id sur messages + FK + index
-- I4b : Messages.send utilise ActiveProfile.getId() comme expéditeur
-       from_name = nom du profil actif (plus authentique)
-       id auto-généré DB (gen_random_uuid) au lieu de Utils.generateUniqueId
-- I4c : chargement messages filtré par to_profile_id/from_profile_id
-- I4c : suppression du select "Tous les profils" dans HTML messagerie (redondant)
-- I4d : ActiveProfile.selectAndClose rafraîchit messagerie + liste projets auto
-- I5a SQL : colonne owner_profile_id sur projects, FK SET NULL, index partiel
-- I5a : migration best-effort projets existants vers owner_profile_id
-- I5b SQL : colonne profile_id sur project_members + FK + index
-- I5b SQL : contrainte UNIQUE NULLS NOT DISTINCT (project_id,email,profile_id)
-       permet à un user d'être membre d'un projet via plusieurs de ses profils
-       (ex : owner Réalisateur + acteur dans son propre film)
-- I5c : refactor showOwnerRoleModal (radio unique, pré-sélection profil actif)
-- I5d : doCreateProject stocke owner_profile_id + ajoute owner au project_members
-       avec profile_id + email
-- I5e : getProjectsList filtre par profil actif (match ou NULL legacy)
-- I5f HTML : select #share-target-profile dans modale Partager
-- I5f : Invitations.loadTargetProfiles(email) charge les profils publics de l'email
-       et remplit le sélecteur dynamiquement
-- I5f : sendInvitation utilise targetProfileId dans messages et project_members
-       invitation signée du profil propriétaire (from_profile_id)
-- I5f : checkPendingInvitations upsert avec email + profile_id du cible
-- I5g : loadProject récupère toutes les memberships, détermine rôle par profil actif
-       match exact si possible, sinon bascule auto sur le profil membre
-- I5g : buildSelectorHtml async, filtre profils disponibles quand dans un projet
-- I6a : index brothersByEmail (owner_email → liste profils), markerPositions
-- I6b : polylignes pointillées violettes au survol vers les profils frères
-- I6c : clearBrotherLines au mouseout
-- I6d : bannière carrousel ‹ › dans la fiche profil (navigation entre frères)
-- H SQL : colonne profile_id sur profile_actualites + FK CASCADE + index
-- H : publishActualite utilise le profil actif comme auteur
-       bypass admin de la limite 1 publication/jour/profil (tests)
-- H : loadMyActualites filtre par profil_id (onglet courant)
-       switchToProfile rafraîchit les actualités
-- Fix : normalisation created_at / createdAt (snake_case DB vs camelCase JSON)
-- Fix : policy INSERT manquante sur table notifications (auth non-null)
-- Fix : addCoordOffset avec positions mémorisées (lignes frères précises)
-
-v2.5 — Modération & Profils démo (22 Avr. 2026)
-- G1 SQL : table reports avec contrainte UNIQUE (reporter_email, reported_id)
-       index idx_reports_reporter_recent + partiel idx_reports_status_pending
-- G1 SQL : user_profiles.moderation_badge (yellow/red/black/NULL)
-       badge_reason, badge_set_at, badge_set_by + index partiel
-- G2 : reportProfile vérifie quota ≤5 signalements/7j avant INSERT
-       gestion erreur 23505 (doublon)
-- G2 : ConfirmModal supporte option hideCancel: true
-- G3 : span admin-pending-badge sur bouton Admin
-       Admin.refreshPendingBadge + setInterval 2 min + après chaque updateReportStatus
-- G4 : fonctions setProfileBadge / applyBadgeFromReport / removeBadgeFromReport
-- G4 : Admin.loadReports charge badges via .in('email', reportedEmails)
-- G4 : rendu MODÉRATION DU PROFIL avec boutons 🟡🔴⚫ + ⚪Retirer
-- G5a : pm-moderation-badge encart coloré dans modale profil
-       config couleurs yellow #f59e0b, red #dc2626, black #1f2937
-- RLS : policy "Admins can update any profile" (auth.jwt email ∈ adminEmails)
-- Fix : tooltips boutons ☆ et 🚩 coupés par overflow (ajout data-tooltip-pos bottom)
-- J1 SQL : colonne is_demo boolean sur user_profiles
-       380 profils démo marqués, 3 réels + index partiel
-- J2 : checkbox "Exclure les profils démo" à côté bouton stats
-       Admin.excludeDemoProfiles + toggleExcludeDemo + filtre loadStats
-
-v2.4 — Persistance navigation & UX (21 Avr. 2026)
-- F : module NavMemory (localStorage moteur_nav_project_id/tab/subtab)
-- F : capture dans UI.switchCategory/switchTab + Store.loadProject
-- F : Store.exitToDashboard (appelé par bouton ⬅ Dashboard) pour NavMemory.clear
-- F : restauration dans UI.showDashboard (capture avant clear + setTimeout 500ms)
-- F Fix racine : UI.hideAllViews n'éteignait pas #landing-view (z-index 9998)
-       ajout display:none pour corriger le bug "écran blanc après F5"
-- F : Auth.logout fait NavMemory.clear()
-
+  v4.8.1 (28 Mai 2026) — Modularisation Phases A & B + UX collaboratif + fixes
+  - Phase A : module ScriptEditor (1471 l) éclaté en 8 sous-modules rétrocompatibles (Prefs, ViewMode, Episodes, Search, AC, Nav, Toolbar, Continuous).
+  - Phase B : Store éclaté (Migrations, Updates, Realtime, Save) ; BeatBoard (7 sections), Resources (4 sections), Breakdown (exportPDF sorti dans BreakdownExport).
+  - UX : drag-and-drop des scènes uniquement via la quick-nav ; choix explicite garder/supprimer le dépouillement à la dé-finalisation d'une scène.
+  - Fixes : SessionManager ne déconnecte plus sur timeout réseau (seulement JWT révoqué), reorderSceneContinuous, rafraîchissement du dashboard après acceptation d'invitation.
+v4.5.8 (22 Mai 2026) — V8 : nettoyage CSS orphelin complet (141 classes, -470 lignes)
+  - Audit Python automatisé (croisement style / utilisations DOM) : 180 classes orphelines identifiées, 141 supprimées sur 19 lots successifs (shortcuts, weather, designs alternatifs, calendar, chat flottant mort, planning, collab/perm-badge…).
+  - Faux positifs conservés : classes injectées par Leaflet, sb-print-page--compact (string CSS injectée). Bug noté : .une-idée (CSS avec accent) non matché par class:'une-idee' (JS sans accent).
+  - Aucune régression ; vérification d'unicité Python + node --check après chaque lot.
+v4.5.7 (22 Mai 2026) — R4 : centralisation complète des couleurs PDF (337 occurrences)
+  - Toutes les couleurs PDF centralisées sur PdfTheme.COLORS (palette sémantique de 16 couleurs nommées), re-thématisation possible en un seul endroit.
+  - 337 occurrences migrées sur 17 sections d'export ; couleurs proches unifiées (noirs vers TEXT_DARK, gris vers TEXT_MUTED, navy vers BANNER_DARK).
+  - Bonus : cleanup d'un bloc mort if(false) dans Storyboard.exportPDF (-182 lignes). Couleurs dynamiques (statusColors, ternaires de signe) conservées ; 0 RGB statique restant dans les exports.
+v4.4.5 (20 Mai 2026) — Grand nettoyage code mort R3 (75 méthodes, ~-1740 lignes) + 6 bugs corrigés
+  - Passe 2 : 50 méthodes mortes supprimées (~1147 l) sur modules périphériques, MoodBoard/Storyboard/Importer, Crew/Planning/Permissions/Expenses, ancien système ScriptEditor, UI.
+  - Passe 3 : 25 méthodes mortes supprimées (~558 l), dont MoodBoard._legacy_exportPDF_orphan (179 l), cascade météo Planning, helpers Editor/Synopsis, cas ambigus investigués.
+  - Bugs corrigés dans la foulée : B1 propagation Vue Script ↔ Vue Scènes, B2 session unique multi-navigateur (max 2 sessions, table active_sessions avec RLS), B3 confirmation suppression Crew, B4/B5/B6 cleanup de modales mortes (expense-validate, title-page, attachment-url), Fix C guard state.data null. B7/B8 = faux positifs.
+v4.3.3 (20 Mai 2026) — Uniformisation complète du Dossier de Production + refonte page de titre
+  - Pages de garde unifiées (modèle B « label SECTION » : titre souligné, label majuscules, auteur contextuel, date) via PdfTheme.coverPage ; mention moteur.studio retirée.
+  - Bandeaux de catégorie uniformisés en gris foncé (Resources, Crew, Expenses, Synopsis, Planning, Stats) ; bleu identitaire préservé pour MoodBoard/Storyboard/Breakdown.
+  - MoodBoard paysage : bandeau vertical sur le bord, texte tourné 270° avec ancrages adaptés.
+  - Page de titre retirée du Dossier (redondante), conservée en export solo ; l'onglet Titre devient la source de vérité (scenarioToPDF lit state.data.titlePage en priorité).
+  - Numérotation globale (phase 7ter, footer « X / N — Sommaire » cliquable) et rotation paysage (7quater, setRotation 270°) ; forDossier propagé à 13 modules.
+  - Bugs : addKeyValue overflow corrigé, cleanText durci (filtre charCode <= 0xFF contre les caractères parasites mal encodés en latin1).
+v4.2.4 (18 Mai 2026) — Refonte complète Export PDF + Dossier de Production fusionné
+  - Modale Export PDF unique avec drag & drop 2 niveaux, persistance de l'ordre, 3 toggles globaux, sous-options par section.
+  - Mode « PDF fusionné » via pdf-lib : page de garde Dossier, sommaire cliquable, numérotation globale X/N, rotation 270° auto des pages paysage.
+  - MoodBoard et Storyboard.exportPDF refondus (rasterisation html2canvas hors-écran, exportables depuis n'importe quel onglet).
+  - 17 modules supportent opts.returnBlob et opts.includeCover ; fixes emojis corrompus en latin1 vers ASCII ; pdf-lib et html2canvas ajoutés via CDN.
+v3.5.7 (05 Mai 2026) — Clic droit dépouillement reportable dans le scénario + raccourci Shift
+  - Dépouillement par clic droit (existant dans l'onglet Dépouillement) reporté sur l'éditeur Scénario via Breakdown.handleRightClickFromScript / addItemFromScript (variantes sans réinit d'onglet, plus permissives : on peut dépouiller en écrivant).
+  - Greffé sur les deux vues (scènes + script continu) ; toggle 🟢/⚪ « Dépouillement » dans les sidebars, persisté en localStorage (ON par défaut).
+  - Shift + clic droit force le menu navigateur natif (correction, copier/coller) même toggle ON.
+v3.5.5 (05 Mai 2026) — Refonte exports PDF (toutes sections) + autocomplétion scénario + bugs latents
+  - Généralisation « 1 fenêtre Blob URL par section » aux 4 autres sections ; Séquencier (2 colonnes A4, multi-saisons), Personnages (2 modes), Comédiens (3 modes dont fiche casting paysage), Lieux (3 modes avec galerie). Popup multi-saisons et filtrage par scope selon contexte.
+  - Bugs latents corrigés : Actions.addDataItem et UI.showModal (référencés mais inexistants) qui faisaient planter les boutons « + Ajouter ».
+  - Autocomplétion scénario étendue : multi-catégories (perso/décor/ressource) en colonnes, détection contextuelle, navigation flèches ; toggle persisté. Utils.setupAutocomplete généralisé (opts source/listEl/multi/transform).
+v3.4.2 (04 Mai 2026) — Storyboard : refonte complète de l'impression PDF + 3 modes de mise en page
+  - Impression storyboard sortie de window.print() (héritage CSS du scénario qui parasitait) vers un pipeline isolé window.open(Blob URL) avec @page A4 dédié (Firefox ignore @page landscape sinon).
+  - 3 modes radio mutuellement exclusifs (remplacent 8 cases) : Standard (portrait 4-6/page), Image en grand (paysage 1/page), Compact (paysage 16/page).
+  - printDirect : re-render, attente des objets vectoriels, clone DOM avec canvas en data URL, Blob HTML autonome, auto-print injecté.
+v3.2.7 (30 Avr. 2026) — DrawingEditor : drag des calques, suppression d'objets, insertion d'image compressée (Phase 4B v2)
+  - Champs numériques Taille/Opacité synchronisés aux sliders (snap au multiple de 5) ; drag-and-drop des calques depuis la sidebar (_reorderLayers) ; touche Suppr/Backspace pour effacer l'objet sélectionné.
+  - Insertion d'images comme objets déplaçables (drag, transform, suppression) stockées en base64 JPEG dans l'objet.
+  - Compression locale avant stockage (_compressImage 1280×720, JPEG 0.8) pour corriger le timeout Supabase 57014 sur les gros payloads ; limite 5 Mo en amont. Fix : toggleDrawingVisibility ratait les images-objets.
+v3.2.1 (29 Avr. 2026) — Storyboard : icônes SVG plan technique (44 objets dessinés à la main) (Phase 4B)
+  - Remplacement des emojis Unicode par des icônes SVG style « plan technique » (vue de dessus, currentColor pour s'adapter au thème) ; emoji conservé en fallback.
+  - Catalogue restructuré en 5 catégories avec visibilité par palette : lighting (10), camera (8), actors (9), tools (10, visible partout), machinery (7, palette Caméra) — 44 objets au total.
+  - Rendu via _svgImageCache + getOrCreateSvgImage (lazy-load Blob, redraw auto), compat ascendante pour les anciens objets sans SVG.
+  - Inclut l'historique des phases 3 (objets vectoriels sur calques : structure data, palette, drag-drop natif + transform par poignées, nettoyage ~250 l de code mort) et 4A (palette de couleurs avancée : input color natif, pipette, 10 couleurs récentes). Fix : SessionManager.broadcast recrée le BroadcastChannel quand il devient invalide.
+v3.0.7 (27 Avr. 2026) — Storyboard : permissions par zone + tableau de permissions style Excel (Phase 2)
+  - 3 nouvelles sections de permission (storyboard_lighting/camera/actors) sur les 11 profils ; Storyboard.chooseAnnotation et openImageMenu vérifient la permission (boutons grisés + cadenas si refus), garde-fou aussi à la sauvegarde dans DrawingEditor.save.
+  - Refonte du tableau « Gérer les accès » en style Excel : en-têtes verticaux (writing-mode) pour 14 colonnes, cellules 32px, thead sticky, tooltips de rappel des labels.
+v2.9.8 (27 Avr. 2026) — Storyboard : calques sémantiques Lumière/Caméra/Acteurs (Phase 1)
+  - Chaque plan a désormais des calques séparés : drawings { original, lighting, camera, actors } + toggles de visibilité ; migration douce des plans existants (dessin cloné dans original).
+  - DrawingEditor.open/save acceptent un paramètre kind pour éditer/écrire la zone correspondante ; l'original reste alimenté pour la compat (aperçu compact, PDF). Arrière-plan original verrouillé à 40% pendant l'édition d'une zone.
+  - Menu image enrichi (Dessin original 🎨📷 + Annotations techniques 💡🎥🎭) ; indicateurs dans la vue compacte ; exports PDF inchangés.
+v2.9.7 (27 Avr. 2026) — Stats filtrables par saison/épisode + badges niveau projet
+  - Sélecteur de scope dans l'onglet Statistiques (séries uniquement) : Tout le projet / Saison X / Épisode X ; state.statsFilter + helper getFilteredScenes branché dans tous les rendus.
+  - Sections non filtrables (Équipe, Budget, Scènes/jours planifiés) : badge « — niveau projet » quand un filtre est actif. Nouvelle section « Stats par saison » (table comparative) visible seulement en mode projet entier.
+v2.9.4 (24 Avr. 2026) — Séries multi-saisons : filtrage, saisons, numérotation
+  - Scénario par épisode (S4) : sélecteur d'épisode dans le header global, episodeId auto-rattaché à la création, filtrage de l'affichage dans 4 vues (scénario 2 vues, séquencier, storyboard) via getScenesForCurrentView.
+  - Saisons multi-niveaux (S7) : data.seasons avec seasonId obligatoire par épisode, migration douce ; double sélecteur header S/E synchronisé ; onglet 📺 Saisons (module Seasons : CRUD, drag&drop, suppression en cascade, protection dernière saison) ; onglet Épisodes filtré par saison active.
+  - Création projet série (N saisons × M épisodes). Numérotation des scènes : formatSceneNumber (film « #17 » / série « S01E03-SC05 ») dans 5 vues. Fiches : section « Apparaît dans » au format S01E01-SC01 + « Joue dans » pour les comédiens.
+v2.7.8 (24 Avr. 2026) — Projets Séries (Phases S1 à S3)
+  - Nouvelle architecture : un projet peut être un film OU une série ; les séries partagent nativement casting/décors/ressources/planning entre épisodes (seule l'écriture a une dimension épisode).
+  - S1 fondation : colonne projects.project_type ('film'|'series') avec CHECK et index, data.episodes ajouté, projets existants inchangés.
+  - S2 création : modale Film/Série avec champ « Nombre d'épisodes » (max 50), project_type stocké à l'INSERT.
+  - S3 onglet Épisodes (module Episodes complet : CRUD, vignette base64, 3 statuts, drag&drop) visible uniquement pour les séries ; badge gradient « 📺 N épisodes » dans Mes Projets.
+v2.7.2 (23 Avr. 2026) — Finalisation modération badge noir + guide complet
+  - Fix Moderation.getBadge : .maybeSingle() échouait en multi-profils, remplacé par .or(email,owner_email) prenant le badge le plus restrictif (black > red > yellow). Blocages effectifs sur contact (Universe), envoi (Messages) et invitation. Un badge noir peut toujours échanger avec ses relations existantes (haveRelation).
+  - Guide/Tutoriel revu : 7 sections mises à jour + 3 nouvelles (multi-profils, messages & notifications, rapports de script).
+v2.6.9 (23 Avr. 2026) — Lignes acteurs → personnages dans le dépouillement
+  - Survol d'un tag COMEDIENS dans le dépouillement trace une ligne jaune vers le personnage joué par l'acteur (match flou nom raccourci « NORA » → fiche « Nora Bellamy » via le prénom).
+  - Breakdown.setupLinkHovers (param charTerm), drawLink avec fallback (nom complet → prénom → startsWith), data-linked-char sur les tags via state.data.actors.
+v2.6.8 (23 Avr. 2026) — Guide / Tutoriel mis à jour
+  - Nouvelle section Multi-profils dans le guide.
+v2.6.7 (23 Avr. 2026) — Fix ajout de prise dans les rapports de script
+  - Bug : après « + Prise », la nouvelle prise ne s'affichait pas (il fallait changer de rapport puis revenir). Cause : key = sceneId + '_' + shotId mais shotId contient déjà des underscores, donc key.split('_') tronquait le shotId.
+  - Fix : helper ScriptReport.splitKey qui split sur le premier _ uniquement, utilisé dans addTake, setTakeStar, deleteTake et l'export PDF.
+v2.6.6 (23 Avr. 2026) — Fix Séquencier invisible
+  - hideAllViews masquait à tort beatboard-view et sequencer-view (sous-vues de l'onglet Séquencier, pas top-level), rendant les scènes invisibles à l'arrivée. Fix : suppression des 2 lignes fautives dans UI.hideAllViews.
+v2.6.5 (23 Avr. 2026) — Page Synopsis en 2 colonnes
+  - Sidebar gauche avec 3 boutons (Synopsis / Résumé court / Résumé long), une section à la fois, compteurs de caractères par bouton (Synopsis.switchSection / updateCounts). Layout cohérent avec BeatBoard/MoodBoard, responsive < 900px.
+v2.6.4 (23 Avr. 2026) — Polices & erreurs console
+  - Retrait de 'Roboto' du body font-family (non chargée en CDN, bloquée par Firefox anti-fingerprinting) ; liste finale = polices système natives (system-ui, -apple-system…). Aucun impact visuel.
+v2.6.3 (23 Avr. 2026) — Fix PreferencesSync multi-profils
+  - Erreur « multiple (or no) rows returned » due à .maybeSingle() sur user_profiles qui ramène N lignes. Load : .or(owner_email,email) + .limit(1) ; pushAll : update .or(owner_email,email) pour synchroniser les préférences sur tous les profils du compte.
+v2.6.2 (23 Avr. 2026) — Fix CGU multi-profils
+  - La modale CGU réapparaissait à chaque connexion (Terms.check regardait un profil non accepté). Désormais : accepté si au moins un profil a terms_accepted = true ; SQL de régularisation sur tous les profils des comptes concernés.
+v2.6.1 (22 Avr. 2026) — Multi-profils bout-en-bout
+  - SQL (I1) : owner_email sur user_profiles, contrainte UNIQUE email supprimée, trigger check_max_profiles_per_user (limite 3 profils), RLS mises à jour.
+  - Refactor save/load (I2) : crypto.randomUUID(), upsert par id, chargement de tous les profils via owner_email ; bouton « + Nouveau profil » avec compteur N/3.
+  - Module ActiveProfile (I3) : sélecteur « Profil actif » global, persisté en localStorage, clear à la déconnexion.
+  - Messagerie par profil (I4) : from_profile_id/to_profile_id sur messages, expéditeur = profil actif, filtrage du chargement.
+  - Projets par profil (I5) : owner_profile_id sur projects et profile_id sur project_members (UNIQUE NULLS NOT DISTINCT pour être membre via plusieurs profils), filtrage de la liste, sélecteur de profil cible dans Partager, invitations signées du profil, résolution du rôle par profil actif au chargement.
+  - Univers (I6) : index brothersByEmail, polylignes pointillées violettes au survol vers les profils frères, carrousel ‹ › entre frères dans la fiche.
+  - Actualités (H) : profile_id sur profile_actualites, auteur = profil actif, filtrage par profil. Fixes : normalisation created_at/createdAt, policy INSERT sur notifications, offsets de lignes frères.
+v2.5 (22 Avr. 2026) — Modération & profils démo
+  - Modération (G) : table reports (contrainte unique reporter/reported, quota ≤5 signalements/7j), badge de modération sur user_profiles (yellow/red/black) avec raison/date/auteur ; panneau admin (boutons 🟡🔴⚫ + retrait, badge de signalements en attente), encart coloré dans la fiche, RLS admin.
+  - Profils démo (J) : colonne is_demo (380 profils démo marqués, 3 réels), checkbox « Exclure les profils démo » dans les stats admin.
+v2.4 (21 Avr. 2026) — Persistance navigation & UX
+  - Module NavMemory (localStorage) : capture du projet/onglet/sous-onglet et restauration au retour ; clear au dashboard et à la déconnexion.
+  - Fix racine « écran blanc après F5 » : hideAllViews n'éteignait pas #landing-view.
 v2.3.6 — Univers & géocodage
-- Univers : catégories Associations/Entreprises visibles, plafond 15→20
-- Migration SQL : colonnes user_profiles.latitude/longitude + index partiel
-- Géocodage 4 niveaux : mémoire → localStorage → DB → Nominatim throttlé
-- Adresse précise : BAN (FR) + Nominatim (monde) stockés sur chaque profil
-- Carte : limite 100→500 marqueurs, batch 50, plus de délai 200ms
-- Démo : 383 profils publics géocodés, 60+ pays représentés
-
-V2.3 - Stabilisation & Sécurité (24 Fév. 2026)
-  • Fix : Commentaire CSS cassé (//* → /*)
-  • Fix : auth-view spécificité CSS (class d-none → inline style)
-  • Fix : 4 balises <divclass → <div class (nav-dropdowns header)
-  • Fix : .single() → .maybeSingle() sur toutes les lectures (×27, anti-hang)
-    - user_profiles, projects, project_members, forum_votes, feed_likes
-  • Fix : var(--text) → var(--text-main) (×28, variable CSS indéfinie)
-  • Sécurité S2 : Échappement XSS sur innerHTML critiques
-    - match.name (autocomplete), roleText, label stats, name markers Univers
-    - getEmbedUrl sécurisé (https only + escape)
-  • Robustesse : Gestion d'erreur sur 16 appels Supabase restants
-    - projects.update (sauvegarde), storage.remove (×6), contacts.delete
-    - Suppression compte (messages, notifications, contacts)
-    - Stats admin (projects, connections, reports)
-  • Fix : IDs dupliqués GlobalSearch (gs-name/city/collab → gs-crew-*)
-  • Nettoyage : 16 console.log supprimés, 3 convertis en console.error
-  • Fix : 3 modules non exportés (ConfirmModal, LoadingScreen, ProfileRenderer)
-
-V2.2 - Audit & Corrections (20 Fév. 2026)
-  • Bug fix : Messages.openCompose() (bouton Contacter Univers)
-  • Bug fix : Hub sélecteur cartes (c.icon → Icons.render)
-  • Bug fix : IDs HTML dupliqués Contacts (filtres par onglet)
-  • Bug fix : Toast d'erreur sur échec Store.save
-  • Bug fix : Guard addEventListener keydown
-  • Bug fix : Cleanup canal notifications Supabase
-  • Fix : EmailJS IDs harmonisés (CONFIG partout)
-  • Fix : URLs harmonisées moteur.studio
-  • Fix : hideAllViews() complété (beatboard, sequencer)
-  • Fix : Fusion scriptMeta/titlePage
-  • Fix : Normalisation email toLowerCase
-  • Sécurité : Échappement XSS noms groupes/tags
-  • Nettoyage : 7 thèmes CSS morts supprimés (~200 lignes)
-  • Nettoyage : Module Help supprimé
-  • Nettoyage : console.log sensibles supprimés (token, email)
-  • Fix : SDK Supabase version fixée @2.49.1 (CDN cassé)
-  • Fix : z-index Hub card selector (z-index 1000/999)
-  • Fix : removeChannel async (await dans try/catch)
-  • Robustesse : Gestion d'erreur sur ~20 appels Supabase (I3)
-    - messages.delete/update, project_members.insert ×2
-    - contacts.delete ×3, user_profiles.update ×2
-    - notifications.insert ×2, update ×2, delete ×2
-    - app_config.upsert ×2, messages.update (marquage lu)
-  • Factorisation : Constantes redéfinies centralisées (N3)
-    - SCENE_STATUS_LABELS (5 occurrences → 1 constante)
-    - BD_TO_RESOURCE_CAT / RESOURCE_CAT_TO_BD (5 → 2)
-    - EXPENSE_STATUS_LABELS (3 → 1)
-  • Factorisation CSS : Styles inline → classes utilitaires (N8)
-    - 2 739 styles inline → 1 381 restants (1 358 éliminés, 49.6%)
-    - 212 classes utilitaires créées (bloc CSS N8)
-    - Patterns ≥2× factorisés : flex, btn, input, avatar, badge, modal, layout
-    - Restants : styles uniques (1×), JS dynamique, conditionnels ${...}
-  • Sync : Module PreferencesSync (localStorage ↔ Supabase)
-
-V2.1.9 - Beat Board : Lignes de suivi & Mode sombre & Éditeur Synopsis (06-09 Fév. 2026)
-  • Éditeur Synopsis type traitement de texte
-    - Zones d'édition contentEditable format A4 (largeur 210mm, fond blanc, ombre)
-    - Barre d'outils : Gras, Italique, Souligné, Barré, Listes, Alignement
-    - Styles : Titre 1 (bleu souligné), Titre 2 (bleu), Titre 3 (majuscules gris), Citation
-    - Insertion images URL, tableaux, ligne horizontale
-    - Collage intelligent, sauvegarde debounce, compatibilité texte brut
-    - Fix scope IIFE (Synopsis.exec → app.Synopsis.exec)
-  • Animations UI subtiles
-    - Transition onglets subtleFadeUp, cards élévation hover, boutons scale clic
-    - Modales scale-in, inputs lueur focus, scrollbar macOS
-    - Courbe cubic-bezier(0.4, 0, 0.2, 1)
-  • Nettoyage code synopsis
-    - Suppression CSS mortes, fix double font-size h3, suppression _activeType
-  • Mode sombre par défaut
-    - Tous les nouveaux utilisateurs arrivent en dark mode
-    - Les utilisateurs ayant choisi le mode clair restent en clair
-  • Lignes de suivi par tag (Beat Board)
-    - Nouvelles lignes colorées reliant les scènes d'un même tag chronologiquement
-    - Toggle global "Afficher les lignes de tags" dans le panneau Beat Board
-    - Toggles individuels par tag (checkbox + couleur + compteur de scènes)
-    - Courbes adaptatives sortie droite → entrée gauche des connecteurs
-    - Mise à jour en temps réel pendant le drag des cartes
-  • Correction fil rouge (Beat Board)
-    - Lignes en segments séparés (connecteur droit → connecteur gauche)
-    - Suppression des boucles noires sur les courbes de Bézier
-    - Courbes quadratiques adaptatives pour toutes les positions de cartes
-  • Compatibilité fichier local (file://)
-    - Désactivation automatique du realtime/websocket en mode local
-    - Fix boucle d'authentification Supabase depuis file://
-    - Protection contre les events de refresh échoués
-
-V2.1.8 - Landing Page & SEO (03 Fév. 2026)
-  • Landing page publique pour le référencement
-    - Hero avec présentation de Moteur
-    - 6 cartes fonctionnalités (Écriture, Storyboard, Casting, Planning, Budget, Univers)
-    - Galerie de screenshots (6 captures d'écran)
-    - Call-to-action et footer
-    - Design responsive mobile
-  • Optimisation SEO
-    - Meta tags optimisés pour "logiciel écriture scénario"
-    - Open Graph et Twitter Cards mis à jour
-    - Keywords ciblés : scénario, storyboard, production film
-  • Module Landing
-    - Navigation Landing ↔ Auth fluide
-    - Bouton retour depuis l'écran de connexion
-  • Fix launchEditor
-    - Cache projects-view pour éviter superposition dans les onglets projet
-
-V2.1.7 - Conditions d'utilisation (03 Fév. 2026)
-  • Modal CGU à la première connexion
-    - Conditions de confidentialité (RGPD, pré-alpha)
-    - Clause de non-concurrence et propriété intellectuelle
-    - Règles d'utilisation acceptable
-  • Acceptation obligatoire pour accéder à la plateforme
-    - Checkbox + bouton Accepter/Refuser
-    - Stockage en base (terms_accepted, terms_accepted_at)
-    - Refus = déconnexion automatique
-
-V2.1.6 - Hub Central & Refonte Navigation (03 Fév. 2026)
-  • Nouveau Hub Central (landing page après connexion)
-    - Bienvenue personnalisé : "Bonjour [prénom] 👋" + type de compte
-    - 6 cartes d'accès rapide personnalisables (Projets, Univers, Profil, Contacts, Forum, Cours)
-    - Bouton ⚙️ Personnaliser pour changer les cartes
-    - Statistiques en temps réel : Mes projets, Profils Univers, Sujets Forum, Messages
-    - Onboarding pour nouveaux utilisateurs (étapes : Compte, Profil, Premier projet)
-  • Refonte complète de la navigation
-    - Fonction centralisée UI.hideAllViews() pour éviter les superpositions de vues
-    - Toutes les vues (Profil, Contacts, Forum, Feed, Cours, Univers, Projets, Admin) utilisent hideAllViews
-    - Headers unifiés sur Univers et Projets (bouton Retour + titre + Mode)
-    - Retour systématique au Hub depuis toutes les sections
-  • Simplification Design & Icônes
-    - 3 designs uniquement : Classique, Lavande, Minimal
-    - Icônes automatiquement liées au design (Classique→emoji, Lavande→duotone, Minimal→minimal)
-    - Suppression des 8 autres designs et styles d'icônes
-    - Hub avec icônes dynamiques selon le design choisi
-  • Fix doublons Univers
-    - Suppression appel redondant à loadMapMarkers() dans init()
-    - Nettoyage du patch de déduplication devenu inutile
-  • Fix statistiques Hub
-    - Requête corrigée : user_profiles avec filtre is_public (au lieu de public_profiles)
-  • Fix Admin
-    - Admin.show() cache le hub sans cacher dashboard-view
-    - Admin.close() retourne proprement au hub
-
-V2.1.5 - Unification Exports PDF (02 Fév. 2026)
-  • Refonte complète Export PDF Profil
-    - Header bleu avec photo de profil intégrée
-    - Sections colorées : Bio, Description physique, Compétences, Tarif, Contact
-    - Support des 4 types : Comédien, Technicien, Association, Entreprise
-    - Galerie photos intégrée (jusqu'à 3 photos)
-    - Footer unifié avec pagination + "Généré par Moteur — moteur.studio"
-  • Refonte Export PDF Budget
-    - Header bleu unifié avec titre projet + mode HT/TTC
-    - Barre de progression visuelle du budget consommé
-    - Résumé global dans encadré bleu
-    - Statuts colorés (vert validé, orange attente, rouge dépassement)
-    - Ligne de total en bas de chaque tableau
-    - Footer paginé unifié
-  • Refonte des 7 PDFs du ZIP (Scénario, Séquencier, Équipe, Budget, Planning, Casting, Décors)
-    - 3 helpers mutualisés : zipHeader(), zipFooter(), zipSection()
-    - Scénario : page de couverture bleue + en-têtes compacts par page
-    - Séquencier : tableau avec alternance de lignes + en-têtes répétés
-    - Équipe : sections colorées par département + tableaux comédiens/techniciens
-    - Budget : encadré résumé + dépenses avec statuts colorés
-    - Planning : numéros de jour en bleu + tableau alternance
-    - Casting : sections Personnages (violet) + Comédiens (vert)
-    - Décors : cartes encadrées avec bordures et numérotation
-  • Charte graphique PDF unifiée
-    - Couleur principale : #2B6EF6 (rgb 43, 110, 246)
-    - Headers bleus cohérents sur tous les exports
-    - Footers paginés "Généré par Moteur — moteur.studio" partout
-    - Contrats volontairement exclus (format juridique sobre)
-
-V2.1.4 - Dashboard Admin Avancé & Tutoriel & SEO (Jan. 2025)
-  • Graphique d'évolution interactif
-    - Courbes avec période sélectionnable (7j, 30j, 3 mois, 12 mois)
-    - Stats principales : Profils, Projets, Comédiens, Connexions, Signalements
-    - Stats détaillées par métier tech (Image, Son, Régie, etc.)
-    - Stats par type d'association et d'entreprise
-    - Fix mapping rôles vers départements pour stats correctes
-  • Tableau utilisateurs enrichi
-    - Colonnes : Email, Nom, Types de profils, Inscription, Projets + dates
-    - Liste des projets de chaque utilisateur avec dates de création
-  • Nouveau système de Tutoriel
-    - Guide complet sur l'écran de connexion (👁️ Tutoriel)
-    - 17 sections couvrant toutes les fonctionnalités
-    - Remplace l'ancien Guide (code allégé de ~1300 lignes)
-  • Optimisation SEO complète
-    - Meta tags (description, keywords, author, robots)
-    - Open Graph pour Facebook/LinkedIn
-    - Twitter Card pour partages Twitter
-    - Favicon emoji 🎬 en SVG inline
-    - Theme color #3b82f6
-    - Canonical URL
-  • Fichiers SEO générés
-    - sitemap.xml pour référencement Google
-    - robots.txt pour crawlers
-    - og-image.png (1200x630) pour partages sociaux
-  • Correction critique Supabase
-    - Fix AbortError sur initialisation (Web Locks API)
-    - Options auth explicites pour stabilité
-  • Déduplication vue Liste
-    - Les profils et projets ne s'affichent plus en double
-
-V2.1.3 - Admin Amélioré & Statistiques (Jan. 2025)
-  • Tableau de bord Admin enrichi
-    - Onglet Connexions : statistiques jour/semaine/mois avec graphiques
-    - Graphiques interactifs (barres) pour visualiser l'activité
-    - Compteurs : aujourd'hui, cette semaine, ce mois, total
-  • Message pré-alpha configurable
-    - Modification du titre et message depuis l'onglet Configuration
-    - Prévisualisation en temps réel
-    - Sauvegarde en base de données (table app_config)
-  • Logging des connexions utilisateurs
-    - Table user_logins pour tracer les connexions
-    - Historique complet des connexions
-
-V2.1.2 - Pré-Alpha Ouverte & Administration (Jan. 2025)
-  • Ouverture de la pré-alpha
-    - Whitelist désactivée, inscriptions ouvertes au public
-    - Limite de 150 utilisateurs maximum
-    - Message d'avertissement pré-alpha sur l'écran de connexion
-  • Tableau de bord Admin (visible uniquement par admin)
-    - Statistiques : utilisateurs, projets, profils publics, signalements
-    - Onglet Signalements : liste, actions (résoudre/rejeter/supprimer)
-    - Onglet Utilisateurs : liste complète avec recherche
-    - Onglet Configuration : modifier la limite d'utilisateurs
-    - Onglet Emailing : envoi de mails ciblés aux utilisateurs
-  • Système d'emailing ciblé
-    - Filtres intelligents : profil incomplet, pas de profil public, 
-      pas de projet, projet inactif, nouveaux inscrits, utilisateurs inactifs
-    - Filtres par type de profil : comédiens, techniciens, associations, entreprises
-    - Templates d'emails prédéfinis (bienvenue, compléter profil, réactivation, etc.)
-    - Prévisualisation et envoi groupé via EmailJS
-  • Système de signalement
-    - Bouton 🚩 sur les profils et projets dans l'Univers
-    - Modale avec choix du motif et détails
-    - Table Supabase 'reports' pour stocker les signalements
-  • Améliorations MoodBoard
-    - Éditeur de palette ColorWheel pour modifier les palettes existantes
-    - Correction du double bouton "Renommer" sur les palettes
-  • Éditeur de dessin
-    - Option "Fond transparent" pour exports PNG sans fond blanc
-  • Corrections diverses
-    - Amélioration responsive mobile (base)
-    - Fix retour depuis Admin (scroll en haut)
-
-V2.1.1 - Univers & Fiches Projets Améliorées (Jan. 2025)
-  • Affichage des projets publics dans l'Univers
-    - Projets visibles sur la carte et dans la liste
-    - Déduplication automatique des projets
-  • Grande fiche projet complète
-    - Affiche toutes les infos de l'onglet Présentation
-    - Localisation, Calendrier (pré-prod/tournage/post-prod/sortie)
-    - Équipe avec budget, Type de production, Partenaires
-    - Note d'intention, Rôles recherchés, Postes recherchés
-  • Synchronisation temps réel Présentation ↔ Univers
-    - Modification d'une info → mise à jour immédiate sur la carte
-    - Dépublication → retrait immédiat de la carte
-  • Boutons de visibilité par section (style Profils)
-    - Icône 🌍👁️ sur chaque section de Présentation
-    - Contrôle granulaire de ce qui apparaît dans l'Univers
-    - Sections : Dates, Localisation, Équipe, Infos légales, 
-      Type de production, Partenaires, Description, Besoins
-  • Favoris projets
-    - Étoile ☆/★ sur la fiche projet dans l'Univers
-    - Ajout aux Contacts & Favoris (onglet Projets)
-    - Correction upsert pour éviter les doublons
-  • Synchronisation titre projet ↔ titre scénario
-  • Nettoyage décors/personnages orphelins après suppression scène
-  • Rafraîchissement dépouillement après finalisation scène
-
-V2.1.0 - Correction Structure Profils Publics (Jan. 2025)
-  • Réorganisation complète du formulaire "Mes Profils Publics"
-    - Toutes les sections (Type, Identité, Comédien, Technicien, Association, 
-      Entreprise, Tarif, Calendrier, Véhicule, Actualité, Zone Danger) sont 
-      maintenant dans un conteneur unique (profile-all-sections)
-    - Correction de l'indentation HTML pour une structure propre
-    - Suppression des </div> en trop qui cassaient la hiérarchie
-  • Affichage corrigé sans profil existant
-    - Seul le panneau "Bienvenue ! Créer mon premier profil" s'affiche
-    - Les sections du formulaire sont masquées jusqu'au clic sur "Nouveau profil"
-  • Clic sur "Nouveau profil" affiche maintenant toutes les sections correctement
-
-V2.0.0 - Supabase Storage & Upload Images (Jan. 2025)
-  • Migration des images vers Supabase Storage
-    - Photos de profil uploadées vers le cloud (plus de base64)
-    - Galerie photos comédiens (3 photos max)
-    - Galerie photos techniciens (3 photos max)
-    - Affiche du projet (onglet Présentation)
-  • Buckets sécurisés avec policies RLS
-    - avatars : photos de profil
-    - gallery : galeries photos des profils
-    - projects : affiche projet et fichiers
-  • Compression automatique des images (800-1200px, qualité 80-85%)
-  • Suppression automatique des anciennes photos lors du remplacement
-  • Interface améliorée : clic direct pour uploader (plus d'URL à copier)
-  • Correctif : sauvegarde des synopsis (Store.save)
-
-V1.9.9.9 - Import PDF Amélioré (Jan. 2025)
-  • Système d'icônes modulaire avec 5 styles au choix
-    - Classique : emojis traditionnels (😀📁🎬)
-    - Coloré : icônes SVG sur fonds colorés par catégorie
-    - Duotone : icônes colorées sur fond transparent
-    - Minimal : icônes grises discrètes style Notion
-    - Gradient : icônes sur fonds dégradés premium
-  • Bibliothèque SVG intégrée (40+ icônes vectorielles)
-  • Code couleur par catégorie (Écriture, Production, Casting, Admin, Social)
-  • Sélecteur dans le menu Design (Dashboard + Projet)
-  • Boutons éditeur avec état visuel "actif"
-  • Fusion intelligente des paragraphes
-    - Les lignes consécutives de même type sont fusionnées automatiquement
-    - Supprime les retours à la ligne artificiels de la mise en page PDF
-    - Un paragraphe d'action = un seul bloc (et non plus une ligne par ligne)
-  • Distinction Dialogue / Didascalie
-    - Étape unique pour sélectionner dialogues et didascalies (même marge)
-    - Détection automatique par les parenthèses : (texte) = didascalie
-    - Plus de confusion entre les deux types
-  • Suppression intelligente des numéros de page
-    - Sélectionner un numéro de page supprime TOUS les numéros du document
-    - Détection des formats : "1", "1.", "1/20", "- 1 -", "Page 1", "[1]", "(1)"
-  • Wizard simplifié : 6 étapes au lieu de 7
-  • Module Cours : images JPEG remplacent les SVG (46 photos professionnelles)
-  • Menus Fichier/Projet/Export : ouverture au survol de la souris
-  • Création de projet simplifiée (suppression vérification trial/pricing)
-  • Correction : changement d'onglet navigateur ne quitte plus le projet
-
-V1.9.9.7 - Actualités & Limitations Pré-Alpha (Jan. 2025)
-  • Système d'actualités de profil
-    - Publication d'une actualité par jour sur son profil
-    - Visible par tous sur le profil public (défilement horizontal)
-    - Historique des 5 dernières actualités dans "Mon Profil"
-  • Limitations pré-alpha
-    - Le Fil : limité à 1 publication par semaine (dimanche à dimanche)
-    - Invitation par email : limitée aux utilisateurs whitelist
-  • Correction bug favoris
-    - L'étoile sur les profils fonctionne correctement
-    - Synchronisation avec la liste des contacts
-  • Nettoyage du code
-    - Suppression du code mort (ancien mode flottant Universe)
-    - Correction des warnings JavaScript
-
-V1.9.9.6 - Migration Supabase (Jan. 2025)
-  • Migration complète Firebase → Supabase
-    - Base de données PostgreSQL hébergée en Europe (RGPD)
-    - Authentification Supabase (inscription, connexion, reset password)
-    - 12 tables optimisées avec Row Level Security (RLS)
-  • Modules migrés
-    - Auth : connexion, inscription, déconnexion, mot de passe oublié
-    - Projets : création, chargement, sauvegarde, suppression, partage
-    - Profils utilisateurs : création, mise à jour, photo
-    - Messages : envoi, réception, notifications
-    - Contacts : ajout, suppression, gestion
-    - Forum : threads, réponses, votes, résolution
-    - Feed (Le Fil) : publications, likes, commentaires
-    - Commentaires : sur les scènes du séquencier
-    - Invitations : partage de projets, invitations en attente
-  • Avantages Supabase
-    - Données hébergées en Europe (conformité RGPD)
-    - PostgreSQL robuste et scalable
-    - Coûts réduits pour la mise à l'échelle
-    - Dashboard d'administration puissant
-	
-V1.9.9.5 - Forum Communautaire & Mur Social (Jan. 2025)
-  • Système de liste blanche pré-alpha
-    - Inscription limitée aux emails autorisés
-    - Message explicite pour utilisateurs non autorisés
-  • Forum communautaire complet (8 catégories)
-    - Général, Comédiens, Techniciens, Retours Site
-    - Scénario, Réalisation, Production, Post-production
-    - Votes style Reddit, réponses imbriquées
-  • Mur social (Feed)
-    - Publications : Statut, Annonce, Recherche
-    - Likes, commentaires, partage
- • Nouvelle navigation par menus déroulants
-    - Mon Espace : Mon Profil, Mes Projets, Contacts
-    - Communauté : Forum, Le Fil
-    - Aide : Guide, Cours
-    - Design : 11 thèmes disponibles
-    - Ouverture au survol de la souris
-  • Forum : sous-catégories Retours Site (17 modules)
-    - Éditeur Scénario, Séquencier, Dépouillement
-    - Storyboard, Moodboard, Équipe, Budget, Contrats
-    - Univers, Forum, Le Fil, Guide, Cours
-    - Mon Profil, Messages, Design/Thèmes
-  • Le Fil : nouveau design unifié avec Forum
-    - Champ titre ajouté
-    - Barre d'outils formatage (Gras, Italique, Souligné, Liste)
-    - Upload d'images (max 5 Mo)
-  • Forum : éditeur amélioré
-    - Même barre d'outils que Le Fil
-    - Upload d'images dans les sujets
-
-V1.9.9.4 - Beat Board & Mode Focus (Jan. 2025)
-  • Nouveau mode Beat Board dans le Séquencier
-    - Basculer entre vue Séquencier classique et vue Beat Board
-    - Fiches de scènes déplaçables librement sur le canvas
-    - Fil rouge connectant les scènes dans l'ordre du séquencier
-  • Outils Beat Board
-    - Zoom (molette ou boutons +/-), pan (clic droit + glisser)
-    - Bouton "Recentrer" pour revenir à la vue d'ensemble
-    - Légende des groupes de couleur visible
-  • Interactions avancées
-    - Drag & drop normal : déplace visuellement la fiche
-    - Shift + drag : mode snap, insère dans le fil rouge
-    - Ctrl + clic : sélection multiple (outline bleu)
-    - Drag multi-sélection : déplace toutes les fiches sélectionnées ensemble
-    - Zone "Retirer du fil rouge" pour sortir une scène du fil
-  • Scènes hors timeline
-    - Création de scènes non ordonnées (bouton "Nouvelle scène")
-    - Style en pointillés + opacité réduite + icône 📌
-    - Shift + drag vers une zone d'insertion pour rejoindre le fil
-  • Synchronisation bidirectionnelle
-    - L'ordre du fil rouge = l'ordre du séquencier
-    - Modifications répercutées dans les deux vues
-  • Mode Focus (plein écran onglet)
-    - Masque la navigation pour se concentrer sur le contenu
-    - Barre d'outils minimaliste avec navigation ◀ ▶
-    - Raccourcis : F11 (activer), Échap (quitter), ← → (naviguer)
-    - Accessible via menu 📐 ou touche F11
-  • Guide d'aide enrichi
-    - Nouvelles sections : Synopsis, Page de Titre, MoodBoard, Chat, Rapport de Script
-    - Matching intelligent documenté dans Univers
-    - Mode Focus documenté
-
-V1.9.9.3 - Navigation Scénario Optimisée (Jan. 2025)
-  • Raccourcis clavier directs pour types de paragraphes
-    - Ctrl/Alt+1 = Action, Ctrl/Alt+2 = Personnage, Ctrl/Alt+3 = Dialogue
-    - Ctrl/Alt+4 = Didascalie, Ctrl/Alt+5 = Transition, Ctrl/Alt+6 = Centré, Ctrl/Alt+7 = Note
-    - Fonctionne dans l'éditeur scène par scène ET continu
-  • Tab contextuel intelligent (toggle)
-    - Action ↔ Personnage
-    - Dialogue ↔ Didascalie
-    - Transition/Centré/Note → Action
-  • Shift+Tab pour cycle inverse
-  • Correction perte de focus en Vue Script (re-render Firebase optimisé)
-  • Didascalie/Note : fermeture propre des parenthèses/accolades sur Entrée
-  • Documentation mise à jour dans l'aide
-
-V1.9.9.2 - Contrats Conformes & Accès Direct (Jan. 2025)
-  • Nouvelle section "Informations Légales" dans Présentation
-    - SIRET, Code APE/NAF, N° Licence entrepreneur spectacle
-    - URSSAF de rattachement, N° Congés Spectacles employeur
-    - Adresse complète, Email RGPD, Qualité du représentant
-    - Pré-remplissage automatique dans tous les contrats
-  • Bouton "📝 Contrat" sur les fiches
-    - Accès direct depuis chaque fiche Comédien (onglet Casting)
-    - Accès direct depuis chaque fiche Technicien (onglet Équipe)
-    - Pré-sélection automatique de la personne
-  • Nouveau type : Accord Bénévole ❤️
-    - Engagement moral pour collaborations non rémunérées
-    - Défraiements (repas, transport, hébergement)
-    - Engagements mutuels (respect, bienveillance, sécurité)
-    - Crédits au générique (choix d'apparaître ou non)
-    - Cession gracieuse des droits pour le projet
-    - Esprit de l'accord (confiance, aventure humaine)
-  • CDDU (Intermittent·e·s) - Mentions légales complètes
-    - Préambule avec motif de recours obligatoire (art. D.1242-1)
-    - Mention DPAE (Déclaration Préalable à l'Embauche)
-    - Code APE, N° Licence entrepreneur spectacle
-    - Date/lieu naissance, nationalité du salarié
-    - N° d'objet Pôle emploi spectacle
-    - Article abattement frais professionnels (avec choix)
-    - Article fin de contrat (documents à remettre)
-    - Article juridiction compétente
-    - N° affiliation Congés Spectacles employeur
-  • Droit à l'image - Refonte complète conforme RGPD
-    - Articles 9 Code civil et 226-1 Code pénal cités
-    - Gestion des mineurs (case représentant légal)
-    - Date/lieu naissance, nationalité, email, téléphone
-    - Supports d'exploitation détaillés (cases à cocher)
-    - Étendue territoriale explicite
-    - Engagements du bénéficiaire (dignité, honneur)
-    - Clause RGPD complète (droits d'accès, rectification...)
-    - Déclarations du signataire (consentement éclairé)
-    - Mention manuscrite « Lu et approuvé »
-  • Contrat de Prestation (Auto-entrepreneur) enrichi
-    - Cla
-
-V1.9.9.1 - Rapport de Script (Jan. 2025)
-  • Nouvel onglet "Rapport" dans Production
-    - Fiche de script par plan (navigation scène/plan à gauche)
-    - Auto-remplissage : film, décor, date, effet (jour/nuit, int/ext)
-    - Auto-remplissage : caméra, objectif depuis l'équipe et storyboard
-    - Extraction automatique des dialogues depuis le scénario
-  • Gestion des prises
-    - Numéro de prise, N° Son, N° Image
-    - Qualité Son/Image/Acting avec notation 1-5 étoiles
-    - Notes libres par prise
-    - Étoiles Or ★ et Argent ☆ pour marquer les meilleures prises
-  • Champs de la fiche
-    - SON (Sonore/Muet), Supports de sauvegarde
-    - NOTE libre, Description du plan, Dialogues
-  • Export PDF professionnel
-    - Mise en page soignée avec en-tête noir
-    - Étoiles graphiques colorées (or/argent) dans le PDF
-    - Export individuel ou export de toutes les fiches
-  • Planning : Feuilles de service
-    - Acteurs groupés par type (Casting Principal, Rôles Secondaires, Figurants)
-    - Même logique de groupement que l'équipe technique
-
-V1.9.9 - Corrections Exports (Jan. 2025)
-  • MoodBoard : Export PNG/PDF corrigé
-    - Toutes les formes SVG (30+) s'exportent correctement
-    - Étoiles, flèches, bulles, symboles exportés fidèlement
-    - Conversion SVG → image pour rendu précis
-  • Noms de fichiers explicites
-    - MoodBoard : "NomProjet_MoodBoard_NomPlanche.pdf/png"
-    - Storyboard : "NomProjet_Storyboard.pdf"
-  • Storyboard PDF complet
-    - Nom du plan affiché (entre guillemets)
-    - Mode caméra (Objectif, Subjectif, Semi-subjectif, PDV)
-    - Direction acteurs (🎭) et technique (⚙️) incluses
-  • Export ZIP enrichi
-    - Dossier PDF/ avec tous les documents prêts à imprimer
-    - Dossier CSV/ avec fichiers tableur
-    - Scénario, Séquencier, Casting, Équipe, Décors, Budget, Planning
-    - README structuré avec instructions de réimport
-  • 11 thèmes visuels disponibles
-    - 🎬 Classique (défaut, sobre et professionnel)
-    - ✨ Glassmorphism (transparent, flou, dégradé violet)
-    - 🫧 Neumorphism (effet soft extrudé, ombres douces)
-    - 🎥 Dark Cinema (noir + or, style Hollywood)
-    - 💜 Cyberpunk (néon cyan/magenta, monospace)
-    - 🌿 Nature (verts apaisants, organique)
-    - 🌅 Sunset (dégradé orange/rose chaleureux)
-    - 🌊 Océan (bleus profonds, apaisant)
-    - 💐 Lavande (violets doux, arrondi élégant)
-    - ⬜ Minimal (épuré noir/blanc, sobre)
-    - 💻 Terminal (hacker rétro, vert sur noir)
-  • Sélecteur de design dans le header (bouton 🎨 Design)
-  • Sauvegarde automatique du choix utilisateur
-  • Compatible avec le mode clair/sombre (🌓)
-  • Corrections de bugs critiques
-    - Fermeture manquante des objets Exporter/Expenses
-    - Suppression de code markdown accidentel
-
-V1.9.8 - Exports Professionnels (Jan. 2025)
-  • Nouveaux exports PDF dédiés
-    - 📋 Rapport de production complet (stats, équipe, budget, planning)
-    - 📋 Dépouillement PDF avec récapitulatif global par catégorie
-    - 🎨 Storyboard PDF (grille 2x2, paysage A4)
-    - 👥 Équipe PDF par département avec coordonnées
-  • Export ZIP complet du projet restructuré
-    - 📁 PDF/ : Scénario, Séquencier, Casting, Équipe, Décors, Budget, Planning
-    - 📁 CSV/ : Tous les fichiers tableur
-    - projet_data.json : Pour réimport dans Moteur
-    - scenario.fountain : Format universel
-    - README.md : Documentation structurée avec instructions
-  • MoodBoard exports corrigés
-    - Toutes les formes SVG (30+) s'exportent correctement en PNG/PDF
-    - Étoiles, flèches, bulles, symboles rendus fidèlement
-    - Conversion SVG → Canvas → Image pour rendu précis
-  • Storyboard PDF enrichi
-    - Nom du plan affiché entre guillemets
-    - Mode caméra (OBJ, SUBJ, SEMI, PDV)
-    - Direction acteurs 🎭 et technique ⚙️ incluses
-    - Zone image réduite (55%) pour plus d'espace texte
-  • Noms de fichiers explicites
-    - MoodBoard : "Projet_MoodBoard_Planche.pdf/png"
-    - Storyboard : "Projet_Storyboard.pdf"
-  • Menu Export enrichi
-    - Nouvelle section "Projet complet"
-    - Organisation par catégories (Scénario, Budget, Projet)
-
-V1.9.7 - MoodBoard Pro : Roue Chromatique & Formes (Jan. 2025)
-  • Générateur de palettes avec roue chromatique interactive
-    - Style Adobe Color avec 8 types d'harmonies
-    - Semblable, Nuances, Complémentaire, Triade, Carré, etc.
-    - Contrôle de la saturation (centre/extérieur) et luminosité
-    - 5 couleurs générées avec codes hex copiables
-  • Bibliothèque de 30+ formes géométriques
-    - Formes de base : rectangle, cercle, ellipse, triangle, losange
-    - Polygones : pentagone, hexagone, octogone, étoiles
-    - Flèches : droite, gauche, haut, bas, double, chevrons
-    - Bulles : parole, ronde, pensée
-    - Symboles : cœur, croix, check, X, plus, moins
-    - Cadres vides : rectangle, arrondi, cercle
-  • Rotation des éléments
-    - Handle de rotation au survol (cercle bleu ↻)
-    - Drag pour tourner librement
-    - Maintenir Shift pour snap à 15°
-  • Personnalisation des formes
-    - Couleur noire par défaut
-    - Clic droit → 🎨 Couleur pour modifier
-    - Palette de 12 couleurs rapides + sélecteur complet
-  • Palettes améliorées
-    - Affichage clair avec codes hex lisibles
-    - Taille par défaut 500x200px
-    - Clic droit → ✏️ Renommer la palette
-  • Formats de canvas fonctionnels
-    - A4, A3, A2, A0 en portrait et paysage
-    - Toast de confirmation au changement
-  • UX améliorée
-    - Menu des formes repositionné automatiquement
-    - Reste toujours visible dans la fenêtre
-    - Scrollable si beaucoup de formes
-
-V1.9.6 - Météo, Cartes & Feuilles de Service Pro (Jan. 2025)
-  • Météo automatique dans les feuilles de service
-    - Intégration Open-Meteo API (100% gratuit, sans clé API)
-    - Température, ressenti, conditions météo
-    - Probabilité de pluie, vent, lever/coucher soleil
-    - Champ "Météo personnalisée / Consignes" pour instructions spéciales
-  • Carte interactive Leaflet/OSM du lieu de tournage
-  • Lien Google Maps pour la navigation GPS
-    - Bouton cliquable dans la feuille de service
-    - URL en texte visible lors de l'impression PDF
-  • Feuille de Service complète et professionnelle
-    - Programme du jour avec scènes ET plans sélectionnés
-    - Dépouillement avec responsable par département (ex: "COSTUMES (Sarah)")
-    - Contact sur place + téléphone + notes d'accès
-    - Transport avec détail "avec qui" pour covoiturage
-    - Notes générales et champs vides affichés avec mention "Vide"
-    - Ordre des sections harmonisé avec la modal de création
-  • Export PDF amélioré
-    - Nom du fichier = "Projet - FDS NomTournage - Date"
-    - Mise en page optimisée pour impression
-  • Synchronisation bidirectionnelle du transport
-    - Si Lila "Amène" Sarah → Sarah passe auto en "Part avec" Lila
-    - Mise à jour instantanée des deux côtés
-  • Recalcul automatique à la suppression de scène
-    - Comédiens non nécessaires décochés automatiquement
-    - Techniciens du dépouillement mis à jour
-    - Transports "avec qui" nettoyés si personne retirée
-    - Aperçu dépouillement rafraîchi en temps réel
-  • Corrections
-    - Fix bug sauvegarde (null check sur éléments supprimés)
-    - Fix parsing des IDs avec underscore (actor_act_xxx)
-    - Fix generateFDS (startDate au lieu de date)
-
-V1.9.5 - Ressources & Liaisons Visuelles (Jan. 2025)
-  • Réorganisation des onglets
-    - Vue Catégories : Personnages, Comédiens, Décors, Ressources
-    - Vue Classique : 7. Comédiens, 8. Décors, 9. Ressources
-  • Liaison visuelle dans le Dépouillement
-    - Survol mot surligné ↔ tag : les deux s'allument en jaune
-    - Flèche SVG courbe reliant texte et dépouillement
-    - Fonctionne aussi pour DECORS-LIEUX dans le titre
-  • Nouvel onglet Ressources (Accessoires, Costumes, Véhicules)
-    - Filtres par catégorie (Tous, Accessoires, Costumes, Véhicules)
-    - Fiches avec photo, description, propriétaire, note, scènes liées
-    - Propriétaire : comédien/technicien du projet OU saisie manuelle (location)
-    - Création automatique depuis le dépouillement
-    - Suppression liée (demande confirmation dépouillement ↔ ressource)
-    - Fusion de fiches similaires (garde la plus complète)
-  • Drag & drop des sous-onglets en vue Catégories
-    - Réordonner les sous-onglets par glisser-déposer
-    - Déplacer un sous-onglet vers une autre catégorie
-    - Ordre sauvegardé par projet
-    - Bouton Réinitialiser remet ordre ET couleurs par défaut
-  • Système Brouillon / Finale pour les scènes
-    - Scène en brouillon (📝) : texte modifiable, dépouillement bloqué
-    - Scène finale (✅) : texte figé, dépouillement accessible
-    - Bouton "Finaliser" dans Séquencier, Scénario (Vue Scènes + Vue Script)
-    - Bouton "Repasser en brouillon" avec alerte suppression dépouillement
-    - Badge visuel sur chaque scène (Séquencier, Scénario, Dépouillement)
-    - Clic-droit bloqué dans Dépouillement si scène non finalisée
-
-V1.9.3 - Dépenses & Contrats Simplifiés (Jan. 2025)
-  • Pricing et Abonnements
-    - Base : 1€/mois pour le propriétaire
-    - 6-15 collaborateurs = 2€/mois
-    - +1€ par tranche de 10 au-delà
-    - 1 collaborateur = 1 fiche comédien ou technicien
-    - Modale d'offre d'essai avec avantages
-    - Modale d'abonnement
-    - Bannière d'essai avec countdown dans le dashboard
-    - Widget de facturation avec détail par projet
-    - Calcul automatique du prix selon projets et membres
-  • Dépenses : Mode Simple / Avancé
-    - Toggle Simple/Avancé en haut de l'onglet Budget
-    - Mode Simple : budget + liste dépenses, statuts À payer/Payé
-    - Mode Avancé : catégories, enveloppes, responsables, salaires auto
-    - Catégories simplifiées (6 au lieu de 16)
-    - Préférence sauvegardée par utilisateur
-  • Contrats : réorganisation et alertes
-    - Droit à l'image en premier (onglet par défaut)
-    - Vérification des infos manquantes avant génération
-    - Alerte avec liste des champs manquants
-    - Bouton "Envoyer rappel" par email
-    - Option "Générer quand même"
-  • Alertes infos manquantes (salaires/contrats)
-    - Bouton "Vérifier infos" dans section Salaires
-    - Modale listant les personnes incomplètes
-    - Email de rappel personnalisé
-    - Envoi groupé possible
-
-V1.8.5 - Plan de Travail & Dépouillement Intelligent
-  • Voir versions antérieures dans le fichier complet
-
-V1.8 à V1.8.4 - Budget Hiérarchique & Améliorations
-  • Voir versions antérieures dans le fichier complet
-
-V1.7 à V1.7.9 - Storyboard, Univers & Planning
-  • Voir versions antérieures dans le fichier complet
-
-V1.6 à V1.6.6 - Refonte Univers
-  • Voir versions antérieures dans le fichier complet
-
-V1.5 à V1.5.1 - Mise en Page
-  • Voir versions antérieures dans le fichier complet
-
-V1.4 à V1.4.7 - Mode Présentation & Fonctionnalités
-  • Voir versions antérieures dans le fichier complet
-
-V1.3 à V1.3.1 - Export PDF & Favoris
-  • Voir versions antérieures dans le fichier complet
-
-V1.2 à V1.2.1 - Responsive Mobile
-  • Voir versions antérieures dans le fichier complet
-
-V1.1 - Notifications Toast
-  • Remplacement des alert() par notifications élégantes
-  • 4 types : success, error, warning, info
-
-V1.0 - Base solide (Déc. 2024)
-  • Authentification Firebase (connexion, inscription, reset)
-  • Profils publics multi-types (Comédien, Technicien)
-  • Gestion de projets avec rôles et permissions
-  • Scénario & Breakdown (import PDF/FDX, éditeur, décomposition)
-  • Storyboard avec éditeur de dessin intégré
-  • Équipe (Crew) avec départements et fiches
-  • Planning et calendrier de tournage
-  • Budget & Dépenses par catégorie
-  • Chat par projet et messagerie interne
-  • Univers (annuaire public des professionnels)
-  • Mode clair / sombre
-
-================================================================================
-                              À FAIRE - ROADMAP
-================================================================================
-
-💳 PRICING - À FINALISER
-  • Intégration Stripe Checkout (paiement réel) ❌
-  • Webhooks Stripe → Firebase (confirmation paiement) ❌
-  • Cloud Functions (cron jobs essais/suppressions) ❌
-  • Emails automatiques (rappels, expirations) ❌
-  • Sécurité Firebase Rules (bloquer si impayé) ❌
-  • Portail client Stripe (gestion abonnement) ❌
-
-📋 DOCUMENTS NON IMPLÉMENTÉS
-  C) Liste des Véhicules nécessaires
-     - Récapitulatif par jour de tournage ❌
-  D) Feuille de Continuité / Rapport Scripte
-     - Raccords, chronométrage, notes ✅ (V1.9.9.1)
-  E) Listing des Figurants par jour
-     - Nombre, costumes, horaires ❌
-  F) Récapitulatif Costumes/Maquillage par personnage ❌
-
-🔗 LIAISONS MANQUANTES
-  1) Dépenses ↔ Catégorie dépouillement
-  2) Scène → Version/Révision (pages colorées)
-
-📊 STATISTIQUES MANQUANTES
-  • Coût moyen par jour ❌
-
-📤 EXPORTS
-  • Rapport prod PDF ✅ (V1.9.8)
-  • ZIP complet avec PDFs ✅ (V1.9.9)
-
-✅ FAIT
-  • Export ZIP avec dossiers PDF/ et CSV/ (V1.9.9)
-  • MoodBoard : export PNG/PDF de toutes les formes SVG (V1.9.9)
-  • Storyboard PDF : nom du plan, mode caméra, directions acteurs/technique (V1.9.9)
-  • Noms de fichiers explicites pour tous les exports (V1.9.9)
-  • Système Brouillon/Finale scènes → Dépouillement bloqué si brouillon (V1.9.5)
-  • Drag & drop sous-onglets entre catégories (V1.9.5)
-  • Accessoire/Costume/Véhicule → Fiche dédiée Ressources (V1.9.5)
-  • Liaison visuelle Dépouillement ↔ Texte avec flèche (V1.9.5)
-  • Dépenses Mode Simple/Avancé (V1.9.3)
-  • Alertes infos manquantes contrats/salaires (V1.9.3)
-  • Contrats : Droit à l'image par défaut (V1.9.3)
-  • Pricing à l'usage avec essai 48h (V1.9.3) - en attente Stripe
-  • Types de journées planning (V1.9.3)
-  • Session unique multi-onglets (V1.9.3)
-  • Langues/Sports avec niveaux (V1.9.3)
-  • Jours de travail par comédien (V1.9)
-  • Nb scènes par lieu (V1.4.3)
-  • Taux d'avancement (V1.4.3)
-  • Nb dialogues par personnage (V1.4.3)
-  • Scénario PDF | Équipe PDF | Dépouillement PDF (via impression)
-  • Budget PDF | Budget Excel (V1.8.6)
-  • Storyboard PDF | Feuille service | Plan travail
-  • Liaison Lieu ↔ Scène enrichie (V1.8.6)
-  • Fiche Lieu avec adresse, contact, photos (V1.8.6)
-  • Auto-liaison dépouillement → feuille de service (V1.8.6)
-  • Workflow validation dépenses (V1.8)
-  • Gestion véhicules équipe (V1.7.6)
-  • Outils dessin 6 pinceaux (V1.7)
-  • Logs/Historique (V1.4.1)
-
-================================================================================
-
-	OK, pas de terminal. Alors essaie ça dans Firefox :
-
-	Tape dans la barre d'adresse : about:config
-	Accepte le risque
-	Cherche : security.fileuri.strict_origin_policy
-	Passe-le à false
-
-	Recharge ton fichier HTML et teste.
-	Si ça marche pas, essaie aussi de chercher privacy.file_unique_origin et le passer à false.
-
-================================================================================
+  - Catégories Associations/Entreprises visibles dans l'Univers (plafond 15→20) ; géocodage 4 niveaux (mémoire → localStorage → DB → Nominatim throttlé), adresse précise BAN (FR) + Nominatim (monde).
+  - Carte : 500 marqueurs max par batch de 50 ; démo 383 profils géocodés, 60+ pays.
+V2.3 (24 Fév. 2026) — Stabilisation & sécurité
+  - Fixes : commentaire CSS cassé, spécificité auth-view, balises <divclass, .single() → .maybeSingle() (×27, anti-hang), var(--text) → var(--text-main) (×28), IDs dupliqués GlobalSearch.
+  - Sécurité S2 : échappement XSS sur innerHTML critiques (autocomplete, stats, markers Univers), getEmbedUrl sécurisé.
+  - Robustesse : gestion d'erreur sur 16 appels Supabase ; nettoyage de 16 console.log ; 3 modules non exportés corrigés.
+V2.2 (20 Fév. 2026) — Audit & corrections
+  - ~10 bugs corrigés (Messages.openCompose, sélecteur Hub, IDs dupliqués Contacts, toast sur échec save, cleanup canal notifications…) ; SDK Supabase figé @2.49.1.
+  - Robustesse : gestion d'erreur sur ~20 appels Supabase ; factorisation de constantes redéfinies.
+  - Factorisation CSS (N8) : 2739 styles inline → 1381 (49.6% éliminés), 212 classes utilitaires créées. Module PreferencesSync (localStorage ↔ Supabase).
+V2.1.9 (06-09 Fév. 2026) — Beat Board : lignes de suivi + mode sombre + éditeur Synopsis
+  - Éditeur Synopsis type traitement de texte (zones contentEditable A4, barre d'outils complète, styles de titres, images/tableaux, sauvegarde debounce).
+  - Beat Board : lignes de suivi colorées reliant les scènes d'un même tag (toggle global + par tag, courbes adaptatives, mise à jour pendant le drag) ; correction du fil rouge.
+  - Mode sombre par défaut pour les nouveaux utilisateurs ; animations UI subtiles ; compatibilité fichier local (file://).
+V2.1.8 (03 Fév. 2026) — Landing page & SEO
+  - Landing page publique (hero, 6 cartes fonctionnalités, galerie de screenshots, CTA, responsive) ; module Landing avec navigation Landing ↔ Auth.
+  - SEO : meta tags ciblés, Open Graph, Twitter Cards.
+V2.1.7 (03 Fév. 2026) — Conditions d'utilisation
+  - Modale CGU à la première connexion (confidentialité RGPD, non-concurrence, règles d'usage), acceptation obligatoire stockée en base, refus = déconnexion.
+V2.1.6 (03 Fév. 2026) — Hub central & refonte navigation
+  - Nouveau Hub central après connexion : accueil personnalisé, 6 cartes d'accès rapide personnalisables, stats temps réel, onboarding nouveaux utilisateurs.
+  - Refonte de la navigation : UI.hideAllViews centralisé, headers unifiés, retour systématique au Hub. Simplification à 3 designs (Classique, Lavande, Minimal) avec icônes liées.
+V2.1.5 (02 Fév. 2026) — Unification des exports PDF
+  - Refonte des exports PDF Profil (header bleu + photo, sections colorées, 4 types, galerie) et Budget (barre de progression, statuts colorés, total).
+  - Refonte des 7 PDFs du ZIP via 3 helpers mutualisés (zipHeader/Footer/Section) ; charte graphique unifiée (#2B6EF6, footers paginés). Contrats exclus (format juridique sobre).
+V2.1.4 (Jan. 2025) — Dashboard admin avancé + tutoriel + SEO
+  - Graphique d'évolution interactif (périodes 7j/30j/3m/12m, stats par métier/type) ; tableau utilisateurs enrichi.
+  - Nouveau système de Tutoriel (17 sections, remplace l'ancien Guide, -1300 l) ; SEO complet (sitemap.xml, robots.txt, og-image) ; fix AbortError Supabase (Web Locks API).
+V2.1.3 (Jan. 2025) — Admin amélioré & statistiques
+  - Tableau de bord admin enrichi (onglet Connexions avec graphiques jour/semaine/mois) ; message pré-alpha configurable (table app_config) ; logging des connexions (table user_logins).
+V2.1.2 (Jan. 2025) — Pré-alpha ouverte & administration
+  - Ouverture de la pré-alpha (whitelist désactivée, limite 150 utilisateurs) ; tableau de bord admin (stats, signalements, utilisateurs, configuration, emailing).
+  - Système d'emailing ciblé (filtres intelligents + par type de profil, templates, envoi groupé via EmailJS) ; système de signalement (bouton 🚩, table reports).
+V2.1.1 (Jan. 2025) — Univers & fiches projets améliorées
+  - Projets publics affichés dans l'Univers (carte + liste, déduplication) ; grande fiche projet complète ; synchronisation temps réel Présentation ↔ Univers.
+  - Boutons de visibilité par section ; favoris projets (★, ajout aux Contacts) ; synchronisation titre projet ↔ scénario.
+V2.1.0 (Jan. 2025) — Correction structure profils publics
+  - Réorganisation du formulaire « Mes Profils Publics » dans un conteneur unique (profile-all-sections), correction de l'indentation et des </div> en trop ; affichage corrigé sans profil existant.
+V2.0.0 (Jan. 2025) — Supabase Storage & upload d'images
+  - Migration des images vers Supabase Storage (photos de profil, galeries comédiens/techniciens, affiche projet, plus de base64) ; buckets avatars/gallery/projects avec RLS.
+  - Compression automatique (800-1200px, qualité 80-85%), suppression des anciennes photos au remplacement, upload par clic direct.
+V1.9.9.9 (Jan. 2025) — Import PDF amélioré
+  - Système d'icônes modulaire (5 styles : Classique, Coloré, Duotone, Minimal, Gradient), bibliothèque SVG 40+ icônes, code couleur par catégorie.
+  - Import PDF : fusion intelligente des paragraphes, distinction dialogue/didascalie par parenthèses, suppression intelligente des numéros de page (7 formats détectés), wizard 6 étapes.
+  - Module Cours : 46 photos JPEG ; menus au survol ; création de projet simplifiée ; fix changement d'onglet navigateur.
+V1.9.9.7 (Jan. 2025) — Actualités & limitations pré-alpha
+  - Système d'actualités de profil (1/jour, défilement horizontal, historique des 5 dernières) ; limitations pré-alpha (Fil 1 publication/semaine, invitations whitelist) ; fix favoris + nettoyage code mort.
+V1.9.9.6 (Jan. 2025) — Migration Supabase
+  - Migration complète Firebase → Supabase (PostgreSQL hébergé en Europe RGPD, auth, 12 tables avec RLS) ; tous les modules migrés (Auth, Projets, Profils, Messages, Contacts, Forum, Feed, Commentaires, Invitations).
+V1.9.9.5 (Jan. 2025) — Forum communautaire & mur social
+  - Forum complet (8 catégories, votes style Reddit, réponses imbriquées) + sous-catégories Retours Site (17 modules) ; mur social Feed (statut/annonce/recherche, likes, commentaires).
+  - Liste blanche pré-alpha ; navigation par menus déroulants (11 thèmes) ; éditeurs Forum/Fil unifiés (formatage, upload d'images).
+V1.9.9.4 (Jan. 2025) — Beat Board & mode Focus
+  - Beat Board dans le Séquencier : fiches déplaçables sur canvas, fil rouge dans l'ordre, zoom/pan, interactions avancées (snap au fil, sélection multiple, scènes hors timeline), synchronisation bidirectionnelle.
+  - Mode Focus (plein écran onglet, barre minimaliste, raccourcis F11/Échap/flèches) ; guide enrichi.
+V1.9.9.3 (Jan. 2025) — Navigation scénario optimisée
+  - Raccourcis clavier directs par type de paragraphe (Ctrl/Alt+1-7), Tab contextuel intelligent (toggles Action↔Personnage, Dialogue↔Didascalie), Shift+Tab inverse ; fix perte de focus en Vue Script ; fermeture propre des parenthèses.
+V1.9.9.2 (Jan. 2025) — Contrats conformes & accès direct
+  - Section « Informations Légales » dans Présentation (SIRET, licence spectacle, URSSAF…) pré-remplie dans tous les contrats ; bouton « 📝 Contrat » sur les fiches comédien/technicien.
+  - Nouveau type Accord Bénévole ❤️ ; CDDU avec mentions légales complètes (DPAE, abattement, juridiction) ; Droit à l'image refondu conforme RGPD (mineurs, supports, clause RGPD) ; Contrat de Prestation auto-entrepreneur enrichi.
+V1.9.9.1 (Jan. 2025) — Rapport de script
+  - Onglet « Rapport » dans Production : fiche de script par plan (auto-remplissage film/décor/date/effet/caméra, extraction des dialogues), gestion des prises (N° Son/Image, notation 1-5 étoiles, marquage or/argent), export PDF professionnel.
+  - Planning : feuilles de service avec acteurs groupés par type (Casting principal, Rôles secondaires, Figurants).
+V1.9.9 (Jan. 2025) — Corrections exports
+  - MoodBoard : export PNG/PDF de toutes les formes SVG (30+) corrigé ; Storyboard PDF complet (nom du plan, mode caméra, directions) ; export ZIP enrichi (dossiers PDF/ et CSV/, README de réimport).
+  - 11 thèmes visuels (Classique, Glassmorphism, Neumorphism, Dark Cinema, Cyberpunk, Nature, Sunset, Océan, Lavande, Minimal, Terminal) avec sélecteur et sauvegarde.
+V1.9.8 (Jan. 2025) — Exports professionnels
+  - Nouveaux exports PDF dédiés (rapport de production, dépouillement, storyboard grille 2×2, équipe par département) ; export ZIP restructuré (PDF/, CSV/, projet_data.json, scenario.fountain, README) ; menu Export enrichi par catégories.
+V1.9.7 (Jan. 2025) — MoodBoard Pro : roue chromatique & formes
+  - Générateur de palettes avec roue chromatique interactive (style Adobe Color, 8 harmonies, 5 couleurs hex) ; bibliothèque 30+ formes géométriques ; rotation des éléments (snap Shift 15°) ; formats de canvas A4-A0 portrait/paysage.
+V1.9.6 (Jan. 2025) — Météo, cartes & feuilles de service Pro
+  - Météo automatique dans les feuilles de service (Open-Meteo, sans clé) ; carte interactive Leaflet/OSM + lien Google Maps ; feuille de service complète (programme, dépouillement par département, transport/covoiturage).
+  - Synchronisation bidirectionnelle du transport ; recalcul automatique à la suppression de scène ; fixes sauvegarde/parsing/generateFDS.
+V1.9.5 (Jan. 2025) — Ressources & liaisons visuelles
+  - Nouvel onglet Ressources (Accessoires/Costumes/Véhicules : fiches avec photo, propriétaire, scènes liées, création depuis le dépouillement, fusion) ; liaison visuelle Dépouillement ↔ Texte (flèche SVG au survol).
+  - Drag & drop des sous-onglets entre catégories ; système Brouillon/Finale des scènes (texte figé + dépouillement accessible une fois finalisé).
+V1.9.3 (Jan. 2025) — Dépenses & contrats simplifiés
+  - Pricing à l'usage (1€/mois propriétaire, paliers collaborateurs, essai avec countdown, widget de facturation) ; Dépenses mode Simple/Avancé (toggle, catégories simplifiées 6 au lieu de 16).
+  - Contrats réorganisés (Droit à l'image par défaut) avec vérification des infos manquantes et rappel par email ; alertes infos manquantes pour les salaires.
+V1.8.5 — Plan de travail & dépouillement intelligent
+  - Voir versions antérieures dans le fichier complet.
+V1.8 à V1.8.4 — Budget hiérarchique & améliorations
+  - Voir versions antérieures dans le fichier complet.
+V1.7 à V1.7.9 — Storyboard, Univers & Planning
+  - Voir versions antérieures dans le fichier complet.
+V1.6 à V1.6.6 — Refonte Univers
+  - Voir versions antérieures dans le fichier complet.
+V1.5 à V1.5.1 — Mise en page
+  - Voir versions antérieures dans le fichier complet.
+V1.4 à V1.4.7 — Mode Présentation & fonctionnalités
+  - Voir versions antérieures dans le fichier complet.
+V1.3 à V1.3.1 — Export PDF & favoris
+  - Voir versions antérieures dans le fichier complet.
+V1.2 à V1.2.1 — Responsive mobile
+  - Voir versions antérieures dans le fichier complet.
+V1.1 — Notifications Toast
+  - Remplacement des alert() par des notifications élégantes (4 types : success, error, warning, info).
+V1.0 (Déc. 2024) — Base solide
+  - Authentification Firebase, profils publics multi-types, gestion de projets avec rôles/permissions, scénario & breakdown (import PDF/FDX), storyboard avec éditeur de dessin, équipe, planning, budget & dépenses, chat/messagerie, Univers, mode clair/sombre.
 -->
 <head>
 <meta charset="utf-8">
