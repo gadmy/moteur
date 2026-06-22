@@ -23,150 +23,6 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 ================================================================================
                          PLAN DE TRAVAIL
 ================================================================================
-========================================================================
-AUDIT v540 — PLAN DE TRAVAIL SÉCURITÉ/QUALITÉ (par ordre d'importance)
-Croisé v529→v540 (fix A1/A2/E1-E5/D6-D7/RLS non re-listés). Statut [ ] à faire.
-Échelle : 🔴 critique · 🟠 élevé · 🟡 moyen · 🟢 faible · ⚪ info
-========================================================================
-
-──────────────────────────── P0 — CRITIQUE ────────────────────────────
-[x] S1 · 🔴 · XSS panneau de signalements → ESCALADE DE PRIVILÈGE  (=L6-01) — FAIT v541
-    Où   : Admin.loadReports, l.57019, 57023-57024, 57011-57012, 57033-57036
-    Pb   : reporter_email/reported_email bruts (57023-57024), reason brut en
-           fallback (57019) ; escName/escEmail n'échappent que ' (57011-12)
-           puis injectés dans onclick="…('${escName}'…)" → un " casse l'attribut.
-           reported_name = nom de profil libre (60899). Un user au nom
-           "><img onerror=…> signalé → l'admin ouvre le panneau → exécution
-           dans SA session (suppression contenu, badges, vol JWT admin).
-           NB : r.details est déjà échappé (57025), pas le reste.
-    Fix  : Utils.escape() sur reporter_email/reported_email/reason ; et
-           SUPPRIMER les nom/email des onclick → passer r.id aux handlers
-           (applyBadgeFromReport(id, badge) résout en interne).
-    Effort : moyen (3 escapes + refonte 4 handlers id-based)
-
-──────────────── P1 — ÉLEVÉ (max d'impact / quick wins) ────────────────
-[x] S2 · 🟠/🟡 · Chokepoints UI : toast + ConfirmModal en innerHTML  (=L2-04 + L5-01)
-    Où   : Utils.toast l.13027 (🟠) · ConfirmModal l.12672-12673 (🟡)
-    Pb   : ${message}/${title} rendus en innerHTML sans escape. 16 toasts +
-           18 confirms interpolent un nom/titre user, plusieurs inter-user
-           (claim.name 36030, person.name 23594/38926/55663, profile.name 59560…).
-    Fix  : 1 correction par chokepoint — Utils.escape(message)/(title) OU
-           pose via .toast-message/.confirm-modal-message .textContent.
-           → ~34 call-sites neutralisés sans toucher les appelants.
-    Effort : TRÈS FAIBLE (meilleur ratio impact/effort de tout l'audit)
-
-[x] S3 · 🟠 · Corps de contrat = HTML brut non sanitisé  (=L4-01) — FAIT v542
-    Où   : doc.innerHTML = ct.body (l.49916) + tempDiv export PDF (l.50115)
-    Pb   : Contracts n'a AUCUN sanitizeRich. body (HTML libre, contenteditable)
-           stocké dans state.data.contracts (49398, SYNCHRONISÉ aux membres).
-           En projet partagé, un collaborateur stocke <img onerror=…> → à
-           l'ouverture/export par un autre membre → exécution.
-    Fix  : ct.body = Utils.sanitizeRich(...) au rendu (49916) et idéalement à
-           la sauvegarde (50023). L'allowlist préserve la mise en forme.
-    Effort : faible (1 ligne au rendu)
-
-[x] S4 · 🟠 · createFanCard : src photo/image brut (carte Univers VIVANTE)  (=L2-01) — FAIT v542
-    Où   : l.58184 (item.image), 58202 (item.photo)  [+ createCard 58248/58285 MORT]
-    Pb   : alt échappé mais src brut. photo/image écrits par tout user
-           (#profile-photo hidden, 36809 ; project-image-input 52358), rendus
-           bruts chez tous les visiteurs de l'Univers. La modale, elle, fait
-           safeMediaUrl (58776) → c'est le jumeau carte oublié (exclusion E3).
-    Fix  : src="${Utils.safeMediaUrl(item.photo)}" (et item.image), ×2 ;
-           appliquer aussi à createCard (mort) par cohérence.
-    Effort : faible
-
-[x] S5 · 🟠 · Contacts renderDirectory + favoris : src + alt nom bruts  (=L2-02) — FAIT v542
-    Où   : l.39326 (renderDirectory) · 39580 (favoris)
-    Pb   : <img src="${person.photo}" alt="${person.name}"> brut. results =
-           profils is_public d'AUTRES users (39254). E1 a échappé le texte de
-           la carte (nom/email/rôle) mais a LAISSÉ la balise <img>. L'alt=nom
-           (texte libre) est le vecteur le plus simple.
-    Fix  : src="${Utils.safeMediaUrl(person.photo)}" alt="${Utils.escape(person.name)}"
-           aux deux endroits.
-    Effort : faible
-
-[x] S6 · 🟠 · getEmbedUrl branche YouTube : ID non échappé → breakout iframe  (=L2-03) — FAIT v542
-    Où   : ProfileRenderer.getEmbedUrl l.13958-13968
-    Pb   : la branche YouTube retourne …/embed/${ytMatch[1]} où ([^&\s]+)
-           autorise " < > . Démoréel d'un autre user (modale Univers 59041,
-           annuaire 38877) → <iframe src="${…}"> → breakout. (Vimeo \d+ et la
-           branche https→escape sont OK.)
-    Fix  : restreindre l'ID à ([A-Za-z0-9_-]{6,}), ou Utils.escape la sortie.
-    Effort : faible
-
-─────────────────────────── P2 — MOYEN ────────────────────────────────
-[x] S7 · 🟡 · BroadcastChannel recréé avec mauvais nom + sans onmessage  (=L1-01) — FAIT v543
-    Où   : création l.15002 ('moteur_session') vs recréation l.15079
-           ('moteur_session_'+projectId, sans .onmessage)
-    Pb   : après invalidation du channel, la sync inter-onglets (SESSION_CLAIMED,
-           LOGOUT, DATA_UPDATED, SYNC_STATE) cesse silencieusement.
-    Fix  : recréer avec 'moteur_session' + réattacher
-           channel.onmessage = SessionManager.handleChannelMessage.
-    Effort : trivial (bug fonctionnel, pas sécu)
-
-[x] S8 · 🟡 · Éditeurs en projet partagé : champs texte bruts dans value=  (=L3-02) — FAIT v543
-    Où   : éditeur jour FDS l.43196-43279 + notes convoc 43097/43136/43171
-           (pattern aussi en 21278-21955, 52576-52719…)
-    Pb   : value="${shootDay.contactName/locationAddress/name…}" sans escape.
-           En projet partagé, un collaborateur injecte → breakout à l'ouverture
-           de l'éditeur par un autre membre. (L'affichage de ces données, lui,
-           est échappé — c'est le formulaire d'édition qui ne l'est pas.)
-    Fix  : Utils.escape() sur ces value (round-trip OK, l'input re-décode).
-           Cadrer d'abord sur l'éditeur FDS, puis étendre.
-    Effort : moyen (beaucoup de sites)
-
-[x] S9 · 🟠* · DÉCISION — Callsheet « publique » non délivrée aux destinataires  (=L3-01) — FAIT v544
-    Où   : publishCallSheet l.41194 + loadPublicCallSheet l.41266
-    Pb   : la feuille était stockée dans state.data (ligne projet, RLS) et
-           relue depuis state.data → un convoqué externe (anon, hors projet)
-           voyait toujours « introuvable », alors que le mail promet le contraire.
-    Fix  : Option B retenue. SQL (Lot 1) : table public_callsheets, RLS tout
-           bloqué + INSERT authenticated (created_by = auth.email()) ; lecture
-           publique via RPC SECURITY DEFINER get_public_callsheet(p_token) ouverte
-           à anon, NON énumérable. Fichier (Lot 2) : publishCallSheet → insert
-           dans la table ; token Math.random → crypto.randomUUID() ;
-           loadPublicCallSheet → supabase.rpc('get_public_callsheet').
-           Testé : lien ouvert en navigation privée (déconnecté) affiche la feuille.
-    Effort : chantier (SQL + RLS + RPC + 3 patchs fichier)
-
-[x] S10 · 🟡 · VÉRIF SUPABASE (pas un patch fichier) — RLS modération  (=L6-02) — FAIT v545
-    Constat (pg_policies) : frontière admin OK — forum_threads_admin_delete +
-           forum_replies_admin_delete autorisent l'admin (lower(jwt email) =
-           contact@moteur.studio) à supprimer les posts d'AUTRUI, sujets ET
-           réponses ; reports a SELECT + UPDATE + DELETE admin. (a) OK ; (b)
-           aucun DELETE en using=true → pas trop large. INSERT reports borné
-           (jwt email = reporter_email) → pas d'usurpation du signaleur.
-           Deux résidus d'hygiène extraits → S19, S20.
-    PATCH 2 — journal : ajouter S19 / S20
-
-─────────────────── P3 — FAIBLE / HYGIÈNE (quand tu veux) ───────────────
-[x] S11 · 🟢 · Double-init dashboard au boot (L1-02) — onAuthStateChange + getSession — FAIT v545
-          appellent tous deux showDashboard (15284/15322). Lectures redondantes ;
-          inits critiques idempotentes. Fix : flag Auth._dashboardShown.
-[x] S12 · 🟢 · electLeader setInterval jamais nettoyé (L1-03, l.15097) + élection
-          localStorage non atomique. Fix : handle leaderInterval + clearInterval dans cleanup. FAIT v546
-[x] S13 · 🟢 · ProfileGallery éditeur src brut (L2-05) — self-XSS, URL d'upload
-          contrôlée. Fix : safeMediaUrl sur les 2 src (updateGallery + updateCrewGallery). FAIT v547
-[x] S14 · 🟢 · Deux chemins de convocation dupliqués/divergents (L3-03) — l'un a le
-          lien public, l'autre non. Fix : sendFDS délègue à sendCallSheet (lien public garanti), ~100 lignes mortes purgées. FAIT v547
-[x] S15 · 🟢 · MoodBoard preview iframe src brut (L4-02) — résiduel E2. Fix : allowlist
-          schéma strict PDF (data:application/pdf|https) + escape jumeau href. PAS safeMediaUrl (casserait data:pdf). FAIT v547
-[x] S16 · 🟢 · IDs dupliqués #report-reason/#report-details (L6-03) — bénin si une seule
-          modale affichée. Fix : id préfixés par contexte (report-profile-* / report-project-*). FAIT v548
-[x] S17 · ⚪ · Instrumentation diag « gel de session » retirée (stabilité confirmée) :
-          sbDiag, [SB auth], Ctrl+Alt+D, fetch instrumenté. Verrou auth conservé (+ son [LOCK]). FAIT v548
-[x] S18 · ⚪ · Cosmétique : actu profil dédupliquée ; tous U+2550 retirés ; code mort
-          sendCallSheet purgé (content/subject/scenesText/appUrl, ~46 lignes). FAIT v548
-[x] S19 · 🟢 · VÉRIF SUPABASE (FAIT v545) — doublons de policy DELETE auteur sur forum. Les
-          policies « Threads/Replies deletable by author » (stricte, sensible
-          casse) sont entièrement couvertes par *_author_delete (lower/lower).
-          Poids mort RLS, inoffensif. Fix : DROP des 2 policies strictes.
-[x] S20 · 🟢 · VÉRIF SUPABASE (FAIT v545) — quota signalements INERTE (pas juste
-          contournable). reports SELECT = admin-only ; le compteur client revenait
-          0 pour un user normal (RLS masque tout) → quota jamais déclenché. Option C
-          retenue : RPC SECURITY DEFINER count_my_reports() (filtre auth.email() en
-          dur, fenêtre 7 j, renvoie un entier) ; reportPost appelle la RPC au lieu
-          du SELECT, fail-open conservé.
 
 ──────────────── HORS AUDIT — TODO BADGES DE MODÉRATION (reporté) ────────────────
 [ ] T-BADGE-1 · Écriture badge-personne CASSÉE : setProfileBadge fait .eq('email',…)
@@ -200,6 +56,10 @@ les CONTRATS, et 2 chokepoints UI (toast, ConfirmModal). S2→S6 ferment l'essen
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v549 (22 Juin 2026) — Profils multi-casquettes découplés + feuille de service unifiée (PDF)
+  - PROFILS / MULTI-CASQUETTES — un compte purement association ou entreprise ne pouvait pas être enregistré : la validation réclamait des champs « personne physique » communs (ville, téléphone) qui n'étaient même pas affichés sur ces onglets, héritage d'un modèle de profil historiquement centré sur une personne. Découplage par casquette : comédien et technicien conservent nom complet, sexe, téléphone et ville ; association et entreprise se valident désormais sur leurs seuls champs dédiés (nom, type, mission ou description), sans aucun champ personne-physique requis. Le seul lien entre les quatre faces d'un compte reste l'email (owner_email). Le drapeau profileComplete est recalculé par casquette pour que les fiches morales apparaissent dans les recherches.
+  - FEUILLE DE SERVICE / PDF UNIQUE — il existait trois rendus divergents de la feuille de service (page web publique reçue par mail, PDF du bouton « Imprimer », PDF de la section Planning du Dossier de Production). Unification sur le seul rendu du Dossier de Production (exportPlanningPDF) : le bouton de la feuille génère ce PDF, et à l'envoi le PDF du jour est produit côté client, déposé dans un nouveau bucket public callsheets (nom = UUID non devinable) puis le mail pointe directement vers ce PDF, ouvrable par un destinataire déconnecté. Suppression de printCallSheet, de toute la page web publique (loadPublicCallSheet, sa modale, le routage ?callsheet=) et de l'ancien instantané. SQL associé : création du bucket callsheets (public, PDF, policy INSERT réservée aux éditeurs du projet) et suppression de la table public_callsheets et de la RPC get_public_callsheet (dispositif S9 remplacé).
+v548 (22 Juin 2026) — Sécurité / hygiène (audit v540, chantier S, fin)
 v548 (22 Juin 2026) — Sécurité / hygiène (audit v540, chantier S, fin)
   - HYGIÈNE / SIGNALEMENTS (S16) — les modales de signalement de profil (reportProfile) et de projet (reportProject) réutilisaient les mêmes id DOM (report-reason, report-details), créant des doublons d'identifiants dans la page. Bénin tant qu'une seule modale est affichée à la fois, mais incorrect ; les identifiants sont désormais préfixés par contexte (report-profile-* et report-project-*) pour le select, le textarea et les lectures getElementById. Les id forum-report-* étaient déjà distincts. Aucun changement fonctionnel.
   - DETTE / DIAGNOSTIC (S17) — retrait de l'instrumentation temporaire « gel de session », la stabilité étant confirmée : outil console sbDiag(), journal automatique [SB auth] sur onAuthStateChange, raccourci Ctrl+Alt+D, et fetch instrumenté (compteurs __sbReqSeq / __sbInflight, journaux [SB] PENDING/LENT/ECHEC) qui l'alimentait. Le client Supabase retombe sur son fetch natif. Le verrou d'authentification en mémoire (chaîne de promesses, garde anti-gel) est intégralement conservé — seule subsiste son instrumentation légère (tableau __sbLock + avertissement [LOCK]), gardée volontairement comme filet de diagnostic.
@@ -11811,25 +11671,6 @@ body.presentation-mode .presentation-bar {
 </div>
 
 <!-- Modal Feuille de Service Publique -->
-<div id="public-callsheet-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg); z-index:99999; overflow-y:auto;">
-    <div style="max-width:800px; margin:0 auto; padding:20px;">
-        <div class="section-header-20">
-            <h1 class="heading-primary">🎬 Feuille de Service</h1>
-            <div class="flex-gap10">
-                <button onclick="window.print()" class="btn btn--primary">🖨️ Imprimer / PDF</button>
-                <button onclick="document.getElementById('public-callsheet-modal').style.display='none'; window.history.pushState({}, '', window.location.pathname);" class="btn btn--secondary">✕ Fermer</button>
-            </div>
-        </div>
-        <div id="public-callsheet-content" style="background:white; color:#333; padding:30px; border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,0.1);">
-            <p>Chargement...</p>
-        </div>
-        <div style="text-align:center; margin-top:30px; padding:20px; color:var(--text-sec);">
-            <p>Propulsé par <strong>Moteur</strong> - Gestion de production audiovisuelle</p>
-            <a href="https://moteur.studio" class="text-primary">moteur.studio</a>
-        </div>
-    </div>
-</div>
-
 <div id="shot-edit-modal" class="shot-edit-modal">
     <div class="shot-edit-container">
         <div class="shot-edit-header">
@@ -41090,195 +40931,19 @@ callsheetHTML += `<tr class="bg-base"><td colspan="5" class="th-primary">🎭 ${
     },
     
     publishCallSheet: async (shootDay) => {
-        // Générer un token unique pour cette feuille
+        // Génère le PDF du jour (rendu identique au Dossier de Production) et l'uploade
         const token = (crypto.randomUUID ? crypto.randomUUID() : 'fds_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11));
-        
-        const projectName = state.data.title || 'Projet';
-        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        
-        // Construire les données des scènes
-        const scenesData = (shootDay.scenes || []).map(ref => {
-            const scene = state.data.scenes.find(s => s.id === ref.sceneId);
-            return scene ? {
-                startTime: ref.startTime || '--:--',
-                title: scene.title || 'Scène sans titre',
-                perso: scene.perso || '',
-                decor: scene.decor || '',
-                time: scene.time || ''
-            } : null;
-        }).filter(s => s);
-        
-        // Construire les données des convoqués
-        const callSheetData = (shootDay.callSheet || []).map(call => {
-            let person = null;
-            if(call.type === 'actor') {
-                person = state.data.actors.find(a => a.id === call.personId);
-            } else if(call.type === 'crew') {
-                person = state.data.crew.find(c => c.id === call.personId);
-            }
-            return person ? {
-                name: person.name || 'Inconnu',
-                role: person.role || person.department || (call.type === 'actor' ? 'Comédien·ne' : 'Technicien·ne'),
-                callTime: call.callTime || shootDay.crewCall || '',
-                notes: call.notes || ''
-            } : null;
-        }).filter(c => c);
-        
-        // Données publiques de la feuille de service
-        const publicData = {
-            token: token,
-            projectName: projectName,
-            dayNumber: shootDay.dayNumber,
-            date: shootDay.date,
-            dateFormatted: dateFormatted,
-            location: shootDay.location || '',
-            locationAddress: shootDay.locationAddress || '',
-            contactName: shootDay.contactName || '',
-            contactPhone: shootDay.contactPhone || '',
-            locationNotes: shootDay.locationNotes || '',
-            crewCall: shootDay.crewCall || '',
-            readyToShoot: shootDay.readyToShoot || '',
-            lunchStart: shootDay.lunchStart || '',
-            lunchEnd: shootDay.lunchEnd || '',
-            estimatedWrap: shootDay.estimatedWrap || '',
-            notes: shootDay.notes || '',
-            customWeather: shootDay.customWeather || '',
-            scenes: scenesData,
-            callSheet: callSheetData,
-            createdAt: Date.now(),
-            createdBy: state.currentUser?.email || ''
-        };
-        
-        // Sauvegarder la feuille publique dans la table dédiée public_callsheets
         try {
-            const { error } = await supabase.from('public_callsheets').insert({
-                token: token,
-                project_id: state.currentProjectId || null,
-                data: publicData,
-                created_by: state.currentUser?.email || ''
-            });
-            if(error) throw error;
-            return token;
+            const blob = await PlanningExport.exportPlanningPDF({ dayIds: [shootDay.id], includeCover: false, returnBlob: true });
+            if(!blob) { Utils.toast('Erreur génération du PDF', 'error'); return null; }
+            const filePath = `${state.currentProjectId || 'projet'}/${token}.pdf`;
+            const { error: upErr } = await supabase.storage.from('callsheets').upload(filePath, blob, { contentType: 'application/pdf', upsert: false });
+            if(upErr) { console.error('Erreur upload feuille:', upErr); Utils.toast('Erreur lors de l\'envoi du PDF', 'error'); return null; }
+            const { data: urlData } = supabase.storage.from('callsheets').getPublicUrl(filePath);
+            return urlData?.publicUrl || null;
         } catch(e) {
-            console.error('❌ Erreur publication feuille:', e);
+            console.error('Erreur publication feuille:', e);
             return null;
-        }
-    },
-    
-    loadPublicCallSheet: async (token) => {
-        try {
-            // Lire la feuille publique depuis le serveur (table dédiée, accès par token)
-            const { data, error } = await supabase.rpc('get_public_callsheet', { p_token: token });
-            if(error) throw error;
-            if(!data) {
-                document.getElementById('public-callsheet-content').innerHTML = '<p style="text-align:center; color:#c00;">❌ Feuille de service introuvable ou expirée.</p>';
-                return;
-            }
-            
-            // Générer le HTML de la feuille
-            let html = `
-                <div style="text-align:center; border-bottom:3px solid #333; padding-bottom:20px; margin-bottom:20px;">
-                    <h2 style="margin:0; font-size:1.8rem;">${Utils.escape(data.projectName)}</h2>
-                    <p style="font-size:1.3rem; margin:10px 0;">FEUILLE DE SERVICE - JOUR ${data.dayNumber}</p>
-                    <p style="font-size:1.1rem; color:#666;">${Utils.escape(data.dateFormatted)}</p>
-                </div>
-                
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
-                    <div style="background:#f5f5f5; padding:15px; border-radius:8px;">
-                        <h3 style="margin:0 0 10px; color:#333;">📍 Lieu</h3>
-                        <p style="margin:0; font-size:1.1rem; font-weight:bold;">${Utils.escape(data.location) || 'À confirmer'}</p>
-                        ${data.locationAddress ? `<p style="margin:5px 0 0; color:#666;">${Utils.escape(data.locationAddress)}</p>` : ''}
-                        ${data.contactName || data.contactPhone ? `<p style="margin:10px 0 0; padding-top:10px; border-top:1px solid #ddd;"><strong>👤 Contact sur place:</strong> ${Utils.escape(data.contactName) || ''} ${data.contactPhone ? '📞 ' + Utils.escape(data.contactPhone) : ''}</p>` : ''}
-                        ${data.locationNotes ? `<p style="margin:5px 0 0; color:#666; font-style:italic;">📝 ${Utils.escape(data.locationNotes)}</p>` : ''}
-                    </div>
-                    <div style="background:#f5f5f5; padding:15px; border-radius:8px;">
-                        <h3 style="margin:0 0 10px; color:#333;">⏰ Horaires</h3>
-                        <p class="m-0"><strong>Convocation équipe:</strong> ${Utils.escape(data.crewCall) || 'À confirmer'}</p>
-                        <p style="margin:5px 0;"><strong>Prêt à tourner:</strong> ${Utils.escape(data.readyToShoot) || 'À confirmer'}</p>
-                        <p style="margin:5px 0;"><strong>Repas:</strong> ${Utils.escape(data.lunchStart) || '?'} - ${Utils.escape(data.lunchEnd) || '?'}</p>
-<p style="margin:5px 0 0;"><strong>Fin estimée:</strong> ${Utils.escape(data.estimatedWrap) || 'À confirmer'}</p>
-                    </div>
-                </div>`;
-            
-            // Scènes
-            if(data.scenes && data.scenes.length > 0) {
-                html += `
-                    <div class="mb-20">
-                        <h3 style="background:#333; color:white; padding:10px; margin:0;">🎬 Scènes Prévues</h3>
-                        <table style="width:100%; border-collapse:collapse;">
-                            <thead>
-                                <tr style="background:#eee;">
-                                    <th class="td-bordered">Heure</th>
-                                    <th class="td-bordered">Scène</th>
-                                    <th class="td-bordered">Personnages</th>
-                                    <th class="td-bordered">Décor</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${data.scenes.map(s => `
-                                    <tr>
-                                        <td class="td-bordered-simple">${Utils.escape(s.startTime)}</td>
-                                        <td class="td-bordered-simple">${Utils.escape(s.title)}</td>
-                                        <td class="td-bordered-simple">${Utils.escape(s.perso)}</td>
-                                        <td class="td-bordered-simple">${Utils.escape(s.decor)}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>`;
-            }
-            
-            // Équipe convoquée
-            if(data.callSheet && data.callSheet.length > 0) {
-                html += `
-                    <div class="mb-20">
-                        <h3 style="background:#333; color:white; padding:10px; margin:0;">👥 Équipe Convoquée</h3>
-                        <table style="width:100%; border-collapse:collapse;">
-                            <thead>
-                                <tr style="background:#eee;">
-                                    <th class="td-bordered">Nom</th>
-                                    <th class="td-bordered">Fonction</th>
-                                    <th class="td-bordered">Convocation</th>
-                                    <th class="td-bordered">Notes</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${data.callSheet.map(c => `
-                                    <tr>
-                                        <td style="padding:10px; border:1px solid #ddd; font-weight:bold;">${Utils.escape(c.name)}</td>
-                                        <td class="td-bordered-simple">${Utils.escape(c.role)}</td>
-                                        <td class="td-bordered-simple">${Utils.escape(c.callTime)}</td>
-                                        <td class="td-bordered-simple">${Utils.escape(c.notes)}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>`;
-            }
-            
-            // Notes
-            if(data.notes) {
-                html += `
-                    <div style="background:#fff3cd; padding:15px; border-radius:8px; margin-bottom:20px;">
-                        <h3 style="margin:0 0 10px; color:#856404;">📋 Notes</h3>
-                        <p style="margin:0; white-space:pre-wrap;">${Utils.escape(data.notes)}</p>
-                    </div>`;
-            }
-            
-            if(data.customWeather) {
-                html += `
-                    <div style="background:#d1ecf1; padding:15px; border-radius:8px;">
-                        <h3 style="margin:0 0 10px; color:#0c5460;">🌤️ Météo / Conditions</h3>
-                        <p style="margin:0; white-space:pre-wrap;">${Utils.escape(data.customWeather)}</p>
-                    </div>`;
-            }
-            
-            document.getElementById('public-callsheet-content').innerHTML = html;
-            document.getElementById('public-callsheet-modal').style.display = 'block';
-            
-        } catch(e) {
-            console.error('Erreur chargement feuille publique:', e);
-            document.getElementById('public-callsheet-content').innerHTML = '<p style="text-align:center; color:#c00;">❌ Erreur lors du chargement.</p>';
         }
     },
     
@@ -41327,13 +40992,11 @@ callsheetHTML += `<tr class="bg-base"><td colspan="5" class="th-primary">🎭 ${
         
         // Publier la feuille de service pour générer le lien
         Utils.toast('Publication de la feuille de service...', 'info');
-        const token = await PlanningCallSheets.publishCallSheet(shootDay);
-        if(!token) {
+        const publicLink = await PlanningCallSheets.publishCallSheet(shootDay);
+        if(!publicLink) {
             Utils.toast('Erreur lors de la publication', 'error');
             return;
         }
-        
-        const publicLink = window.location.origin + window.location.pathname + '?callsheet=' + token;
         
         let sent = 0;
         let errors = 0;
@@ -41364,173 +41027,6 @@ callsheetHTML += `<tr class="bg-base"><td colspan="5" class="th-primary">🎭 ${
         if(errors > 0) {
             Utils.toast(`⚠️ ${errors} erreur(s) d'envoi`, 'warning');
         }
-    },
-    
-    printCallSheet: (dayId) => {
-        const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
-    if(!shootDay) return;
-        
-        const dateFormatted = new Date(shootDay.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-        const projectTitle = document.getElementById('projectTitle')?.value || 'Projet';
-        
-        let printContent = `
-            <html>
-            <head>
-                <title>Feuille de Service - Jour ${shootDay.dayNumber}</title>
-                <style>
-                    body { font-family: Arial, sans-serif; padding: 20px; }
-                    h1 { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; }
-                    h2 { color: #333; margin-top: 25px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
-                    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
-                    .info-item { padding: 8px; background: #f5f5f5; border-radius: 4px; }
-                    .info-label { font-weight: bold; color: #666; }
-                    table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-                    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-                    th { background: #f0f0f0; }
-                    .scene-item { padding: 10px; margin: 5px 0; background: #f9f9f9; border-left: 3px solid #2b6ef6; }
-                </style>
-            </head>
-            <body>
-                <h1>📋 FEUILLE DE SERVICE</h1>
-                <div style="text-align:center; margin-bottom:20px;">
-                    <strong style="font-size:1.2rem;">${Utils.escape(projectTitle)}</strong><br>
-                    <span>Jour ${shootDay.dayNumber} - ${dateFormatted}</span>
-                </div>
-                
-                <h2>📍 Lieu de Tournage</h2>
-                <div class="info-grid">
-                    <div class="info-item"><span class="info-label">Lieu:</span> ${Utils.escape(shootDay.location || 'Non défini')}</div>
-                    <div class="info-item"><span class="info-label">Adresse:</span> ${Utils.escape(shootDay.locationAddress || 'Non définie')}</div>
-                </div>
-                
-                <h2>⏰ Horaires</h2>
-                <div class="info-grid">
-                    <div class="info-item"><span class="info-label">Convocation équipe:</span> ${Utils.escape(shootDay.crewCall || '--:--')}</div>
-                    <div class="info-item"><span class="info-label">Prêt à tourner:</span> ${Utils.escape(shootDay.readyToShoot || '--:--')}</div>
-                    <div class="info-item"><span class="info-label">Pause déjeuner:</span> ${Utils.escape(shootDay.lunchStart || '--:--')} - ${Utils.escape(shootDay.lunchEnd || '--:--')}</div>
-                    <div class="info-item"><span class="info-label">Fin estimée:</span> ${Utils.escape(shootDay.estimatedWrap || '--:--')}</div>
-                </div>
-                
-                <h2>🎬 Scènes à Tourner</h2>`;
-        
-        if(shootDay.scenes && shootDay.scenes.length > 0) {
-            shootDay.scenes.forEach(sceneRef => {
-                const scene = state.data.scenes.find(s => s.id === sceneRef.sceneId);
-                if(scene) {
-                    printContent += `<div class="scene-item">
-                        <strong>${Utils.escape(scene.title)}</strong><br>
-                        <span class="text-muted">Personnages: ${Utils.escape(scene.perso || 'N/A')}</span><br>
-                        <span class="text-muted">Heure prévue: ${Utils.escape(sceneRef.startTime || 'Non définie')}</span>
-                    </div>`;
-                }
-            });
-        } else {
-            printContent += '<p style="color:#999;">Aucune scène planifiée</p>';
-        }
-        
-        printContent += '<h2>👥 Convocations</h2>';
-        
-        if(shootDay.callSheet && shootDay.callSheet.length > 0) {
-            printContent += `<table>
-                <thead><tr><th>Nom</th><th>Fonction</th><th>Convocation</th><th>Notes</th></tr></thead>
-                <tbody>`;
-            
-            shootDay.callSheet.forEach(call => {
-                let person = null;
-                let role = '';
-                if(call.type === 'actor') {
-                    person = state.data.actors.find(a => a.id === call.personId);
-                    role = 'Comédien(ne)';
-                } else {
-                    person = state.data.crew.find(c => c.id === call.personId);
-                    role = person?.role || 'Technicien';
-                }
-                if(person) {
-                    printContent += `<tr>
-                        <td>${Utils.escape(person.name)}</td>
-                        <td>${Utils.escape(role)}</td>
-                        <td>${Utils.escape(call.callTime || '--:--')}</td>
-                        <td>${Utils.escape(call.notes || '')}</td>
-                    </tr>`;
-                }
-            });
-            
-            printContent += '</tbody></table>';
-        } else {
-            printContent += '<p style="color:#999;">Aucune convocation</p>';
-        }
-        
-        // Section "À prévoir" basée sur le dépouillement
-        const scenesIds = (shootDay.scenes || []).map(ref => ref.sceneId);
-        if(scenesIds.length > 0 && shootDay.callSheet && shootDay.callSheet.length > 0) {
-            let breakdownByPerson = [];
-            
-            shootDay.callSheet.forEach(call => {
-                if(call.type !== 'crew') return;
-                
-                const member = state.data.crew.find(c => c.id === call.personId);
-                if(!member || !member.group_id) return;
-                
-                const items = Planning.getBreakdownItemsForPerson(member, scenesIds);
-                if(items.length > 0) {
-                    const groupInfo = state.data.groups.find(g => g.id === member.group_id);
-                    breakdownByPerson.push({
-                        name: member.name,
-                        department: groupInfo ? groupInfo.name : 'Non classé',
-                        items: items
-                    });
-                }
-            });
-            
-            if(breakdownByPerson.length > 0) {
-    printContent += '<h2>📦 À Prévoir par Département</h2>';
-                
-                // Regrouper par département
-                const byDepartment = {};
-                breakdownByPerson.forEach(person => {
-                    if(!byDepartment[person.department]) {
-                        byDepartment[person.department] = { names: [], items: [] };
-                    }
-                    byDepartment[person.department].names.push(person.name);
-                    person.items.forEach(item => {
-                        // Éviter les doublons
-                        const exists = byDepartment[person.department].items.some(
-                            i => i.item === item.item && i.sceneNum === item.sceneNum
-                        );
-                        if(!exists) {
-                            byDepartment[person.department].items.push(item);
-                        }
-                    });
-                });
-                
-                // Afficher par département
-                Object.keys(byDepartment).forEach(dept => {
-                    const data = byDepartment[dept];
-                    const namesStr = data.names.join(', ');
-                    
-                    printContent += `<div style="margin-bottom: 15px; padding: 10px; background: #f9f9f9; border-radius: 6px; border-left: 3px solid #ff9800;">
-                        <strong>${Utils.escape(dept)}</strong> <span class="text-muted">(${Utils.escape(namesStr)})</span>
-                        <ul style="margin: 10px 0 0 20px; padding: 0;">`;
-                    
-                    data.items.forEach(item => {
-                        printContent += `<li>${Utils.escape(item.item)} <span class="text-muted">(Sc.${Utils.escape(String(item.sceneNum))})</span></li>`;
-                    });
-                    
-                    printContent += '</ul></div>';
-                });
-            }
-        }
-        
-        if(shootDay.notes) {
-            printContent += `<h2>📝 Notes</h2><p>${Utils.escape(shootDay.notes)}</p>`;
-        }
-        
-        printContent += '</body></html>';
-        
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(printContent);
-        printWindow.document.close();
-        printWindow.print();
     },
   };
 
@@ -45060,7 +44556,7 @@ closeModal: () => {
                     </div>
                     <div style="display:flex; gap:10px; flex-wrap:wrap;">
                         <button onclick="app.Planning.editShootDay('${day.id}')" style="padding:8px 15px; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer;">✏️ Modifier</button>
-                        <button onclick="app.Planning.printCallSheet('${day.id}')" style="padding:8px 15px; background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; cursor:pointer;">🖨️ Imprimer</button>
+                        <button onclick="app.Planning.exportPlanningPDF({ dayIds: ['${day.id}'], includeCover: false })" style="padding:8px 15px; background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; cursor:pointer;">📄 PDF</button>
                         <button onclick="app.Planning.sendCallSheet('${day.id}')" style="padding:8px 15px; background:var(--warning, #FF9800); color:white; border:none; border-radius:6px; cursor:pointer;">📧 Envoyer</button>
                         <button onclick="app.Planning.validateCallSheet('${day.id}')" style="padding:8px 15px; background:${day.validated ? 'var(--text-sec)' : 'var(--success)'}; color:white; border:none; border-radius:6px; cursor:pointer;">${day.validated ? '🔓 Dé-valider' : '✅ Valider'}</button>
                         <button onclick="app.Planning.deleteShootDayFromList('${day.id}')" style="padding:8px 15px; background:var(--danger); color:white; border:none; border-radius:6px; cursor:pointer;">🗑️ Supprimer</button>
@@ -45079,9 +44575,7 @@ closeModal: () => {
     closeCallSheets: (...a) => PlanningCallSheets.closeCallSheets(...a),
     validateCallSheet: (...a) => PlanningCallSheets.validateCallSheet(...a),
     publishCallSheet: (...a) => PlanningCallSheets.publishCallSheet(...a),
-    loadPublicCallSheet: (...a) => PlanningCallSheets.loadPublicCallSheet(...a),
     sendCallSheet: (...a) => PlanningCallSheets.sendCallSheet(...a),
-    printCallSheet: (...a) => PlanningCallSheets.printCallSheet(...a),
 	
     // ========== FEUILLE DE SERVICE (FDS) — délégué à PlanningFDS ==========
     get currentFDSDay() { return PlanningFDS.currentFDSDay; },
@@ -62589,18 +62083,6 @@ ${window.location.origin}${window.location.pathname}
 
   Icons.init();
   setTimeout(Auth.init, 50);
-
-  // ===== DÉTECTION FEUILLE DE SERVICE PUBLIQUE =====
-  (function checkPublicCallSheet() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const callsheetToken = urlParams.get('callsheet');
-      if(callsheetToken) {
-          // Attendre que Firebase soit initialisé
-          setTimeout(() => {
-              Planning.loadPublicCallSheet(callsheetToken);
-          }, 500);
-      }
-  })();
 
   // ===== RACCOURCIS CLAVIER =====
   document.addEventListener('keydown', (e) => {
