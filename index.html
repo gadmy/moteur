@@ -30,15 +30,18 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 ──────────────────────────── À FAIRE — ROADMAP ────────────────────────────
 💳 PRICING - À FINALISER
   • Intégration Stripe Checkout (paiement réel) ❌
-  • Webhooks Stripe → Firebase (confirmation paiement) ❌
+  • Webhooks Stripe → Supabase (confirmation paiement) ❌
   • Cloud Functions (cron jobs essais/suppressions) ❌
   • Emails automatiques (rappels, expirations) ❌
-  • Sécurité Firebase Rules (bloquer si impayé) ❌
+  • Sécurité RLS Supabase (bloquer si impayé) ❌
   • Portail client Stripe (gestion abonnement) ❌
 
 📋 DOCUMENTS NON IMPLÉMENTÉS
-  C) Liste des Véhicules nécessaires
-     - Récapitulatif par jour de tournage ❌
+  C) MODULE TRANSPORT (véhicules + covoiturage) — en cours
+     ✅ Permis de conduire (profil + comédiens + techniciens) : moto/VL/PL/SPL/TC
+     ✅ Usage véhicule perso (gratuit / dédommagement / payé / privé)
+     ✅ Parc véhicules de production (state.data.vehicles, onglet Équipe)
+     ❌ Lot 3 : transport FDS (amène V.perso / V.régie, filtrage possession+permis, conducteur PL/SPL, capacité places conducteur inclus)
   D) Feuille de Continuité / Rapport Scripte
      - Raccords, chronométrage, notes ✅ (V1.9.9.1)
   E) Listing des Figurants par jour
@@ -48,9 +51,6 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 🔗 LIAISONS MANQUANTES
   1) Dépenses ↔ Catégorie dépouillement
   2) Scène → Version/Révision (pages colorées)
-
-📊 STATISTIQUES MANQUANTES
-  • Coût moyen par jour ❌
 
 📤 EXPORTS
   • Rapport prod PDF ✅ (V1.9.8)
@@ -74,6 +74,18 @@ les CONTRATS, et 2 chokepoints UI (toast, ConfirmModal). S2→S6 ferment l'essen
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v553 (24 Juin 2026) — Module Transport (socle) + stat coût/jour + nettoyage vestiges Firebase
+  - STAT COÛT/JOUR — la grille de synthèse des dépenses (mode avancé) affiche une carte « Coût moyen / jour » : montant dépensé réel divisé par le nombre de jours de tournage (state.data.shootingDays), avec rappel du nombre de jours ; affiche « — » tant qu'aucun jour n'est saisi. Calcul ajouté à Expenses.updateSummary, aucune donnée nouvelle.
+  - NETTOYAGE FIREBASE → SUPABASE — le backend ayant migré de longue date vers Supabase, les mentions « Firebase » résiduelles ont été corrigées : deux lignes du roadmap interne (bloc Pricing, « Firebase Rules » devenant « RLS Supabase ») et six commentaires de code. Les entrées d'historique décrivant la migration restent intactes (faits passés).
+  - TRANSPORT / PERMIS DE CONDUIRE — nouveau champ multi-valeurs licenses (moto A, VL B, PL C, SPL CE, TC D) ajouté au profil personnel (section Véhicule) et aux fiches comédiens/techniciens, avec récupération automatique depuis le profil public lié. Socle de la future règle « conducteur » de la feuille de service.
+  - TRANSPORT / USAGE VÉHICULE PERSO — la possession d'un véhicule (profil + membres) se précise par un statut d'usage sur un tournage : à disposition gratuitement, contre dédommagement, en étant payé, ou non visible par la prod (opt-out). Le site n'effectue aucune gestion financière, l'information est simplement portée à la connaissance de la production ; la voiture remonte dans le transport de la feuille de service sauf si « privé ».
+  - TRANSPORT / PARC VÉHICULES DE PRODUCTION — nouvelle liste dédiée state.data.vehicles, volontairement distincte de l'équipe pour ne pas polluer les ~40 itérations de state.data.crew (covoiturage, compteurs, lignes de feuille de service). Un bouton « Ajouter Véhicule » dans l'onglet Équipe crée un véhicule (nom, type, nombre de places conducteur inclus, permis requis VL/PL/SPL, notes), affiché dans une section « Véhicules de production » sous les techniciens.
+  - RESTE (Lot 3, prochaine session) — transport de la feuille de service : scinder « Amène » en « V. perso » / « V. régie », filtrer selon possession d'un véhicule exploitable et permis, plafonner les passagers au nombre de places (conducteur inclus).
+v552 (23 Juin 2026) — Anti-accumulation du stockage (feuilles de service, MiniChat) + corbeille projets 30 jours
+  - FEUILLES DE SERVICE — chaque republication d'une feuille de service déposait un nouveau PDF (nom en UUID, upsert:false) dans le bucket callsheets sans jamais supprimer l'ancien : accumulation sans fin de PDF orphelins, tous publiquement accessibles par leur URL. publishCallSheet mémorise désormais le chemin du PDF sur la journée de tournage (shootDay.callsheetFile) et supprime l'ancien avant de déposer le nouveau ; une policy DELETE a été ajoutée sur le bucket callsheets (réservée aux comptes connectés) pour autoriser cette purge. Le passif déjà accumulé a été vidé manuellement.
+  - MINICHAT — les fichiers partagés dans le talkie-walkie étaient conservés indéfiniment alors que leur URL signée expirait à 24 h (présents mais inaccessibles). Durée alignée et portée à 48 h des deux côtés : URL signée (createSignedUrl 86400 → 172800) et seuil du ménage paresseux _cleanupOldFiles (24 h → 48 h). Le ménage s'exécute à l'ouverture du chat d'un projet et requiert une policy DELETE active sur le bucket minichat.
+  - CORBEILLE PROJETS (30 JOURS) — la suppression d'un projet faisait un DELETE immédiat et définitif sans purger les buckets (fichiers orphelins à vie). Remplacée par une corbeille : nouvelle colonne projects.deleted_at, deleteProject effectue un soft-delete (UPDATE deleted_at) réservé au propriétaire (verrou role !== 'owner'), et le listing exclut les projets en corbeille (filtre .is('deleted_at', null) sur getProjectsList). Nouveau bouton « Corbeille » dans la barre des dossiers ouvrant une modale (UIDashboard.openTrash) qui liste les projets supprimés avec leur date d'effacement définitif et un bouton Restaurer (Store.restoreProject).
+  - PURGE AUTOMATIQUE SERVEUR — Edge Function qui supprime réellement les projets dont deleted_at dépasse 30 jours (suppression de la ligne en base + purge récursive des 3 buckets projects/callsheets/minichat via l'API storage en service_role), déclenchée chaque nuit par une tâche pg_cron (3 h UTC, via net.http_post). La purge est garantie indépendamment de toute reconnexion de l'utilisateur.
 v551 (date) — Normalisation des z-index (échelle de paliers en variables CSS)
   - ÉCHELLE Z-INDEX — la gestion des z-index était devenue une course à l'armement : ~150 déclarations en dur étalées de 1 à 2147483647, une trentaine de valeurs distinctes, des escalades à +1/+2/+3 pour gagner les conflits locaux et plusieurs rustines max-int 32 bits (infobulles, taskbar, overlay du tour). Mise en place d'une échelle de 9 paliers nommés en variables CSS dans :root : --z-sticky:10, --z-float:1000, --z-dropdown:2000, --z-overlay:3000, --z-modal:3100, --z-modal-top:4000, --z-loading:5000, --z-toast:6000, --z-tooltip:7000. Tout ce qui se chevauche au niveau global (dropdowns, modales, panels, overlays, toasts, infobulles, fenêtres flottantes) pioche désormais var(--z-*) au lieu d'un nombre. Migration par lots sur l'ensemble du fichier : CSS, styles inline, chaînes JS de construction des modales dynamiques, styles injectés du module Tour.
   - BUGS CORRIGÉS AU PASSAGE — les toasts s'affichaient DERRIÈRE les modales / l'overlay de chargement / l'écran CGU (désormais au-dessus, comme attendu) ; doublon de règle .menu-dropdown (deux z-index conflictuels 10000/10001) résolu ; barre des fenêtres flottantes (taskbar, conservée tout en haut via --z-tooltip) et fenêtres flottantes (sous les modales) rationalisées.
@@ -5696,7 +5708,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv551</p>
+      <p>vv553</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -7270,11 +7282,33 @@ body.presentation-mode .presentation-bar {
                             <button type="button" class="visibility-btn" data-section="vehicle" data-scope="project" onclick="app.PublicProfile.toggleVisibility('vehicle', 'project')" title="Visibilité projet (équipe)">🎬 <span class="vis-icon">👁️</span></button>
                         </div>
                     </h3>
+                    <div style="margin-bottom:14px; padding:14px; background:rgba(0,0,0,0.03); border-radius:8px;">
+                        <label class="form-label" style="margin-bottom:8px; display:block;">Permis de conduire</label>
+                        <div style="display:flex; flex-wrap:wrap; gap:14px;">
+                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="profile-license-moto"> Moto (A)</label>
+                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="profile-license-vl"> VL (B)</label>
+                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="profile-license-pl"> PL (C)</label>
+                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="profile-license-spl"> SPL (CE)</label>
+                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="profile-license-tc"> TC (D)</label>
+                        </div>
+                    </div>
                     <label class="flex-row-btn" style="margin-bottom: 10px;">
                         <input type="checkbox" id="profile-has-vehicle" onchange="document.getElementById('profile-vehicle-details').style.display = this.checked ? 'block' : 'none';">
                         🚗 Je possède un véhicule
                     </label>
                     <div id="profile-vehicle-details" style="display:none; margin-top:15px; padding:20px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
+                        <div class="profile-row mt-10" style="margin-top:0;">
+                            <div style="grid-column:1 / -1;">
+                                <label class="form-label">Utilisation sur un tournage</label>
+                                <select class="profile-input" id="profile-vehicle-usage">
+                                    <option value="">-- Précisez --</option>
+                                    <option value="free">À dispo gratuitement (peut emmener gens/matériel)</option>
+                                    <option value="compensation">À dispo contre dédommagement (frais)</option>
+                                    <option value="paid">À dispo en étant payé</option>
+                                    <option value="private">Je ne veux pas que la prod le voie</option>
+                                </select>
+                            </div>
+                        </div>
                         <div class="profile-row">
                             <div>
                                 <label class="form-label">Type de véhicule</label>
@@ -8954,11 +8988,13 @@ body.presentation-mode .presentation-bar {
 		<div id="crew-toolbar" class="data-toolbar" style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; align-items:center;">
 			<button onclick="app.Actions.addGroup('crew')" class="btn-tool">➕ Nouveau Département</button>
 			<button onclick="app.Crew.addMember()" class="btn-tool">➕ Ajouter Technicien</button>
+			<button onclick="app.Crew.addVehicle()" class="btn-tool">🚐 Ajouter Véhicule</button>
             <button onclick="app.Contacts.importToProject('crew')" class="btn-tool">📇 Mes contacts</button>
             <button onclick="app.GlobalSearch.openCrew()" class="btn-tool">🔍 Rechercher un.e technicien.ne</button>
             <button onclick="app.Crew.openExportModal()" class="btn-tool-print" style="background:var(--primary); color:#fff;">📄 Export PDF</button>
 		</div>
 		<div id="crewContainer"></div>
+		<div id="vehiclesContainer"></div>
 	</div>
 	  
 <div id="tab-orgs" class="tab-content">
@@ -9551,6 +9587,10 @@ body.presentation-mode .presentation-bar {
                 <div class="expenses-summary-card success">
                     <div class="amount" id="expenses-total-remaining">0 €</div>
                     <div class="label">Restant</div>
+                </div>
+                <div class="expenses-summary-card">
+                    <div class="amount" id="expenses-cost-per-day">—</div>
+                    <div class="label">Coût moyen / jour</div>
                 </div>
             </div>
             
@@ -19654,11 +19694,20 @@ initCategoriesDragDrop: () => {
                 // Section Véhicule (vérifier visibilité)
                 if(UI.isSectionVisibleForProject(item, 'vehicle')) {
                 contentHtml += `<div class="crew-vehicle-section mt-10">
+                    <div class="form-label">Permis de conduire</div>
+                    <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:10px;">
+                        ${[['moto','Moto (A)'],['vl','VL (B)'],['pl','PL (C)'],['spl','SPL (CE)'],['tc','TC (D)']].map(([k,lbl]) => `<label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" ${(item.licenses||[]).includes(k) ? 'checked' : ''} onchange="app.Actions.toggleActorLicense(${idx}, '${k}', this.checked)" ${isReadOnly ? 'disabled' : ''}> ${lbl}</label>`).join('')}
+                    </div>
                     <label class="crew-vehicle-toggle">
                         <input type="checkbox" ${item.hasVehicle ? 'checked' : ''} onchange="app.Actions.toggleActorVehicle(${idx}, this.checked)" ${isReadOnly ? 'disabled' : ''}>
                         <strong>🚗 Possède un véhicule</strong>
                     </label>
                     <div class="crew-vehicle-details ${item.hasVehicle ? 'visible' : ''}" id="actor-vehicle-${idx}">
+                        <div class="actor-input-row mt-8">
+                            <select class="actor-input" style="grid-column:1 / -1;" onchange="app.Actions.updateActorMeta(${idx}, 'vehicleUsage', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                                ${[['','-- Utilisation sur un tournage --'],['free','À dispo gratuitement'],['compensation','Contre dédommagement'],['paid','En étant payé'],['private','Non visible par la prod']].map(([v,lbl]) => `<option value="${v}" ${(item.vehicleUsage||'')===v ? 'selected' : ''}>${lbl}</option>`).join('')}
+                            </select>
+                        </div>
                         <div class="actor-input-row mt-8">
                             <input class="actor-input" placeholder="Type de véhicule" value="${Utils.escape(item.vehicleType || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'vehicleType', this.value)" ${isReadOnly ? 'disabled' : ''}>
                             <input class="actor-input" placeholder="Immatriculation" value="${Utils.escape(item.vehiclePlate || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'vehiclePlate', this.value)" ${isReadOnly ? 'disabled' : ''}>
@@ -19871,6 +19920,7 @@ initCategoriesDragDrop: () => {
 	  renderCrewTab: () => {
         const container = document.getElementById('crewContainer');
         container.innerHTML = '';
+        if(typeof Crew !== 'undefined' && Crew.renderVehicles) Crew.renderVehicles();
         
         if(!state.data.crew || state.data.crew.length === 0) {
             container.innerHTML = `
@@ -20163,11 +20213,20 @@ initCategoriesDragDrop: () => {
             </div>` : ''}
             
             ${UI.isSectionVisibleForProject(member, 'vehicle') ? `<div class="crew-vehicle-section">
+                <div class="form-label">Permis de conduire</div>
+                <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:10px;">
+                    ${[['moto','Moto (A)'],['vl','VL (B)'],['pl','PL (C)'],['spl','SPL (CE)'],['tc','TC (D)']].map(([k,lbl]) => `<label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" ${(member.licenses||[]).includes(k) ? 'checked' : ''} onchange="app.Crew.toggleCrewLicense(${idx}, '${k}', this.checked)" ${isReadOnly ? 'disabled' : ''}> ${lbl}</label>`).join('')}
+                </div>
                 <label class="crew-vehicle-toggle">
                     <input type="checkbox" ${member.hasVehicle ? 'checked' : ''} onchange="app.Crew.toggleVehicle(${idx}, this.checked)" ${isReadOnly ? 'disabled' : ''}>
                     <strong>🚗 Possède un véhicule</strong>
                 </label>
                 <div class="crew-vehicle-details ${member.hasVehicle ? 'visible' : ''}" id="crew-vehicle-${idx}">
+                    <div class="crew-row">
+                        <select class="crew-input" style="grid-column:1 / -1;" onchange="app.Crew.updateMember(${idx}, 'vehicleUsage', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                            ${[['','-- Utilisation sur un tournage --'],['free','À dispo gratuitement'],['compensation','Contre dédommagement'],['paid','En étant payé'],['private','Non visible par la prod']].map(([v,lbl]) => `<option value="${v}" ${(member.vehicleUsage||'')===v ? 'selected' : ''}>${lbl}</option>`).join('')}
+                        </select>
+                    </div>
                     <div class="crew-row">
                         <input class="crew-input" placeholder="Type de véhicule" value="${Utils.escape(member.vehicleType || '')}" onchange="app.Crew.updateMember(${idx}, 'vehicleType', this.value)" ${isReadOnly ? 'disabled' : ''}>
                         <input class="crew-input" placeholder="Immatriculation" value="${Utils.escape(member.vehiclePlate || '')}" onchange="app.Crew.updateMember(${idx}, 'vehiclePlate', this.value)" ${isReadOnly ? 'disabled' : ''}>
@@ -21889,6 +21948,8 @@ const tabToSection = {
                           actor.vehicleSeats = extraData.vehicleSeats || actor.vehicleSeats;
                           actor.vehicleTrunk = extraData.vehicleTrunk || actor.vehicleTrunk;
                           actor.vehicleNotes = extraData.vehicleNotes || actor.vehicleNotes;
+                          actor.licenses = extraData.licenses || actor.licenses;
+                          actor.vehicleUsage = extraData.vehicleUsage || actor.vehicleUsage;
                           actor.availabilityText = publicData.availability || actor.availabilityText;
                           actor.availabilityDates = extraData.availabilityDates || actor.availabilityDates;
                           actor.unavailabilityDates = extraData.unavailabilityDates || actor.unavailabilityDates;
@@ -21972,6 +22033,8 @@ const tabToSection = {
                           member.vehicleSeats = extraData.vehicleSeats || member.vehicleSeats;
                           member.vehicleTrunk = extraData.vehicleTrunk || member.vehicleTrunk;
                           member.vehicleNotes = extraData.vehicleNotes || member.vehicleNotes;
+                          member.licenses = extraData.licenses || member.licenses;
+                          member.vehicleUsage = extraData.vehicleUsage || member.vehicleUsage;
                           member.professionalStatus = extraData.professionalStatus || member.professionalStatus;
                           member.collabType = extraData.collabType || member.collabType;
                           // Préférences de visibilité
@@ -22062,6 +22125,13 @@ const tabToSection = {
               Store.save();
               UI.renderDataTab('locations', els.locContainer);
           }
+      },
+      toggleActorLicense: (idx, key, checked) => {
+          const a = state.data.actors[idx];
+          if(!a) return;
+          let lic = Array.isArray(a.licenses) ? a.licenses.slice() : [];
+          if(checked) { if(!lic.includes(key)) lic.push(key); } else { lic = lic.filter(k => k !== key); }
+          Actions.updateActorMeta(idx, 'licenses', lic);
       },
       updateActorMeta: (idx, field, val) => { 
           if(state.data.actors[idx]) { 
@@ -22295,7 +22365,7 @@ const tabToSection = {
               const senderName = state.userProfile?.displayName || state.currentUser?.email?.split('@')[0] || 'Un réalisateur';
               const typeLabel = type === 'actor' ? 'comédien.ne' : 'technicien.ne';
               
-              // Créer un pending claim dans Firebase
+              // Créer un pending claim dans Supabase
               const recipientEmailKey = Utils.sanitizeEmail(person.email);
               const claimId = 'claim_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11);
               
@@ -33030,6 +33100,63 @@ const DrawingEditor = {
     },
     
     // Appelée quand on assigne un groupe à un technicien (depuis updateMember ou ici)
+    addVehicle: async () => {
+        if(state.currentRole === 'viewer') return;
+        if(state.currentRole !== 'owner' && !Permissions.canEdit('equipe')) {
+            Utils.toast('Vous n\'avez pas la permission d\'ajouter des véhicules.', 'error');
+            return;
+        }
+        const name = await ConfirmModal.prompt('Nom du véhicule (ex: Trafic régie).', 'Nouveau véhicule', 'Nom...');
+        if(!name) return;
+        if(!state.data.vehicles) state.data.vehicles = [];
+        const v = { id: Utils.generateUniqueId(), name: name, type: '', seats: '', licenseRequired: 'vl', notes: '' };
+        state.data.vehicles.push(v);
+        History.log('ADD', `Ajout véhicule : ${name}`);
+        Store.save();
+        Crew.renderVehicles();
+    },
+    updateVehicle: (idx, field, value) => {
+        if(state.currentRole === 'viewer') return;
+        if(!state.data.vehicles || !state.data.vehicles[idx]) return;
+        state.data.vehicles[idx][field] = value;
+        Store.saveDebounced();
+    },
+    removeVehicle: async (idx) => {
+        if(state.currentRole === 'viewer') return;
+        const v = (state.data.vehicles || [])[idx];
+        if(!v) return;
+        if(!(await ConfirmModal.confirmDelete(`Supprimer le véhicule "${v.name || 'sans nom'}" ?`))) return;
+        state.data.vehicles.splice(idx, 1);
+        Store.save();
+        Crew.renderVehicles();
+    },
+    renderVehicles: () => {
+        const c = document.getElementById('vehiclesContainer');
+        if(!c) return;
+        if(!state.data.vehicles) state.data.vehicles = [];
+        const vehicles = state.data.vehicles;
+        const ro = state.currentRole === 'viewer';
+        const licOpts = [['vl','VL (B)'],['pl','PL (C)'],['spl','SPL (CE)']];
+        c.innerHTML = `
+            <h2 style="margin:24px 0 12px 0;">🚐 Véhicules de production <span class="text-sec" style="font-weight:400; font-size:0.85rem;">(${vehicles.length})</span></h2>
+            ${vehicles.length === 0 ? '<div class="text-sec" style="padding:12px 0;">Aucun véhicule de production. Ajoute-en via « Ajouter Véhicule ».</div>' : vehicles.map((v, idx) => `
+                <div class="crew-vehicle-section" style="margin-bottom:12px; padding:14px;">
+                    <div class="crew-row">
+                        <input class="crew-input" placeholder="Nom du véhicule" value="${Utils.escape(v.name || '')}" onchange="app.Crew.updateVehicle(${idx}, 'name', this.value)" ${ro ? 'disabled' : ''}>
+                        <input class="crew-input" placeholder="Type (ex: minibus 9 places)" value="${Utils.escape(v.type || '')}" onchange="app.Crew.updateVehicle(${idx}, 'type', this.value)" ${ro ? 'disabled' : ''}>
+                    </div>
+                    <div class="crew-row" style="margin-top:8px;">
+                        <input class="crew-input" type="number" min="1" max="80" placeholder="Nb places (conducteur inclus)" value="${Utils.escape(v.seats || '')}" onchange="app.Crew.updateVehicle(${idx}, 'seats', this.value)" ${ro ? 'disabled' : ''}>
+                        <select class="crew-input" onchange="app.Crew.updateVehicle(${idx}, 'licenseRequired', this.value)" ${ro ? 'disabled' : ''}>
+                            ${licOpts.map(([lv,llbl]) => `<option value="${lv}" ${(v.licenseRequired||'vl')===lv ? 'selected' : ''}>Permis ${llbl}</option>`).join('')}
+                        </select>
+                    </div>
+                    <textarea class="crew-input" style="margin-top:8px; width:100%; height:38px;" placeholder="Notes (immat, état, contraintes...)" onchange="app.Crew.updateVehicle(${idx}, 'notes', this.value)" ${ro ? 'disabled' : ''}>${Utils.escape(v.notes || '')}</textarea>
+                    ${ro ? '' : `<div style="text-align:right; margin-top:8px;"><button class="btn-tool" onclick="app.Crew.removeVehicle(${idx})">🗑 Supprimer</button></div>`}
+                </div>
+            `).join('')}
+        `;
+    },
     syncCrewMemberToScenes: (member) => {
         if(!member || !member.name) return;
         
@@ -33126,6 +33253,13 @@ const DrawingEditor = {
         UI.renderCrewTab();
     },
     
+    toggleCrewLicense: (idx, key, checked) => {
+        const m = state.data.crew[idx];
+        if(!m) return;
+        let lic = Array.isArray(m.licenses) ? m.licenses.slice() : [];
+        if(checked) { if(!lic.includes(key)) lic.push(key); } else { lic = lic.filter(k => k !== key); }
+        Crew.updateMember(idx, 'licenses', lic);
+    },
     updateMember: (idx, field, value) => {
         if(state.currentRole === 'viewer') return;
         if(!state.data.crew[idx]) return;
@@ -33133,7 +33267,7 @@ const DrawingEditor = {
         const oldVal = state.data.crew[idx][field];
         state.data.crew[idx][field] = value;
         // Tracer en niveau minor (sera filtré en mode "essentiel")
-        const fieldLabels = { name: 'nom', email: 'email', phone: 'téléphone', role: 'rôle', city: 'ville', address: 'adresse', dailyRate: 'tarif', group_id: 'département', photo: 'photo' };
+        const fieldLabels = { licenses: 'permis', name: 'nom', email: 'email', phone: 'téléphone', role: 'rôle', city: 'ville', address: 'adresse', dailyRate: 'tarif', group_id: 'département', photo: 'photo' };
         const fLabel = fieldLabels[field] || field;
         const memberName = state.data.crew[idx].name || 'technicien';
         const memberId = state.data.crew[idx].id;
@@ -34008,7 +34142,7 @@ const ProfileGallery = {
   };
 
   const ProfileClaims = {
-    // Charge tous les profils de l'utilisateur depuis Firebase
+    // Charge tous les profils de l'utilisateur depuis Supabase
     pendingClaims: [],
     
     // Charge les profils en attente de revendication
@@ -34332,7 +34466,7 @@ const ProfileGallery = {
         
 document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         
-        // Charger les profils depuis Firebase
+        // Charger les profils depuis Supabase
         await PublicProfile.loadProfiles();
         ActiveProfile.ensureValid();
         setTimeout(() => ActiveProfile.attachToDom(), 100);
@@ -34841,6 +34975,8 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         document.getElementById('profile-vehicle-seats').value = profile.vehicleSeats || '';
         document.getElementById('profile-vehicle-trunk').checked = profile.vehicleTrunk || false;
         document.getElementById('profile-vehicle-notes').value = profile.vehicleNotes || '';
+        const vu = document.getElementById('profile-vehicle-usage'); if(vu) vu.value = profile.vehicleUsage || '';
+        ['moto','vl','pl','spl','tc'].forEach(k => { const el = document.getElementById('profile-license-' + k); if(el) el.checked = (profile.licenses || []).includes(k); });
         
         PublicProfile.updatePhotoPreview();
         PublicProfile.updateStatus();
@@ -35032,6 +35168,9 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         // Types de collaboration
         PublicProfile.saveCollabTypes(profile);
         
+        // Permis de conduire
+        profile.licenses = ['moto','vl','pl','spl','tc'].filter(k => document.getElementById('profile-license-' + k)?.checked);
+        
         // Véhicule
         profile.hasVehicle = document.getElementById('profile-has-vehicle')?.checked || false;
         profile.vehicleType = document.getElementById('profile-vehicle-type')?.value.trim() || '';
@@ -35039,6 +35178,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         profile.vehicleSeats = document.getElementById('profile-vehicle-seats')?.value || '';
         profile.vehicleTrunk = document.getElementById('profile-vehicle-trunk')?.checked || false;
         profile.vehicleNotes = document.getElementById('profile-vehicle-notes')?.value.trim() || '';
+        profile.vehicleUsage = document.getElementById('profile-vehicle-usage')?.value || '';
         
         // Statut
         profile.profileComplete = !!(profile.type && (
@@ -39145,6 +39285,7 @@ END:VEVENT
   };
 
   const PlanningTransport = {
+    isDriverMode: (t) => t === 'own-brings' || t === 'own-brings-regie',
     onTransportChange: (type, personId) => {
         const transportSelect = document.getElementById(`call-transport-${type}-${personId}`);
         const withWhoDropdown = document.getElementById(`call-withwho-${type}-${personId}`);
@@ -39153,7 +39294,7 @@ END:VEVENT
         
         const transport = transportSelect.value;
         
-        if(transport === 'own-brings' || transport === 'with') {
+        if(PlanningTransport.isDriverMode(transport) || transport === 'with') {
             withWhoDropdown.style.display = 'block';
             PlanningTransport.populateWithWhoDropdown(type, personId, transport);
         } else {
@@ -39214,7 +39355,7 @@ END:VEVENT
         if(!passengerType || !passId) return;
         
         // Si le conducteur "amène" quelqu'un
-        if(transport === 'own-brings') {
+        if(PlanningTransport.isDriverMode(transport)) {
             // Cocher la checkbox du passager s'il ne l'est pas déjà
             const passengerCheckbox = document.querySelector(`input[data-type="${passengerType}"][data-id="${passId}"]`);
             if(passengerCheckbox && !passengerCheckbox.checked) {
@@ -39245,7 +39386,7 @@ END:VEVENT
         if(transport === 'with') {
             const driverTransport = document.getElementById(`call-transport-${passengerType}-${passId}`);
             // Vérifier si le conducteur n'est pas déjà en mode "amène"
-            if(driverTransport && driverTransport.value !== 'own-brings') {
+            if(driverTransport && !PlanningTransport.isDriverMode(driverTransport.value)) {
                 // Le mettre en "Amène..."
                 driverTransport.value = 'own-brings';
                 PlanningTransport.onTransportChange(passengerType, passId);
@@ -39290,7 +39431,7 @@ END:VEVENT
                 const stillChecked = otherList.querySelectorAll('input[type="checkbox"]:checked').length;
                 if(stillChecked === 0) {
                     const otherTransport = document.getElementById(`call-transport-${otherType}-${otherPersonId}`);
-                    if(otherTransport && (otherTransport.value === 'with' || otherTransport.value === 'own-brings')) {
+                    if(otherTransport && (otherTransport.value === 'with' || PlanningTransport.isDriverMode(otherTransport.value))) {
                         otherTransport.value = '';
                         PlanningTransport.onTransportChange(otherType, otherPersonId);
                     }
@@ -39361,7 +39502,7 @@ END:VEVENT
         
         // Pour chaque personne dans la callSheet
         (shootDay.callSheet || []).forEach(call => {
-            if(call.transport === 'own-brings' || call.transport === 'with') {
+            if(PlanningTransport.isDriverMode(call.transport) || call.transport === 'with') {
                 PlanningTransport.populateWithWhoDropdown(call.type, call.personId, call.transport);
             }
         });
@@ -39623,7 +39764,7 @@ addSceneToDay: () => {
                 call.withWho = call.withWho.filter(id => !allRemovedIds.includes(id));
                 
                 // Si plus personne dans "avec qui", réinitialiser le transport
-                if(call.withWho.length === 0 && (call.transport === 'own-brings' || call.transport === 'with')) {
+                if(call.withWho.length === 0 && (PlanningTransport.isDriverMode(call.transport) || call.transport === 'with')) {
                     call.transport = '';
                     const transportSelect = document.getElementById(`call-transport-${call.type}-${call.personId}`);
                     if(transportSelect) transportSelect.value = '';
@@ -40188,14 +40329,15 @@ const shotBadge = shotCount > 0 ? `<span style="background: var(--primary); colo
                         <select id="call-transport-actor-${actor.id}" onchange="app.Planning.onTransportChange('actor', '${actor.id}')" style="width: 100%; padding: 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--input-bg); color: var(--text-main); font-size: 0.85rem;">
                             <option value="" ${!call?.transport ? 'selected' : ''}>-- Transport --</option>
                             <option value="own" ${call?.transport === 'own' ? 'selected' : ''}>🚗 Propres moyens</option>
-                            <option value="own-brings" ${call?.transport === 'own-brings' ? 'selected' : ''}>🚗👥 Amène...</option>
+                            ${((actor.licenses||[]).length > 0 && actor.hasVehicle && actor.vehicleUsage !== 'private') ? `<option value="own-brings" ${call?.transport === 'own-brings' ? 'selected' : ''}>🚗👥 Amène (V. perso)</option>` : ''}
+                            ${((actor.licenses||[]).length > 0 && (state.data.vehicles||[]).length > 0) ? `<option value="own-brings-regie" ${call?.transport === 'own-brings-regie' ? 'selected' : ''}>🚐 Amène (V. régie)</option>` : ''}
                             <option value="taxi" ${call?.transport === 'taxi' ? 'selected' : ''}>🚕 Taxi</option>
                             <option value="public" ${call?.transport === 'public' ? 'selected' : ''}>🚇 Transports</option>
                             <option value="with" ${call?.transport === 'with' ? 'selected' : ''}>🚗➡️ Part avec...</option>
                         </select>
                     </td>
                     <td>
-                        <div id="call-withwho-actor-${actor.id}" class="withwho-dropdown" style="display: ${call?.transport === 'own-brings' || call?.transport === 'with' ? 'block' : 'none'};">
+                        <div id="call-withwho-actor-${actor.id}" class="withwho-dropdown" style="display: ${PlanningTransport.isDriverMode(call?.transport) || call?.transport === 'with' ? 'block' : 'none'};">
                             <button type="button" class="withwho-btn" onclick="app.Planning.toggleWithWhoDropdown('actor', '${actor.id}')">
                                 <span class="withwho-label">-- Choisir --</span>
                             </button>
@@ -40227,14 +40369,15 @@ const shotBadge = shotCount > 0 ? `<span style="background: var(--primary); colo
                                 <select id="call-transport-crew-${member.id}" onchange="app.Planning.onTransportChange('crew', '${member.id}')" style="width: 100%; padding: 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--input-bg); color: var(--text-main); font-size: 0.85rem;">
                                     <option value="" ${!call?.transport ? 'selected' : ''}>-- Transport --</option>
                                     <option value="own" ${call?.transport === 'own' ? 'selected' : ''}>🚗 Propres moyens</option>
-                                    <option value="own-brings" ${call?.transport === 'own-brings' ? 'selected' : ''}>🚗👥 Amène...</option>
+                                    ${((member.licenses||[]).length > 0 && member.hasVehicle && member.vehicleUsage !== 'private') ? `<option value="own-brings" ${call?.transport === 'own-brings' ? 'selected' : ''}>🚗👥 Amène (V. perso)</option>` : ''}
+                                    ${((member.licenses||[]).length > 0 && (state.data.vehicles||[]).length > 0) ? `<option value="own-brings-regie" ${call?.transport === 'own-brings-regie' ? 'selected' : ''}>🚐 Amène (V. régie)</option>` : ''}
                                     <option value="taxi" ${call?.transport === 'taxi' ? 'selected' : ''}>🚕 Taxi</option>
                                     <option value="public" ${call?.transport === 'public' ? 'selected' : ''}>🚇 Transports</option>
                                     <option value="with" ${call?.transport === 'with' ? 'selected' : ''}>🚗➡️ Part avec...</option>
                                 </select>
                             </td>
                             <td>
-                                <div id="call-withwho-crew-${member.id}" class="withwho-dropdown" style="display: ${call?.transport === 'own-brings' || call?.transport === 'with' ? 'block' : 'none'};">
+                                <div id="call-withwho-crew-${member.id}" class="withwho-dropdown" style="display: ${PlanningTransport.isDriverMode(call?.transport) || call?.transport === 'with' ? 'block' : 'none'};">
                                     <button type="button" class="withwho-btn" onclick="app.Planning.toggleWithWhoDropdown('crew', '${member.id}')">
                                         <span class="withwho-label">-- Choisir --</span>
                                     </button>
@@ -40262,14 +40405,15 @@ const shotBadge = shotCount > 0 ? `<span style="background: var(--primary); colo
                             <select id="call-transport-crew-${member.id}" onchange="app.Planning.onTransportChange('crew', '${member.id}')" style="width: 100%; padding: 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--input-bg); color: var(--text-main); font-size: 0.85rem;">
                                 <option value="" ${!call?.transport ? 'selected' : ''}>-- Transport --</option>
                                 <option value="own" ${call?.transport === 'own' ? 'selected' : ''}>🚗 Propres moyens</option>
-                                <option value="own-brings" ${call?.transport === 'own-brings' ? 'selected' : ''}>🚗👥 Amène...</option>
+                                ${((member.licenses||[]).length > 0 && member.hasVehicle && member.vehicleUsage !== 'private') ? `<option value="own-brings" ${call?.transport === 'own-brings' ? 'selected' : ''}>🚗👥 Amène (V. perso)</option>` : ''}
+                                ${((member.licenses||[]).length > 0 && (state.data.vehicles||[]).length > 0) ? `<option value="own-brings-regie" ${call?.transport === 'own-brings-regie' ? 'selected' : ''}>🚐 Amène (V. régie)</option>` : ''}
                                 <option value="taxi" ${call?.transport === 'taxi' ? 'selected' : ''}>🚕 Taxi</option>
                                 <option value="public" ${call?.transport === 'public' ? 'selected' : ''}>🚇 Transports</option>
                                 <option value="with" ${call?.transport === 'with' ? 'selected' : ''}>🚗➡️ Part avec...</option>
                             </select>
                         </td>
                         <td>
-                            <div id="call-withwho-crew-${member.id}" class="withwho-dropdown" style="display: ${call?.transport === 'own-brings' || call?.transport === 'with' ? 'block' : 'none'};">
+                            <div id="call-withwho-crew-${member.id}" class="withwho-dropdown" style="display: ${PlanningTransport.isDriverMode(call?.transport) || call?.transport === 'with' ? 'block' : 'none'};">
                                 <button type="button" class="withwho-btn" onclick="app.Planning.toggleWithWhoDropdown('crew', '${member.id}')">
                                     <span class="withwho-label">-- Choisir --</span>
                                 </button>
@@ -40509,7 +40653,7 @@ closeModal: () => {
             });
         });
         
-        // Synchroniser vers les profils publics sur Firebase
+        // Synchroniser vers les profils publics sur Supabase
         PlanningDayEdit.syncShootingDatesToPublicProfiles();
     },
     
@@ -40607,7 +40751,7 @@ closeModal: () => {
             
             // Récupérer les personnes sélectionnées dans "Avec qui" (nouveau dropdown avec checkboxes)
             let withWho = [];
-            if(transport === 'own-brings' || transport === 'with') {
+            if(PlanningTransport.isDriverMode(transport) || transport === 'with') {
                 const list = document.getElementById(`call-withwho-list-${type}-${personId}`);
                 if(list) {
                     list.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
@@ -51980,7 +52124,7 @@ const ExpensesCRUD = {
         }
         
         // Envoyer l'email si activé
-        // Note: L'envoi d'email dépend de la configuration Firebase
+        // Note: L'envoi d'email dépend de la configuration Supabase
     },
     
     // Envoie une notification interne via le système de messagerie
@@ -52567,6 +52711,13 @@ const Expenses = {
         if(budgetEl) budgetEl.textContent = budgetTotal.toLocaleString() + ' ' + currency + ' ' + vatMode;
         if(spentEl) spentEl.innerHTML = totalSpent.toLocaleString() + ' ' + currency + ` <span style="font-size:0.75rem; opacity:0.8;">(${percentUsed}%)</span>`;
         if(remainingEl) remainingEl.textContent = remaining.toLocaleString() + ' ' + currency;
+        
+        // Coût moyen / jour = dépensé réel / nb jours de tournage
+        const nbShootDays = (state.data.shootingDays || []).length;
+        const cpdEl = document.getElementById('expenses-cost-per-day');
+        if(cpdEl) cpdEl.innerHTML = nbShootDays > 0
+            ? Math.round(totalSpent / nbShootDays).toLocaleString() + ' ' + currency + ` <span style="font-size:0.75rem; opacity:0.7;">/ jour · ${nbShootDays} j</span>`
+            : '—';
         
         // Changer la couleur si dépassement (mode avancé)
         const remainingCard = remainingEl?.parentElement;
@@ -58283,7 +58434,7 @@ const Messages = {
 // --- MODULE INVITATIONS V84 ---
 const Invitations = {
     // ===================== VÉRIFICATION & PROFILS =====================
-    // Vérifie si l'email existe déjà dans Firebase
+    // Vérifie si l'email existe déjà dans Supabase
     checkEmail: async (email) => {
         const statusEl = document.getElementById('share-email-status');
         const messageSection = document.getElementById('share-message-section');
@@ -59401,6 +59552,7 @@ ${window.location.origin}${window.location.pathname}
           <p>Chaque fiche technicien : contact, dispo, compétences, matériel technique (caméra, objectifs, micros...).</p>
           <p><strong>Contrats :</strong> Génère un CDDU ou contrat de prestation selon le statut.</p>
           <p>L'export PDF liste tout le monde par département avec coordonnées. Parfait pour le premier jour !</p>
+          <p><strong>🚐 Véhicules de production :</strong> le bouton « Ajouter Véhicule » crée un véhicule de régie (places conducteur inclus, permis requis) pour le transport de l'équipe, listé sous les techniciens.</p>
         `
       },
       {
@@ -59470,6 +59622,7 @@ ${window.location.origin}${window.location.pathname}
           <p><strong>Profil Association / Entreprise :</strong> Nom de structure, description, membres référents, zone d'action.</p>
           <div class="tuto-tip"><strong>🔒 Visibilité :</strong> Chaque section a un bouton pour masquer ce que tu ne veux pas montrer publiquement. Tu contrôles ton image.</div>
           <p><strong>📍 Géolocalisation :</strong> Ajoute ta ville et tu apparais pile au bon endroit sur la carte de l'Univers.</p>
+          <p><strong>🚗 Permis & véhicule :</strong> indique tes permis (moto, VL, PL, SPL, TC) et, si tu as un véhicule, précise si tu le mets à dispo d'un tournage (gratuitement, contre dédommagement ou payé) — ou pas. Ces infos servent au transport de l'équipe.</p>
           <p>Tarif, zone de mobilité, coordonnées de contact... Tout pour faciliter les contacts !</p>
         `
       },
