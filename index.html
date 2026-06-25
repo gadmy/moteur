@@ -3508,7 +3508,12 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .planning-week-event-block.multi-day { background: linear-gradient(135deg, var(--primary), #3b82f6, #1e40af); min-height: 60px; }
 .planning-day-view { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px; padding: 20px; max-height: 70vh; overflow-y: auto; }
 
-.shoot-section { margin-bottom: 20px; }
+.fds-tabs { display:flex; gap:8px; margin-bottom:18px; border-bottom:2px solid var(--border); }
+  .fds-tabbtn { padding:10px 16px; border:none; background:none; cursor:pointer; font-weight:600; font-size:0.95rem; color:var(--text-main); border-bottom:3px solid transparent; margin-bottom:-2px; }
+  .fds-tabbtn-active { color:var(--primary); border-bottom-color:var(--primary); }
+  .fds-tabbtn-dim { opacity:0.5; }
+  .fds-tabbtn-dim:hover { opacity:1; }
+  .shoot-section { margin-bottom: 20px; }
 .shoot-section-title { font-weight: bold; margin-bottom: 10px; color: var(--primary); font-size: 0.9rem; text-transform: uppercase; }
 .shoot-time-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
 .shoot-time-item { display: flex; flex-direction: column; gap: 5px; }
@@ -8969,7 +8974,6 @@ body.presentation-mode .presentation-bar {
               <button onclick="app.Figuration.add()" class="btn-tool">➕ Nouveau figurant</button>
           </div>
           <div id="figurantsContainer"></div>
-          <div id="figurationDaysContainer" style="margin-top:36px;"></div>
       </div>
       
       <div id="tab-resources" class="tab-content">
@@ -20847,7 +20851,7 @@ const tabToSection = {
           if(tabName === 'contracts') Contracts.renderHub();
           if(tabName === 'orgs') { Orgs.render(); Orgs.syncFromUniverse().then(() => Orgs.render()); }
           if(tabName === 'presentation') Presentation.init();
-          if(tabName === 'figuration') { Figuration.render(); Figuration.renderDays(); }
+          if(tabName === 'figuration') Figuration.render();
           if(typeof LockManager !== 'undefined') LockManager.onTabEnter(tabName);
       },
       
@@ -33077,11 +33081,7 @@ const DrawingEditor = {
         return day.figuration;
     },
     _currentDay: () => {
-        const days = state.data.shootingDays || [];
-        if(!days.length) return null;
-        let d = days.find(x => x.id === Figuration._dayId);
-        if(!d) { d = days.slice().sort((a, b) => new Date(a.date) - new Date(b.date))[0]; Figuration._dayId = d.id; }
-        return d;
+        return (typeof Planning !== 'undefined' && Planning.tempShootDay) ? Planning.tempShootDay : null;
     },
     selectDay: (dayId) => { Figuration._dayId = dayId; Figuration.renderDays(); },
     addGroup: () => {
@@ -33151,8 +33151,8 @@ const DrawingEditor = {
         const pageHeight = doc.internal.pageSize.getHeight();
         const margin = 18;
         const usableWidth = pageWidth - margin * 2;
-        const dayStr = day.date ? new Date(day.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : 'date ?';
-        const dayHdr = `J${day.dayNumber || '?'} - ${dayStr}`;
+        const dayStr = (day.startDate || day.date) ? new Date(day.startDate || day.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '';
+        const dayHdr = [day.name, dayStr].filter(Boolean).join(' - ');
 
         if(opts.includeCover !== false) {
             PdfTheme.coverPage(doc, { sectionName: 'Figuration', customSubtitle: dayHdr });
@@ -33239,7 +33239,7 @@ const DrawingEditor = {
 
         FichesPDF._drawFooters(doc, opts.includeCover !== false, !!opts.returnBlob || !!opts.forDossier);
         if(opts.returnBlob) return doc.output('blob');
-        doc.save(PdfTheme.filename('Figuration J' + (day.dayNumber || '')));
+        doc.save(PdfTheme.filename('Figuration - ' + (day.name || '')));
     },
     _publishGroup: async (day, g) => {
         const token = (crypto.randomUUID ? crypto.randomUUID() : 'fig_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11));
@@ -33264,25 +33264,32 @@ const DrawingEditor = {
     },
     sendGroup: async (gid) => {
         if(state.currentRole === 'viewer') return;
-        const day = Figuration._currentDay();
-        if(!day) return;
-        const g = Figuration._fig(day).groups.find(x => x.id === gid);
-        if(!g) return;
+        const tday = Figuration._currentDay();
+        if(!tday || !tday.id) { Utils.toast('Enregistre d\'abord le jour de tournage', 'warning'); return; }
+        const saved = (state.data.shootingDays || []).find(sd => sd.id === tday.id);
+        if(!saved) { Utils.toast('Enregistre d\'abord le jour de tournage', 'warning'); return; }
+        const tg = Figuration._fig(tday).groups.find(x => x.id === gid);
+        if(!tg) return;
         const repertoire = state.data.figurants || [];
-        const recipients = (g.figurantIds || []).map(id => repertoire.find(p => p.id === id)).filter(p => p && p.email);
+        const recipients = (tg.figurantIds || []).map(id => repertoire.find(p => p.id === id)).filter(p => p && p.email);
         if(!recipients.length) { Utils.toast('Aucun figurant avec email dans ce groupe', 'warning'); return; }
-        if(!await ConfirmModal.show({ title: `Envoyer la FDS figuration - ${g.name || 'groupe'} ?`, message: `${recipients.length} figurant(s) :\n\n${recipients.map(r => '• ' + Utils.escape(r.name || 'sans nom')).join('\n')}`, icon: '📧', confirmText: 'Envoyer' })) return;
+        if(!await ConfirmModal.show({ title: `Envoyer la FDS figuration - ${tg.name || 'groupe'} ?`, message: `Le jour sera enregistré, puis ${recipients.length} figurant(s) recevront leur convocation :\n\n${recipients.map(r => '• ' + Utils.escape(r.name || 'sans nom')).join('\n')}`, icon: '📧', confirmText: 'Enregistrer et envoyer' })) return;
+        saved.figuration = JSON.parse(JSON.stringify(Figuration._fig(tday)));
+        Store.save();
+        const g = (saved.figuration.groups || []).find(x => x.id === gid);
+        if(!g) return;
         Utils.toast('Publication de la FDS figuration...', 'info');
-        const link = await Figuration._publishGroup(day, g);
+        const link = await Figuration._publishGroup(saved, g);
         if(!link) { Utils.toast('Erreur lors de la publication', 'error'); return; }
+        tg.callsheetFile = g.callsheetFile;
         const projectName = state.data.title || 'Projet';
-        const dateFormatted = day.date ? new Date(day.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '';
+        const dateFormatted = (saved.startDate || saved.date) ? new Date(saved.startDate || saved.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '';
         const senderName = state.userProfile?.displayName || state.currentUser?.email?.split('@')[0] || 'La production';
-        const location = g.callLocation || day.location || 'À confirmer';
+        const location = g.callLocation || saved.location || 'À confirmer';
         let sent = 0, errors = 0;
         for(const r of recipients) {
             try {
-                const callTime = Figuration._resolveCall(day, g, r.id) || 'À confirmer';
+                const callTime = Figuration._resolveCall(saved, g, r.id) || 'À confirmer';
                 await Messages.sendEmailPing(r.email, r.name, 'callsheet', { projectName: projectName, shootDate: dateFormatted, location: location, callTime: callTime, senderName: senderName, publicLink: link });
                 sent++;
             } catch(e) { console.error('Erreur envoi figuration:', e); errors++; }
@@ -33333,70 +33340,88 @@ const DrawingEditor = {
         Figuration._overrides(g, fid)[field] = value;
         Store.saveDebounced();
     },
+    updateFiguField: (field, value) => {
+        if(state.currentRole === 'viewer') return;
+        const day = (typeof Planning !== 'undefined') ? Planning.tempShootDay : null;
+        if(!day) return;
+        Figuration._fig(day)[field] = value;
+    },
     renderDays: () => {
-        const c = document.getElementById('figurationDaysContainer');
+        const c = document.getElementById('fds-pane-figu');
         if(!c) return;
         const ro = state.currentRole === 'viewer';
-        const days = (state.data.shootingDays || []).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+        const day = (typeof Planning !== 'undefined') ? Planning.tempShootDay : null;
+        if(!day) { c.innerHTML = '<div class="text-sec" style="padding:12px;">Aucun jour.</div>'; return; }
+        const fig = Figuration._fig(day);
         const repertoire = state.data.figurants || [];
-        if(!days.length) {
-            c.innerHTML = `<h2 style="margin:0 0 12px 0;">📋 Figuration par jour</h2><div class="text-sec" style="padding:12px 0;">Crée d'abord des jours de tournage dans le Planning.</div>`;
-            return;
-        }
-        const d = Figuration._currentDay();
-        const fig = Figuration._fig(d);
-        const dayLabel = (x) => `J${x.dayNumber || '?'} — ${x.date ? new Date(x.date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }) : 'date ?'}`;
+        const dateStr = (day.startDate || day.date) ? new Date(day.startDate || day.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '';
+        const scenesNames = (day.scenes || []).map(ref => { const sc = (state.data.scenes || []).find(s => s.id === ref.sceneId); return sc ? ('#' + ((state.data.scenes.indexOf(sc)) + 1) + ' ' + (sc.title || '')) : ''; }).filter(Boolean).join(', ');
+        const horaire = [(day.crewCall || ''), (day.estimatedWrap || '')].filter(Boolean).join(' -> ');
         c.innerHTML = `
-            <h2 style="margin:0 0 12px 0;">📋 Figuration par jour</h2>
-            <div class="crew-row" style="margin-bottom:16px;">
-                <select class="crew-input" onchange="app.Figuration.selectDay(this.value)" ${ro ? 'disabled' : ''}>
-                    ${days.map(x => `<option value="${x.id}" ${x.id === d.id ? 'selected' : ''}>${Utils.escape(dayLabel(x))}</option>`).join('')}
-                </select>
-                ${ro ? '' : `<button class="btn-tool" onclick="app.Figuration.addGroup()">➕ Nouveau groupe</button>`}
-                <button class="btn-tool" onclick="app.Figuration.exportPDF()">📄 Export PDF</button>
+            <div class="shoot-section">
+                <div class="shoot-section-title">📋 Infos (reprises de la FDS)</div>
+                <div style="font-size:0.9rem; line-height:1.7;">
+                    ${day.name ? `<strong>${Utils.escape(day.name)}</strong><br>` : ''}
+                    ${dateStr ? `📅 ${Utils.escape(dateStr)}<br>` : ''}
+                    ${scenesNames ? `🎬 ${Utils.escape(scenesNames)}<br>` : ''}
+                    ${day.location ? `📍 ${Utils.escape(day.location)}<br>` : ''}
+                    ${horaire ? `⏰ ${Utils.escape(horaire)}` : ''}
+                </div>
             </div>
-            ${fig.groups.length === 0 ? '<div class="text-sec" style="padding:12px 0;">Aucun groupe pour ce jour. Crée un groupe et ajoute des figurants.</div>' : fig.groups.map(g => {
-                const members = (g.figurantIds || []);
-                const inGroup = new Set(members);
-                const available = repertoire.filter(f => !inGroup.has(f.id));
-                return `
-                <div class="crew-vehicle-section" style="margin-bottom:14px; padding:14px;">
-                    <div class="crew-row">
-                        <input class="crew-input" placeholder="Nom du groupe (ex: Clients du bar)" value="${Utils.escape(g.name || '')}" onchange="app.Figuration.updateGroup('${g.id}', 'name', this.value)" ${ro ? 'disabled' : ''}>
-                        ${ro ? '' : `<button class="btn-tool" onclick="app.Figuration.sendGroup('${g.id}')">📧 Envoyer</button><button class="btn-tool" onclick="app.Figuration.removeGroup('${g.id}')">🗑 Groupe</button>`}
-                    </div>
-                    <div class="crew-row" style="margin-top:8px;">
-                        <input class="crew-input" placeholder="Lieu d'arrivée figuration" value="${Utils.escape(g.callLocation || '')}" onchange="app.Figuration.updateGroup('${g.id}', 'callLocation', this.value)" ${ro ? 'disabled' : ''}>
-                    </div>
-                    <div class="crew-row" style="margin-top:8px;">
-                        <input class="crew-input" type="time" value="${Utils.escape(g.callTime || '')}" title="Convocation du groupe (vide = jour : ${d.crewCall || '—'})" onchange="app.Figuration.updateGroup('${g.id}', 'callTime', this.value)" ${ro ? 'disabled' : ''}>
-                        <input class="crew-input" type="time" value="${Utils.escape(g.endTime || '')}" title="Fin du groupe (vide = jour : ${d.estimatedWrap || '—'})" onchange="app.Figuration.updateGroup('${g.id}', 'endTime', this.value)" ${ro ? 'disabled' : ''}>
-                    </div>
-                    <div class="crew-row" style="margin-top:8px;">
-                        <select class="crew-input" onchange="app.Figuration.updateTransport('${g.id}', 'mode', this.value)" ${ro ? 'disabled' : ''}>
-                            ${Figuration._transportModes.map(m => `<option value="${Utils.escape(m)}" ${((g.transport && g.transport.mode) || '') === m ? 'selected' : ''}>${m || 'Transport — non précisé'}</option>`).join('')}
-                        </select>
-                        <input class="crew-input" placeholder="Précision transport" value="${Utils.escape((g.transport && g.transport.note) || '')}" onchange="app.Figuration.updateTransport('${g.id}', 'note', this.value)" ${ro ? 'disabled' : ''}>
-                    </div>
-                    <textarea class="crew-input" style="margin-top:8px; width:100%; height:38px;" placeholder="Consignes du groupe (costume, accessoires...)" onchange="app.Figuration.updateGroup('${g.id}', 'notes', this.value)" ${ro ? 'disabled' : ''}>${Utils.escape(g.notes || '')}</textarea>
-                    <div style="margin-top:10px;">
-                        <div class="text-sec" style="font-size:0.85rem; margin-bottom:6px;">Figurants (${members.length})</div>
-                        ${members.length === 0 ? '<div class="text-sec" style="font-size:0.85rem;">Aucun figurant dans ce groupe.</div>' : members.map(id => {
-                            const f = repertoire.find(p => p.id === id);
-                            const ov = (g.overrides && g.overrides[id]) || {};
-                            const rc = Figuration._resolveCall(d, g, id), re_ = Figuration._resolveEnd(d, g, id);
-                            const dur = Figuration._duration(rc, re_);
-                            return `<div class="crew-row" style="align-items:center; margin-bottom:6px; flex-wrap:wrap;"><span style="flex:1 1 130px;">${f ? Utils.escape(f.name || 'sans nom') : '<span class="text-sec">(figurant supprimé)</span>'}</span><input class="crew-input" type="time" style="max-width:108px;" value="${Utils.escape(ov.callTime || '')}" title="Arrivée (vide = ${rc || '—'})" onchange="app.Figuration.updateMemberTime('${g.id}', '${id}', 'callTime', this.value)" ${ro ? 'disabled' : ''}><input class="crew-input" type="time" style="max-width:108px;" value="${Utils.escape(ov.endTime || '')}" title="Fin (vide = ${re_ || '—'})" onchange="app.Figuration.updateMemberTime('${g.id}', '${id}', 'endTime', this.value)" ${ro ? 'disabled' : ''}><span class="text-sec" style="font-size:0.8rem; min-width:52px; text-align:right;">${dur || '—'}</span>${ro ? '' : `<button class="btn-tool" onclick="app.Figuration.removeMember('${g.id}', '${id}')">Retirer</button>`}</div>`;
-                        }).join('')}
-                    </div>
-                    ${ro ? '' : `<div class="crew-row" style="margin-top:10px;">
-                        <select class="crew-input" onchange="app.Figuration.addMember('${g.id}', this.value); this.value='';">
-                            <option value="">${available.length ? '+ Ajouter un figurant…' : '(répertoire vide ou tous ajoutés)'}</option>
-                            ${available.map(f => `<option value="${f.id}">${Utils.escape(f.name || 'sans nom')}</option>`).join('')}
-                        </select>
-                    </div>`}
-                </div>`;
-            }).join('')}
+            <div class="shoot-section">
+                <div class="shoot-section-title">🎭 Convocation figuration</div>
+                ${ro ? '' : `<div class="crew-row" style="margin-bottom:12px;"><button class="btn-tool" onclick="app.Figuration.addGroup()">➕ Nouveau groupe</button><button class="btn-tool" onclick="app.Figuration.exportPDF()">📄 Export PDF</button></div>`}
+                ${fig.groups.length === 0 ? '<div class="text-sec" style="padding:12px 0;">Aucun groupe. Crée un groupe et ajoute des figurants.</div>' : fig.groups.map(g => {
+                    const members = (g.figurantIds || []);
+                    const inGroup = new Set(members);
+                    const available = repertoire.filter(f => !inGroup.has(f.id));
+                    return `
+                    <div class="crew-vehicle-section" style="margin-bottom:14px; padding:14px;">
+                        <div class="crew-row">
+                            <input class="crew-input" placeholder="Nom du groupe (ex: Clients du bar)" value="${Utils.escape(g.name || '')}" onchange="app.Figuration.updateGroup('${g.id}', 'name', this.value)" ${ro ? 'disabled' : ''}>
+                            ${ro ? '' : `<button class="btn-tool" onclick="app.Figuration.sendGroup('${g.id}')">📧 Envoyer</button><button class="btn-tool" onclick="app.Figuration.removeGroup('${g.id}')">🗑 Groupe</button>`}
+                        </div>
+                        <div class="crew-row" style="margin-top:8px;">
+                            <input class="crew-input" placeholder="Lieu d'arrivée figuration" value="${Utils.escape(g.callLocation || '')}" onchange="app.Figuration.updateGroup('${g.id}', 'callLocation', this.value)" ${ro ? 'disabled' : ''}>
+                        </div>
+                        <div class="crew-row" style="margin-top:8px;">
+                            <input class="crew-input" type="time" value="${Utils.escape(g.callTime || '')}" title="Convocation du groupe (vide = jour : ${day.crewCall || '—'})" onchange="app.Figuration.updateGroup('${g.id}', 'callTime', this.value)" ${ro ? 'disabled' : ''}>
+                            <input class="crew-input" type="time" value="${Utils.escape(g.endTime || '')}" title="Fin du groupe (vide = jour : ${day.estimatedWrap || '—'})" onchange="app.Figuration.updateGroup('${g.id}', 'endTime', this.value)" ${ro ? 'disabled' : ''}>
+                        </div>
+                        <div class="crew-row" style="margin-top:8px;">
+                            <select class="crew-input" onchange="app.Figuration.updateTransport('${g.id}', 'mode', this.value)" ${ro ? 'disabled' : ''}>
+                                ${Figuration._transportModes.map(m => `<option value="${Utils.escape(m)}" ${((g.transport && g.transport.mode) || '') === m ? 'selected' : ''}>${m || 'Transport — non précisé'}</option>`).join('')}
+                            </select>
+                            <input class="crew-input" placeholder="Précision transport" value="${Utils.escape((g.transport && g.transport.note) || '')}" onchange="app.Figuration.updateTransport('${g.id}', 'note', this.value)" ${ro ? 'disabled' : ''}>
+                        </div>
+                        <textarea class="crew-input" style="margin-top:8px; width:100%; height:38px;" placeholder="Consignes du groupe (costume, accessoires...)" onchange="app.Figuration.updateGroup('${g.id}', 'notes', this.value)" ${ro ? 'disabled' : ''}>${Utils.escape(g.notes || '')}</textarea>
+                        <div style="margin-top:10px;">
+                            <div class="text-sec" style="font-size:0.85rem; margin-bottom:6px;">Figurants (${members.length})</div>
+                            ${members.length === 0 ? '<div class="text-sec" style="font-size:0.85rem;">Aucun figurant dans ce groupe.</div>' : members.map(id => {
+                                const f = repertoire.find(p => p.id === id);
+                                const ov = (g.overrides && g.overrides[id]) || {};
+                                const rc = Figuration._resolveCall(day, g, id), re_ = Figuration._resolveEnd(day, g, id);
+                                const dur = Figuration._duration(rc, re_);
+                                return `<div class="crew-row" style="align-items:center; margin-bottom:6px; flex-wrap:wrap;"><span style="flex:1 1 130px;">${f ? Utils.escape(f.name || 'sans nom') : '<span class="text-sec">(figurant supprimé)</span>'}</span><input class="crew-input" type="time" style="max-width:108px;" value="${Utils.escape(ov.callTime || '')}" title="Arrivée (vide = ${rc || '—'})" onchange="app.Figuration.updateMemberTime('${g.id}', '${id}', 'callTime', this.value)" ${ro ? 'disabled' : ''}><input class="crew-input" type="time" style="max-width:108px;" value="${Utils.escape(ov.endTime || '')}" title="Fin (vide = ${re_ || '—'})" onchange="app.Figuration.updateMemberTime('${g.id}', '${id}', 'endTime', this.value)" ${ro ? 'disabled' : ''}><span class="text-sec" style="font-size:0.8rem; min-width:52px; text-align:right;">${dur || '—'}</span>${ro ? '' : `<button class="btn-tool" onclick="app.Figuration.removeMember('${g.id}', '${id}')">Retirer</button>`}</div>`;
+                            }).join('')}
+                        </div>
+                        ${ro ? '' : `<div class="crew-row" style="margin-top:10px;">
+                            <select class="crew-input" onchange="app.Figuration.addMember('${g.id}', this.value); this.value='';">
+                                <option value="">${available.length ? '+ Ajouter un figurant…' : '(répertoire vide ou tous ajoutés)'}</option>
+                                ${available.map(f => `<option value="${f.id}">${Utils.escape(f.name || 'sans nom')}</option>`).join('')}
+                            </select>
+                        </div>`}
+                    </div>`;
+                }).join('')}
+            </div>
+            <div class="shoot-section">
+                <div class="shoot-section-title">🌤️ Météo (figuration)</div>
+                <input class="crew-input" placeholder="Météo prévue" value="${Utils.escape(fig.weather || '')}" onchange="app.Figuration.updateFiguField('weather', this.value)" ${ro ? 'disabled' : ''}>
+            </div>
+            <div class="shoot-section">
+                <div class="shoot-section-title">📝 Notes générales (figuration)</div>
+                <textarea class="crew-input" style="width:100%; height:60px;" placeholder="Notes..." onchange="app.Figuration.updateFiguField('notes', this.value)" ${ro ? 'disabled' : ''}>${Utils.escape(fig.notes || '')}</textarea>
+            </div>
         `;
     },
     add: async () => {
@@ -33404,7 +33429,7 @@ const DrawingEditor = {
         const name = await ConfirmModal.prompt('Nom du figurant.', 'Nouveau figurant', 'Nom...');
         if(!name) return;
         if(!state.data.figurants) state.data.figurants = [];
-        const f = { id: Utils.generateUniqueId(), name: name, email: '', phone: '', notes: '' };
+        const f = { id: Utils.generateUniqueId(), name: name, email: '', phone: '', notes: '', photo: '' };
         state.data.figurants.push(f);
         History.log('ADD', `Ajout figurant : ${name}`);
         Store.save();
@@ -33425,29 +33450,64 @@ const DrawingEditor = {
         Store.save();
         Figuration.render();
     },
+    uploadPhoto: async (idx, input) => {
+        if(state.currentRole === 'viewer') return;
+        if(!state.data.figurants || !state.data.figurants[idx]) return;
+        if(!input.files || !input.files[0]) return;
+        const file = input.files[0];
+        input.value = '';
+        Utils.toast('Envoi de la photo...', 'info', 1500);
+        const fig = state.data.figurants[idx];
+        const url = await Utils.uploadProjectFile(file, { category: 'figurants', entityId: fig.id || `idx${idx}`, kind: 'photo', maxDimension: 1920, quality: 0.92, maxKb: 1500 });
+        if(!url) return;
+        if(fig.photo) await Utils.deleteProjectFile(fig.photo);
+        fig.photo = url;
+        Store.save();
+        Figuration.render();
+    },
+    removePhoto: async (idx) => {
+        if(state.currentRole === 'viewer') return;
+        const fig = (state.data.figurants || [])[idx];
+        if(!fig || !fig.photo) return;
+        await Utils.deleteProjectFile(fig.photo);
+        fig.photo = '';
+        Store.save();
+        Figuration.render();
+    },
     render: () => {
         const c = document.getElementById('figurantsContainer');
         if(!c) return;
         if(!state.data.figurants) state.data.figurants = [];
         const figurants = state.data.figurants;
         const ro = state.currentRole === 'viewer';
-        c.innerHTML = `
-            <h2 style="margin:24px 0 12px 0;">🎭 Répertoire figurants <span class="text-sec" style="font-weight:400; font-size:0.85rem;">(${figurants.length})</span></h2>
-            ${figurants.length === 0 ? '<div class="text-sec" style="padding:12px 0;">Aucun figurant. Ajoute-en via « Nouveau figurant ».</div>' : figurants.map((f, idx) => `
-                <div class="crew-vehicle-section" style="margin-bottom:12px; padding:14px;">
-                    <div class="crew-row">
-                        <input class="crew-input" placeholder="Nom" value="${Utils.escape(f.name || '')}" onchange="app.Figuration.update(${idx}, 'name', this.value)" ${ro ? 'disabled' : ''}>
-                        <input class="crew-input" type="email" placeholder="Email" value="${Utils.escape(f.email || '')}" onchange="app.Figuration.update(${idx}, 'email', this.value)" ${ro ? 'disabled' : ''}>
+        if(figurants.length === 0) {
+            c.innerHTML = '<div class="text-sec" style="padding:16px 0;">Aucun figurant. Ajoute-en via le bouton ci-dessus.</div>';
+            return;
+        }
+        c.innerHTML = `<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:12px;">` + figurants.map((f, idx) => {
+            const photoBtnLabel = f.photo ? '🖼️ Changer la photo' : '📤 Importer une photo';
+            return `
+            <div class="data-card">
+                <div class="actor-card-header">
+                    ${f.photo ? `<img src="${f.photo}" alt="Photo du figurant" class="actor-photo-preview">` : '<div class="actor-photo-preview"></div>'}
+                    <div style="flex-grow:1;">
+                        <input class="actor-input" style="font-weight:bold; font-size:1rem; margin-bottom:5px;" placeholder="Nom" value="${Utils.escape(f.name || '')}" onchange="app.Figuration.update(${idx}, 'name', this.value)" ${ro ? 'disabled' : ''}>
+                        ${ro ? '' : `<div class="flex-gap10" style="align-items:center;">
+                            <input type="file" id="figurant-photo-input-${idx}" accept="image/*" style="display:none;" onchange="app.Figuration.uploadPhoto(${idx}, this)">
+                            <button onclick="document.getElementById('figurant-photo-input-${idx}').click()" class="btn btn--primary btn--sm" style="flex:0 0 auto;">${photoBtnLabel}</button>
+                            ${f.photo ? `<button onclick="app.Figuration.removePhoto(${idx})" class="btn-icon-sm" title="Supprimer la photo" style="background:var(--danger); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer;">✕</button>` : ''}
+                        </div>`}
                     </div>
-                    <div class="crew-row" style="margin-top:8px;">
-                        <input class="crew-input" placeholder="Téléphone" value="${Utils.escape(f.phone || '')}" onchange="app.Figuration.update(${idx}, 'phone', this.value)" ${ro ? 'disabled' : ''}>
-                    </div>
-                    <textarea class="crew-input" style="margin-top:8px; width:100%; height:38px;" placeholder="Notes (gabarit, dispo, contraintes...)" onchange="app.Figuration.update(${idx}, 'notes', this.value)" ${ro ? 'disabled' : ''}>${Utils.escape(f.notes || '')}</textarea>
-                    ${ro ? '' : `<div style="text-align:right; margin-top:8px;"><button class="btn-tool" onclick="app.Figuration.remove(${idx})">🗑 Supprimer</button></div>`}
+                    ${ro ? '' : `<button onclick="app.Figuration.remove(${idx})" style="color:var(--danger);border:none;background:none;cursor:pointer">🗑️</button>`}
                 </div>
-            `).join('')}
-        `;
-    }
+                <div class="actor-input-row mt-10">
+                    <input class="actor-input" placeholder="Email" value="${Utils.escape(f.email || '')}" onchange="app.Figuration.update(${idx}, 'email', this.value)" ${ro ? 'disabled' : ''}>
+                    <input class="actor-input" placeholder="Tél" value="${Utils.escape(f.phone || '')}" onchange="app.Figuration.update(${idx}, 'phone', this.value)" ${ro ? 'disabled' : ''}>
+                </div>
+                <textarea class="data-desc mt-5" placeholder="Notes (gabarit, dispo, contraintes...)" oninput="app.Figuration.update(${idx}, 'notes', this.value)" ${ro ? 'disabled' : ''}>${Utils.escape(f.notes || '')}</textarea>
+            </div>`;
+        }).join('') + `</div>`;
+    },
   };
 
   const Crew = {
@@ -40870,6 +40930,11 @@ const shotBadge = shotCount > 0 ? `<span style="background: var(--primary); colo
         }
         
         body.innerHTML = `
+            <div class="fds-tabs">
+                <button type="button" class="fds-tabbtn fds-tabbtn-active" onclick="app.Planning.switchFDSTab('normal')">📋 FDS ${shootDay.startDate ? new Date(shootDay.startDate).toLocaleDateString('fr-FR') : ''}</button>
+                <button type="button" class="fds-tabbtn fds-tabbtn-dim" onclick="app.Planning.switchFDSTab('figu')">🎭 FDS figu ${shootDay.startDate ? new Date(shootDay.startDate).toLocaleDateString('fr-FR') : ''}</button>
+            </div>
+            <div id="fds-pane-normal">
             <div class="shoot-section">
                 <div class="shoot-section-title">📅 Type, Dates et Nom</div>
                 <div class="shoot-time-grid">
@@ -41015,6 +41080,8 @@ const shotBadge = shotCount > 0 ? `<span style="background: var(--primary); colo
                 <button onclick="app.Planning.deleteShootDay('${shootDay.id}')" style="padding: 10px 20px; background: var(--danger); color: white; border: none; border-radius: 6px; cursor: pointer;">🗑️ Supprimer ce jour de tournage</button>
             </div>
             ` : ''}
+            </div>
+            <div id="fds-pane-figu" style="display:none;"></div>
         `;
         
         modal.classList.add('active');
@@ -41107,6 +41174,22 @@ closeModal: () => {
         // Dates de tournage sauvegardées
     },
     
+    switchFDSTab: (which) => {
+        const paneN = document.getElementById('fds-pane-normal');
+        const paneF = document.getElementById('fds-pane-figu');
+        if(!paneN || !paneF) return;
+        const btns = document.querySelectorAll('.fds-tabbtn');
+        if(which === 'figu') {
+            paneN.style.display = 'none'; paneF.style.display = '';
+            if(btns[0]) { btns[0].classList.remove('fds-tabbtn-active'); btns[0].classList.add('fds-tabbtn-dim'); }
+            if(btns[1]) { btns[1].classList.remove('fds-tabbtn-dim'); btns[1].classList.add('fds-tabbtn-active'); }
+            Figuration.renderDays();
+        } else {
+            paneN.style.display = ''; paneF.style.display = 'none';
+            if(btns[0]) { btns[0].classList.remove('fds-tabbtn-dim'); btns[0].classList.add('fds-tabbtn-active'); }
+            if(btns[1]) { btns[1].classList.remove('fds-tabbtn-active'); btns[1].classList.add('fds-tabbtn-dim'); }
+        }
+    },
     saveShootDay: () => {
         if(state.currentRole === 'viewer') return;
         
@@ -41160,7 +41243,8 @@ closeModal: () => {
             scenes: [],
             callSheet: [],
             notes: document.getElementById('edit-notes').value,
-            customWeather: document.getElementById('edit-customWeather').value
+            customWeather: document.getElementById('edit-customWeather').value,
+            figuration: (Planning.tempShootDay && Planning.tempShootDay.figuration) ? Planning.tempShootDay.figuration : { groups: [] }
         };
         
         // Collect scenes from tempShootDay
@@ -42249,6 +42333,7 @@ closeModal: () => {
     syncShootingDatesToProfiles: (...a) => PlanningDayEdit.syncShootingDatesToProfiles(...a),
     syncShootingDatesToPublicProfiles: (...a) => PlanningDayEdit.syncShootingDatesToPublicProfiles(...a),
     saveShootDay: (...a) => PlanningDayEdit.saveShootDay(...a),
+    switchFDSTab: (...a) => PlanningDayEdit.switchFDSTab(...a),
     
     deleteShootDay: async (dayId) => {
         if(!await ConfirmModal.confirmDelete("Ce jour de tournage sera supprimé.")) return;
