@@ -74,6 +74,11 @@ les CONTRATS, et 2 chokepoints UI (toast, ConfirmModal). S2→S6 ferment l'essen
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v555 (26 Juin 2026) — Figuration intégrée au casting (suppression du module figurant isolé)
+  - SUPPRESSION DU MODULE FIGURANT ISOLÉ — l'onglet « Figuration », le répertoire dédié state.data.figurants, les groupes state.data.figurantGroups, le second onglet « FDS figu » de l'éditeur de jour et tout l'export figuration séparé (helper Figuration._renderFiguPage + pages ajoutées au PDF du planning) ont été entièrement retirés, ainsi que l'objet Figuration complet (~390 lignes), le champ day.figuration et le support du type de partie « figurant » dans les contrats. Motif : le silo isolait les figurants de l'Univers, incohérent pour une cible amateurs/semi-pros où un même comédien est figurant sur un projet payé et rôle principal sur un autre bénévole. Les figurants deviennent de simples comédiens, tirés de l'Univers ou invités comme les autres.
+  - GROUPE FIGURATION — troisième groupe de comédiens par défaut ({id:'ga3', name:'Figuration'}) aux côtés de Casting Principal et Rôles Secondaires, ajouté aux nouveaux projets et rétro-inséré (après Rôles Secondaires) dans les projets existants au chargement. Les trois groupes par défaut sont désormais toujours affichés dans l'onglet Comédien·nes même vides, et regarantis à chaque rendu : le sync temps réel reconstruisait state.data depuis la version serveur et faisait disparaître Figuration dès la première opération — un filet dans renderDataTab réinjecte ga3 s'il est absent.
+  - DÉPOUILLEMENT — la catégorie FIGURATION du menu de dépouillement (clic droit sur le scénario) devient un sous-menu de sélection de personnes, au même titre que COMEDIENS et TECHNICIENS, ne listant que les comédiens rangés dans le groupe Figuration (option « TOUS » incluse).
+  - FEUILLE DE SERVICE / SECOND TABLEAU — l'éditeur d'un jour affiche un second tableau « Convocations Figuration » sous le tableau de convocations principal, listant les comédiens du groupe Figuration, cochés automatiquement depuis le dépouillement FIGURATION des scènes du jour (même logique d'agrégation que comédiens et techniciens). Tout reste stocké dans day.callSheet en type « actor » : transport, covoiturage, « avec qui » et sauvegarde restent inchangés (collecte par .callsheet-table input:checked), la séparation comédiens / figurants étant purement présentationnelle via group_id === 'ga3'. Feuille séparée à l'export et routage de l'envoi par destinataire : à venir.
 v554 (25 Juin 2026) — Module Figuration (figurants/extras, complet) : répertoire, groupes, convocation par jour, export intégré aux feuilles de service
   - RÉPERTOIRE & GROUPES — nouveau répertoire de figurants state.data.figurants, volontairement isolé de state.data.actors (suivi salarial distinct, pas de pollution du casting) : chaque figurant est saisi individuellement par son nom, fiche avec photo réutilisant le moteur de fiche comédien. Ajout de groupes nommés state.data.figurantGroups ({id, name, figurantIds}) — un même figurant peut appartenir à plusieurs groupes ; les groupes servent de raccourci de convocation (cartes sous le répertoire, membres cochables). Onglet « Figuration » rangé dans la catégorie casting.
   - FEUILLE DE SERVICE FIGURATION (par jour) — l'éditeur d'un jour de tournage gagne un second onglet « FDS figu » à côté de la feuille de service normale. Les sections du jour (type/dates/nom, scènes, lieu, horaires, météo, notes générales) y sont reprises en lecture seule — toute modification se fait côté FDS normale, même jour, aucune donnée dupliquée. La convocation est un tableau plat day.figuration.callSheet ({figurantId, callTime, transport:{mode,note}, notes}) : un menu déroulant liste figurants ET groupes (choisir un groupe ajoute tous ses membres non déjà présents), colonnes Figurant / Heure / Transport / Note. Heure vide = convocation équipe du jour. Transport parmi Perso défrayé / Perso payé / Perso bénévole / Régie / Autre (« Autre » révèle un champ libre).
@@ -5717,7 +5722,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv555</p>
+      <p>vv556</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -38122,6 +38127,7 @@ if(isActors) {
         const days = (opts.dayIds && opts.dayIds.length > 0)
             ? allDays.filter(d => opts.dayIds.includes(d.id))
             : allDays;
+        const figuMode = !!opts.figuMode;
         
         if(days.length === 0) {
             Utils.toast('Aucun jour à exporter', 'warning');
@@ -38321,7 +38327,7 @@ doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(13);
             doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.text('FEUILLE DE SERVICE', margin, 8);
+            doc.text(figuMode ? 'FEUILLE FIGURATION' : 'FEUILLE DE SERVICE', margin, 8);
             doc.setFont('helvetica', 'normal');
             doc.setFontSize(10);
             doc.text(`${dayIdx + 1} / ${days.length}`, pageWidth - margin, 8, { align: 'right' });
@@ -38386,8 +38392,8 @@ doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
             y += 2;
             
             // PROGRAMME
+            const scenes = shootDay.scenes || [];
             drawSectionHeader('Programme du jour');
-const scenes = shootDay.scenes || [];
             if(scenes.length === 0) {
                 drawTextBlock('Aucune scène planifiée pour ce jour.', { italic: true, color: 150 });
             } else {
@@ -38436,8 +38442,8 @@ const scenes = shootDay.scenes || [];
                     { x: margin + usableWidth * 0.85,     w: usableWidth * 0.15 }
                 ];
                 
-                const actorCalls = callsAll.filter(c => c.type === 'actor');
-                const crewCalls = callsAll.filter(c => c.type === 'crew');
+                const actorCalls = callsAll.filter(c => c.type === 'actor' && (figuMode === (((allActors.find(a => a.id === c.personId) || {}).group_id) === 'ga3')));
+                const crewCalls = figuMode ? [] : callsAll.filter(c => c.type === 'crew');
                 
                 if(actorCalls.length > 0) {
                     drawTableRow(callCols, ['Nom', 'Rôle', 'Convoc.', 'Transport', 'Notes'],
@@ -38449,7 +38455,7 @@ const scenes = shootDay.scenes || [];
                             return actor && actor.group_id === grp.id;
                         });
                         if(groupCalls.length === 0) return;
-                        drawSubGroupHeader('COMÉDIENS — ' + grp.name);
+                        drawSubGroupHeader(figuMode ? 'FIGURATION' : ('COMÉDIENS — ' + grp.name));
                         groupCalls.forEach(call => {
                             const person = allActors.find(a => a.id === call.personId);
                             if(!person) return;
@@ -38542,6 +38548,7 @@ const scenes = shootDay.scenes || [];
                 const sc = allScenes.find(s => s.id === ref.sceneId);
                 if(sc && sc.breakdown) {
                     Object.entries(sc.breakdown).forEach(([category, items]) => {
+                        if(category === 'FIGURATION') return;
                         if(Array.isArray(items) && items.length > 0) {
                             if(!allCategories[category]) allCategories[category] = new Set();
                             items.forEach(item => allCategories[category].add(item));
@@ -38565,7 +38572,7 @@ const scenes = shootDay.scenes || [];
                 return null;
             };
             
-            if(Object.keys(allCategories).length > 0) {
+            if(!figuMode && Object.keys(allCategories).length > 0) {
                 drawSectionHeader('Dépouillement / besoins');
                 Object.entries(allCategories).forEach(([cat, itemsSet]) => {
                     const items = Array.from(itemsSet);
@@ -38662,25 +38669,52 @@ const scenes = shootDay.scenes || [];
     },
     
     publishCallSheet: async (shootDay) => {
-        // Génère le PDF du jour (rendu identique au Dossier de Production) et l'uploade
-        const token = (crypto.randomUUID ? crypto.randomUUID() : 'fds_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11));
+        // Génère 2 PDF du jour : principal (sans figuration) + figuration (si figurants convoqués)
+        const mkToken = () => (crypto.randomUUID ? crypto.randomUUID() : 'fds_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11));
+        const projectId = state.currentProjectId || 'projet';
+        const allActors = state.data.actors || [];
+        const hasFigu = (shootDay.callSheet || []).some(c => c.type === 'actor' && ((allActors.find(a => a.id === c.personId) || {}).group_id === 'ga3'));
+        const out = { main: null, figu: null };
         try {
-            const blob = await PlanningExport.exportPlanningPDF({ dayIds: [shootDay.id], includeCover: false, returnBlob: true });
-            if(!blob) { Utils.toast('Erreur génération du PDF', 'error'); return null; }
-            const filePath = `${state.currentProjectId || 'projet'}/${token}.pdf`;
-            const { error: upErr } = await supabase.storage.from('callsheets').upload(filePath, blob, { contentType: 'application/pdf', upsert: false });
-            if(upErr) { console.error('Erreur upload feuille:', upErr); Utils.toast('Erreur lors de l\'envoi du PDF', 'error'); return null; }
-            if(shootDay.callsheetFile && shootDay.callsheetFile !== filePath) {
+            // --- PDF principal ---
+            const blobMain = await PlanningExport.exportPlanningPDF({ dayIds: [shootDay.id], includeCover: false, returnBlob: true });
+            if(!blobMain) { Utils.toast('Erreur génération du PDF', 'error'); return out; }
+            const pathMain = `${projectId}/${mkToken()}.pdf`;
+            const { error: upMain } = await supabase.storage.from('callsheets').upload(pathMain, blobMain, { contentType: 'application/pdf', upsert: false });
+            if(upMain) { console.error('Erreur upload feuille principale:', upMain); Utils.toast('Erreur lors de l\'envoi du PDF', 'error'); return out; }
+            if(shootDay.callsheetFile && shootDay.callsheetFile !== pathMain) {
                 const { error: rmOld } = await supabase.storage.from('callsheets').remove([shootDay.callsheetFile]);
                 if(rmOld) console.warn('Purge ancienne feuille échouée:', rmOld.message);
             }
-            shootDay.callsheetFile = filePath;
+            shootDay.callsheetFile = pathMain;
+            out.main = supabase.storage.from('callsheets').getPublicUrl(pathMain).data?.publicUrl || null;
+
+            // --- PDF figuration ---
+            if(hasFigu) {
+                const blobFigu = await PlanningExport.exportPlanningPDF({ dayIds: [shootDay.id], includeCover: false, returnBlob: true, figuMode: true });
+                if(blobFigu) {
+                    const pathFigu = `${projectId}/${mkToken()}.pdf`;
+                    const { error: upFigu } = await supabase.storage.from('callsheets').upload(pathFigu, blobFigu, { contentType: 'application/pdf', upsert: false });
+                    if(upFigu) { console.warn('Erreur upload feuille figuration:', upFigu.message); }
+                    else {
+                        if(shootDay.callsheetFileFigu && shootDay.callsheetFileFigu !== pathFigu) {
+                            const { error: rmOldF } = await supabase.storage.from('callsheets').remove([shootDay.callsheetFileFigu]);
+                            if(rmOldF) console.warn('Purge ancienne feuille figu échouée:', rmOldF.message);
+                        }
+                        shootDay.callsheetFileFigu = pathFigu;
+                        out.figu = supabase.storage.from('callsheets').getPublicUrl(pathFigu).data?.publicUrl || null;
+                    }
+                }
+            } else if(shootDay.callsheetFileFigu) {
+                const { error: rmF } = await supabase.storage.from('callsheets').remove([shootDay.callsheetFileFigu]);
+                if(rmF) console.warn('Purge feuille figu obsolète échouée:', rmF.message);
+                shootDay.callsheetFileFigu = null;
+            }
             Store.save();
-            const { data: urlData } = supabase.storage.from('callsheets').getPublicUrl(filePath);
-            return urlData?.publicUrl || null;
+            return out;
         } catch(e) {
             console.error('Erreur publication feuille:', e);
-            return null;
+            return out;
         }
     },
     
@@ -38712,7 +38746,8 @@ const scenes = shootDay.scenes || [];
                         name: person.name || 'Inconnu',
                         email: person.email,
                         callTime: call.callTime || shootDay.crewCall || 'À confirmer',
-                        notes: call.notes || ''
+                        notes: call.notes || '',
+                        isFigu: call.type === 'actor' && person.group_id === 'ga3'
                     });
                 }
             }
@@ -38729,8 +38764,8 @@ const scenes = shootDay.scenes || [];
         
         // Publier la feuille de service pour générer le lien
         Utils.toast('Publication de la feuille de service...', 'info');
-        const publicLink = await PlanningCallSheets.publishCallSheet(shootDay);
-        if(!publicLink) {
+        const links = await PlanningCallSheets.publishCallSheet(shootDay);
+        if(!links || !links.main) {
             Utils.toast('Erreur lors de la publication', 'error');
             return;
         }
@@ -38740,15 +38775,20 @@ const scenes = shootDay.scenes || [];
         
         for(const recipient of recipients) {
             try {
-                
-                // Envoyer email avec lien public
+                let link;
+                if(recipient.isFigu) {
+                    if(!links.figu) { errors++; continue; }
+                    link = links.figu;
+                } else {
+                    link = links.main;
+                }
                 await Messages.sendEmailPing(recipient.email, recipient.name, 'callsheet', {
                     projectName: projectName,
                     shootDate: dateFormatted,
                     location: shootDay.location || 'À confirmer',
                     callTime: recipient.callTime,
                     senderName: senderName,
-                    publicLink: publicLink
+                    publicLink: link
                 });
                 
                 sent++;
