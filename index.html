@@ -38966,10 +38966,22 @@ const scenes = shootDay.scenes || [];
                 return null;
             };
             
-            if(Object.keys(allCategories).length > 0) {
+const bdHidden = shootDay.bdHidden || [];
+            const bdExtra = shootDay.bdExtra || {};
+            const bdNotes = shootDay.bdNotes || {};
+            const bdOrder = ['PERSONNAGES', 'COMEDIENS', 'TECHNICIENS', 'COSTUMES', 'MAQUILLAGE-COIFFURE', 'ACCESSOIRES', 'DECORS-LIEUX', 'VEHICULES', 'FIGURATION', 'ANIMAUX', 'SON-MUSIQUE', 'EFFETS SPECIAUX (SFX)', 'EFFETS VISUELS (VFX)', 'LUMIERE', 'MACHINERIE', 'LOGISTIQUE'];
+            const bdCats = bdOrder.filter(cat => {
+                if(bdHidden.includes(cat)) return false;
+                const hasAuto = allCategories[cat] && allCategories[cat].size > 0;
+                const hasExtra = Array.isArray(bdExtra[cat]) && bdExtra[cat].length > 0;
+                const hasNote = bdNotes[cat] && String(bdNotes[cat]).trim();
+                return hasAuto || hasExtra || hasNote;
+            });
+            if(bdCats.length > 0) {
                 drawSectionHeader('Dépouillement / besoins');
-                Object.entries(allCategories).forEach(([cat, itemsSet]) => {
-                    const items = Array.from(itemsSet);
+                bdCats.forEach(cat => {
+                    const items = allCategories[cat] ? Array.from(allCategories[cat]) : [];
+                    (Array.isArray(bdExtra[cat]) ? bdExtra[cat] : []).forEach(it => { if(!items.includes(it)) items.push(it); });
                     const resp = getResponsibleForCategory(cat);
                     ensureSpace(4);
                     doc.setFont('helvetica', 'bold');
@@ -38978,12 +38990,23 @@ const scenes = shootDay.scenes || [];
                     const respText = resp ? '  (Responsable : ' + resp + ')' : '';
                     doc.text(cat + respText, margin + 1, y + 3);
                     y += 4;
-                    doc.setFont('helvetica', 'normal');
-                    doc.setFontSize(8);
-                    doc.setTextColor(...PdfTheme.COLORS.TEXT_BODY);
-                    const line = '• ' + items.join('   ·   ');
-                    const lines = doc.splitTextToSize(line, usableWidth - 4);
-                    lines.forEach(l => { ensureSpace(3.5); doc.text(l, margin + 3, y + 2.8); y += 3.5; });
+                    if(items.length > 0) {
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(8);
+                        doc.setTextColor(...PdfTheme.COLORS.TEXT_BODY);
+                        const line = '• ' + items.join('   ·   ');
+                        const lines = doc.splitTextToSize(line, usableWidth - 4);
+                        lines.forEach(l => { ensureSpace(3.5); doc.text(l, margin + 3, y + 2.8); y += 3.5; });
+                    }
+                    const note = bdNotes[cat] && String(bdNotes[cat]).trim();
+                    if(note) {
+                        doc.setFont('helvetica', 'italic');
+                        doc.setFontSize(8);
+                        doc.setTextColor(90, 90, 90);
+                        const nlines = doc.splitTextToSize(note, usableWidth - 4);
+                        nlines.forEach(l => { ensureSpace(3.5); doc.text(l, margin + 3, y + 2.8); y += 3.5; });
+                        doc.setFont('helvetica', 'normal');
+                    }
                     y += 1;
                 });
             }
@@ -40534,58 +40557,39 @@ options += `<option value="${scene.id}">#${idx + 1} - ${Utils.escape(scene.title
         PlanningBreakdown.updateBreakdownNeeds();
     },
     
-    updateBreakdownNeeds: () => {
+updateBreakdownNeeds: () => {
         const container = document.getElementById('auto-breakdown-needs');
         if(!container) return;
         
-        if(!Planning.tempShootDay || Planning.tempShootDay.scenes.length === 0) {
-            container.innerHTML = '<em class="text-sec">Sélectionnez des scènes pour voir les besoins...</em>';
-            return;
-        }
+        const day = Planning.tempShootDay;
+        if(!day) { container.innerHTML = ''; return; }
+        if(!day.bdNotes) day.bdNotes = {};
+        if(!day.bdExtra) day.bdExtra = {};
+        if(!day.bdHidden) day.bdHidden = [];
+        const canEdit = state.currentRole === 'owner' || (typeof Permissions !== 'undefined' && Permissions.canEdit('planning'));
         
-        // Collecter tous les besoins des scènes sélectionnées
+        // Collecter le dépouillement automatique des scènes sélectionnées
         const allNeeds = {};
-        
-        Planning.tempShootDay.scenes.forEach(sceneRef => {
+        (day.scenes || []).forEach(sceneRef => {
             const scene = state.data.scenes.find(s => s.id === sceneRef.sceneId || String(s.id) === String(sceneRef.sceneId));
             if(scene && scene.breakdown) {
                 Object.keys(scene.breakdown).forEach(category => {
-                    if(!allNeeds[category]) {
-                        allNeeds[category] = new Set();
-                    }
-                    scene.breakdown[category].forEach(item => {
-                        allNeeds[category].add(item);
-                    });
+                    if(!allNeeds[category]) allNeeds[category] = new Set();
+                    scene.breakdown[category].forEach(item => allNeeds[category].add(item));
                 });
             }
         });
         
-        // Afficher les besoins
-        if(Object.keys(allNeeds).length === 0) {
-            container.innerHTML = '<em class="text-sec">Aucun dépouillement pour ces scènes. Allez dans l\'onglet Dépouillement pour ajouter des éléments.</em>';
-            return;
-        }
-        
-        // Trouver les techniciens responsables par catégorie
         const getResponsiblesForCategory = (category) => {
             const responsibles = [];
-            const crewGroups = state.data.groups.filter(g => g.type === 'crew');
-            
-            // Chercher quel groupe gère cette catégorie
             Object.keys(CONFIG.crewToBreakdownMap).forEach(groupId => {
                 if(CONFIG.crewToBreakdownMap[groupId].includes(category)) {
-                    // Trouver les techniciens de ce groupe
-                    const members = state.data.crew.filter(c => c.group_id === groupId);
-                    members.forEach(m => responsibles.push(m.name));
+                    state.data.crew.filter(c => c.group_id === groupId).forEach(m => responsibles.push(m.name));
                 }
             });
-            
             return responsibles;
         };
         
-    let html = '';
-        
-        // Fonction pour obtenir le comédien lié à un personnage
         const getActorForCharacter = (charName) => {
             const character = state.data.characters?.find(c => c.name.toUpperCase() === charName.toUpperCase());
             if(character && character.actor_id) {
@@ -40595,69 +40599,65 @@ options += `<option value="${scene.id}">#${idx + 1} - ${Utils.escape(scene.title
             return null;
         };
         
-        // Ordre personnalisé des catégories (PERSONNAGES en premier)
+        const buildAutoItems = (category) => {
+            const items = Array.from(allNeeds[category] || []);
+            if(category === 'PERSONNAGES') {
+                return items.map(charName => {
+                    const actorName = getActorForCharacter(charName);
+                    return actorName
+                        ? `<span class="badge-panel"><strong>${Utils.escape(charName)}</strong> <span class="text-sec">/</span> <span style="color: var(--primary);">${Utils.escape(actorName)}</span></span>`
+                        : `<span class="badge-panel">${Utils.escape(charName)} <span style="color: var(--warning); font-size: 0.75rem;">⚠️ Non casté</span></span>`;
+                }).join('');
+            }
+            if(category === 'COMEDIENS') {
+                const shown = new Set();
+                (allNeeds['PERSONNAGES'] ? Array.from(allNeeds['PERSONNAGES']) : []).forEach(charName => {
+                    const a = getActorForCharacter(charName);
+                    if(a) shown.add(a.toUpperCase());
+                });
+                return items.filter(name => !shown.has(name.toUpperCase())).map(item => `<span class="badge-panel">${Utils.escape(item)}</span>`).join('');
+            }
+            return items.map(item => `<span class="badge-panel">${Utils.escape(item)}</span>`).join('');
+        };
+        
         const categoryOrder = ['PERSONNAGES', 'COMEDIENS', 'TECHNICIENS', 'COSTUMES', 'MAQUILLAGE-COIFFURE', 'ACCESSOIRES', 'DECORS-LIEUX', 'VEHICULES', 'FIGURATION', 'ANIMAUX', 'SON-MUSIQUE', 'EFFETS SPECIAUX (SFX)', 'EFFETS VISUELS (VFX)', 'LUMIERE', 'MACHINERIE', 'LOGISTIQUE'];
         
-        const sortedCategories = Object.keys(allNeeds).sort((a, b) => {
-            const idxA = categoryOrder.indexOf(a);
-            const idxB = categoryOrder.indexOf(b);
-            return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+        let html = '';
+        const hiddenList = [];
+        
+        categoryOrder.forEach(cat => {
+            const i = CONFIG.bdCategories.indexOf(cat);
+            if(i === -1) return;
+            if(day.bdHidden.includes(cat)) { hiddenList.push({ i, cat }); return; }
+            
+            const resp = getResponsiblesForCategory(cat);
+            const respStr = resp.length > 0 ? `<span style="color: var(--text-sec); font-size: 0.8rem;">(${Utils.escape(resp.join(', '))})</span>` : '';
+            const autoHtml = buildAutoItems(cat);
+            const extras = day.bdExtra[cat] || [];
+            const extraHtml = extras.map((item, j) => `<span class="badge-panel" style="border: 1px dashed var(--primary);">${Utils.escape(item)}${canEdit ? ` <span onclick="app.Planning.bdRemoveExtra(${i}, ${j})" style="cursor:pointer; color:var(--danger); font-weight:bold;">×</span>` : ''}</span>`).join('');
+            const bodyHtml = (autoHtml || extraHtml) ? `<div style="display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px;">${autoHtml}${extraHtml}</div>` : `<div style="margin-top: 6px; font-style: italic; color: var(--text-sec); font-size: 0.8rem;">Rien depuis le scénario</div>`;
+            const note = day.bdNotes[cat] || '';
+            
+            html += `<div style="margin-top: 12px; background: var(--bg); padding: 12px 15px; border-radius: 6px; border: 1px solid var(--border);">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <strong style="color: var(--primary); font-size: 0.85rem;">${cat}</strong>${respStr}
+                    ${canEdit ? `<button type="button" onclick="app.Planning.bdHide(${i})" style="margin-left:auto; padding:2px 8px; font-size:0.72rem; background:none; border:1px solid var(--border); border-radius:4px; color:var(--text-sec); cursor:pointer;">✕ retirer de la FDS</button>` : ''}
+                </div>
+                ${bodyHtml}
+                ${canEdit ? `<div style="display:flex; gap:6px; margin-top:8px;">
+                    <input id="bd-extra-input-${i}" type="text" placeholder="+ ajouter un oubli / imprévu…" onkeydown="if(event.key==='Enter'){event.preventDefault(); app.Planning.bdAddExtra(${i});}" style="flex:1; padding:6px 8px; border:1px solid var(--border); border-radius:4px; background:var(--input-bg); color:var(--text-main); font-size:0.85rem;">
+                    <button type="button" onclick="app.Planning.bdAddExtra(${i})" style="padding:6px 12px; background:var(--primary); color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:0.85rem;">+</button>
+                </div>` : ''}
+                <textarea ${canEdit ? '' : 'disabled'} oninput="app.Planning.bdSetNote(${i}, this.value)" placeholder="Notes / consignes…" style="width:100%; min-height:44px; margin-top:8px; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--input-bg); color:var(--text-main); font-size:0.85rem;">${Utils.escape(note)}</textarea>
+            </div>`;
         });
         
-        sortedCategories.forEach(category => {
-            if(allNeeds[category].size > 0) {
-                const items = Array.from(allNeeds[category]);
-                const responsibles = getResponsiblesForCategory(category);
-                const responsiblesStr = responsibles.length > 0 
-                    ? `<span style="color: var(--text-sec); font-size: 0.8rem; margin-left: 10px;">(${responsibles.join(', ')})</span>` 
-                    : '';
-                
-                // Affichage spécial pour PERSONNAGES : montrer personnage / comédien
-                let itemsHtml = '';
-                if(category === 'PERSONNAGES') {
-                    itemsHtml = items.map(charName => {
-                        const actorName = getActorForCharacter(charName);
-                        if(actorName) {
-                            return `<span class="badge-panel">
-                                <strong>${Utils.escape(charName)}</strong> <span class="text-sec">/</span> <span style="color: var(--primary);">${Utils.escape(actorName)}</span>
-                            </span>`;
-                        } else {
-                            return `<span class="badge-panel">
-                                ${Utils.escape(charName)} <span style="color: var(--warning); font-size: 0.75rem;">⚠️ Non casté</span>
-                            </span>`;
-                        }
-                    }).join('');
-                } else if(category === 'COMEDIENS') {
-                    // Ne pas afficher COMEDIENS séparément si déjà affiché avec PERSONNAGES
-                    // Sauf si le comédien n'est pas lié à un personnage
-                    const actorsAlreadyShown = new Set();
-                    if(allNeeds['PERSONNAGES']) {
-                        allNeeds['PERSONNAGES'].forEach(charName => {
-                            const actorName = getActorForCharacter(charName);
-                            if(actorName) actorsAlreadyShown.add(actorName.toUpperCase());
-                        });
-                    }
-                    const actorsNotLinked = items.filter(name => !actorsAlreadyShown.has(name.toUpperCase()));
-                    if(actorsNotLinked.length === 0) return; // Skip si tous les comédiens sont déjà affichés
-                    itemsHtml = actorsNotLinked.map(item => `<span class="badge-panel">${Utils.escape(item)}</span>`).join('');
-                } else {
-                    itemsHtml = items.map(item => `<span class="badge-panel">${Utils.escape(item)}</span>`).join('');
-                }
-                
-                if(itemsHtml) {
-                    html += `<div class="mb-10">
-                        <strong style="color: var(--primary); font-size: 0.85rem;">${category}</strong>${responsiblesStr}
-                        <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px;">
-                            ${itemsHtml}
-                        </div>
-                    </div>`;
-                }
-            }
-        });
+        if(hiddenList.length > 0) {
+            html += `<div style="margin-top:14px; padding-top:10px; border-top:1px dashed var(--border); font-size:0.8rem; color:var(--text-sec);">Catégories retirées de la FDS : ${hiddenList.map(h => canEdit ? `<span onclick="app.Planning.bdShow(${h.i})" style="cursor:pointer; text-decoration:underline; margin-right:10px;">${h.cat} ↩</span>` : `<span style="margin-right:10px;">${h.cat}</span>`).join('')}</div>`;
+        }
         
         container.innerHTML = html;
-    },
-	
+    },	
 	onLocationSelect: (value) => {
         const locationInput = document.getElementById('edit-location');
         const addressInput = document.getElementById('edit-locationAddress');
@@ -41226,6 +41226,9 @@ closeModal: () => {
             notes: document.getElementById('edit-notes').value,
             customWeather: document.getElementById('edit-customWeather').value,
             meals: document.getElementById('edit-meals') ? document.getElementById('edit-meals').value : ((Planning.tempShootDay && Planning.tempShootDay.meals) || ''),
+            bdNotes: (Planning.tempShootDay && Planning.tempShootDay.bdNotes) ? Planning.tempShootDay.bdNotes : {},
+            bdExtra: (Planning.tempShootDay && Planning.tempShootDay.bdExtra) ? Planning.tempShootDay.bdExtra : {},
+            bdHidden: (Planning.tempShootDay && Planning.tempShootDay.bdHidden) ? Planning.tempShootDay.bdHidden : [],
             figuration: (Planning.tempShootDay && Planning.tempShootDay.figuration) ? Planning.tempShootDay.figuration : { groups: [] }
         };
         
@@ -42585,6 +42588,48 @@ closeModal: () => {
     autoSelectCrewForBreakdown: (...a) => PlanningBreakdown.autoSelectCrewForBreakdown(...a),
     refreshScenesList: (...a) => PlanningBreakdown.refreshScenesList(...a),
     updateBreakdownNeeds: (...a) => PlanningBreakdown.updateBreakdownNeeds(...a),
+    _bdEnsure: () => {
+        const d = Planning.tempShootDay;
+        if(!d) return null;
+        if(!d.bdNotes) d.bdNotes = {};
+        if(!d.bdExtra) d.bdExtra = {};
+        if(!d.bdHidden) d.bdHidden = [];
+        return d;
+    },
+    bdSetNote: (i, val) => {
+        const d = Planning._bdEnsure(); if(!d) return;
+        const cat = CONFIG.bdCategories[i]; if(!cat) return;
+        d.bdNotes[cat] = val;
+    },
+    bdAddExtra: (i) => {
+        const d = Planning._bdEnsure(); if(!d) return;
+        const cat = CONFIG.bdCategories[i]; if(!cat) return;
+        const inp = document.getElementById('bd-extra-input-' + i);
+        if(!inp) return;
+        const val = inp.value.trim();
+        if(!val) return;
+        if(!d.bdExtra[cat]) d.bdExtra[cat] = [];
+        if(!d.bdExtra[cat].includes(val)) d.bdExtra[cat].push(val);
+        inp.value = '';
+        PlanningBreakdown.updateBreakdownNeeds();
+    },
+    bdRemoveExtra: (i, j) => {
+        const d = Planning._bdEnsure(); if(!d) return;
+        const cat = CONFIG.bdCategories[i]; if(!cat) return;
+        if(d.bdExtra[cat]) { d.bdExtra[cat].splice(j, 1); PlanningBreakdown.updateBreakdownNeeds(); }
+    },
+    bdHide: (i) => {
+        const d = Planning._bdEnsure(); if(!d) return;
+        const cat = CONFIG.bdCategories[i]; if(!cat) return;
+        if(!d.bdHidden.includes(cat)) d.bdHidden.push(cat);
+        PlanningBreakdown.updateBreakdownNeeds();
+    },
+    bdShow: (i) => {
+        const d = Planning._bdEnsure(); if(!d) return;
+        const cat = CONFIG.bdCategories[i]; if(!cat) return;
+        d.bdHidden = d.bdHidden.filter(c => c !== cat);
+        PlanningBreakdown.updateBreakdownNeeds();
+    },
 	
     // ========================= SÉLECTEURS DE DISPONIBILITÉS =========================
     selectedAvailability: { actors: [], crew: [] },
