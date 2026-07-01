@@ -3292,6 +3292,17 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
 
   .group-section { margin-bottom: 30px; }
   .group-header { font-size: 1.1rem; font-weight: bold; margin-bottom: 15px; padding-bottom: 5px; border-bottom: 2px solid var(--border); color: var(--primary); display: flex; justify-content: space-between; align-items: center; }
+  .compact-card[draggable="true"] { cursor: grab; }
+  .compact-card[draggable="true"]:active { cursor: grabbing; }
+  .compact-card[draggable="true"] img { -webkit-user-drag: none; user-select: none; }
+  .compact-card.dnd-dragging { opacity: 0.4; }
+  .compact-cards-grid.dnd-over { outline: 2px dashed var(--primary); outline-offset: 4px; border-radius: 8px; background: rgba(127,127,127,0.06); }
+  .group-header .group-del-btn { border: none; background: none; cursor: pointer; font-size: 0.85rem; opacity: 0.55; padding: 2px 6px; border-radius: 6px; line-height: 1; }
+  .group-header .group-del-btn:hover { opacity: 1; background: rgba(231,76,60,0.15); }
+  .group-section.dnd-empty-target { display: none; }
+  body.dnd-active .group-section.dnd-empty-target { display: block; }
+  body.dnd-active .group-section.dnd-empty-target .compact-cards-grid { min-height: 54px; }
+  body.dnd-active .group-section.dnd-empty-target .group-header { opacity: 0.7; }
   /* S7 : tags "apparaît dans" sur les fiches personnage/acteur/décor */
   .appearances-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 0.85rem; }
   .appearances-label { color: var(--text-sec); font-weight: 600; margin-bottom: 6px; display: block; }
@@ -5647,7 +5658,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv556</p>
+      <p>vv557</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -10845,6 +10856,111 @@ crewRoles: {
       // Raccourci pour prompt
       prompt: (message, title = 'Saisie', placeholder = '', defaultValue = '') => {
           return ConfirmModal.show({ title, message, icon: '✏️', type: 'prompt', inputPlaceholder: placeholder, inputValue: defaultValue, confirmText: 'OK' });
+      }
+  };
+
+  // ==================== DRAG & DROP DE GROUPES ====================
+  // Deplacement des cartes compactes entre groupes + suppression des groupes crees.
+  // Collections gerees : characters, actors, locations, crew, orgs.
+  const GroupDnD = {
+      _init: false,
+      _coll: null,
+      _idx: null,
+      _el: null,
+      _defaultIds: null,
+
+      defaultIds: () => {
+          if(!GroupDnD._defaultIds) {
+              GroupDnD._defaultIds = new Set([...(CONFIG.defaultGroups || []), ...(CONFIG.crewGroups || [])].map(g => g.id));
+          }
+          return GroupDnD._defaultIds;
+      },
+      isDefault: (id) => GroupDnD.defaultIds().has(id),
+
+      delBtnHtml: (coll, groupId, isView) => {
+          if(isView || GroupDnD.isDefault(groupId)) return '';
+          return `<button class="group-del-btn" type="button" title="Supprimer ce groupe" onclick="event.stopPropagation(); app.GroupDnD.deleteGroup('${coll}','${groupId}')">🗑️</button>`;
+      },
+
+      rerender: (coll) => {
+          if(coll === 'characters') UI.renderDataTab('characters', els.charContainer);
+          else if(coll === 'actors') UI.renderDataTab('actors', els.actorContainer);
+          else if(coll === 'locations') UI.renderDataTab('locations', els.locContainer);
+          else if(coll === 'crew') UI.renderCrewTab();
+          else if(coll === 'orgs') Orgs.render();
+      },
+
+      move: (coll, idx, groupId) => {
+          const arr = state.data[coll];
+          const item = arr && arr[idx];
+          if(!item) return;
+          if((item.group_id || '') === (groupId || '')) return;
+          item.group_id = groupId || '';
+          Store.save();
+          GroupDnD.rerender(coll);
+      },
+
+      deleteGroup: (coll, groupId) => {
+          if(GroupDnD.isDefault(groupId)) { Utils.toast('Ce groupe par défaut ne peut pas être supprimé.', 'warning'); return; }
+          const grp = (state.data.groups || []).find(g => g.id === groupId);
+          if(!grp) return;
+          const arr = state.data[coll] || [];
+          const count = arr.filter(it => it.group_id === groupId).length;
+          const msg = count > 0
+              ? `Supprimer le groupe « ${Utils.escape(grp.name)} » ?<br>Les ${count} fiche(s) qu'il contient repasseront en « Non classé ».`
+              : `Supprimer le groupe « ${Utils.escape(grp.name)} » ?`;
+          ConfirmModal.confirmDelete(msg, 'Supprimer le groupe ?').then(ok => {
+              if(!ok) return;
+              arr.forEach(it => { if(it.group_id === groupId) it.group_id = ''; });
+              state.data.groups = (state.data.groups || []).filter(g => g.id !== groupId);
+              Store.save();
+              GroupDnD.rerender(coll);
+          });
+      },
+
+      init: () => {
+          if(GroupDnD._init) return;
+          GroupDnD._init = true;
+          document.addEventListener('dragstart', GroupDnD._onStart, true);
+          document.addEventListener('dragend', GroupDnD._onEnd, true);
+          document.addEventListener('dragover', GroupDnD._onOver, true);
+          document.addEventListener('drop', GroupDnD._onDrop, true);
+      },
+      _onStart: (e) => {
+          const card = e.target.closest ? e.target.closest('.compact-card[draggable="true"]') : null;
+          if(!card) return;
+          GroupDnD._el = card;
+          GroupDnD._coll = card.dataset.dndColl;
+          GroupDnD._idx = parseInt(card.dataset.dndIdx, 10);
+          try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(GroupDnD._idx)); } catch(_) {}
+          card.classList.add('dnd-dragging');
+          document.body.classList.add('dnd-active');
+      },
+      _onEnd: () => {
+          if(GroupDnD._el) GroupDnD._el.classList.remove('dnd-dragging');
+          document.querySelectorAll('.compact-cards-grid.dnd-over').forEach(g => g.classList.remove('dnd-over'));
+          document.body.classList.remove('dnd-active');
+          GroupDnD._el = null; GroupDnD._coll = null; GroupDnD._idx = null;
+      },
+      _onOver: (e) => {
+          if(GroupDnD._coll == null) return;
+          const grid = e.target.closest ? e.target.closest('.compact-cards-grid[data-dnd-group]') : null;
+          if(!grid || grid.dataset.dndColl !== GroupDnD._coll) return;
+          e.preventDefault();
+          try { e.dataTransfer.dropEffect = 'move'; } catch(_) {}
+          if(!grid.classList.contains('dnd-over')) {
+              document.querySelectorAll('.compact-cards-grid.dnd-over').forEach(g => g.classList.remove('dnd-over'));
+              grid.classList.add('dnd-over');
+          }
+      },
+      _onDrop: (e) => {
+          if(GroupDnD._coll == null) return;
+          const grid = e.target.closest ? e.target.closest('.compact-cards-grid[data-dnd-group]') : null;
+          if(!grid || grid.dataset.dndColl !== GroupDnD._coll) return;
+          e.preventDefault();
+          const coll = GroupDnD._coll, idx = GroupDnD._idx, groupId = grid.dataset.dndGroup || '';
+          GroupDnD._onEnd();
+          GroupDnD.move(coll, idx, groupId);
       }
   };
 
@@ -19376,12 +19492,13 @@ initCategoriesDragDrop: () => {
         const relevantGroups = state.data.groups.filter(g => g.type === groupType);
         
         {
+            GroupDnD.init();
             // Vue compacte : grille de petites cartes
             relevantGroups.forEach(grp => {
                 const itemsInGroup = arr.filter(item => item.group_id === grp.id);
-                if(itemsInGroup.length > 0) {
-                    const section = document.createElement('div'); section.className = 'group-section';
-                    section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}</div><div class="compact-cards-grid"></div>`;
+                if(itemsInGroup.length > 0 || !isView) {
+                    const section = document.createElement('div'); section.className = 'group-section' + (itemsInGroup.length ? '' : ' dnd-empty-target');
+                    section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}${GroupDnD.delBtnHtml(type, grp.id, isView)}</div><div class="compact-cards-grid" data-dnd-coll="${type}" data-dnd-group="${grp.id}"></div>`;
                     const grid = section.querySelector('.compact-cards-grid');
                     CardModal.renderCompactCards(itemsInGroup, type, grid);
                     container.appendChild(section);
@@ -19390,7 +19507,7 @@ initCategoriesDragDrop: () => {
             const noGroup = arr.filter(item => !item.group_id || !relevantGroups.find(g => g.id === item.group_id));
             if(noGroup.length > 0) {
                 const section = document.createElement('div'); section.className = 'group-section';
-                section.innerHTML = `<div class="group-header text-sec">Non classé</div><div class="compact-cards-grid"></div>`;
+                section.innerHTML = `<div class="group-header text-sec">Non classé</div><div class="compact-cards-grid" data-dnd-coll="${type}" data-dnd-group=""></div>`;
                 const grid = section.querySelector('.compact-cards-grid');
                 CardModal.renderCompactCards(noGroup, type, grid);
                 container.appendChild(section);
@@ -19853,13 +19970,14 @@ initCategoriesDragDrop: () => {
         const crewGroups = state.data.groups.filter(g => g.type === 'crew');
         
         {
+            GroupDnD.init();
             // Vue compacte
             crewGroups.forEach(grp => {
                 const membersInGroup = state.data.crew.filter(m => m.group_id === grp.id);
-                if(membersInGroup.length > 0) {
+                if(membersInGroup.length > 0 || !isView) {
                     const section = document.createElement('div');
-                    section.className = 'group-section';
-                    section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}</div><div class="compact-cards-grid"></div>`;
+                    section.className = 'group-section' + (membersInGroup.length ? '' : ' dnd-empty-target');
+                    section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}${GroupDnD.delBtnHtml('crew', grp.id, isView)}</div><div class="compact-cards-grid" data-dnd-coll="crew" data-dnd-group="${grp.id}"></div>`;
                     const grid = section.querySelector('.compact-cards-grid');
                     CardModal.renderCompactCrewCards(membersInGroup, grid, isView);
                     container.appendChild(section);
@@ -19870,7 +19988,7 @@ initCategoriesDragDrop: () => {
             if(noGroup.length > 0) {
                 const section = document.createElement('div');
                 section.className = 'group-section';
-                section.innerHTML = `<div class="group-header text-sec">Non classé</div><div class="compact-cards-grid"></div>`;
+                section.innerHTML = `<div class="group-header text-sec">Non classé</div><div class="compact-cards-grid" data-dnd-coll="crew" data-dnd-group=""></div>`;
                 const grid = section.querySelector('.compact-cards-grid');
                 CardModal.renderCompactCrewCards(noGroup, grid, isView);
                 container.appendChild(section);
@@ -21559,7 +21677,7 @@ const tabToSection = {
           } 
       },
       addGroup: (type) => { 
-        const typeLabel = type === 'perso' ? 'personnages' : (type === 'actor' ? 'comédiens' : (type === 'org' ? 'structures' : 'lieux'));
+        const typeLabel = type === 'perso' ? 'personnages' : (type === 'actor' ? 'comédiens' : (type === 'org' ? 'structures' : (type === 'crew' ? 'techniciens' : 'lieux')));
         
         const modal = document.createElement('div');
         modal.id = 'add-group-modal';
@@ -21600,7 +21718,8 @@ const tabToSection = {
             return;
         }
         
-        state.data.groups.push({ id: 'g'+Date.now(), name: icon + ' ' + name, type: type, icon: icon });
+        const newGroup = { id: 'g'+Date.now(), name: icon + ' ' + name, type: type, icon: icon };
+        state.data.groups.push(newGroup);
         History.log('ADD', `Ajout groupe : ${icon} ${name}`, {
             target: { kind: 'group', id: newGroup.id, label: name }
         });
@@ -21613,6 +21732,7 @@ const tabToSection = {
         if(type==='perso') UI.renderDataTab('characters', els.charContainer); 
         else if(type==='actor') UI.renderDataTab('actors', els.actorContainer); 
         else if(type==='org') Orgs.render(); 
+        else if(type==='crew') UI.renderCrewTab(); 
         else UI.renderDataTab('locations', els.locContainer);
     },
       changeGroup: (type, idx, gid) => { state.data[type][idx].group_id = gid; Store.save(); if(type==='characters') UI.renderDataTab(type, els.charContainer); else if(type==='actors') UI.renderDataTab(type, els.actorContainer); else if(type==='orgs') Orgs.render(); else UI.renderDataTab(type, els.locContainer); },
@@ -46700,6 +46820,7 @@ const Orgs = {
     render: () => {
         const host = document.getElementById('orgs-list');
         if(!host) return;
+        GroupDnD.init();
         const list = Orgs._list();
 
         // Datalist des departements : ceux de l'equipe + classiques
@@ -46746,16 +46867,17 @@ const orgGroups = (state.data.groups || []).filter(g => g.type === 'org');
                     <button class="delete-btn" onclick="event.stopPropagation(); app.Orgs.remove(${i})" title="Supprimer">🗑️</button>
                     <div class="group-round-wrap" title="Changer de groupe"><button class="group-btn" type="button" tabindex="-1">👥</button><select class="group-round-select" onclick="event.stopPropagation();" onchange="event.stopPropagation(); app.Actions.changeGroup('orgs', ${i}, this.value)">${opts}</select></div>
                 </div>`;
-            return `<div class="compact-card" onclick="app.Orgs.edit(${i})">${actions}<div class="compact-card-photo">${logo}</div><div class="compact-card-name">${esc(fc.name || o.name || 'Sans nom')}</div><div class="compact-card-role">${typeLabel}</div></div>`;
+            const dnd = isView ? '' : ` draggable="true" data-dnd-coll="orgs" data-dnd-idx="${i}"`;
+            return `<div class="compact-card"${dnd} onclick="app.Orgs.edit(${i})">${actions}<div class="compact-card-photo">${logo}</div><div class="compact-card-name">${esc(fc.name || o.name || 'Sans nom')}</div><div class="compact-card-role">${typeLabel}</div></div>`;
         };
         const idxPairs = list.map((o, i) => [o, i]);
         let sections = '';
         orgGroups.forEach(grp => {
             const inG = idxPairs.filter(p => p[0].group_id === grp.id);
-            if(inG.length) sections += `<div class="group-section"><div class="group-header">${esc(grp.name)}</div><div class="compact-cards-grid">` + inG.map(p => cardHtml(p[0], p[1])).join('') + `</div></div>`;
+            if(inG.length || !isView) sections += `<div class="group-section${inG.length ? '' : ' dnd-empty-target'}"><div class="group-header">${esc(grp.name)}${GroupDnD.delBtnHtml('orgs', grp.id, isView)}</div><div class="compact-cards-grid" data-dnd-coll="orgs" data-dnd-group="${grp.id}">` + inG.map(p => cardHtml(p[0], p[1])).join('') + `</div></div>`;
         });
         const noG = idxPairs.filter(p => !p[0].group_id || !orgGroups.find(g => g.id === p[0].group_id));
-        if(noG.length) sections += `<div class="group-section"><div class="group-header text-sec">Non classé</div><div class="compact-cards-grid">` + noG.map(p => cardHtml(p[0], p[1])).join('') + `</div></div>`;
+        if(noG.length) sections += `<div class="group-section"><div class="group-header text-sec">Non classé</div><div class="compact-cards-grid" data-dnd-coll="orgs" data-dnd-group="">` + noG.map(p => cardHtml(p[0], p[1])).join('') + `</div></div>`;
         host.innerHTML = dl + importHtml + sections;
     },
     edit: (i) => {
@@ -63588,6 +63710,7 @@ const CardModal = {
             const card = document.createElement('div');
             card.className = 'compact-card';
             card.onclick = () => CardModal.openCrew(idx);
+            if(!isView) { card.setAttribute('draggable', 'true'); card.dataset.dndColl = 'crew'; card.dataset.dndIdx = idx; }
             
             const photoContent = member.photo ? `<img src="${member.photo}" alt="Photo du membre de l'équipe">` : '👤';
             const roleInfo = member.role || '<em style="opacity:0.6">Fonction non définie</em>';
@@ -63677,6 +63800,7 @@ const CardModal = {
             const card = document.createElement('div');
             card.className = 'compact-card';
             card.onclick = () => CardModal.open(type, idx);
+            if(!isView) { card.setAttribute('draggable', 'true'); card.dataset.dndColl = type; card.dataset.dndIdx = idx; }
             
             let photoContent = '';
             let roleInfo = '';
@@ -69656,7 +69780,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, ContractsTemplates, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Tutorial, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration };
+  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, ContractsTemplates, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Tutorial, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD };
 })();
 </script>
 
