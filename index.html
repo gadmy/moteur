@@ -27,6 +27,10 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v557 (1er Juillet 2026) — Glisser-déposer des fiches entre groupes, suppression des groupes personnalisés, véhicules de production en cartes compactes
+  - GLISSER-DÉPOSER ENTRE GROUPES — les cartes compactes des onglets Personnages, Comédiens, Décors, Équipe et Asso/Entreprises se déplacent maintenant d'un groupe à l'autre par drag & drop (nouveau module GroupDnD : écouteurs délégués dragstart/dragover/drop, réassignation du group_id via GroupDnD.move puis re-render de l'onglet concerné). Chaque carte porte draggable + data-dnd-coll/data-dnd-idx (hors lecture seule), chaque grille de groupe data-dnd-coll/data-dnd-group. Pendant un glissement, les groupes vides apparaissent comme cibles (sections .dnd-empty-target masquées le reste du temps, révélées via body.dnd-active) pour permettre de classer dans un groupe encore vide ; déposer sur « Non classé » retire du groupe. Ressources et véhicules de production restent exclus (rangés par catégorie, pas par groupe).
+  - SUPPRESSION DES GROUPES PERSONNALISÉS — un bouton corbeille apparaît sur l'en-tête des groupes créés par l'utilisateur (GroupDnD.delBtnHtml), jamais sur les groupes par défaut (gp*/ga*/gl*/gc*/go* protégés via GroupDnD.isDefault, listés depuis CONFIG.defaultGroups + CONFIG.crewGroups) ni sur « Non classé ». La suppression (GroupDnD.deleteGroup, confirmation via ConfirmModal.confirmDelete) retire le groupe de state.data.groups et repasse ses fiches en « Non classé ». Au passage, correction d'un bug de confirmAddGroup qui référençait une variable newGroup inexistante (ReferenceError bloquant la création de tout groupe) et ajout du re-render manquant du cas 'crew'.
+  - VÉHICULES DE PRODUCTION EN CARTES COMPACTES — le parc véhicules de l'onglet Équipe (state.data.vehicles) quitte les grandes fiches inline pour le format compact commun : Crew.renderVehicles réécrit en .compact-cards-grid avec icône selon le permis requis (VL / PL / SPL), nom, type en sous-titre et nombre de places en badge, ronds Modifier / Supprimer. Un clic ouvre la fiche complète (nom, type, places, permis, notes) dans le modal partagé #card-edit-modal via le nouveau Crew.editVehicle, le re-render à la fermeture étant assuré par CardModal.close → renderCrewTab → renderVehicles.
 v556 (30 Juin 2026) — Figuration fondue dans le casting (les figurants deviennent un groupe de comédiens) + sélecteur de groupe déplacé sur la carte
   - FIGURATION = GROUPE DE COMÉDIENS — l'ancien système autonome (répertoire state.data.figurants + state.data.figurantGroups, onglet « Figuration » dédié) est supprimé : un figurant est désormais un comédien rangé dans un groupe. Ajout du groupe d'acteurs par défaut ga3 « Figuration » (CONFIG.defaultGroups + filet de migration safeData). Les trois groupes de base — ga1 Casting Principal, ga2 Rôles Secondaires, ga3 Figuration — ne sont ni renommables ni supprimables (aucune UI ne touche un groupe d'acteurs existant). Onglet de nav, contenu tab-figuration, hook de rendu, entrée de la catégorie casting et clés state.data.figurants/figurantGroups de Store.getEmpty retirés ; le module Figuration ne conserve que ses fonctions de feuille de service.
   - FDS FIGU REBRANCHÉE — la convocation figuration par jour (Figuration.renderDays et le PDF _renderFiguPage) puise maintenant dans les comédiens du groupe « Figuration » (ciblage par nom de groupe) au lieu de l'ancien répertoire. Suppression des sous-groupes de figurants (addGroupToCallsheet et la branche « g: » du picker de convocation). Le tableau day.figuration.callSheet est inchangé — figurantId contient désormais l'id du comédien.
@@ -33321,26 +33325,46 @@ container.innerHTML = filtered.map(res => {
         if(!state.data.vehicles) state.data.vehicles = [];
         const vehicles = state.data.vehicles;
         const ro = state.currentRole === 'viewer';
-        const licOpts = [['vl','VL (B)'],['pl','PL (C)'],['spl','SPL (CE)']];
+        const icons = { vl: '🚗', pl: '🚚', spl: '🚛' };
         c.innerHTML = `
             <h2 style="margin:24px 0 12px 0;">🚐 Véhicules de production <span class="text-sec" style="font-weight:400; font-size:0.85rem;">(${vehicles.length})</span></h2>
-            ${vehicles.length === 0 ? '<div class="text-sec" style="padding:12px 0;">Aucun véhicule de production. Ajoute-en via « Ajouter Véhicule ».</div>' : vehicles.map((v, idx) => `
-                <div class="crew-vehicle-section" style="margin-bottom:12px; padding:14px;">
-                    <div class="crew-row">
-                        <input class="crew-input" placeholder="Nom du véhicule" value="${Utils.escape(v.name || '')}" onchange="app.Crew.updateVehicle(${idx}, 'name', this.value)" ${ro ? 'disabled' : ''}>
-                        <input class="crew-input" placeholder="Type (ex: minibus 9 places)" value="${Utils.escape(v.type || '')}" onchange="app.Crew.updateVehicle(${idx}, 'type', this.value)" ${ro ? 'disabled' : ''}>
-                    </div>
-                    <div class="crew-row" style="margin-top:8px;">
-                        <input class="crew-input" type="number" min="1" max="80" placeholder="Nb places (conducteur inclus)" value="${Utils.escape(v.seats || '')}" onchange="app.Crew.updateVehicle(${idx}, 'seats', this.value)" ${ro ? 'disabled' : ''}>
-                        <select class="crew-input" onchange="app.Crew.updateVehicle(${idx}, 'licenseRequired', this.value)" ${ro ? 'disabled' : ''}>
-                            ${licOpts.map(([lv,llbl]) => `<option value="${lv}" ${(v.licenseRequired||'vl')===lv ? 'selected' : ''}>Permis ${llbl}</option>`).join('')}
-                        </select>
-                    </div>
-                    <textarea class="crew-input" style="margin-top:8px; width:100%; height:38px;" placeholder="Notes (immat, état, contraintes...)" onchange="app.Crew.updateVehicle(${idx}, 'notes', this.value)" ${ro ? 'disabled' : ''}>${Utils.escape(v.notes || '')}</textarea>
-                    ${ro ? '' : `<div style="text-align:right; margin-top:8px;"><button class="btn-tool" onclick="app.Crew.removeVehicle(${idx})">🗑 Supprimer</button></div>`}
-                </div>
-            `).join('')}
+            ${vehicles.length === 0
+                ? '<div class="text-sec" style="padding:12px 0;">Aucun véhicule de production. Ajoute-en via « Ajouter Véhicule ».</div>'
+                : `<div class="compact-cards-grid">` + vehicles.map((v, idx) => {
+                    const ic = icons[v.licenseRequired || 'vl'] || '🚐';
+                    const sub = v.type ? Utils.escape(v.type) : '<em style="opacity:0.5">Type non défini</em>';
+                    const actions = ro ? '' : `
+                        <div class="compact-card-actions">
+                            <button class="edit-btn" onclick="event.stopPropagation(); app.Crew.editVehicle(${idx})" title="Modifier">✏️</button>
+                            <button class="delete-btn" onclick="event.stopPropagation(); app.Crew.removeVehicle(${idx})" title="Supprimer">🗑️</button>
+                        </div>`;
+                    return `<div class="compact-card" onclick="app.Crew.editVehicle(${idx})">${actions}${v.seats ? `<div class="compact-card-badge">${Utils.escape(String(v.seats))} pl.</div>` : ''}<div class="compact-card-photo">${ic}</div><div class="compact-card-name">${Utils.escape(v.name || 'Sans nom')}</div><div class="compact-card-role">${sub}</div></div>`;
+                }).join('') + `</div>`}
         `;
+    },
+    editVehicle: (idx) => {
+        const v = (state.data.vehicles || [])[idx];
+        if(!v) return;
+        const modal = document.getElementById('card-edit-modal');
+        const body = document.getElementById('card-edit-modal-body');
+        const titleEl = document.getElementById('card-edit-modal-title');
+        const ro = state.currentRole === 'viewer';
+        const licOpts = [['vl','VL (B)'],['pl','PL (C)'],['spl','SPL (CE)']];
+        if(titleEl) titleEl.textContent = '🚐 Véhicule : ' + (v.name || 'Sans nom');
+        if(body) body.innerHTML = `
+            <div class="crew-row">
+                <input class="crew-input" placeholder="Nom du véhicule" value="${Utils.escape(v.name || '')}" onchange="app.Crew.updateVehicle(${idx}, 'name', this.value)" ${ro ? 'disabled' : ''}>
+                <input class="crew-input" placeholder="Type (ex: minibus 9 places)" value="${Utils.escape(v.type || '')}" onchange="app.Crew.updateVehicle(${idx}, 'type', this.value)" ${ro ? 'disabled' : ''}>
+            </div>
+            <div class="crew-row" style="margin-top:10px;">
+                <input class="crew-input" type="number" min="1" max="80" placeholder="Nb places (conducteur inclus)" value="${Utils.escape(String(v.seats || ''))}" onchange="app.Crew.updateVehicle(${idx}, 'seats', this.value)" ${ro ? 'disabled' : ''}>
+                <select class="crew-input" onchange="app.Crew.updateVehicle(${idx}, 'licenseRequired', this.value)" ${ro ? 'disabled' : ''}>
+                    ${licOpts.map(([lv,llbl]) => `<option value="${lv}" ${(v.licenseRequired||'vl')===lv ? 'selected' : ''}>Permis ${llbl}</option>`).join('')}
+                </select>
+            </div>
+            <textarea class="crew-input" style="margin-top:10px; width:100%; height:80px; resize:vertical;" placeholder="Notes (immat, état, contraintes...)" onchange="app.Crew.updateVehicle(${idx}, 'notes', this.value)" ${ro ? 'disabled' : ''}>${Utils.escape(v.notes || '')}</textarea>
+        `;
+        if(modal) modal.classList.add('visible');
     },
     syncCrewMemberToScenes: (member) => {
         if(!member || !member.name) return;
