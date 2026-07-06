@@ -3758,6 +3758,7 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
 .sb-print-page { background: white; width: 100%; max-width: 210mm; margin: 0 auto 30px; padding: 20mm; box-shadow: 0 4px 15px rgba(0,0,0,0.2); border: 1px solid #ddd; page-break-after: always; }
 .sb-print-page h2 { margin: 0 0 20px 0; padding-bottom: 10px; border-bottom: 3px solid #333; font-size: 1.5rem; color: #333; }
 .sb-print-grid { display: grid; grid-template-columns: 1fr; gap: 15px; }
+.sb-print-grid h2 { grid-column: 1 / -1; margin: 5px 0 0; }
 .sb-print-shot { background: white; border: 2px solid #333; border-radius: 8px; overflow: hidden; page-break-inside: avoid; display: flex; flex-direction: row; min-height: 160px; }
 .sb-print-shot-image { width: 40%; flex-shrink: 0; height: auto; min-height: 160px; background: #f5f5f5; border-right: 2px solid #333; border-bottom: none; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .sb-print-shot-image img, .sb-print-shot-image canvas { width: 100%; height: 100%; object-fit: contain; }
@@ -5662,7 +5663,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv557</p>
+      <p>vv558</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -22994,12 +22995,12 @@ const tabToSection = {
           doc.addPage();
           y = margin;
           
-          doc.setFillColor(...PdfTheme.COLORS.BANNER_BLUE);
-          doc.rect(0, 0, pageWidth, 20, 'F');
+          doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
+          doc.rect(margin, y, pageWidth - margin * 2, 9, 'F');
           doc.setTextColor(...PdfTheme.COLORS.WHITE);
-          doc.setFontSize(14);
+          doc.setFontSize(11);
           doc.setFont('helvetica', 'bold');
-          doc.text('RÉCAPITULATIF GLOBAL', pageWidth / 2, 13, { align: 'center' });
+          doc.text('RÉCAPITULATIF GLOBAL', margin + 4, y + 6.2);
           
           y = 30;
           
@@ -23057,14 +23058,16 @@ const tabToSection = {
                       return bd.some(i => (typeof i === 'string' ? i : i.name) === item);
                   }).length;
                   
-                  doc.text(PdfTheme.cleanText(`• ${item}`), margin + 3, y);
+                  let itemTxt = PdfTheme.cleanText(`• ${item}`);
+                  while(doc.getTextWidth(itemTxt) > pageWidth - margin * 2 - 30 && itemTxt.length > 5) itemTxt = itemTxt.substring(0, itemTxt.length - 2) + '...';
+                  doc.text(itemTxt, margin + 3, y);
                   doc.setTextColor(...PdfTheme.COLORS.TEXT_FAINT);
-                  doc.text(`(${sceneCount} scène${sceneCount > 1 ? 's' : ''})`, margin + 100, y);
+                  doc.text(`(${sceneCount} scène${sceneCount > 1 ? 's' : ''})`, pageWidth - margin - 3, y, { align: 'right' });
                   doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-                  y += 5;
+                  y += 4.5;
               });
               
-              y += 10;
+              y += 6;
           });
           
           // ===== FOOTERS UNIFIÉS (Phase C.1) =====
@@ -27644,7 +27647,6 @@ const Storyboard = {
     
     // ===================== IMPRESSION & EXPORT (délégué à StoryboardExport) =====================
     renderPrintPreview: (...a) => StoryboardExport.renderPrintPreview(...a),
-    createPrintPage: (...a) => StoryboardExport.createPrintPage(...a),
     _drawTechLayerOnTop: (...a) => StoryboardExport._drawTechLayerOnTop(...a),
     createPrintShot: (...a) => StoryboardExport.createPrintShot(...a),
     exportPDF: (...a) => StoryboardExport.exportPDF(...a),
@@ -27699,43 +27701,40 @@ const StoryboardExport = {
         // Calcul plage de scènes pour titre PDF
         const sceneNums = Object.values(sceneGroups).map(g => state.data.scenes.indexOf(g.scene) + 1);
         Storyboard._printSceneRange = sceneNums.length === 0 ? '' : (sceneNums.length === 1 ? `Sc ${sceneNums[0]}` : `Sc ${Math.min(...sceneNums)} à ${Math.max(...sceneNums)}`);
-        // Render pages
+        // Render pages — flux continu : chaque page est remplie jusqu'à perPage plans,
+        // toutes scènes confondues (fini les pages quasi vides à 1-2 plans). Un bandeau
+        // de scène est inséré dans le flux à chaque changement de scène.
+        const layout = (Storyboard.printConfig && Storyboard.printConfig.layout) || 'standard';
+        const perPage = layout === 'large' ? 1 : (layout === 'compact' ? 16 : 4);
+        let page = null, grid = null, used = 0;
+        const newPage = () => {
+            page = document.createElement('div');
+            page.className = 'sb-print-page sb-print-page--' + layout;
+            grid = document.createElement('div');
+            grid.className = 'sb-print-grid';
+            page.appendChild(grid);
+            container.appendChild(page);
+            used = 0;
+        };
+        const addSceneTitle = (sceneIndex, scene, suite) => {
+            if(!Storyboard.printConfig.sceneTitle) return;
+            const h = document.createElement('h2');
+            h.innerText = `Scène ${sceneIndex} - ${scene.title}` + (suite ? ' (suite)' : '');
+            if(layout === 'large') page.insertBefore(h, grid);
+            else grid.appendChild(h);
+        };
+        newPage();
         Object.values(sceneGroups).forEach(group => {
             const { scene, shots } = group;
             const sceneIndex = state.data.scenes.indexOf(scene) + 1;
-            
-            // Découpage selon le mode : 1 (large), 12 (compact), 6 (standard)
-            const layout = (Storyboard.printConfig && Storyboard.printConfig.layout) || 'standard';
-            const perPage = layout === 'large' ? 1 : (layout === 'compact' ? 16 : 4);
-            for(let i = 0; i < shots.length; i += perPage) {
-                const pageShots = shots.slice(i, i + perPage);
-                const page = Storyboard.createPrintPage(scene, sceneIndex, pageShots, i);
-                container.appendChild(page);
-            }
+            let titled = false;
+            shots.forEach((shot, idx) => {
+                if(used >= perPage) { newPage(); titled = false; }
+                if(!titled) { addSceneTitle(sceneIndex, scene, idx > 0); titled = true; }
+                grid.appendChild(Storyboard.createPrintShot(shot, sceneIndex, idx + 1));
+                used++;
+            });
         });
-    },
-    
-    createPrintPage: (scene, sceneIndex, shots, startIndex) => {
-        const page = document.createElement('div');
-        const layout = (Storyboard.printConfig && Storyboard.printConfig.layout) || 'standard';
-        page.className = 'sb-print-page sb-print-page--' + layout;
-        
-        if(Storyboard.printConfig.sceneTitle) {
-            const title = document.createElement('h2');
-            title.innerText = `Scène ${sceneIndex} - ${scene.title}`;
-            page.appendChild(title);
-        }
-        
-        const grid = document.createElement('div');
-        grid.className = 'sb-print-grid';
-        
-        shots.forEach((shot, idx) => {
-            const shotCard = Storyboard.createPrintShot(shot, sceneIndex, startIndex + idx + 1);
-            grid.appendChild(shotCard);
-        });
-        
-        page.appendChild(grid);
-        return page;
     },
     
     // [Phase C.2.6] Helper : dessine un calque technique (lighting/camera/actors) PAR-DESSUS un canvas
@@ -33035,7 +33034,7 @@ container.innerHTML = filtered.map(res => {
         const clean = PdfTheme.cleanText;
         const dayStr = (day.startDate || day.date) ? new Date(day.startDate || day.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '';
         const dayHdr = [day.name, dayStr].filter(Boolean).join(' - ');
-        let y = margin;
+        let y = layout.startY || margin;
         doc.setFillColor(...C.BANNER_DARK);
         doc.rect(margin, y, usableWidth, 9, 'F');
         doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...C.WHITE);
@@ -33076,6 +33075,7 @@ container.innerHTML = filtered.map(res => {
         y += 3;
         doc.setTextColor(...C.TEXT_LIGHT); doc.setFontSize(8);
         doc.text(clean(cs.length + ' figurant(s) convoque(s)'), margin, y);
+        return y + 4;
     },
     exportPDF: async (opts = {}) => {
         await LazyLib.load('pdfexport'); const { jsPDF } = window.jspdf;
@@ -38383,29 +38383,29 @@ const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
         };
         
         const drawSectionHeader = (title) => {
-            ensureSpace(8 + 3);
+            ensureSpace(7 + 2);
             doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(margin, y, usableWidth, 6, 'F');
+            doc.rect(margin, y, usableWidth, 5.5, 'F');
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(9);
             doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.text(title.toUpperCase(), margin + 3, y + 4.2);
-            y += 6 + 2.5;
+            doc.text(title.toUpperCase(), margin + 3, y + 4);
+            y += 5.5 + 1.5;
         };
         
         const drawSubGroupHeader = (text) => {
-            ensureSpace(5);
+            ensureSpace(4.5);
             doc.setFillColor(...PdfTheme.COLORS.BORDER_LIGHT);
-            doc.rect(margin, y, usableWidth, 4.5, 'F');
+            doc.rect(margin, y, usableWidth, 4, 'F');
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(8);
             doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
-            doc.text(pdfSafe(text), margin + 2, y + 3.2);
-            y += 4.5 + 1;
+            doc.text(pdfSafe(text), margin + 2, y + 3);
+            y += 4 + 0.5;
         };
         
         const drawTableRow = (cols, cells, opts = {}) => {
-            const rowH = opts.height || 5;
+            const rowH = opts.height || 4.4;
             ensureSpace(rowH);
             if(opts.fillRow) {
                 doc.setFillColor(...PdfTheme.COLORS.BG_LIGHTER);
@@ -38786,16 +38786,30 @@ const bdHidden = shootDay.bdHidden || [];
                     doc.setFont('helvetica', 'bold');
                     doc.setFontSize(8.5);
                     doc.setTextColor(...PdfTheme.COLORS.BANNER_DARK);
-                    const respText = resp ? '  (Responsable : ' + resp + ')' : '';
-                    doc.text(cat + respText, margin + 1, y + 3);
-                    y += 4;
+                    const respText = resp ? ' (Resp. : ' + resp + ')' : '';
+                    const catLabel = pdfSafe(cat + respText + (items.length > 0 ? ' :' : ''));
+                    doc.text(catLabel, margin + 1, y + 3);
                     if(items.length > 0) {
+                        // Compaction : les items démarrent sur la ligne du titre,
+                        // la suite passe en pleine largeur en dessous.
+                        const prefixW = doc.getTextWidth(catLabel) + 2;
                         doc.setFont('helvetica', 'normal');
                         doc.setFontSize(8);
                         doc.setTextColor(...PdfTheme.COLORS.TEXT_BODY);
-                        const line = '• ' + items.join('   ·   ');
-                        const lines = doc.splitTextToSize(line, usableWidth - 4);
-                        lines.forEach(l => { ensureSpace(3.5); doc.text(l, margin + 3, y + 2.8); y += 3.5; });
+                        const words = pdfSafe(items.join('  ·  ')).split(' ');
+                        const firstW = usableWidth - 4 - prefixW;
+                        let firstLine = '';
+                        while(words.length && doc.getTextWidth(firstLine + (firstLine ? ' ' : '') + words[0]) <= firstW) {
+                            firstLine += (firstLine ? ' ' : '') + words.shift();
+                        }
+                        if(firstLine) doc.text(firstLine, margin + 1 + prefixW, y + 3);
+                        y += 3.6;
+                        if(words.length) {
+                            const lines = doc.splitTextToSize(words.join(' '), usableWidth - 4);
+                            lines.forEach(l => { ensureSpace(3.5); doc.text(l, margin + 3, y + 2.8); y += 3.5; });
+                        }
+                    } else {
+                        y += 3.6;
                     }
                     const note = bdNotes[cat] && String(bdNotes[cat]).trim();
                     if(note) {
@@ -38835,13 +38849,19 @@ const bdHidden = shootDay.bdHidden || [];
             }
         });
 
-        // FDS figuration a la suite (jours avec figurants convoques)
+        // FDS figuration a la suite (jours avec figurants convoques) — flux continu :
+        // plusieurs jours par page tant que la place le permet (fini 1 page par jour).
         if(typeof Figuration !== 'undefined' && Figuration._renderFiguPage) {
+            let figY = null;
             days.forEach(shootDay => {
                 const fcs = (shootDay.figuration && shootDay.figuration.callSheet) || [];
                 if(fcs.length > 0) {
-                    doc.addPage();
-                    Figuration._renderFiguPage(doc, shootDay, { margin, pageWidth, pageHeight });
+                    const estH = 42 + fcs.length * 6;
+                    if(figY === null || figY + estH > pageHeight - margin - 10) {
+                        doc.addPage();
+                        figY = margin;
+                    }
+                    figY = Figuration._renderFiguPage(doc, shootDay, { margin, pageWidth, pageHeight, startY: figY }) + 10;
                 }
             });
         }
@@ -44056,6 +44076,12 @@ const Stats = {
         doc.setFontSize(28);
         doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
         const titleUpper = PdfTheme.cleanText(projectTitle).toUpperCase();
+        // Rétrécir la police jusqu'à tenir dans la page (évite le titre tronqué)
+        let coverFs = 28;
+        while(doc.getTextWidth(titleUpper) > pageWidth - margin * 2 && coverFs > 14) {
+            coverFs -= 1;
+            doc.setFontSize(coverFs);
+        }
         doc.text(titleUpper, pageWidth / 2, titleY, { align: 'center' });
         const titleWidth = doc.getTextWidth(titleUpper);
         doc.setLineWidth(0.5);
@@ -45674,9 +45700,14 @@ const MoteurArchive = {
         
         // Titre du projet (XXL)
         const titleStr = cleanStr(projectTitle).toUpperCase();
-        const titleSize = titleStr.length > 30 ? 28 : (titleStr.length > 18 ? 36 : 44);
-        const titleW = fontHelvBold.widthOfTextAtSize(titleStr, titleSize);
-        cover.drawText(titleStr, { x: Math.max(40, (A4_W - titleW) / 2), y: A4_H * 0.50, size: titleSize, font: fontHelvBold, color: rgb(0.1, 0.1, 0.1) });
+        let titleSize = titleStr.length > 30 ? 28 : (titleStr.length > 18 ? 36 : 44);
+        let titleW = fontHelvBold.widthOfTextAtSize(titleStr, titleSize);
+        // Rétrécir jusqu'à tenir dans la page (évitait un titre tronqué à droite)
+        while(titleW > A4_W - 80 && titleSize > 14) {
+            titleSize -= 2;
+            titleW = fontHelvBold.widthOfTextAtSize(titleStr, titleSize);
+        }
+        cover.drawText(titleStr, { x: (A4_W - titleW) / 2, y: A4_H * 0.50, size: titleSize, font: fontHelvBold, color: rgb(0.1, 0.1, 0.1) });
         
         // Auteur (si renseigné)
         if(authorCombined) {
@@ -45692,7 +45723,7 @@ const MoteurArchive = {
         cover.drawText(dateStr, { x: (A4_W - dateW) / 2, y: A4_H * 0.32, size: 10, font: fontHelvOblique, color: rgb(0.5, 0.5, 0.5) });
         
         // Récap nombre de sections
-        const recap = `${loadedSections.length} section(s) — ${toc[toc.length-1].startPage + loadedSections[loadedSections.length-1].pageCount - prefixPages - 1} pages de contenu`;
+        const recap = `${loadedSections.length} section${loadedSections.length > 1 ? 's' : ''} — ${toc[toc.length-1].startPage + loadedSections[loadedSections.length-1].pageCount - prefixPages - 1} pages de contenu`;
         const recapW = fontHelv.widthOfTextAtSize(recap, 10);
         cover.drawText(recap, { x: (A4_W - recapW) / 2, y: A4_H * 0.18, size: 10, font: fontHelv, color: rgb(0.5, 0.5, 0.5) });
         
@@ -45710,9 +45741,11 @@ const MoteurArchive = {
         // Titre "SOMMAIRE"
         sumPage.drawText('SOMMAIRE', { x: marginX, y: titleSomY, size: 22, font: fontHelvBold, color: rgb(0.15, 0.15, 0.15) });
         sumPage.drawLine({ start: { x: marginX, y: titleSomY - 8 }, end: { x: A4_W - marginX, y: titleSomY - 8 }, thickness: 0.6, color: rgb(0.7, 0.7, 0.7) });
+        const sumSubtitle = cleanStr(projectTitle) + ' — Dossier de production';
+        sumPage.drawText(sumSubtitle, { x: marginX, y: titleSomY - 24, size: 10, font: fontHelvOblique, color: rgb(0.45, 0.45, 0.45) });
         
         // Lignes du sommaire + zones cliquables (liens hypertextes ajoutés en étape 7bis)
-        let sumY = titleSomY - 30;
+        let sumY = titleSomY - 46;
         const lineH = 18;
         const maxY = 60;
         const tocLinkAreas = []; // { page, x1, y1, x2, y2, sectionIndex }
@@ -45729,8 +45762,8 @@ const MoteurArchive = {
             // Couleur bleu liens hypertextes pour le label (indique cliquable)
             const linkColor = rgb(0.16, 0.43, 0.96);
             
-            // Label à gauche (en bleu liens)
-            sumPage.drawText(labelStr, { x: marginX, y: sumY, size: 11, font: fontHelv, color: linkColor });
+            // Label à gauche (sombre — le n° de page reste en bleu lien)
+            sumPage.drawText(labelStr, { x: marginX, y: sumY, size: 11, font: fontHelv, color: rgb(0.18, 0.18, 0.18) });
             
             // Points de remplissage entre label et numéro
             const labelW = fontHelv.widthOfTextAtSize(labelStr, 11);
@@ -45875,6 +45908,12 @@ const MoteurArchive = {
                         font: fontHelv,
                         color: rgb(0.5, 0.5, 0.5)
                     });
+                    
+                    // Nom de la section courante en bas à gauche
+                    const curSect = toc.filter(t => t.startPage <= i + 1).pop();
+                    if(curSect) {
+                        pg.drawText(cleanStr(curSect.label), { x: 40, y: 14, size: 8, font: fontHelv, color: rgb(0.62, 0.62, 0.62) });
+                    }
                     
                     // Lien "Sommaire" en bas à droite
                     linkX = pw - 40 - linkSommaireW;
@@ -66843,34 +66882,47 @@ const FichesPDF = {
         // ----- MODE LIST : 1 colonne dense -----
         const renderList = (locsArr) => {
             const lineHeight = 5.5;
+            // Colonnes : nom (28%) · realName (32%) · adresse courte (28%) · nb scènes (12%)
+            const nameW = usableWidth * 0.28;
+            const realW = usableWidth * 0.32;
+            const addrW = usableWidth * 0.28;
+            
+            // En-tête de colonnes
+            y = FichesPDF._ensureSpace(doc, y, lineHeight + 2, pageHeight, margin);
+            doc.setFillColor(...PdfTheme.COLORS.BG_LIGHT);
+            doc.rect(margin, y - 4, usableWidth, 6, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(7.5);
+            doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
+            doc.text('DÉCOR', margin + 1, y);
+            doc.text('LIEU RÉEL', margin + nameW + 1, y);
+            doc.text('ADRESSE', margin + nameW + realW + 1, y);
+            doc.text('SCÈNES', margin + usableWidth - 1, y, { align: 'right' });
+            y += 6;
+            
             locsArr.forEach(loc => {
                 y = FichesPDF._ensureSpace(doc, y, lineHeight, pageHeight, margin);
                 const sList = locationScenes(loc, scenesScope);
-                
-                // Colonnes : nom (28%) · realName (32%) · adresse courte (28%) · nb scènes (12%)
-                const nameW = usableWidth * 0.28;
-                const realW = usableWidth * 0.32;
-                const addrW = usableWidth * 0.28;
                 
                 doc.setFont('helvetica', 'bold');
                 doc.setFontSize(9);
                 doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
                 let txtName = loc.name || '(sans nom)';
-                while(doc.getTextWidth(txtName) > nameW - 2 && txtName.length > 5) txtName = txtName.substring(0, txtName.length - 2) + '…';
+                while(doc.getTextWidth(txtName) > nameW - 5 && txtName.length > 5) txtName = txtName.substring(0, txtName.length - 2) + '…';
                 doc.text(txtName, margin, y);
                 
                 doc.setFont('helvetica', 'italic');
                 doc.setFontSize(9);
                 doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
                 let txtReal = loc.realName || '—';
-                while(doc.getTextWidth(txtReal) > realW - 2 && txtReal.length > 3) txtReal = txtReal.substring(0, txtReal.length - 2) + '…';
+                while(doc.getTextWidth(txtReal) > realW - 5 && txtReal.length > 3) txtReal = txtReal.substring(0, txtReal.length - 2) + '…';
                 doc.text(txtReal, margin + nameW, y);
                 
                 doc.setFont('helvetica', 'normal');
                 doc.setFontSize(9);
                 doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
                 let txtAddr = loc.address || '—';
-                while(doc.getTextWidth(txtAddr) > addrW - 2 && txtAddr.length > 5) txtAddr = txtAddr.substring(0, txtAddr.length - 2) + '…';
+                while(doc.getTextWidth(txtAddr) > addrW - 5 && txtAddr.length > 5) txtAddr = txtAddr.substring(0, txtAddr.length - 2) + '…';
                 doc.text(txtAddr, margin + nameW + realW, y);
                 
                 doc.setTextColor(...PdfTheme.COLORS.TEXT_LIGHT);
