@@ -10014,6 +10014,17 @@ body.presentation-mode .presentation-bar {
                         </div>
                     </div>
                     
+                    <div class="exp-section-row" data-section="scriptreports" draggable="true">
+                        <span class="exp-drag-handle exp-drag-handle-row" title="Glisser pour réorganiser">⋮⋮</span>
+                        <label class="exp-row-main"><input type="checkbox" class="exp-section-chk" data-section="scriptreports"><span>Rapports de script</span></label>
+                        <label class="exp-row-cover"><input type="checkbox" class="exp-cover-chk" data-section="scriptreports" checked><span>📋 Page de garde</span></label>
+                        <div class="exp-row-opts">
+                            <label class="exp-suboption"><input type="radio" name="exp-sr-scope" value="all" checked onchange="app.Actions.expToggleSrScenes()"><span>Toutes les scènes</span></label>
+                            <label class="exp-suboption"><input type="radio" name="exp-sr-scope" value="select" onchange="app.Actions.expToggleSrScenes()"><span>Sélection</span></label>
+                            <div id="exp-sr-scenes" style="display:none;flex-basis:100%;margin-top:6px;max-height:130px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:4px 8px;"></div>
+                        </div>
+                    </div>
+                    
                     <div class="exp-section-row" data-section="report" draggable="true">
                         <span class="exp-drag-handle exp-drag-handle-row" title="Glisser pour réorganiser">⋮⋮</span>
                         <label class="exp-row-main"><input type="checkbox" class="exp-section-chk" data-section="report"><span>Rapport de production (synthèse)</span></label>
@@ -22437,6 +22448,8 @@ const tabToSection = {
       
       openExportModal: () => { 
           els.exportModal.style.display = 'flex';
+          // [Rapports script] Peupler la liste des scènes ayant des fiches
+          if(Actions.expPopulateSrScenes) Actions.expPopulateSrScenes();
           // Appliquer l'ordre custom mémorisé (si présent) avant de poser le drag
           if(Actions.expRestoreOrder) Actions.expRestoreOrder();
           // Brancher le drag & drop (idempotent : peut être rappelé plusieurs fois)
@@ -22471,6 +22484,34 @@ const tabToSection = {
           if(!btn) return;
           const newState = btn.dataset.active !== '1';
           btn.dataset.active = newState ? '1' : '0';
+      },
+      
+      // [Rapports script] Affiche/masque la liste des scènes selon le scope choisi
+      expToggleSrScenes: () => {
+          const box = document.getElementById('exp-sr-scenes');
+          if(!box) return;
+          const scope = document.querySelector('input[name="exp-sr-scope"]:checked')?.value || 'all';
+          box.style.display = scope === 'select' ? 'block' : 'none';
+      },
+      
+      // [Rapports script] Peuple la liste des scènes ayant au moins une fiche
+      expPopulateSrScenes: () => {
+          const box = document.getElementById('exp-sr-scenes');
+          if(!box) return;
+          const reports = state.data.scriptReports || {};
+          const keys = Object.keys(reports).filter(k => reports[k] && reports[k].length > 0);
+          const allScenes = state.data.scenes || [];
+          const withFiches = allScenes.filter(s => keys.some(k => k.startsWith(s.id + '_')));
+          if(withFiches.length === 0) {
+              box.innerHTML = '<span style="font-size:0.75rem;color:var(--text-sec);">Aucune fiche de script dans le projet</span>';
+              return;
+          }
+          box.innerHTML = withFiches.map(scene => {
+              const idx = allScenes.indexOf(scene);
+              const num = UI.formatSceneNumber(scene, idx);
+              const nb = keys.filter(k => k.startsWith(scene.id + '_')).reduce((acc, k) => acc + reports[k].length, 0);
+              return `<label style="display:block;font-size:0.78rem;padding:2px 0;cursor:pointer;"><input type="checkbox" class="exp-sr-scene-chk" data-scene-id="${scene.id}" checked> Sc ${Utils.escape(String(num))} — ${Utils.escape(scene.title || '')} <span style="color:var(--text-sec);">(${nb} fiche${nb > 1 ? 's' : ''})</span></label>`;
+          }).join('');
       },
       
       // [Phase D drag] Persistance de l'ordre custom (groupes + sous-sections)
@@ -22741,6 +22782,11 @@ const tabToSection = {
               includeCover:    getCover('planning'),
               includeCallSheet: document.getElementById('exp-planning-callsheet')?.checked !== false
           });
+          const srSceneIds = () => {
+              const scope = document.querySelector('input[name="exp-sr-scope"]:checked')?.value || 'all';
+              if(scope !== 'select') return null;
+              return Array.from(document.querySelectorAll('#export-modal .exp-sr-scene-chk:checked')).map(cb => cb.dataset.sceneId);
+          };
           
           // Mapping : chaque section a un build(extra) qui retourne une Promise
           // - extra = { returnBlob: true } en mode fusionné, sinon {}
@@ -22760,6 +22806,7 @@ const tabToSection = {
               orgs:         { label: 'Asso / Entreprises',    build: (extra) => Orgs.exportPDF({ includeCover: getCover('orgs'), mode: document.querySelector('input[name="exp-orgs-mode"]:checked')?.value || 'detailed', ...extra }) },
               resources:    { label: 'Ressources',            build: (extra) => Resources.exportPDF({ includeCover: getCover('resources'), mode: document.querySelector('input[name="exp-resources-mode"]:checked')?.value || 'detailed', ...extra }) },
               planning:     { label: 'Planning',              build: (extra) => Planning.exportPlanningPDF({ ...planningOpts(), ...extra }) },
+              scriptreports: { label: 'Rapports script',     build: (extra) => ScriptReport.exportPDF({ includeCover: getCover('scriptreports'), sceneIds: srSceneIds(), ...extra }) },
               report:       { label: 'Rapport de production', build: (extra) => Exporter.productionReport({ includeCover: getCover('report'), ...extra }) },
               budget:       { label: 'Budget',                build: (extra) => Expenses.exportPDF({ ...budgetOpts(), ...extra }) },
               stats:        { label: 'Statistiques',          build: (extra) => Stats.exportPDF({ includeCover: getCover('stats'), ...extra }) }
@@ -44036,7 +44083,7 @@ const Stats = {
         'Personnages': [67, 160, 71], 'Comédiens': [67, 160, 71], 'Équipe': [67, 160, 71], 'Figuration': [67, 160, 71],
         'Lieux': [121, 85, 72], 'Décors': [121, 85, 72], 'Ressources': [121, 85, 72], 'Asso / Entreprises': [121, 85, 72],
         'Planning': [230, 110, 0], 'Dépouillement': [230, 110, 0],
-        'Budget': [0, 137, 123], 'Statistiques': [0, 137, 123], 'Production': [0, 137, 123], 'Rapport de production': [0, 137, 123]
+        'Budget': [0, 137, 123], 'Statistiques': [0, 137, 123], 'Production': [0, 137, 123], 'Rapport de production': [0, 137, 123], 'Rapports script': [0, 137, 123]
     },
     // Couleur d'accent d'une section (repli : bleu identitaire)
     accentFor: (sectionName) => PdfTheme.SECTION_COLORS[sectionName] || PdfTheme.COLORS.BANNER_BLUE,
@@ -68147,6 +68194,61 @@ const ScriptReport = {
         }
         // Cleanup du Blob URL après ouverture
         setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    },
+    
+    // === EXPORT GLOBAL (modal Export PDF / Dossier de Production) ===
+    // opts = { includeCover, returnBlob, sceneIds: null | [sceneId, ...] }
+    // sceneIds null/undefined = toutes les scènes. Tri : ordre scènes > ordre plans > n° prise.
+    exportPDF: async (opts = {}) => {
+        const reports = state.data.scriptReports || {};
+        const allScenes = state.data.scenes || [];
+        const allShots = state.data.shots || [];
+        const keys = Object.keys(reports).filter(k => reports[k] && reports[k].length > 0);
+        
+        const items = [];
+        keys.forEach(key => {
+            const scene = allScenes.find(s => key.startsWith(s.id + '_'));
+            const sceneId = scene ? scene.id : '__orphan__';
+            if(Array.isArray(opts.sceneIds) && !opts.sceneIds.includes(sceneId)) return;
+            const shotId = scene ? key.substring(scene.id.length + 1) : key;
+            reports[key].forEach((r, idx) => items.push({ key, idx, sceneId, shotId }));
+        });
+        
+        if(items.length === 0) {
+            if(!opts.returnBlob) Utils.toast('Aucune fiche de script à exporter', 'warning');
+            return null;
+        }
+        
+        const sceneOrder = (id) => { const i = allScenes.findIndex(s => s.id === id); return i === -1 ? 999 : i; };
+        const shotOrder = (id) => { const i = allShots.findIndex(s => s.id === id); return i === -1 ? 999 : i; };
+        items.sort((a, b) => sceneOrder(a.sceneId) - sceneOrder(b.sceneId) || shotOrder(a.shotId) - shotOrder(b.shotId) || a.idx - b.idx);
+        
+        await LazyLib.load('pdfexport'); const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        
+        if(opts.includeCover !== false && typeof PdfTheme !== 'undefined' && PdfTheme.coverPage) {
+            PdfTheme.coverPage(doc, { sectionName: 'Rapports script' });
+            doc.addPage();
+        }
+        
+        let first = true;
+        items.forEach(it => {
+            if(!first) doc.addPage();
+            first = false;
+            ScriptReport.renderPDFPage(doc, reports[it.key][it.idx], it.key);
+        });
+        
+        if(typeof PdfTheme !== 'undefined' && PdfTheme.applyFooters) {
+            PdfTheme.applyFooters(doc, { skipFirstPage: opts.includeCover !== false, forDossier: !!opts.returnBlob });
+        }
+        
+        if(opts.returnBlob) return doc.output('blob');
+        
+        const filename = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
+            ? PdfTheme.filename('Rapports script')
+            : `${state.data.title || 'Projet'} - Rapports script.pdf`;
+        doc.save(filename);
+        Utils.toast('Rapports de script exportés !', 'success');
     },
     
     generatePDF: async (sceneId, shotId, reportIdx) => {
