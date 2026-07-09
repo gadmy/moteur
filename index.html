@@ -9082,6 +9082,35 @@ body.presentation-mode .presentation-bar {
         </div>
     </div>
 
+    <!-- Section Parité -->
+    <div class="stats-section-title">⚖️ Parité</div>
+    <div class="charts-row-advanced">
+        <div class="chart-box-advanced">
+            <div class="chart-title">Personnages</div>
+            <div class="chart-canvas-container"><canvas id="chart-parite-chars"></canvas></div>
+        </div>
+        <div class="chart-box-advanced">
+            <div class="chart-title">Répliques de dialogue</div>
+            <div class="chart-canvas-container"><canvas id="chart-parite-dialogues"></canvas></div>
+        </div>
+        <div class="chart-box-advanced">
+            <div class="chart-title">Rôles principaux</div>
+            <div class="chart-canvas-container"><canvas id="chart-parite-principaux"></canvas></div>
+        </div>
+        <div class="chart-box-advanced">
+            <div class="chart-title">Rôles secondaires</div>
+            <div class="chart-canvas-container"><canvas id="chart-parite-secondaires"></canvas></div>
+        </div>
+        <div class="chart-box-advanced">
+            <div class="chart-title">Apparitions en scène</div>
+            <div class="chart-canvas-container"><canvas id="chart-parite-scenes"></canvas></div>
+        </div>
+        <div class="chart-box-advanced">
+            <div class="chart-title">Technicien·nes</div>
+            <div class="chart-canvas-container"><canvas id="chart-parite-crew"></canvas></div>
+        </div>
+    </div>
+
     <!-- Section Budget -->
     <div class="stats-section-title" data-stats-scope="project">💰 Budget</div>
     <div class="charts-row-advanced">
@@ -17408,6 +17437,7 @@ openBoardPrintEpisodeChooser: () => {
             { id: 'cards', label: '📊 Cartes résumé (totaux)', defaultOn: true, alwaysShow: true },
             { id: 'seasons', label: '📺 Stats par saison', defaultOn: isSeries, alwaysShow: isSeries },
             { id: 'progress', label: '📈 Avancement (planification, INT/EXT, JOUR/NUIT)', defaultOn: true, alwaysShow: true },
+            { id: 'parite', label: '⚖️ Parité', defaultOn: true, alwaysShow: true },
             { id: 'budget', label: '💰 Budget', defaultOn: true, alwaysShow: true },
             { id: 'time', label: '⏱️ Temps par Tag/Acte', defaultOn: true, alwaysShow: true },
             { id: 'charsLocs', label: '👥 Personnages & Lieux', defaultOn: true, alwaysShow: true },
@@ -17519,6 +17549,22 @@ openBoardPrintEpisodeChooser: () => {
                 ${intExt ? `<div class="st-chart-box"><div class="st-chart-title">Répartition INT / EXT</div><img src="${intExt}" alt="Graphique de répartition" class="st-chart-img"></div>` : ''}
                 ${jourNuit ? `<div class="st-chart-box"><div class="st-chart-title">Répartition JOUR / NUIT</div><img src="${jourNuit}" alt="Graphique de répartition" class="st-chart-img"></div>` : ''}
             </div></div>`;
+        }
+        // Section Parité
+        if(sections.includes('parite')) {
+            const pariteDefs = [
+                { id: 'chart-parite-chars', label: 'Personnages' },
+                { id: 'chart-parite-dialogues', label: 'Répliques de dialogue' },
+                { id: 'chart-parite-principaux', label: 'Rôles principaux' },
+                { id: 'chart-parite-secondaires', label: 'Rôles secondaires' },
+                { id: 'chart-parite-scenes', label: 'Apparitions en scène' },
+                { id: 'chart-parite-crew', label: 'Technicien·nes' }
+            ];
+            const pariteBoxes = pariteDefs.map(p => {
+                const img = captureCanvas(p.id);
+                return img ? `<div class="st-chart-box"><div class="st-chart-title">${p.label}</div><img src="${img}" alt="Graphique de parité" class="st-chart-img"></div>` : '';
+            }).join('');
+            if(pariteBoxes) bodyHTML += `<div class="st-section"><h2>⚖️ Parité</h2><div class="st-charts-grid">${pariteBoxes}</div></div>`;
         }
         // Section Budget
         if(sections.includes('budget')) {
@@ -43259,6 +43305,7 @@ const Stats = {
           Stats.renderProgressScenes();
           Stats.renderIntExtChart();
           Stats.renderJourNuitChart();
+          Stats.renderPariteCharts();
           Stats.renderBudgetChart();
           Stats.renderTimeTagsChart();
       },
@@ -43383,6 +43430,107 @@ const Stats = {
                   }
               }
           });
+      },
+      
+      // ===== PARITÉ =====
+      _pariteBucket: (g) => {
+          if(g === 'homme') return 'Homme';
+          if(g === 'femme') return 'Femme';
+          if(g === 'non-binaire') return 'Non-binaire';
+          return 'Non renseigné';
+      },
+      
+      _paritePie: (canvasId, chartKey, counts) => {
+          const canvas = document.getElementById(canvasId);
+          if(!canvas) return;
+          Stats.destroyChart(chartKey);
+          const colorMap = { 'Homme': '#2196F3', 'Femme': '#E91E63', 'Non-binaire': '#9C27B0', 'Non renseigné': '#9E9E9E' };
+          const labels = Object.keys(counts).filter(k => counts[k] > 0);
+          if(labels.length === 0) {
+              canvas.parentElement.innerHTML = '<div class="empty-state-lg">Pas de données</div>';
+              return;
+          }
+          Stats.chartInstances[chartKey] = new Chart(canvas, {
+              type: 'doughnut',
+              data: {
+                  labels: labels,
+                  datasets: [{
+                      data: labels.map(l => counts[l]),
+                      backgroundColor: labels.map(l => colorMap[l] || '#607D8B'),
+                      borderWidth: 0
+                  }]
+              },
+              options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: {
+                      legend: { position: 'bottom' }
+                  }
+              }
+          });
+      },
+      
+      renderPariteCharts: () => {
+          const chars = state.data.characters || [];
+          const bucketOf = Stats._pariteBucket;
+          const newCounts = () => ({ 'Homme': 0, 'Femme': 0, 'Non-binaire': 0, 'Non renseigné': 0 });
+          
+          // 1. Parité des personnages
+          const charCounts = newCounts();
+          chars.forEach(c => charCounts[bucketOf(c.gender)]++);
+          Stats._paritePie('chart-parite-chars', 'pariteChars', charCounts);
+          
+          // Index nom → genre (même matching que charScenes)
+          const genderByName = {};
+          chars.forEach(c => { if(c.name) genderByName[c.name.trim().toUpperCase()] = bucketOf(c.gender); });
+          
+          const scenes = Stats.getFilteredScenes();
+          
+          // 2. Répliques de dialogue par genre
+          const dialCounts = newCounts();
+          scenes.forEach(s => {
+              if(!s.scriptContent) return;
+              const div = document.createElement('div');
+              div.innerHTML = s.scriptContent;
+              div.querySelectorAll('.sc-dial').forEach(d => {
+                  let prev = d.previousElementSibling;
+                  while(prev && !prev.classList.contains('sc-perso')) prev = prev.previousElementSibling;
+                  if(prev) {
+                      const name = prev.innerText.trim().replace(/\(.*\)/,'').trim().toUpperCase();
+                      dialCounts[genderByName[name] || 'Non renseigné']++;
+                  }
+              });
+          });
+          Stats._paritePie('chart-parite-dialogues', 'pariteDialogues', dialCounts);
+          
+          // 3-4. Rôles principaux / secondaires (via le groupe du comédien lié : ga1 / ga2)
+          const actors = state.data.actors || [];
+          const principCounts = newCounts();
+          const secondCounts = newCounts();
+          chars.forEach(c => {
+              if(!c.actor_id) return;
+              const a = actors.find(x => x.id === c.actor_id);
+              if(!a) return;
+              if(a.group_id === 'ga1') principCounts[bucketOf(c.gender)]++;
+              else if(a.group_id === 'ga2') secondCounts[bucketOf(c.gender)]++;
+          });
+          Stats._paritePie('chart-parite-principaux', 'paritePrincipaux', principCounts);
+          Stats._paritePie('chart-parite-secondaires', 'pariteSecondaires', secondCounts);
+          
+          // 5. Apparitions en scène par genre
+          const appearCounts = newCounts();
+          scenes.forEach(s => {
+              if(!s.perso) return;
+              s.perso.split(/[,;]/).map(n => n.trim().toUpperCase()).filter(n => n.length).forEach(n => {
+                  appearCounts[genderByName[n] || 'Non renseigné']++;
+              });
+          });
+          Stats._paritePie('chart-parite-scenes', 'pariteScenes', appearCounts);
+          
+          // 6. Technicien·nes par genre
+          const crewCounts = newCounts();
+          (state.data.crew || []).forEach(m => crewCounts[bucketOf(m.gender)]++);
+          Stats._paritePie('chart-parite-crew', 'pariteCrew', crewCounts);
       },
       
       // Budget par catégorie + comparaison
@@ -43828,6 +43976,47 @@ const Stats = {
             doc.setFontSize(9);
             doc.setTextColor(...PdfTheme.COLORS.TEXT_FAINT);
             doc.text('Pas de données disponibles', margin, y + 4);
+            y += 8;
+        }
+        
+        // ========= SECTION : PARITÉ =========
+        drawSectionHeader('Parité');
+        const pariteCharts = [
+            { id: 'chart-parite-chars', label: 'Personnages' },
+            { id: 'chart-parite-dialogues', label: 'Répliques de dialogue' },
+            { id: 'chart-parite-principaux', label: 'Rôles principaux' },
+            { id: 'chart-parite-secondaires', label: 'Rôles secondaires' },
+            { id: 'chart-parite-scenes', label: 'Apparitions en scène' },
+            { id: 'chart-parite-crew', label: 'Technicien·nes' }
+        ].map(p => ({ label: p.label, img: captureCanvas(p.id) })).filter(p => p.img);
+        if(pariteCharts.length) {
+            const halfWP = (usableWidth - 8) / 2;
+            const targetHP = 55;
+            for(let i = 0; i < pariteCharts.length; i += 2) {
+                const pair = pariteCharts.slice(i, i + 2);
+                ensureSpace(targetHP + 12);
+                const yStartP = y;
+                pair.forEach((p, col) => {
+                    const xBase = margin + col * (halfWP + 8);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(9);
+                    doc.setTextColor(...PdfTheme.COLORS.TEXT_BODY);
+                    doc.text(p.label, xBase + halfWP / 2, yStartP + 3, { align: 'center' });
+                    const ratio = p.img.w / p.img.h;
+                    let h = targetHP;
+                    let w = h * ratio;
+                    if(w > halfWP) { w = halfWP; h = w / ratio; }
+                    const x = xBase + (halfWP - w) / 2;
+                    try { doc.addImage(p.img.dataUrl, 'PNG', x, yStartP + 5, w, h); } catch(e){}
+                });
+                y = yStartP + targetHP + 12;
+            }
+        } else {
+            doc.setFont('helvetica', 'italic');
+            doc.setFontSize(9);
+            doc.setTextColor(...PdfTheme.COLORS.TEXT_FAINT);
+            ensureSpace(6);
+            doc.text('Pas de données', margin, y + 4);
             y += 8;
         }
         
