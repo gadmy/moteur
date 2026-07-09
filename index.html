@@ -35,6 +35,12 @@ v558 (6 Juillet 2026) — Refonte PDF du Dossier de Production : pages creuses, 
   - ENCODAGE PDF — _drawGroupHeader passe les noms de groupes par PdfTheme.cleanText (fin des emoji corrompus « Ø<ß4 ») ; stripPdfUnsafe normalise les espaces fines/insécables U+202F/U+2009/U+00A0 (jsPDF corrompait U+202F en « / » : « 31 /800 € ») et whiteliste le symbole € (silencieusement supprimé partout auparavant) ; drawStatCard nettoie label et valeur ; budget prévu des stats lu depuis parseFloat(state.data.budget?.total) avec repli assaini sur presentation.budget (parseFloat("1 800 000") donnait 1).
   - SYNOPSIS EN TEXTE BRUT — les sections Synopsis / Résumé court / Résumé long sortaient vides du PDF quand leur contenu était du texte sans balises HTML : Synopsis._parseRichHtml ne parcourait que les éléments (container.children). Il itère désormais sur les childNodes et convertit les nœuds texte de premier niveau en paragraphes (découpe par lignes) ; le HTML riche est traité comme avant.
   - RAPPORTS DE SCRIPT DANS L'EXPORT GLOBAL — le module Rapports de script (fiches de script/prises) était le seul onglet imprimable absent du modal Export PDF et du Dossier de Production. Nouvelle section « Rapports de script » (entre Planning et Rapport de production, réordonnable) avec page de garde et choix du périmètre : toutes les scènes, ou sélection dans une liste des scènes ayant au moins une fiche (peuplée à l'ouverture du modal, compteur de fiches par scène, tout coché par défaut). Nouvelle fonction ScriptReport.exportPDF({includeCover, returnBlob, sceneIds}) : tri ordre des scènes > ordre des plans > numéro de prise, une page par fiche via renderPDFPage, charte PdfTheme (cover, footers, accent teal), compatible export solo et fusionné. Le flux d'impression interactif de l'onglet (openPrintChooser) est inchangé.
+  - BARRES D'OUTILS FIGÉES — les barres du haut des onglets Personnages, Comédiens, Décors, Ressources, Équipe et Asso/Entreprises restent visibles au défilement (même comportement que Synopsis/Séquencier) : nouvelle règle .data-toolbar en position:sticky (top:0, fond opaque, liseré + ombre, z-index --z-sticky) ; classe data-toolbar ajoutée à la barre Ressources qui ne l'avait pas.
+  - STATS / PARITÉ — nouvelle section « ⚖️ Parité » dans l'onglet Statistiques, entre Avancement et Budget : six camemberts Chart.js (personnages, répliques de dialogue, rôles principaux, rôles secondaires, apparitions en scène, technicien·nes) répartis par genre (Homme / Femme / Non-binaire / Non renseigné). Le genre d'un personnage est son champ Sexe, avec repli sur le genre du comédien lié s'il est vide ; principal/secondaire déduit du groupe du comédien lié (ga1/ga2) ; répliques et apparitions calculées avec le même parsing que les stats existantes ; respecte le périmètre saison/épisode des séries.
+  - STATS / PARITÉ — la section est intégrée aux deux sorties : export PDF de l'onglet Stats (camemberts deux par ligne entre Avancement et Budget, camemberts vides omis) et impression navigateur (nouvelle case « ⚖️ Parité » cochée par défaut dans le chooser de sections).
+  - EXPORT GLOBAL / STORYBOARD — les options Storyboard du modal Export (« Image seule » + choix du calque technique) étaient collectées mais jamais lues par l'export : le rendu dépendait silencieusement du dernier réglage du panneau de config de l'onglet. Elles sont désormais branchées : opts.imageOnly / opts.techLayer surchargent temporairement Storyboard.printConfig le temps du rendu offscreen (restauré ensuite, y compris en cas d'échec), sans toucher la config de l'onglet. « Image seule » conserve numéro de plan et titre de scène et retire type de plan, mouvements, descriptions et directions ; la case, cochée par défaut alors qu'elle ne faisait rien, passe décochée par défaut.
+  - EXPORT GLOBAL / SÉQUENCIER — choix des saisons à exporter (séries) : cases par saison sous la ligne Séquencier du modal Export (peuplées à l'ouverture, toutes cochées par défaut, masquées pour les films), traduites en episodeIds passés à exportSequencerPDF. Corrige au passage le chooser saisons/épisodes du séquencier qui surgissait au milieu de l'export global en mode séparé (episodeIds désormais toujours défini pour les séries) ; rien coché = tout exporté.
+  - BUDGET / EXPORT — le bouton Export PDF de l'onglet Dépenses exportait directement en mode détaillé sans options, alors que le modal Export global propose simple/détaillé avec défaut simple : les deux PDF par défaut différaient. Nouveau modal d'options sur le bouton d'onglet (Expenses.openExportModal → ExpensesExport), aligné sur le global : page de garde + mode Simple (résumé + totaux CNC, défaut) / Détaillé (avec tableau complet des dépenses).
 v557 (1er Juillet 2026) — Glisser-déposer des fiches entre groupes, suppression des groupes personnalisés, véhicules de production en cartes compactes
   - GLISSER-DÉPOSER ENTRE GROUPES — les cartes compactes des onglets Personnages, Comédiens, Décors, Équipe et Asso/Entreprises se déplacent maintenant d'un groupe à l'autre par drag & drop (nouveau module GroupDnD : écouteurs délégués dragstart/dragover/drop, réassignation du group_id via GroupDnD.move puis re-render de l'onglet concerné). Chaque carte porte draggable + data-dnd-coll/data-dnd-idx (hors lecture seule), chaque grille de groupe data-dnd-coll/data-dnd-group. Pendant un glissement, les groupes vides apparaissent comme cibles (sections .dnd-empty-target masquées le reste du temps, révélées via body.dnd-active) pour permettre de classer dans un groupe encore vide ; déposer sur « Non classé » retire du groupe. Ressources et véhicules de production restent exclus (rangés par catégorie, pas par groupe).
   - SUPPRESSION DES GROUPES PERSONNALISÉS — un bouton corbeille apparaît sur l'en-tête des groupes créés par l'utilisateur (GroupDnD.delBtnHtml), jamais sur les groupes par défaut (gp*/ga*/gl*/gc*/go* protégés via GroupDnD.isDefault, listés depuis CONFIG.defaultGroups + CONFIG.crewGroups) ni sur « Non classé ». La suppression (GroupDnD.deleteGroup, confirmation via ConfirmModal.confirmDelete) retire le groupe de state.data.groups et repasse ses fiches en « Non classé ». Au passage, correction d'un bug de confirmAddGroup qui référençait une variable newGroup inexistante (ReferenceError bloquant la création de tout groupe) et ajout du re-render manquant du cas 'crew'.
@@ -9445,7 +9451,7 @@ body.presentation-mode .presentation-bar {
     
     <!-- Toggle Mode Simple / Avancé + Export PDF -->
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; gap: 10px; flex-wrap: wrap;">
-        <button onclick="app.Expenses.exportPDF()" class="btn-tool-print" style="background:var(--primary); color:#fff; padding:8px 16px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📄 Export PDF</button>
+        <button onclick="app.Expenses.openExportModal()" class="btn-tool-print" style="background:var(--primary); color:#fff; padding:8px 16px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">📄 Export PDF</button>
         <div style="display: flex; gap: 5px;">
             <button id="expenses-mode-simple" onclick="app.Expenses.setMode('simple')" style="padding: 8px 16px; border: 1px solid var(--primary); border-radius: 6px 0 0 6px; cursor: pointer; font-weight: 500; background: var(--primary); color: white;">📋 Simple</button>
             <button id="expenses-mode-advanced" onclick="app.Expenses.setMode('advanced')" style="padding: 8px 16px; border: 1px solid var(--border); border-radius: 0 6px 6px 0; cursor: pointer; font-weight: 500; background: var(--bg); color: var(--text-main);">⚙️ Avancé</button>
@@ -9907,6 +9913,7 @@ body.presentation-mode .presentation-bar {
                         <span class="exp-drag-handle exp-drag-handle-row" title="Glisser pour réorganiser">⋮⋮</span>
                         <label class="exp-row-main"><input type="checkbox" class="exp-section-chk" data-section="board"><span>Séquencier</span></label>
                         <label class="exp-row-cover"><input type="checkbox" class="exp-cover-chk" data-section="board" checked><span>📋 Page de garde</span></label>
+                        <div class="exp-row-opts" id="exp-board-seasons" style="display:none;"></div>
                     </div>
                     
                     <div class="exp-section-row" data-section="script" draggable="true">
@@ -9939,7 +9946,7 @@ body.presentation-mode .presentation-bar {
                         <label class="exp-row-main"><input type="checkbox" class="exp-section-chk" data-section="storyboard"><span>Storyboard</span></label>
                         <label class="exp-row-cover"><input type="checkbox" class="exp-cover-chk" data-section="storyboard" checked><span>📋 Page de garde</span></label>
                         <div class="exp-row-opts">
-                            <label class="exp-suboption" title="Image seule, sans détails techniques"><input type="checkbox" id="exp-storyboard-imageonly" checked><span>Image seule</span></label>
+                            <label class="exp-suboption" title="Image seule, sans détails techniques"><input type="checkbox" id="exp-storyboard-imageonly"><span>Image seule</span></label>
                             <label class="exp-suboption"><input type="radio" name="exp-storyboard-techlayer" value="none" checked><span>Aucun calque</span></label>
                             <label class="exp-suboption"><input type="radio" name="exp-storyboard-techlayer" value="lighting"><span>Lumière</span></label>
                             <label class="exp-suboption"><input type="radio" name="exp-storyboard-techlayer" value="camera"><span>Caméra</span></label>
@@ -22505,6 +22512,8 @@ const tabToSection = {
           els.exportModal.style.display = 'flex';
           // [Rapports script] Peupler la liste des scènes ayant des fiches
           if(Actions.expPopulateSrScenes) Actions.expPopulateSrScenes();
+          // [Séquencier] Peupler les cases de saisons (séries uniquement)
+          ActionsExport.expPopulateBoardSeasons();
           // Appliquer l'ordre custom mémorisé (si présent) avant de poser le drag
           if(Actions.expRestoreOrder) Actions.expRestoreOrder();
           // Brancher le drag & drop (idempotent : peut être rappelé plusieurs fois)
@@ -22547,6 +22556,23 @@ const tabToSection = {
           if(!box) return;
           const scope = document.querySelector('input[name="exp-sr-scope"]:checked')?.value || 'all';
           box.style.display = scope === 'select' ? 'block' : 'none';
+      },
+      
+      // [Séquencier] Peuple les cases de saisons à exporter (séries uniquement)
+      expPopulateBoardSeasons: () => {
+          const box = document.getElementById('exp-board-seasons');
+          if(!box) return;
+          const seasons = state.data.seasons || [];
+          if(state.currentProjectType !== 'series' || seasons.length === 0) {
+              box.style.display = 'none';
+              box.innerHTML = '';
+              return;
+          }
+          box.style.display = '';
+          box.innerHTML = seasons.map(s => {
+              const label = 'S' + String(s.number).padStart(2, '0') + (s.title ? ' — ' + Utils.escape(s.title) : '');
+              return `<label class="exp-suboption"><input type="checkbox" class="exp-board-season-chk" value="${s.id}" checked><span>${label}</span></label>`;
+          }).join('');
       },
       
       // [Rapports script] Peuple la liste des scènes ayant au moins une fiche
@@ -22837,6 +22863,16 @@ const tabToSection = {
               includeCover:    getCover('planning'),
               includeCallSheet: document.getElementById('exp-planning-callsheet')?.checked !== false
           });
+          // [Séquencier] Épisodes correspondant aux saisons cochées (undefined pour les films
+          // → exportSequencerPDF exporte tout sans ouvrir son chooser, seasons.length===0)
+          const boardEpisodeIds = () => {
+              const boxes = document.querySelectorAll('#export-modal .exp-board-season-chk');
+              if(state.currentProjectType !== 'series' || boxes.length === 0) return undefined;
+              let checked = Array.from(document.querySelectorAll('#export-modal .exp-board-season-chk:checked')).map(cb => cb.value);
+              if(checked.length === 0) checked = Array.from(boxes).map(cb => cb.value); // rien coché = tout
+              const seaSet = new Set(checked);
+              return (state.data.episodes || []).filter(ep => seaSet.has(ep.seasonId)).map(ep => ep.id);
+          };
           const srSceneIds = () => {
               const scope = document.querySelector('input[name="exp-sr-scope"]:checked')?.value || 'all';
               if(scope !== 'select') return null;
@@ -22848,7 +22884,7 @@ const tabToSection = {
           const sectionsMap = {
               // titlepage : retiré du Dossier (redondant avec la cover Dossier). Reste accessible en export solo via l'onglet Titre.
               synopsis:     { label: 'Synopsis',              build: (extra) => Synopsis.synopsisToPDF({ includeCover: getCover('synopsis'), ...opts.synopsis, ...extra }) },
-              board:        { label: 'Séquencier',            build: (extra) => BeatBoard.exportSequencerPDF({ includeCover: getCover('board'), ...extra }) },
+              board:        { label: 'Séquencier',            build: (extra) => BeatBoard.exportSequencerPDF({ includeCover: getCover('board'), episodeIds: boardEpisodeIds(), ...extra }) },
               script:       { label: 'Scénario',              build: (extra) => Exporter.scenarioToPDF({ includeCover: getCover('script'), ...opts.script, ...extra }) },
               moodboard:    { label: 'Mood Board',            build: (extra) => MoodBoard.exportPDF({ includeCover: getCover('moodboard'), ...extra }) },
               storyboard:   { label: 'Storyboard',            build: (extra) => Storyboard.exportPDF({ ...storyboardOpts(), ...extra }) },
@@ -28022,15 +28058,33 @@ if(hasContent) {
         document.body.appendChild(offscreen);
         
         // ===== 2. Appeler renderPrintPreview qui sait déjà tout rendre =====
+        // [Modal Export global] opts.imageOnly / opts.techLayer surchargent temporairement
+        // printConfig le temps du rendu (sans opts, la config du panneau de l'onglet s'applique)
+        const prevPrintConfig = Storyboard.printConfig;
+        if(opts.imageOnly || opts.techLayer !== undefined) {
+            const pc = { ...prevPrintConfig };
+            if(opts.techLayer !== undefined) pc.techLayer = opts.techLayer;
+            if(opts.imageOnly) {
+                pc.shotType = false;
+                pc.cameraMove = false;
+                pc.cameraMode = false;
+                pc.description = false;
+                pc.actorDirection = false;
+                pc.techDirection = false;
+            }
+            Storyboard.printConfig = pc;
+        }
         StoryboardExport._printCapturing = true;
         StoryboardExport._printImgPromises = [];
         try {
             Storyboard.renderPrintPreview('storyboardOffscreenPreview');
         } catch(e) {
             console.warn('[Storyboard PDF] Échec renderPrintPreview:', e);
+            Storyboard.printConfig = prevPrintConfig;
             try { document.body.removeChild(offscreen); } catch(_) {}
             return;
         }
+        Storyboard.printConfig = prevPrintConfig;
         
         // Laisser le temps au DOM de se mettre à jour ET aux images async
         await new Promise(r => setTimeout(r, 600));
@@ -51469,6 +51523,50 @@ document.addEventListener('click', (e) => {
 });
 
 const ExpensesExport = {
+    // Modal d'options du bouton d'onglet — aligné sur le modal Export global
+    // (mode Simple par défaut + toggle page de garde)
+    openExportModal: () => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:460px;padding:20px;">
+            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:14px;">💰 Budget PDF — Options</div>
+            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Page de garde :</div>
+            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
+                <button type="button" class="fmt-btn active" id="bud-opt-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre</button>
+            </div>
+            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Mode de rendu :</div>
+            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;" id="bud-opt-modes">
+                <button type="button" class="fmt-btn active" data-mode="simple" style="padding:10px 14px;font-size:0.85rem;text-align:left;">Simple<br><span style="font-size:0.75rem;color:var(--text-sec);font-weight:normal;">Résumé global + totaux par catégorie CNC</span></button>
+                <button type="button" class="fmt-btn" data-mode="detailed" style="padding:10px 14px;font-size:0.85rem;text-align:left;">Détaillé<br><span style="font-size:0.75rem;color:var(--text-sec);font-weight:normal;">Résumé + tableau complet des dépenses</span></button>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="confirm-modal-btn cancel" id="bud-opt-cancel" style="margin:0;">Annuler</button>
+                <button class="confirm-modal-btn confirm" id="bud-opt-ok" style="margin:0;">📄 Générer le PDF</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        const coverBtn = overlay.querySelector('#bud-opt-cover');
+        coverBtn.onclick = () => {
+            const isActive = coverBtn.classList.toggle('active');
+            coverBtn.dataset.active = isActive ? '1' : '0';
+        };
+        let selectedMode = 'simple';
+        overlay.querySelectorAll('#bud-opt-modes .fmt-btn').forEach(btn => {
+            btn.onclick = () => {
+                overlay.querySelectorAll('#bud-opt-modes .fmt-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedMode = btn.dataset.mode;
+            };
+        });
+        overlay.querySelector('#bud-opt-cancel').onclick = () => overlay.remove();
+        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+        overlay.querySelector('#bud-opt-ok').onclick = () => {
+            const includeCover = coverBtn.dataset.active === '1';
+            overlay.remove();
+            ExpensesExport.exportPDF({ includeCover, simple: selectedMode === 'simple' });
+        };
+    },
+    
     // Export PDF du budget [Phase C.2.2 refondu + Phase D : opts.simple / opts.includeCover]
     // opts = { includeCover, returnBlob, simple }
     // - simple : page de garde + résumé global + totaux par catégorie CNC (saute le tableau détaillé des dépenses)
@@ -54162,6 +54260,7 @@ await supabase.functions.invoke('super-action', { body: {
     sendInternalNotification: (...a) => ExpensesCRUD.sendInternalNotification(...a),
     duplicateExpense: (...a) => ExpensesCRUD.duplicateExpense(...a),
     // Export PDF & Excel — délégué à ExpensesExport
+    openExportModal: (...a) => ExpensesExport.openExportModal(...a),
     exportPDF: (...a) => ExpensesExport.exportPDF(...a),
     exportExcel: (...a) => ExpensesExport.exportExcel(...a)
 };
