@@ -27,6 +27,13 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v559 (24 Juillet 2026) — Correctif critique : la création de projet était impossible pour tous les comptes sauf un
+  - CAUSE RACINE (RLS / INSERT ... RETURNING) — depuis la mise en place de la policy SELECT « Projects viewable », aucun utilisateur autre que ga.dmy@ikmail.com ne pouvait créer de projet : toast « Erreur lors de la création du projet », erreur Postgres 42501. Le refus ne venait pas de la policy INSERT (dont le WITH CHECK passait) mais de la policy SELECT, appliquée par PostgreSQL au RETURNING du .select().single() et signalée sous le message trompeur « new row violates row-level security policy ». Cette policy s'appuie sur can_view_project(id), fonction SECURITY DEFINER qui RE-INTERROGE la table : pendant l'INSERT la nouvelle ligne n'est pas visible dans le snapshot de la sous-requête, et project_members n'est alimenté qu'après. Les deux premières branches renvoyaient donc systématiquement faux ; seule la troisième — l'email d'administration écrit en dur dans la fonction — pouvait être vraie. D'où un bug invisible pour le développeur et bloquant pour 100 % des inscrits (5 comptes créés en juillet, 0 projet créé).
+  - SQL — nouvelle policy SELECT permissive « Projects viewable by owner » sur public.projects : using (lower(owner_email) = lower(auth.jwt() ->> 'email')). Elle teste la colonne de la ligne DIRECTEMENT au lieu de relire la table, ce qui la rend évaluable pendant le RETURNING. Sous-ensemble strict des droits déjà accordés par can_view_project (les policies permissives s'additionnent en OR) : aucune régression de visibilité.
+  - SQL — can_view_project purgée de l'email d'administration en dur (ga.dmy@ikmail.com), reste de la migration des policies vers contact@moteur.studio. Ce privilège résiduel masquait le bug au développeur en lui offrant un chemin d'accès que personne d'autre n'avait. L'accès admin transversal reste assuré par la policy « Admins can view all projects ». can_edit_project audité : propre, aucune exception en dur, non modifié.
+  - GARDE DE SESSION (doCreateProject) — vérification de session réelle via supabase.auth.getSession() avant l'insert : sans JWT valide la requête part en rôle anon et se fait refuser par les policies (toutes TO authenticated), avec la même erreur 42501 opaque. Message explicite « Session expirée » et sortie anticipée. owner_email est désormais dérivé de l'email de la session (_jwtEmail) plutôt que de state.currentUser : la valeur insérée est par construction celle que la policy compare, ce qui neutralise toute divergence de casse ou d'état obsolète ; avertissement console si les deux emails divergent.
+  - DIAGNOSTIC — le toast d'échec de création de projet remonte maintenant le code et le message Postgres (« Erreur création projet : ... », 10 s) au lieu d'un libellé générique : un utilisateur sans console peut décrire la panne. Correctif du même ordre sur les toasts d'ajout de membre.
+  - BUG LATENT — trois appels à Toast.show(), objet qui n'existe nulle part dans le fichier : toute erreur d'ajout de membre projet ou de mise à jour de profil déclenchait une ReferenceError au lieu du message attendu. Remplacés par Utils.toast().
 v558 (6 Juillet 2026) — Refonte PDF du Dossier de Production : pages creuses, couleurs par section, corrections d'encodage + Rapports de script dans l'export global
   - PAGES CREUSES (~33 pages économisées) — Storyboard : flux continu multi-scènes par page (fin du « 1 page par scène ») ; createPrintPage supprimé (méthode + délégation), bandeaux de scène insérés dans la grille avec suffixe « (suite) » et grid-column: 1/-1. Feuilles de service compactées : drawSectionHeader 5.5 mm, lignes 4.4, sous-groupes 4 mm, dépouillement/besoins sur une ligne (préfixe gras mesuré via getTextWidth) — un jour tient sur une page. Feuilles figuration en flux continu dans PlanningExport (_renderFiguPage accepte layout.startY et retourne le y final).
   - TABLEAUX — tableau des Lieux : en-tête de colonnes DÉCOR / LIEU RÉEL / ADRESSE / SCÈNES ajouté, troncatures élargies (-2 → -5, fin des collisions). Récapitulatif du dépouillement : bandeau harmonisé BANNER_DARK dans les marges, compte de scènes aligné à droite, interlignes 4.5/6.
@@ -15864,11 +15871,23 @@ const LockManager = {
           // I5d : récupérer l'id du profil propriétaire (premier profil passé, ou null si aucun)
           const ownerProfileId = (selectedProfiles && selectedProfiles[0]?.profileId) || null;
           
+          // Garde : session réellement valide (sinon la requête part en anon -> RLS 42501)
+          let _sess = null;
+          try { const { data: _sd } = await supabase.auth.getSession(); _sess = _sd && _sd.session; } catch(_) {}
+          if(!_sess || !_sess.access_token) {
+              Utils.toast('Session expirée. Reconnecte-toi puis réessaie.', 'error', 9000);
+              return;
+          }
+          const _jwtEmail = (_sess.user && _sess.user.email || '').toLowerCase();
+          if(_jwtEmail && _jwtEmail !== myEmail) {
+              console.warn('[Projects] email session != email state', _jwtEmail, myEmail);
+          }
+
           // Créer le projet dans Supabase
           const { data: newProject, error } = await supabase
               .from('projects')
               .insert({
-                  owner_email: myEmail,
+                  owner_email: _jwtEmail || myEmail,
                   owner_profile_id: ownerProfileId, // I5d : profil propriétaire
                   project_type: projectType, // S2 : film ou series
                   title: empty.title,
