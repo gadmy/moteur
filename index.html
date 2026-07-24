@@ -5719,6 +5719,11 @@ body.presentation-mode .presentation-bar {
         </div>
 
 
+        <button type="button" onclick="app.Terms.show()" style="display:block; width:100%; background:none; border:1px solid rgba(128,128,128,0.4); border-radius:8px; padding:10px; margin:5px 0; cursor:pointer; color:var(--text-sec); font-size:0.85rem;">📜 Lire les conditions d'utilisation et mentions légales</button>
+        <label style="display:flex; align-items:flex-start; gap:8px; margin:8px 0 12px; font-size:0.8rem; color:var(--text-sec); cursor:pointer; text-align:left;">
+          <input type="checkbox" id="signup-terms-check" style="margin-top:2px;">
+          <span>J'ai pris connaissance des conditions d'utilisation et des mentions légales.</span>
+        </label>
         <div id="signup-error" class="auth-error">Erreur de création.</div>
         <button type="submit" class="auth-btn">Créer mon compte</button>
         <div class="auth-link" onclick="app.Auth.toggleMode('login')">Se connecter</div>
@@ -5777,7 +5782,8 @@ body.presentation-mode .presentation-bar {
         <div class="dropdown-menu dropdown-abs">
           <div onclick="app.Courses.open()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:6px 6px 0 0;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-help"><span class="emoji">🎓</span><svg><use href="#ico-graduation"/></svg></span> Cours</div>
           <div onclick="app.Tutorial.open()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:0;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-help"><span class="emoji">📖</span><svg><use href="#ico-book"/></svg></span> Guide</div>
-          <div onclick="app.Tour.openPanel()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:0 0 6px 6px;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-help"><span class="emoji">🧭</span><svg><use href="#ico-help"/></svg></span> Visites guidees</div>
+          <div onclick="app.Tour.openPanel()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:0;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-help"><span class="emoji">🧭</span><svg><use href="#ico-help"/></svg></span> Visites guidees</div>
+          <div onclick="app.Terms.show()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:0 0 6px 6px;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-help"><span class="emoji">📜</span><svg><use href="#ico-help"/></svg></span> Conditions &amp; mentions légales</div>
         </div>
       </div>
       <!-- Mode -->
@@ -13749,13 +13755,6 @@ showDashboard: async () => {
     // V2.1.2: Initialiser module Admin
     Admin.init();
     
-    // Vérifier si l'utilisateur a accepté les conditions
-    const termsAccepted = await Terms.check();
-    if(!termsAccepted) {
-        Terms.show();
-        return; // Bloquer l'accès au dashboard
-    }
-    
     UI.showDashboard(); 
     setTimeout(function () { try { Tour.maybeAutoStart(); } catch (e) {} }, 700);
 },
@@ -13809,6 +13808,14 @@ showDashboard: async () => {
           if(!email || !pass) return; 
           if(pass !== confirm) { els.signupError.innerText = "Mots de passe non identiques"; els.signupError.style.display = 'block'; return; }
           
+          // CGU : le premier clic coche automatiquement la case, un second clic crée le compte
+          const termsCk = document.getElementById('signup-terms-check');
+          if(termsCk && !termsCk.checked) {
+              termsCk.checked = true;
+              Utils.toast("Case « conditions d'utilisation et mentions légales » cochée. Cliquez à nouveau pour créer votre compte.", 'info');
+              return;
+          }
+          
           // ========== VÉRIFICATION LISTE BLANCHE PRÉ-ALPHA ==========
           if(CONFIG.preAlpha.enabled) {
               const emailLower = email.toLowerCase();
@@ -13858,6 +13865,8 @@ showDashboard: async () => {
           const { error: profileError } = await supabase.from('user_profiles').insert({
               email: email.toLowerCase(),
               name: '',
+              terms_accepted: true,
+              terms_accepted_at: new Date().toISOString(),
               profile_type: accountType,
               created_at: new Date().toISOString(),
               is_public: false
@@ -70286,78 +70295,10 @@ const Weather = {
   const Terms = {
       show: () => {
           document.getElementById('terms-modal').style.display = 'flex';
-          document.getElementById('terms-checkbox').checked = false;
-          document.getElementById('terms-accept-btn').classList.remove('enabled');
       },
       
       hide: () => {
           document.getElementById('terms-modal').style.display = 'none';
-      },
-      
-      toggleCheckbox: () => {
-          const checkbox = document.getElementById('terms-checkbox');
-          checkbox.checked = !checkbox.checked;
-          const btn = document.getElementById('terms-accept-btn');
-          if(checkbox.checked) {
-              btn.classList.add('enabled');
-          } else {
-              btn.classList.remove('enabled');
-          }
-      },
-      
-      accept: async () => {
-          const checkbox = document.getElementById('terms-checkbox');
-          if(!checkbox.checked) return;
-          
-          try {
-              // Enregistrer l'acceptation en base
-              const { error } = await supabase
-                  .from('user_profiles')
-                  .update({ terms_accepted: true, terms_accepted_at: new Date().toISOString() })
-                  .eq('email', state.currentUser?.email?.toLowerCase());
-              
-              if(error) throw error;
-              
-              // Mettre à jour le state local
-              if(state.userProfile) state.userProfile.terms_accepted = true;
-              
-              Terms.hide();
-              // Continuer vers le dashboard
-              UI.showDashboard();
-          } catch(e) {
-              console.error('Erreur acceptation conditions:', e);
-              Utils.toast('Une erreur est survenue. Veuillez réessayer.', 'error');
-          }
-      },
-      
-      refuse: async () => {
-          // Déconnecter l'utilisateur
-          await supabase.auth.signOut();
-          Terms.hide();
-          Utils.toast('Vous devez accepter les conditions pour utiliser Moteur.', 'warning');
-      },
-      
-      check: async () => {
-          // Comptes admin : exemptés de la CGU end-user (login admin sans profil dédié)
-          try { if(typeof Admin !== 'undefined' && Admin.isAdmin && Admin.isAdmin()) return true; } catch(_) {}
-          // Vérifier si l'utilisateur a déjà accepté (sur le profil courant)
-          if(state.userProfile && state.userProfile.terms_accepted) {
-              return true;
-          }
-          // Multi-profils : considérer accepté si AU MOINS UN des profils du compte l'a accepté
-          if(state.currentUser?.email) {
-              try {
-                  const email = state.currentUser.email.toLowerCase();
-                  const { data, error } = await supabase
-                      .from('user_profiles')
-                      .select('id')
-                      .or(`owner_email.eq.${Utils.pgSafe(email)},email.eq.${Utils.pgSafe(email)}`)
-                      .eq('terms_accepted', true)
-                      .limit(1);
-                  if(!error && data && data.length > 0) return true;
-              } catch(e) { console.warn('[Terms] Vérification CGU échouée, re-prompt possible:', e && e.message); }
-          }
-          return false;
       }
   };
 
@@ -70411,7 +70352,7 @@ const Weather = {
 <div id="terms-modal" class="terms-modal-overlay d-none">
   <div class="terms-modal">
     <div class="terms-modal-header">
-      <h2>📜 Conditions d'utilisation</h2>
+      <h2>📜 Conditions d'utilisation &amp; Mentions légales</h2>
     </div>
     <div class="terms-modal-body">
       <p><strong>Bienvenue sur Moteur !</strong> Avant de continuer, merci de prendre connaissance des conditions suivantes :</p>
@@ -70426,9 +70367,16 @@ const Weather = {
         <li>Vous pouvez demander la suppression de votre compte et de vos données à tout moment.</li>
       </ul>
       
+      <h3>💶 Tarification</h3>
+      <ul>
+        <li>Moteur est <strong>actuellement gratuit</strong> pendant sa phase de test.</li>
+        <li>Le service a vocation à devenir <strong>payant</strong> : des offres d'abonnement seront introduites ultérieurement. Vous serez informé·e avant tout passage en version payante, et rien ne vous sera facturé sans votre accord explicite.</li>
+      </ul>
+
       <h3>⚖️ Propriété intellectuelle & Non-concurrence</h3>
       <p>En accédant à Moteur, vous vous engagez à :</p>
       <ul>
+        <li>La plateforme Moteur (code, design, fonctionnalités, contenus, marque) est protégée par le <strong>droit de la propriété intellectuelle</strong>. Toute reproduction, extraction ou réutilisation non autorisée est interdite.</li>
         <li>Ne pas copier, reproduire ou imiter les fonctionnalités, le design ou le concept de Moteur sur un autre site ou application.</li>
         <li>Ne pas utiliser les informations techniques ou fonctionnelles découvertes sur Moteur pour développer un service concurrent.</li>
         <li>Respecter la propriété intellectuelle de Moteur et de ses créateurs.</li>
@@ -70441,15 +70389,17 @@ const Weather = {
         <li>Tout contenu illégal, diffamatoire ou portant atteinte aux droits d'autrui est interdit.</li>
         <li>Nous nous réservons le droit de suspendre tout compte en cas de non-respect de ces conditions.</li>
       </ul>
+
+      <h3>📇 Mentions légales</h3>
+      <ul>
+        <li><strong>Éditeur :</strong> moteur.studio</li>
+        <li><strong>Contact :</strong> contact@moteur.studio</li>
+        <li><strong>Hébergement :</strong> GitHub Pages (GitHub, Inc.) — données applicatives hébergées par Supabase sur des serveurs situés dans l'Union européenne (conformité RGPD).</li>
+      </ul>
     </div>
     <div class="terms-modal-footer">
-      <div class="terms-checkbox-row" onclick="app.Terms.toggleCheckbox()">
-        <input type="checkbox" id="terms-checkbox">
-        <label for="terms-checkbox">J'ai lu et j'accepte les conditions d'utilisation, la politique de confidentialité et la clause de non-concurrence.</label>
-      </div>
       <div class="terms-buttons">
-        <button class="terms-btn terms-btn-refuse" onclick="app.Terms.refuse()">Refuser</button>
-        <button class="terms-btn terms-btn-accept" id="terms-accept-btn" onclick="app.Terms.accept()">Accepter et continuer</button>
+        <button class="terms-btn terms-btn-accept enabled" onclick="app.Terms.hide()">Fermer</button>
       </div>
     </div>
   </div>
