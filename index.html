@@ -27,6 +27,14 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v560 (24 Juillet 2026) — CGU / mentions légales refondues à l'inscription + URLs propres (routage par chemin)
+  - CGU À L'INSCRIPTION, FIN DE LA MODALE BLOQUANTE — l'ancien dispositif (modale plein écran imposée à la première connexion, cases Accepter / Refuser, refus = déconnexion, acceptation écrite en base par Terms.accept, vérification Terms.check à chaque entrée avec exemption admin) est supprimé. Le consentement est désormais recueilli au moment de la création de compte : le formulaire d'inscription porte un bouton « 📜 Lire les conditions d'utilisation et mentions légales » qui ouvre la modale en lecture seule, et une case « J'ai pris connaissance… ». Premier clic sur « Créer mon compte » avec la case décochée : la case est cochée automatiquement et un toast (bas droite, via Utils.toast) le signale ; il faut un second clic pour créer le compte. L'acceptation est écrite dans user_profiles dès l'insert (terms_accepted / terms_accepted_at) — aucune migration SQL, les colonnes et les données existantes sont conservées.
+  - MODALE DEVENUE CONSULTABLE — le module Terms se réduit à show/hide ; toggleCheckbox, accept, refuse et check sont retirés, ainsi que l'appel bloquant en tête de Auth.showDashboard. Le pied de modale perd les boutons Accepter / Refuser au profit d'un simple « Fermer ». Troisième entrée « 📜 Conditions & mentions légales » ajoutée au menu Aide (après Cours et Guide, sous Visites guidées) pour relecture à tout moment.
+  - CONTENU JURIDIQUE — nouvelle section « 💶 Tarification » : le service est gratuit pendant la phase de test et a vocation à devenir payant, avec information préalable et aucune facturation sans accord explicite. La section propriété intellectuelle s'ouvre sur une clause explicite (code, design, fonctionnalités, contenus, marque protégés ; reproduction, extraction et réutilisation non autorisées interdites) avant les engagements de non-concurrence existants. Nouvelle section « 📇 Mentions légales » en fin de modale (éditeur, contact, hébergement GitHub Pages + Supabase UE). Titre passé à « Conditions d'utilisation & Mentions légales ».
+  - ROUTAGE PAR CHEMIN — le site entier répondait sur moteur.studio quel que soit l'écran ; chaque vue a maintenant son URL : / (accueil), /connexion, /inscription, /hub, /monprofil, /contacts, /univers, /forum, /cours, /admin, /projet/<id> et /projet/<id>/<onglet>. Nouveau module Router : la route est DÉDUITE DU DOM (quelle vue est réellement affichée) plutôt que déclarée par chaque appelant, ce qui évite d'instrumenter les dizaines de points d'entrée — un seul hook dans UI.hideAllViews couvre profil, contacts, forum, cours, univers, hub et tous les retours, complété par quatre hooks ponctuels (launchEditor, Admin.show, Landing.show, Landing.showAuth). Bascule d'écran = pushState, changement d'onglet projet = replaceState (l'historique n'est pas pollué par chaque clic d'onglet), bouton précédent/suivant géré par popstate.
+  - DEEP LINKS & F5 — GitHub Pages ne sachant pas réécrire les URLs, un fichier 404.html à la racine mémorise le chemin demandé en sessionStorage et renvoie sur /, où un script de <head> restaure l'URL par replaceState avant le démarrage de l'app. Router.boot applique ensuite la route au sortir de l'authentification. Une route protégée demandée hors session est mise en attente (capturePending), l'écran de connexion s'affiche, et la page voulue s'ouvre une fois connecté. L'URL prime désormais sur NavMemory : arriver sur /hub n'y rouvre plus le dernier projet mémorisé (drapeau Router.suppressNavMemory), tandis que la racine / conserve le comportement historique de restauration.
+  - ONGLETS PROJET — table de correspondance clé interne → slug lisible (board → sequencier, titlepage → titre, script → scenario, locs → decors, crew → equipes, orgs → structures, contracts → contrats, stats → statistiques, breakdown → depouillement, scriptreport → rapport, expenses → depenses, seasons → saisons, et identités pour les autres), les noms d'onglets étant uniques la catégorie est déduite via getCategoryForTab. Un lien /projet/<id>/planning charge le projet puis bascule sur l'onglet (séquence catégorie → onglet identique à la restauration NavMemory) ; si le projet est déjà ouvert, seul l'onglet change.
+  - CHEMINS D'IMAGES ABSOLUS — les 52 références src="images/…" (captures de la landing, illustrations des cours) étaient relatives et se seraient résolues en /projet/images/… sur les URLs à plusieurs segments : passées en src="/images/…". L'option <base href="/"> a été écartée, elle aurait cassé les 33 href="#" du fichier.
 v559 (24 Juillet 2026) — Correctif critique : la création de projet était impossible pour tous les comptes sauf un
   - CAUSE RACINE (RLS / INSERT ... RETURNING) — depuis la mise en place de la policy SELECT « Projects viewable », aucun utilisateur autre que ga.dmy@ikmail.com ne pouvait créer de projet : toast « Erreur lors de la création du projet », erreur Postgres 42501. Le refus ne venait pas de la policy INSERT (dont le WITH CHECK passait) mais de la policy SELECT, appliquée par PostgreSQL au RETURNING du .select().single() et signalée sous le message trompeur « new row violates row-level security policy ». Cette policy s'appuie sur can_view_project(id), fonction SECURITY DEFINER qui RE-INTERROGE la table : pendant l'INSERT la nouvelle ligne n'est pas visible dans le snapshot de la sous-requête, et project_members n'est alimenté qu'après. Les deux premières branches renvoyaient donc systématiquement faux ; seule la troisième — l'email d'administration écrit en dur dans la fonction — pouvait être vraie. D'où un bug invisible pour le développeur et bloquant pour 100 % des inscrits (5 comptes créés en juillet, 0 projet créé).
   - SQL — nouvelle policy SELECT permissive « Projects viewable by owner » sur public.projects : using (lower(owner_email) = lower(auth.jwt() ->> 'email')). Elle teste la colonne de la ligne DIRECTEMENT au lieu de relire la table, ce qui la rend évaluable pendant le RETURNING. Sous-ensemble strict des droits déjà accordés par can_view_project (les policies permissives s'additionnent en OR) : aucune régression de visibilité.
@@ -710,6 +718,10 @@ V1.0 (Déc. 2024) — Base solide
 
 <!-- Favicon -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+<script>
+  // Routage GitHub Pages : 404.html a mémorisé le chemin demandé, on le restaure
+  try { var _mr = sessionStorage.getItem('moteur_redirect'); if(_mr) { sessionStorage.removeItem('moteur_redirect'); history.replaceState(null, '', _mr); } } catch(e) {}
+</script>
 <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
 
 <!-- Theme Color -->
@@ -5640,27 +5652,27 @@ body.presentation-mode .presentation-bar {
     <h2>Découvrez l'interface</h2>
     <div class="landing-screenshots-grid">
       <div class="landing-screenshot">
-        <img src="images/landing/hub.png" alt="Dashboard Moteur - Hub central">
+        <img src="/images/landing/hub.png" alt="Dashboard Moteur - Hub central">
         <div class="landing-screenshot-label">🏠 Hub — Votre tableau de bord</div>
       </div>
       <div class="landing-screenshot">
-        <img src="images/landing/ecriture.png" alt="Écriture scénario - Séquencier">
+        <img src="/images/landing/ecriture.png" alt="Écriture scénario - Séquencier">
         <div class="landing-screenshot-label">✍️ Écriture — Séquencier et scénario</div>
       </div>
       <div class="landing-screenshot">
-        <img src="images/landing/casting.png" alt="Casting et personnages">
+        <img src="/images/landing/casting.png" alt="Casting et personnages">
         <div class="landing-screenshot-label">🎭 Casting — Personnages et comédiens</div>
       </div>
       <div class="landing-screenshot">
-        <img src="images/landing/production.png" alt="Planning de production">
+        <img src="/images/landing/production.png" alt="Planning de production">
         <div class="landing-screenshot-label">📅 Production — Planning de tournage</div>
       </div>
       <div class="landing-screenshot">
-        <img src="images/landing/univers.png" alt="Univers - Carte des profils">
+        <img src="/images/landing/univers.png" alt="Univers - Carte des profils">
         <div class="landing-screenshot-label">🌍 Univers — Trouvez des collaborateurs</div>
       </div>
       <div class="landing-screenshot">
-        <img src="images/landing/administration.png" alt="Administration et statistiques">
+        <img src="/images/landing/administration.png" alt="Administration et statistiques">
         <div class="landing-screenshot-label">📊 Admin — Statistiques et budget</div>
       </div>
     </div>
@@ -5685,7 +5697,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv559</p>
+      <p>vv560</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -13755,7 +13767,7 @@ showDashboard: async () => {
     // V2.1.2: Initialiser module Admin
     Admin.init();
     
-    UI.showDashboard(); 
+    Router.boot(); 
     setTimeout(function () { try { Tour.maybeAutoStart(); } catch (e) {} }, 700);
 },
       toggleMode: (mode) => { 
@@ -18780,7 +18792,8 @@ initCategoriesDragDrop: () => {
         if(typeof DBPresence !== 'undefined') DBPresence.start(null);
         
         // Restauration du projet après F5 (capture AVANT de nettoyer NavMemory)
-        const _lastProjectId = NavMemory.getProject();
+        const _lastProjectId = Router.suppressNavMemory ? null : NavMemory.getProject();
+        Router.suppressNavMemory = false;
         const _savedNav = NavMemory.getTab();
         
         // On est de retour au dashboard : on oublie le projet précédent
@@ -20660,6 +20673,7 @@ const tabToSection = {
           document.getElementById('contacts-view').classList.remove('active');
           document.getElementById('forum-view').classList.remove('active');
           document.getElementById('courses-view').classList.remove('active');
+          Router.sync();
           },
 		  
 // ===== DASHBOARD / LISTE PROJETS — délégué à UIDashboard =====
@@ -20709,6 +20723,8 @@ const tabToSection = {
       launchEditor: () => { 
           els.dashboardView.style.display = 'none'; 
           els.appView.style.display = 'flex';
+          Router.sync();
+          Router.applyPendingTab();
           setTimeout(() => { try { WindowManager.restoreSaved(); } catch(_) {} }, 400);
           
           // Appliquer les permissions sur les onglets visibles
@@ -20913,6 +20929,7 @@ const tabToSection = {
           if(tabName === 'orgs') { Orgs.render(); Orgs.syncFromUniverse().then(() => Orgs.render()); }
           if(tabName === 'presentation') Presentation.init();
           if(typeof LockManager !== 'undefined') LockManager.onTabEnter(tabName);
+          Router.sync(true);
       },
       
       // ============================================================
@@ -54976,6 +54993,7 @@ const Admin = {
         document.getElementById('hub-content').style.display = 'none';
         document.getElementById('universe-view').style.display = 'none';
         document.getElementById('admin-view').style.display = 'flex';
+        Router.sync();
         
         await Admin.loadStats();
         await Admin.loadReports();
@@ -61473,7 +61491,7 @@ const Courses = {
             description: `<p>Le plan d'ensemble est le plus large des plans cinématographiques. Il embrasse un vaste espace et situe l'action dans son environnement global.</p>
             <p>Ce plan établit la <strong>géographie</strong> d'une scène et donne au spectateur tous les repères spatiaux nécessaires. Il répond aux questions : Où sommes-nous ? Quelle est l'atmosphère du lieu ?</p>
             <p>Souvent utilisé en ouverture de séquence (establishing shot), il permet de "poser le décor" avant de resserrer sur les personnages.</p>`,
-            image: `<img src="images/cours/plan-ensemble.jpeg" alt="Plan d'ensemble" class="w-full-r8">`,
+            image: `<img src="/images/cours/plan-ensemble.jpeg" alt="Plan d'ensemble" class="w-full-r8">`,
             example: 'L\'ouverture de "Lawrence d\'Arabie" - le désert immense écrase le personnage.'
         },
         'plan-large': {
@@ -61481,7 +61499,7 @@ const Courses = {
             description: `<p>Le plan large montre les personnages en pied dans leur environnement, mais avec plus de proximité que le plan d'ensemble.</p>
             <p>Il permet de voir les <strong>interactions entre les personnages</strong> et leur espace, leurs déplacements, leur gestuelle corporelle complète.</p>
             <p>C'est le plan idéal pour les scènes de groupe, les chorégraphies, ou pour montrer un personnage qui entre dans un lieu.</p>`,
-            image: `<img src="images/cours/plan-large.jpeg" alt="Plan large" class="w-full-r8">`,
+            image: `<img src="/images/cours/plan-large.jpeg" alt="Plan large" class="w-full-r8">`,
             example: 'Les duels dans les westerns de Sergio Leone.'
         },
         'plan-moyen': {
@@ -61489,7 +61507,7 @@ const Courses = {
             description: `<p>Le plan moyen cadre le personnage à mi-cuisse, parfois appelé "plan italien" car très utilisé dans le cinéma néoréaliste italien.</p>
             <p>Il établit un <strong>équilibre</strong> entre le personnage et son environnement. On voit suffisamment le corps pour percevoir la gestuelle, tout en gardant le contexte spatial.</p>
             <p>C'est un plan de transition, souvent utilisé pour les dialogues à plusieurs personnages ou les scènes de mouvement modéré.</p>`,
-            image: `<img src="images/cours/plan-moyen.jpeg" alt="Plan moyen" class="w-full-r8">`,
+            image: `<img src="/images/cours/plan-moyen.jpeg" alt="Plan moyen" class="w-full-r8">`,
             example: 'Les scènes de marche et discussion dans les films d\'Aaron Sorkin.'
         },
         'plan-americain': {
@@ -61497,7 +61515,7 @@ const Courses = {
             description: `<p>Le plan américain cadre le personnage à mi-cuisse, juste au-dessus des genoux. Son nom vient des westerns hollywoodiens où il permettait de voir le colt à la ceinture.</p>
             <p>Ce plan offre une <strong>proximité accrue</strong> avec le personnage tout en conservant une partie de sa gestuelle corporelle. Idéal pour les confrontations et les dialogues tendus.</p>
             <p>Il est légèrement plus serré que le plan moyen et crée une présence plus affirmée du personnage dans le cadre.</p>`,
-            image: `<img src="images/cours/plan-americain.jpeg" alt="Plan américain" class="w-full-r8">`,
+            image: `<img src="/images/cours/plan-americain.jpeg" alt="Plan américain" class="w-full-r8">`,
             example: 'Les face-à-face dans "Le Bon, la Brute et le Truand".'
         },
         'plan-rapproche': {
@@ -61505,7 +61523,7 @@ const Courses = {
             description: `<p>Le plan rapproché cadre le personnage à la poitrine ou aux épaules. On distingue parfois le "plan rapproché taille" et le "plan rapproché poitrine".</p>
             <p>Ce plan crée une véritable <strong>intimité</strong> avec le personnage. Les expressions du visage deviennent lisibles, les émotions plus palpables.</p>
             <p>C'est le plan privilégié pour les dialogues intimes, les révélations, les moments d'émotion. Le spectateur entre dans la sphère personnelle du personnage.</p>`,
-            image: `<img src="images/cours/plan-rapproche.jpeg" alt="Plan rapproché" class="w-full-r8">`,
+            image: `<img src="/images/cours/plan-rapproche.jpeg" alt="Plan rapproché" class="w-full-r8">`,
             example: 'Les conversations entre Rick et Ilsa dans "Casablanca".'
         },
         'gros-plan': {
@@ -61513,7 +61531,7 @@ const Courses = {
             description: `<p>Le gros plan isole le visage du personnage ou un objet significatif, remplissant la majeure partie du cadre.</p>
             <p>C'est le plan de l'<strong>émotion pure</strong>. Chaque micro-expression devient visible : un frémissement de paupière, une larme naissante, un sourire esquissé.</p>
             <p>Le gros plan crée une connexion émotionnelle intense avec le spectateur. Il est souvent réservé aux moments clés pour ne pas perdre son impact.</p>`,
-            image: `<img src="images/cours/gros-plan.jpeg" alt="Gros plan" class="w-full-r8">`,
+            image: `<img src="/images/cours/gros-plan.jpeg" alt="Gros plan" class="w-full-r8">`,
             example: 'Le regard final d\'Antoine Doinel dans "Les 400 Coups".'
         },
         'tres-gros-plan': {
@@ -61521,7 +61539,7 @@ const Courses = {
             description: `<p>Le très gros plan isole un détail : un œil, une bouche, une main, un objet. Il extrait un fragment de réalité pour lui donner une importance capitale.</p>
             <p>Ce plan crée un effet de <strong>loupe dramatique</strong>. Il dirige impérativement l'attention du spectateur vers ce détail et lui confère une signification narrative.</p>
             <p>L'insert sur un objet (lettre, arme, clé) est une variante narrative qui révèle une information cruciale.</p>`,
-            image: `<img src="images/cours/tres-gros-plan.jpeg" alt="Très gros plan" class="w-full-r8">`,
+            image: `<img src="/images/cours/tres-gros-plan.jpeg" alt="Très gros plan" class="w-full-r8">`,
             example: 'L\'œil en ouverture de "Blade Runner" ou la douille dans "Il faut sauver le soldat Ryan".'
         },
         // === ANGLES ===
@@ -61530,7 +61548,7 @@ const Courses = {
             description: `<p>La caméra est placée au-dessus du sujet et regarde vers le bas. Cet angle écrase le personnage, le diminue visuellement.</p>
             <p>La plongée traduit souvent la <strong>vulnérabilité</strong>, la soumission, l'infériorité ou l'écrasement d'un personnage. Elle peut aussi représenter le point de vue d'un personnage dominant.</p>
             <p>Plus l'angle est prononcé, plus l'effet est dramatique. La plongée totale (90°) est parfois appelée "vue de Dieu".</p>`,
-            image: `<img src="images/cours/plongee.jpeg" alt="Plongée" class="w-full-r8">`,
+            image: `<img src="/images/cours/plongee.jpeg" alt="Plongée" class="w-full-r8">`,
             example: 'Norman Bates vu d\'en haut après le meurtre dans "Psychose".'
         },
         'contre-plongee': {
@@ -61538,7 +61556,7 @@ const Courses = {
             description: `<p>La caméra est placée en dessous du sujet et regarde vers le haut. Cet angle grandit le personnage, lui confère puissance et autorité.</p>
             <p>La contre-plongée traduit la <strong>domination</strong>, la menace, l'héroïsme ou la supériorité. Elle peut créer un sentiment d'intimidation chez le spectateur.</p>
             <p>C'est l'angle classique pour filmer les figures d'autorité, les monuments, ou les moments de triomphe.</p>`,
-            image: `<img src="images/cours/contre-plongee.jpeg" alt="Contre-plongée" class="w-full-r8">`,
+            image: `<img src="/images/cours/contre-plongee.jpeg" alt="Contre-plongée" class="w-full-r8">`,
             example: 'Dark Vador dans toutes ses apparitions dans "Star Wars".'
         },
         'dutch-angle': {
@@ -61546,7 +61564,7 @@ const Courses = {
             description: `<p>La caméra est inclinée sur son axe, créant un horizon penché. Le monde semble basculer, perdre son équilibre.</p>
             <p>Le dutch angle traduit le <strong>déséquilibre psychologique</strong>, la folie, le malaise, l'étrangeté. Il signale que quelque chose ne va pas.</p>
             <p>Son nom vient d'une déformation de "Deutsch" (allemand), car cette technique était populaire dans l'expressionnisme allemand des années 1920.</p>`,
-            image: `<img src="images/cours/dutch-angle.jpeg" alt="Dutch angle" class="w-full-r8">`,
+            image: `<img src="/images/cours/dutch-angle.jpeg" alt="Dutch angle" class="w-full-r8">`,
             example: 'Omniprésent dans "Le Troisième Homme" et les films de Tim Burton.'
         },
         // === MOUVEMENTS ===
@@ -61555,7 +61573,7 @@ const Courses = {
             description: `<p>La caméra pivote sur son axe (horizontal ou vertical) sans se déplacer. Elle "balaie" l'espace comme une tête qui tourne.</p>
             <p>Le panoramique permet d'<strong>explorer un espace</strong>, de suivre un personnage en mouvement, ou de relier deux éléments dans le même plan.</p>
             <p>On distingue le panoramique horizontal (gauche-droite), vertical (haut-bas), et le panoramique filé (très rapide, créant un flou).</p>`,
-            image: `<img src="images/cours/panoramique.jpeg" alt="Panoramique" class="w-full-r8">`,
+            image: `<img src="/images/cours/panoramique.jpeg" alt="Panoramique" class="w-full-r8">`,
             example: 'Les panoramiques contemplatifs sur les paysages dans les films de Terrence Malick.'
         },
         'travelling': {
@@ -61563,7 +61581,7 @@ const Courses = {
             description: `<p>La caméra se déplace physiquement dans l'espace, généralement sur des rails, un chariot, ou tout autre support mobile.</p>
             <p>Le travelling crée une <strong>immersion dynamique</strong>. Il peut accompagner un personnage (travelling d'accompagnement), s'en approcher (travelling avant) ou s'en éloigner (travelling arrière).</p>
             <p>Le travelling latéral est particulièrement efficace pour les scènes de dialogue en marche ou pour révéler progressivement un décor.</p>`,
-            image: `<img src="images/cours/travelling.jpeg" alt="Travelling" class="w-full-r8">`,
+            image: `<img src="/images/cours/travelling.jpeg" alt="Travelling" class="w-full-r8">`,
             example: 'Le travelling arrière infini dans "Les Affranchis" (scène du Copacabana).'
         },
         'steadicam': {
@@ -61571,7 +61589,7 @@ const Courses = {
             description: `<p>Système de stabilisation porté par l'opérateur, permettant des mouvements fluides et libres impossibles sur rails.</p>
             <p>Le Steadicam offre une <strong>fluidité onirique</strong> tout en permettant de suivre les acteurs dans des espaces complexes (escaliers, foules, couloirs).</p>
             <p>Inventé par Garrett Brown en 1975, il a révolutionné le cinéma en permettant des plans-séquences mobiles d'une fluidité inédite.</p>`,
-            image: `<img src="images/cours/steadicam.jpeg" alt="Steadicam" class="w-full-r8">`,
+            image: `<img src="/images/cours/steadicam.jpeg" alt="Steadicam" class="w-full-r8">`,
             example: 'La poursuite dans les couloirs de l\'Overlook Hotel dans "Shining".'
         },
         'zoom': {
@@ -61579,7 +61597,7 @@ const Courses = {
             description: `<p>Changement de focale optique qui rapproche ou éloigne le sujet sans déplacer la caméra. Contrairement au travelling, il modifie la perspective.</p>
             <p>Le zoom est souvent considéré comme moins "cinématographique" que le travelling car il <strong>aplatit l'image</strong>. Mais utilisé intentionnellement, il peut créer des effets puissants.</p>
             <p>Le zoom rapide était caractéristique des années 70 (films de kung-fu, gialli italiens). Il connaît un renouveau ironique ou stylistique.</p>`,
-            image: `<img src="images/cours/zoom.jpeg" alt="Zoom" class="w-full-r8">`,
+            image: `<img src="/images/cours/zoom.jpeg" alt="Zoom" class="w-full-r8">`,
             example: 'Les zooms brutaux de Quentin Tarantino en hommage aux films d\'exploitation.'
         },
         'vertigo-effect': {
@@ -61587,7 +61605,7 @@ const Courses = {
             description: `<p>Combinaison d'un travelling et d'un zoom en sens inverse. La caméra avance pendant que l'objectif dézoome (ou l'inverse).</p>
             <p>Le sujet garde la même taille mais le fond semble s'étirer ou se comprimer, créant un effet de <strong>vertige et de dissociation</strong>.</p>
             <p>Inventé par Irmin Roberts pour "Vertigo" d'Hitchcock (1958), il traduit visuellement le malaise, la prise de conscience brutale, ou le choc émotionnel.</p>`,
-            image: `<img src="images/cours/vertigo-effect.jpeg" alt="Effet Vertigo" class="w-full-r8">`,
+            image: `<img src="/images/cours/vertigo-effect.jpeg" alt="Effet Vertigo" class="w-full-r8">`,
             example: 'La scène du clocher dans "Vertigo" et la plage dans "Les Dents de la Mer".'
         },
         // === IMAGE - COMPOSITION ===
@@ -61596,7 +61614,7 @@ const Courses = {
             description: `<p>Principe de composition divisant l'image en 9 zones égales par 2 lignes horizontales et 2 verticales.</p>
             <p>Les éléments importants (visage, horizon, sujet principal) gagnent en <strong>dynamisme</strong> lorsqu'ils sont placés sur ces lignes ou à leurs intersections, appelées "points forts".</p>
             <p>Centrer le sujet crée une image statique ; le décentrer selon la règle des tiers crée tension et mouvement.</p>`,
-            image: `<img src="images/cours/regle-tiers.jpeg" alt="Règle des tiers" class="w-full-r8">`,
+            image: `<img src="/images/cours/regle-tiers.jpeg" alt="Règle des tiers" class="w-full-r8">`,
             example: 'Quasi tous les grands directeurs photo utilisent cette règle comme base.'
         },
         'profondeur-champ': {
@@ -61604,7 +61622,7 @@ const Courses = {
             description: `<p>Zone de netteté devant et derrière le point de mise au point. Peut être courte (flou d'arrière-plan) ou grande (tout net).</p>
             <p>Une <strong>faible profondeur</strong> isole le sujet et crée de l'intimité. Une <strong>grande profondeur</strong> permet de voir tous les plans simultanément.</p>
             <p>Contrôlée par l'ouverture (f/1.4 = faible, f/16 = grande), la focale et la distance au sujet.</p>`,
-            image: `<img src="images/cours/profondeur-champ.jpeg" alt="Profondeur de champ" class="w-full-r8">`,
+            image: `<img src="/images/cours/profondeur-champ.jpeg" alt="Profondeur de champ" class="w-full-r8">`,
             example: 'Wong Kar-wai utilise une très faible profondeur pour créer l intimité.'
         },
         'key-light': {
@@ -61612,7 +61630,7 @@ const Courses = {
             description: `<p>Source lumineuse principale qui définit la direction et la qualité de l'éclairage d'une scène.</p>
             <p>C'est elle qui crée les <strong>ombres principales</strong> et donne le "caractère" à l'image. Sa position détermine le modelé du visage.</p>
             <p>Généralement placée à 45° du sujet (horizontalement et verticalement), mais peut varier selon l'effet recherché.</p>`,
-            image: `<img src="images/cours/key-light.jpeg" alt="Key Light" class="w-full-r8">`,
+            image: `<img src="/images/cours/key-light.jpeg" alt="Key Light" class="w-full-r8">`,
             example: 'Position classique "Rembrandt" à 45° pour les portraits.'
         },
         'fill-light': {
@@ -61620,7 +61638,7 @@ const Courses = {
             description: `<p>Source secondaire qui adoucit les ombres créées par la Key Light, sans les éliminer complètement.</p>
             <p>Contrôle le <strong>ratio de contraste</strong> : plus elle est forte, plus l'image est douce. Absente, les ombres sont noires (low-key).</p>
             <p>Souvent placée du côté opposé à la Key, peut être un réflecteur plutôt qu'une vraie source.</p>`,
-            image: `<img src="images/cours/fill-light.jpeg" alt="Fill Light" class="w-full-r8">`,
+            image: `<img src="/images/cours/fill-light.jpeg" alt="Fill Light" class="w-full-r8">`,
             example: 'Un ratio Key:Fill de 2:1 donne un look naturel.'
         },
         'back-light': {
@@ -61628,7 +61646,7 @@ const Courses = {
             description: `<p>Lumière placée derrière le sujet qui crée un liseré lumineux sur les contours, séparant le sujet du fond.</p>
             <p>Apporte <strong>profondeur et relief</strong> à l'image. Sans elle, le sujet peut se "fondre" dans l'arrière-plan.</p>
             <p>Aussi appelée "rim light" ou "hair light" quand elle éclaire spécifiquement les cheveux.</p>`,
-            image: `<img src="images/cours/back-light.jpeg" alt="Back Light" class="w-full-r8">`,
+            image: `<img src="/images/cours/back-light.jpeg" alt="Back Light" class="w-full-r8">`,
             example: 'Indispensable dans les interviews pour décoller le sujet du fond.'
         },
         'high-key': {
@@ -61636,7 +61654,7 @@ const Courses = {
             description: `<p>Style d'éclairage uniforme et lumineux avec très peu d'ombres. L'image est globalement claire.</p>
             <p>Crée une atmosphère <strong>légère, optimiste, accessible</strong>. Associé aux comédies, sitcoms, publicités, clips pop.</p>
             <p>Nécessite beaucoup de fill light pour éliminer les ombres. Ratio Key:Fill proche de 1:1.</p>`,
-            image: `<img src="images/cours/high-key.jpeg" alt="High-Key" class="w-full-r8">`,
+            image: `<img src="/images/cours/high-key.jpeg" alt="High-Key" class="w-full-r8">`,
             example: 'Les comédies romantiques, les pubs de cosmétiques.'
         },
         'low-key': {
@@ -61644,7 +61662,7 @@ const Courses = {
             description: `<p>Style d'éclairage contrasté avec des ombres profondes et des zones sombres dominantes.</p>
             <p>Crée une atmosphère <strong>dramatique, mystérieuse, menaçante</strong>. Signature du film noir, thriller, horreur.</p>
             <p>Peu ou pas de fill light. Les ombres sont noires, les sources souvent hors-champ.</p>`,
-            image: `<img src="images/cours/low-key.jpeg" alt="Low-Key" class="w-full-r8">`,
+            image: `<img src="/images/cours/low-key.jpeg" alt="Low-Key" class="w-full-r8">`,
             example: 'Film noir, Se7en, Blade Runner, Le Parrain.'
         },
         'magic-hour': {
@@ -61652,7 +61670,7 @@ const Courses = {
             description: `<p>Période juste après le lever ou avant le coucher du soleil où la lumière est dorée, douce et directionnelle.</p>
             <p>Produit une lumière <strong>naturellement flatteuse</strong> avec des ombres longues et une qualité "magique" impossible à reproduire artificiellement.</p>
             <p>Fenêtre de tournage très courte (20-40 min). Demande une préparation minutieuse.</p>`,
-            image: `<img src="images/cours/magic-hour.jpeg" alt="Magic Hour" class="w-full-r8">`,
+            image: `<img src="/images/cours/magic-hour.jpeg" alt="Magic Hour" class="w-full-r8">`,
             example: 'Terrence Malick (Days of Heaven, The Tree of Life) tourne quasi exclusivement en magic hour.'
         },
         // === IMAGE - OPTIQUES ===
@@ -61661,7 +61679,7 @@ const Courses = {
             description: `<p>Objectif de 16-35mm qui offre un champ de vision large et exagère les perspectives.</p>
             <p>Les objets proches paraissent <strong>plus grands</strong>, les distances semblent <strong>étirées</strong>. Déforme les bords de l'image.</p>
             <p>Idéal pour : espaces confinés, sentiment d'oppression, immensité des paysages, effets comiques (visage déformé).</p>`,
-            image: `<img src="images/cours/focale-courte.jpeg" alt="Focale courte" class="w-full-r8">`,
+            image: `<img src="/images/cours/focale-courte.jpeg" alt="Focale courte" class="w-full-r8">`,
             example: 'Kubrick dans Orange Mécanique, les scènes de poursuite de Mad Max.'
         },
         'focale-longue': {
@@ -61669,7 +61687,7 @@ const Courses = {
             description: `<p>Objectif de 85-200mm+ qui compresse les distances et isole le sujet avec un fort flou d'arrière-plan.</p>
             <p>Les plans semblent <strong>rapprochés</strong> les uns des autres. Crée une sensation d'<strong>intimité</strong> ou d'<strong>écrasement</strong>.</p>
             <p>Idéal pour : portraits, isoler un sujet dans une foule, créer une sensation de surveillance ou filature.</p>`,
-            image: `<img src="images/cours/focale-longue.jpeg" alt="Focale longue" class="w-full-r8">`,
+            image: `<img src="/images/cours/focale-longue.jpeg" alt="Focale longue" class="w-full-r8">`,
             example: 'Les portraits de Gordon Willis dans Le Parrain.'
         },
         'anamorphique': {
@@ -61677,7 +61695,7 @@ const Courses = {
             description: `<p>Optique spéciale qui compresse l'image horizontalement à la prise de vue, puis l'étire à la projection.</p>
             <p>Produit le format <strong>CinemaScope 2.39:1</strong>, des flares horizontaux caractéristiques et un bokeh ovale.</p>
             <p>Considéré comme le "look cinéma" par excellence. Plus coûteux et complexe à utiliser.</p>`,
-            image: `<img src="images/cours/anamorphique.jpeg" alt="Anamorphique" class="w-full-r8">`,
+            image: `<img src="/images/cours/anamorphique.jpeg" alt="Anamorphique" class="w-full-r8">`,
             example: 'Blade Runner 2049, Star Wars, La La Land.'
         },
         // === IMAGE - RATIOS ===
@@ -61686,7 +61704,7 @@ const Courses = {
             description: `<p>Dispositif mécanique permettant des mouvements de caméra verticaux amples et fluides.</p>
             <p>La <strong>grue</strong> peut porter l'opérateur, le <strong>jib</strong> est télécommandé. Permet des mouvements impossibles autrement.</p>
             <p>Idéal pour les révélations spectaculaires, les survols, les mouvements du sol au ciel.</p>`,
-            image: `<img src="images/cours/grue-jib.jpeg" alt="Grue / Jib" class="w-full-r8">`,
+            image: `<img src="/images/cours/grue-jib.jpeg" alt="Grue / Jib" class="w-full-r8">`,
             example: 'Le plan final de La Haine, les survols de foule.'
         },
         'chiaroscuro': {
@@ -61694,7 +61712,7 @@ const Courses = {
             description: `<p>Technique d'éclairage inspirée de la peinture baroque (Caravage, Rembrandt) utilisant des contrastes extrêmes.</p>
             <p>Des zones de <strong>lumière intense</strong> côtoient des <strong>ombres profondes</strong>, créant un effet dramatique et sculptural.</p>
             <p>Renforce le mystère, la tension, la dimension psychologique des personnages.</p>`,
-            image: `<img src="images/cours/chiaroscuro.jpeg" alt="Chiaroscuro" class="w-full-r8">`,
+            image: `<img src="/images/cours/chiaroscuro.jpeg" alt="Chiaroscuro" class="w-full-r8">`,
             example: 'Le Parrain, Blade Runner, les films de Fincher.'
         },
         'rembrandt-lighting': {
@@ -61702,7 +61720,7 @@ const Courses = {
             description: `<p>Technique de portrait où la lumière crée un triangle lumineux sous l'œil du côté ombré du visage.</p>
             <p>Nommé d'après le peintre qui utilisait ce motif. Considéré comme l'<strong>éclairage portrait classique</strong> par excellence.</p>
             <p>La key light est placée à 45° en hauteur et sur le côté, créant ce triangle caractéristique.</p>`,
-            image: `<img src="images/cours/rembrandt-lighting.jpeg" alt="Éclairage Rembrandt" class="w-full-r8">`,
+            image: `<img src="/images/cours/rembrandt-lighting.jpeg" alt="Éclairage Rembrandt" class="w-full-r8">`,
             example: 'Portraits classiques, interviews cinéma.'
         },
         'lumiere-pratique': {
@@ -61710,7 +61728,7 @@ const Courses = {
             description: `<p>Source de lumière visible à l'écran : lampes, bougies, néons, écrans, phares de voiture.</p>
             <p>Justifie la lumière de la scène de manière <strong>diégétique</strong> (dans l'univers du film).</p>
             <p>Souvent renforcée par des sources cachées car les pratiques seules sont rarement suffisantes.</p>`,
-            image: `<img src="images/cours/lumiere-pratique.jpeg" alt="Lumière pratique" class="w-full-r8">`,
+            image: `<img src="/images/cours/lumiere-pratique.jpeg" alt="Lumière pratique" class="w-full-r8">`,
             example: 'Barry Lyndon (bougies), Taxi Driver (néons).'
         },
         'temperature-couleur': {
@@ -61718,7 +61736,7 @@ const Courses = {
             description: `<p>Mesure en Kelvin (K) de la teinte d'une source lumineuse, du chaud (orange) au froid (bleu).</p>
             <p><strong>2700-3200K</strong> = tungstène, bougie (chaud). <strong>5500-6500K</strong> = lumière du jour (neutre à froid).</p>
             <p>Mélanger des sources de températures différentes crée des dominantes colorées (voulues ou non).</p>`,
-            image: `<img src="images/cours/temperature-couleur.jpeg" alt="Température de couleur" class="w-full-r8">`,
+            image: `<img src="/images/cours/temperature-couleur.jpeg" alt="Température de couleur" class="w-full-r8">`,
             example: 'Mélange tungstène/daylight dans les scènes intérieur/fenêtre.'
         },
         'ratio-scope': {
@@ -61726,7 +61744,7 @@ const Courses = {
             description: `<p>Format cinématographique ultra-large, aussi appelé CinemaScope ou Panavision.</p>
             <p>Idéal pour les <strong>paysages épiques</strong>, les westerns, la science-fiction. Permet de composer avec beaucoup d'espace horizontal.</p>
             <p>Peut créer un sentiment d'isolement quand un personnage seul occupe ce format large.</p>`,
-            image: `<img src="images/cours/ratio-scope.jpeg" alt="Format Scope" class="w-full-r8">`,
+            image: `<img src="/images/cours/ratio-scope.jpeg" alt="Format Scope" class="w-full-r8">`,
             example: 'Lawrence d Arabie, Dune, les westerns de Leone.'
         },
         'ratio-185': {
@@ -61741,7 +61759,7 @@ const Courses = {
             description: `<p>Format géant développé pour les écrans IMAX, presque carré, offrant une immersion maximale.</p>
             <p>Utilise des pellicules ou capteurs beaucoup plus grands que le 35mm standard. Résolution et détails exceptionnels.</p>
             <p>Certains films alternent entre IMAX et Scope selon les scènes (Nolan, Villeneuve).</p>`,
-            image: `<img src="images/cours/ratio-imax.jpeg" alt="Format IMAX" class="w-full-r8">`,
+            image: `<img src="/images/cours/ratio-imax.jpeg" alt="Format IMAX" class="w-full-r8">`,
             example: 'Dunkirk, Oppenheimer, Interstellar (séquences IMAX).'
         },
         'cadre-ferme': {
@@ -61749,7 +61767,7 @@ const Courses = {
             description: `<p>Composition où des éléments du décor (portes, fenêtres, barreaux) encadrent et "emprisonnent" le sujet.</p>
             <p>Crée un sentiment d'<strong>oppression, d'enfermement, de piège</strong>. Le personnage semble coincé.</p>
             <p>Contraste avec le cadre ouvert qui suggère la liberté et les possibilités.</p>`,
-            image: `<img src="images/cours/cadre-ferme.jpeg" alt="Cadre fermé" class="w-full-r8">`,
+            image: `<img src="/images/cours/cadre-ferme.jpeg" alt="Cadre fermé" class="w-full-r8">`,
             example: 'Les plans à travers les barreaux dans Le Silence des Agneaux.'
         },
         'cadre-ouvert': {
@@ -61757,7 +61775,7 @@ const Courses = {
             description: `<p>Composition où le personnage dispose d'espace pour "sortir" du cadre, suggérant liberté et possibilités.</p>
             <p>Le regard ou le mouvement du personnage indique un <strong>hors-champ accessible</strong>.</p>
             <p>Crée une dynamique, une invitation au mouvement, un sentiment d'ouverture.</p>`,
-            image: `<img src="images/cours/cadre-ouvert.jpeg" alt="Cadre ouvert" class="w-full-r8">`,
+            image: `<img src="/images/cours/cadre-ouvert.jpeg" alt="Cadre ouvert" class="w-full-r8">`,
             example: 'Plans larges de westerns, fins ouvertes.'
         },
         'log-raw': {
@@ -61765,7 +61783,7 @@ const Courses = {
             description: `<p>Profils d'enregistrement qui capturent un maximum d'informations pour l'étalonnage en post-production.</p>
             <p><strong>LOG</strong> : image plate et désaturée, préserve les hautes et basses lumières. <strong>RAW</strong> : données brutes du capteur.</p>
             <p>Nécessite un étalonnage obligatoire mais offre une flexibilité créative maximale.</p>`,
-            image: `<img src="images/cours/log-raw.jpeg" alt="LOG / RAW" class="w-full-r8">`,
+            image: `<img src="/images/cours/log-raw.jpeg" alt="LOG / RAW" class="w-full-r8">`,
             example: 'Standard sur toutes les productions cinéma actuelles.'
         },
         'lut': {
@@ -61788,7 +61806,7 @@ const Courses = {
             description: `<p>Tout ce qui existe dans l'univers du film mais n'est pas visible dans le cadre à un moment donné.</p>
             <p>Outil narratif <strong>puissant</strong> : ce qu'on ne voit pas peut être plus effrayant/intrigant que ce qu'on montre.</p>
             <p>Le regard d'un personnage, un son, une ombre peuvent suggérer une présence hors-champ.</p>`,
-            image: `<img src="images/cours/hors-champ.jpeg" alt="Hors-champ" class="w-full-r8">`,
+            image: `<img src="/images/cours/hors-champ.jpeg" alt="Hors-champ" class="w-full-r8">`,
             example: 'Alien - le monstre reste hors-champ la majorité du film.'
         },
         'amorce': {
@@ -61796,7 +61814,7 @@ const Courses = {
             description: `<p>Élément (souvent flou) placé au premier plan du cadre, partiellement visible, qui crée de la profondeur.</p>
             <p>Donne une sensation de <strong>voyeurisme</strong>, d'espionnage, ou simplement de profondeur spatiale.</p>
             <p>Souvent une épaule, une tête, un objet. Fréquent dans les champs/contre-champs.</p>`,
-            image: `<img src="images/cours/amorce.jpeg" alt="Amorce" class="w-full-r8">`,
+            image: `<img src="/images/cours/amorce.jpeg" alt="Amorce" class="w-full-r8">`,
             example: 'Quasi tous les champs/contre-champs utilisent des amorces.'
         },
         'surcadrage': {
@@ -61804,7 +61822,7 @@ const Courses = {
             description: `<p>Technique de composition où un cadre dans l'image (porte, fenêtre, miroir) encadre le sujet.</p>
             <p>Crée une <strong>mise en abyme</strong>, isole le personnage, peut suggérer l'enfermement ou le voyeurisme.</p>
             <p>Très utilisé par John Ford (portes) et Wong Kar-wai (fenêtres, miroirs).</p>`,
-            image: `<img src="images/cours/surcadrage.jpeg" alt="Surcadrage" class="w-full-r8">`,
+            image: `<img src="/images/cours/surcadrage.jpeg" alt="Surcadrage" class="w-full-r8">`,
             example: 'In the Mood for Love, La Prisonnière du désert (plan final).'
         },
         // === SON - MICROPHONES ===
@@ -62134,7 +62152,7 @@ const Courses = {
             description: `<p>Une scène entière tournée en un seul plan continu, sans aucune coupe de montage.</p>
             <p>Demande une <strong>chorégraphie parfaite</strong> des acteurs, de la caméra et de la technique. Très exigeant mais immersif.</p>
             <p>Crée une tension continue car le spectateur sait qu'il n'y a pas d'échappatoire au temps réel.</p>`,
-            image: `<img src="images/cours/plan-sequence.jpeg" alt="Plan-séquence" class="w-full-r8">`,
+            image: `<img src="/images/cours/plan-sequence.jpeg" alt="Plan-séquence" class="w-full-r8">`,
             example: 'La Corde (Hitchcock), Birdman, 1917, Copacabana dans Les Affranchis.'
         },
         'blocking': {
@@ -62170,7 +62188,7 @@ const Courses = {
             description: `<p>Technique où l'opérateur porte la caméra sur l'épaule, créant une image légèrement instable.</p>
             <p>Apporte <strong>urgence, réalisme, immersion documentaire</strong>. Le spectateur ressent la présence physique du filmeur.</p>
             <p>Signature des frères Dardenne, Paul Greengrass. À utiliser avec intention, pas par défaut.</p>`,
-            image: `<img src="images/cours/camera-epaule.jpeg" alt="Caméra épaule" class="w-full-r8">`,
+            image: `<img src="/images/cours/camera-epaule.jpeg" alt="Caméra épaule" class="w-full-r8">`,
             example: 'La Haine, Bourne Identity, films des Dardenne.'
         },
         'storyboard': {
@@ -62199,7 +62217,7 @@ const Courses = {
             description: `<p>Espace entre le haut de la tête du sujet et le bord supérieur du cadre.</p>
             <p><strong>Trop de headroom</strong> = sujet écrasé, perdu. <strong>Pas assez</strong> = sujet étouffé, tête coupée.</p>
             <p>Varie selon la valeur de plan : plus serré = moins de headroom nécessaire.</p>`,
-            image: `<img src="images/cours/headroom.jpeg" alt="Headroom" class="w-full-r8">`,
+            image: `<img src="/images/cours/headroom.jpeg" alt="Headroom" class="w-full-r8">`,
             example: 'Erreur fréquente des débutants : trop ou pas assez d air.'
         },
         'looking-room': {
@@ -62207,7 +62225,7 @@ const Courses = {
             description: `<p>Espace laissé devant le regard ou la direction du mouvement d'un sujet.</p>
             <p>Si le personnage regarde à droite, laisser de l'espace à droite. Sinon, il semble <strong>coincé</strong> contre le bord.</p>
             <p>Crée une composition équilibrée et suggère ce que le personnage regarde (hors-champ).</p>`,
-            image: `<img src="images/cours/looking-room.jpeg" alt="Looking Room" class="w-full-r8">`,
+            image: `<img src="/images/cours/looking-room.jpeg" alt="Looking Room" class="w-full-r8">`,
             example: 'Règle de base pour les interviews et dialogues.'
         },
         // === SCÉNARIO - ÉLÉMENTS DRAMATIQUES ===
@@ -62260,7 +62278,7 @@ const Courses = {
             description: `<p>Objectif dont l'angle de champ est proche de la <strong>vision humaine</strong> (environ 46°).</p>
             <p>Rendu naturel, sans distorsion ni compression. Considérée comme "neutre" et polyvalente.</p>
             <p>La focale de référence, souvent recommandée pour apprendre la composition.</p>`,
-            image: `<img src="images/cours/focale-normale.jpeg" alt="Focale normale" class="w-full-r8">`,
+            image: `<img src="/images/cours/focale-normale.jpeg" alt="Focale normale" class="w-full-r8">`,
             example: 'Kubrick adorait le 50mm. Idéal pour les portraits naturels.'
         },
         'macro': {
@@ -62268,7 +62286,7 @@ const Courses = {
             description: `<p>Optique permettant des <strong>très gros plans</strong> sur de petits objets (ratio 1:1 ou plus).</p>
             <p>Révèle des détails invisibles à l'œil nu : textures, insectes, gouttes d'eau, mécanismes.</p>
             <p>Profondeur de champ extrêmement réduite. Demande stabilisation et éclairage précis.</p>`,
-            image: `<img src="images/cours/macro.jpeg" alt="Macro" class="w-full-r8">`,
+            image: `<img src="/images/cours/macro.jpeg" alt="Macro" class="w-full-r8">`,
             example: 'Microcosmos, les inserts de Se7en, Planet Earth.'
         },
         'balance-blancs': {
@@ -62706,7 +62724,7 @@ const Courses = {
             description: `<p>Utilisation exclusive ou principale du soleil comme source de lumière, sans éclairage artificiel.</p>
             <p>Crée un <strong>réalisme</strong> et une authenticité uniques. Demande une grande maîtrise des horaires et de la météo.</p>
             <p>Signature de Terrence Malick et Emmanuel Lubezki. Contraignant mais résultats organiques.</p>`,
-            image: `<img src="images/cours/lumiere-naturelle.jpeg" alt="Lumière naturelle" class="w-full-r8">`,
+            image: `<img src="/images/cours/lumiere-naturelle.jpeg" alt="Lumière naturelle" class="w-full-r8">`,
             example: 'The Tree of Life, The Revenant, Days of Heaven.'
         },
         'decoupage-technique': {
@@ -70272,8 +70290,10 @@ const Weather = {
   // ==================== MODULE LANDING ====================
   const Landing = {
       show: () => {
+          Router.capturePending();
           document.getElementById('landing-view').style.display = 'flex';
           document.getElementById('auth-view').style.display = 'none';
+          Router.sync();
       },
       
       hide: () => {
@@ -70283,6 +70303,7 @@ const Weather = {
       showAuth: (mode) => {
           Landing.hide();
           document.getElementById('auth-view').style.display = 'flex';
+          Router.sync();
           if(mode === 'signup') {
               Auth.toggleMode('signup');
           } else {
@@ -70290,6 +70311,151 @@ const Weather = {
           }
       }
   };
+
+  // ==================== MODULE ROUTER (URLs) ====================
+  const Router = {
+      suppressNavMemory: false,
+      _pending: null,
+      _muted: false,
+
+      routes: {
+          '/hub':         () => UI.showDashboard(),
+          '/monprofil':   () => PublicProfile.open(),
+          '/contacts':    () => Contacts.open(),
+          '/univers':     () => Universe.openFromMenu(),
+          '/forum':       () => Forum.open(),
+          '/cours':       () => Courses.open(),
+          '/admin':       () => { if(Admin.isAdmin && Admin.isAdmin()) Admin.show(); else UI.showDashboard(); },
+          '/connexion':   () => Landing.showAuth('login'),
+          '/inscription': () => Landing.showAuth('signup')
+      },
+
+      path: () => {
+          const p = (window.location.pathname || '/').replace(/\/+$/, '');
+          return p === '' ? '/' : p;
+      },
+
+      isPublic: (p) => (p === '/' || p === '/connexion' || p === '/inscription'),
+
+      // Onglets projet : clé interne -> slug d'URL
+      tabSlugs: {
+          presentation: 'presentation', seasons: 'saisons', episodes: 'episodes', synopsis: 'synopsis',
+          board: 'sequencier', titlepage: 'titre', script: 'scenario', moodboard: 'moodboard',
+          storyboard: 'storyboard', chars: 'personnages', actors: 'comediens', locs: 'decors',
+          resources: 'ressources', crew: 'equipes', orgs: 'structures', contracts: 'contrats',
+          stats: 'statistiques', breakdown: 'depouillement', planning: 'planning',
+          scriptreport: 'rapport', expenses: 'depenses'
+      },
+      _pendingTab: null,
+
+      tabFromSlug: (slug) => {
+          const keys = Object.keys(Router.tabSlugs);
+          for(let i = 0; i < keys.length; i++) { if(Router.tabSlugs[keys[i]] === slug) return keys[i]; }
+          return null;
+      },
+
+      // Bascule catégorie + onglet (même séquence que la restauration NavMemory)
+      goTab: (tab) => {
+          if(!tab) return;
+          try {
+              UI.switchCategory(UI.getCategoryForTab(tab));
+              setTimeout(() => { try { UI.switchTab(tab); } catch(e) {} }, 150);
+          } catch(e) { console.warn('[Router] onglet:', e); }
+      },
+
+      // Onglet demandé par l'URL, appliqué une fois le projet ouvert
+      applyPendingTab: () => {
+          const t = Router._pendingTab;
+          Router._pendingTab = null;
+          if(t) setTimeout(() => Router.goTab(t), 300);
+      },
+
+      // Route déduite de l'affichage réel (le DOM fait foi)
+      current: () => {
+          const vis = (id) => { const e = document.getElementById(id); return !!e && window.getComputedStyle(e).display !== 'none'; };
+          const act = (id) => { const e = document.getElementById(id); return !!e && e.classList.contains('active'); };
+          if(vis('landing-view')) return '/';
+          if(vis('auth-view')) {
+              const sf = document.getElementById('signup-form');
+              return (sf && window.getComputedStyle(sf).display !== 'none') ? '/inscription' : '/connexion';
+          }
+          if(act('public-profile-view')) return '/monprofil';
+          if(act('contacts-view')) return '/contacts';
+          if(act('forum-view')) return '/forum';
+          if(act('courses-view')) return '/cours';
+          if(vis('admin-view')) return '/admin';
+          if(vis('universe-view')) return '/univers';
+          if(vis('app-view')) {
+              if(!state.currentProjectId) return '/hub';
+              let r = '/projet/' + state.currentProjectId;
+              const ct = document.querySelector('#app-view .tab-content.active');
+              if(ct && ct.id && ct.id.indexOf('tab-') === 0) {
+                  const slug = Router.tabSlugs[ct.id.slice(4)];
+                  if(slug) r += '/' + slug;
+              }
+              return r;
+          }
+          if(vis('dashboard-view')) return '/hub';
+          return null;
+      },
+
+      // Aligne l'URL sur l'écran affiché
+      sync: (replace) => { setTimeout(() => Router._syncNow(replace), 0); },
+      _syncNow: (replace) => {
+          if(Router._muted) return;
+          try {
+              const r = Router.current();
+              if(!r || r === Router.path()) return;
+              if(replace) window.history.replaceState({ r: r }, '', r);
+              else window.history.pushState({ r: r }, '', r);
+          } catch(e) { console.warn('[Router] sync:', e); }
+      },
+
+      // Ouvre l'écran correspondant à un chemin
+      apply: (p) => {
+          p = (p || '/').replace(/\/+$/, '') || '/';
+          if(!state.currentUser && !Router.isPublic(p)) { Router._pending = p; Landing.showAuth('login'); return true; }
+          const m = p.match(/^\/projet\/([^\/]+)(?:\/([^\/]+))?/);
+          if(m) {
+              const pid = decodeURIComponent(m[1]);
+              const tab = m[2] ? Router.tabFromSlug(m[2]) : null;
+              const appV = document.getElementById('app-view');
+              const opened = state.currentProjectId === pid && appV && window.getComputedStyle(appV).display !== 'none';
+              if(opened) { Router.goTab(tab); return true; }
+              Router._pendingTab = tab;
+              Store.loadProject(pid);
+              return true;
+          }
+          if(p === '/') { if(state.currentUser) UI.showDashboard(); else Landing.show(); return true; }
+          if(state.currentUser && Router.isPublic(p)) { UI.showDashboard(); return true; }
+          const fn = Router.routes[p];
+          if(fn) { fn(); return true; }
+          return false;
+      },
+
+      // Démarrage post-connexion : applique la route de l'URL
+      boot: () => {
+          const p = Router._pending || Router.path();
+          Router._pending = null;
+          const deep = (!Router.isPublic(p) && p !== '/hub');
+          Router._muted = true;
+          Router.suppressNavMemory = !Router.isPublic(p);
+          UI.showDashboard();
+          setTimeout(() => {
+              Router._muted = false;
+              try { if(deep) { if(!Router.apply(p)) Router.sync(); } else Router.sync(); }
+              catch(e) { console.warn('[Router] boot:', e); Router.sync(); }
+          }, deep ? 450 : 60);
+      },
+
+      // Mémorise la route demandée avant l'écran de connexion (deep link)
+      capturePending: () => {
+          const p = Router.path();
+          if(!Router.isPublic(p)) Router._pending = p;
+      }
+  };
+
+  window.addEventListener('popstate', () => { try { Router.apply(Router.path()); } catch(e) { console.warn('[Router] popstate:', e); } });
 
   // ==================== MODULE TERMS ====================
   const Terms = {
@@ -70302,7 +70468,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, ContractsTemplates, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Tutorial, Landing, Terms, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD };
+  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, ContractsTemplates, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Tutorial, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD };
 })();
 </script>
 
