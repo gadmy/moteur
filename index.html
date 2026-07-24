@@ -35,6 +35,7 @@ v560 (24 Juillet 2026) — CGU / mentions légales refondues à l'inscription + 
   - DEEP LINKS & F5 — GitHub Pages ne sachant pas réécrire les URLs, un fichier 404.html à la racine mémorise le chemin demandé en sessionStorage et renvoie sur /, où un script de <head> restaure l'URL par replaceState avant le démarrage de l'app. Router.boot applique ensuite la route au sortir de l'authentification. Une route protégée demandée hors session est mise en attente (capturePending), l'écran de connexion s'affiche, et la page voulue s'ouvre une fois connecté. L'URL prime désormais sur NavMemory : arriver sur /hub n'y rouvre plus le dernier projet mémorisé (drapeau Router.suppressNavMemory), tandis que la racine / conserve le comportement historique de restauration.
   - ONGLETS PROJET — table de correspondance clé interne → slug lisible (board → sequencier, titlepage → titre, script → scenario, locs → decors, crew → equipes, orgs → structures, contracts → contrats, stats → statistiques, breakdown → depouillement, scriptreport → rapport, expenses → depenses, seasons → saisons, et identités pour les autres), les noms d'onglets étant uniques la catégorie est déduite via getCategoryForTab. Un lien /projet/<id>/planning charge le projet puis bascule sur l'onglet (séquence catégorie → onglet identique à la restauration NavMemory) ; si le projet est déjà ouvert, seul l'onglet change.
   - CHEMINS D'IMAGES ABSOLUS — les 52 références src="images/…" (captures de la landing, illustrations des cours) étaient relatives et se seraient résolues en /projet/images/… sur les URLs à plusieurs segments : passées en src="/images/…". L'option <base href="/"> a été écartée, elle aurait cassé les 33 href="#" du fichier.
+  - SYNCHRO TEMPS RÉEL PAR DIFF — le listener temps réel recevait la ligne projet ENTIÈRE à chaque modification, ce qui butait sur le plafond de 1 024 Ko des payloads postgres_changes : au-delà, Supabase ne transmet plus que les champs de moins de 64 octets, la colonne data disparaissait du message et le handler sortait en silence (if(!val) return) — la collaboration décrochait sans le moindre signe, sur tous les plans y compris payants. StoreSave.save calcule déjà le diff (savePatch, clés modifiées depuis la baseline) : il est désormais diffusé sur le canal broadcast du projet, quelques Ko au lieu du JSON complet, le poids du projet n'entrant plus en jeu. Le merge sélectif et le rendu sont extraits dans StoreRealtime.applyRemote, partagés par les deux voies. Le postgres_changes reste branché en filet pour les écritures hors save() (updateScene, updateTitle, imports, admin), avec garde de 1,5 s contre la double application et, surtout, rechargement via refetchRemote quand le payload est tronqué au lieu du return muet. Écriture complète ou diff au-delà de 180 Ko : message full, le destinataire recharge. Identifiant d'onglet (clientId) et canal en self:false pour ne pas s'appliquer son propre broadcast.
 v559 (24 Juillet 2026) — Correctif critique : la création de projet était impossible pour tous les comptes sauf un
   - CAUSE RACINE (RLS / INSERT ... RETURNING) — depuis la mise en place de la policy SELECT « Projects viewable », aucun utilisateur autre que ga.dmy@ikmail.com ne pouvait créer de projet : toast « Erreur lors de la création du projet », erreur Postgres 42501. Le refus ne venait pas de la policy INSERT (dont le WITH CHECK passait) mais de la policy SELECT, appliquée par PostgreSQL au RETURNING du .select().single() et signalée sous le message trompeur « new row violates row-level security policy ». Cette policy s'appuie sur can_view_project(id), fonction SECURITY DEFINER qui RE-INTERROGE la table : pendant l'INSERT la nouvelle ligne n'est pas visible dans le snapshot de la sous-requête, et project_members n'est alimenté qu'après. Les deux premières branches renvoyaient donc systématiquement faux ; seule la troisième — l'email d'administration écrit en dur dans la fonction — pouvait être vraie. D'où un bug invisible pour le développeur et bloquant pour 100 % des inscrits (5 comptes créés en juillet, 0 projet créé).
   - SQL — nouvelle policy SELECT permissive « Projects viewable by owner » sur public.projects : using (lower(owner_email) = lower(auth.jwt() ->> 'email')). Elle teste la colonne de la ligne DIRECTEMENT au lieu de relire la table, ce qui la rend évaluable pendant le RETURNING. Sous-ensemble strict des droits déjà accordés par can_view_project (les policies permissives s'additionnent en OR) : aucune régression de visibilité.
@@ -5697,7 +5698,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv560</p>
+      <p>vv561</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -15280,6 +15281,70 @@ const LockManager = {
 
     // StoreRealtime — sous-module B.1.4 : écoute temps réel Supabase (DB changes, presence) + chargement
   const StoreRealtime = {
+      // Identifiant de cet onglet : évite d'appliquer son propre broadcast
+      clientId: 'c' + Math.random().toString(36).slice(2) + Date.now().toString(36),
+      _lastBroadcastAt: 0,
+      _refetchTimer: null,
+      BROADCAST_MAX: 180000, // ~180 Ko : marge sous le plafond broadcast (256 Ko en plan Free)
+
+      // Applique un jeu de clés distantes sur state.data (merge sélectif + rendu)
+      applyRemote: (val) => {
+          if(!val) return;
+          // Phase 0 : merge sélectif — n'écrase pas une clé modifiée localement et non encore sauvegardée
+          const base_ = state.savedBaseline;
+          if(base_) {
+              for(const k in val) {
+                  if(JSON.stringify(state.data[k]) !== JSON.stringify(base_[k])) continue; // modif locale en cours : on protège
+                  state.data[k] = val[k];
+                  base_[k] = JSON.parse(JSON.stringify(val[k]));
+              }
+          } else {
+              state.data = { ...state.data, ...val };
+          }
+          if(document.activeElement !== els.title) els.title.value = state.data.title;
+          // Ne pas re-rendre un éditeur synopsis en cours de saisie (l'écho du save remettrait le curseur au début)
+          const _synFocusId = (document.activeElement || {}).id;
+          if(_synFocusId !== 'synopsisEditor') Synopsis.renderTree('synopsis');
+          if(_synFocusId !== 'shortEditor') Synopsis.renderTree('short');
+          if(_synFocusId !== 'longEditor') Synopsis.renderTree('long');
+          Synopsis.updateBoard();
+          const activeId = document.activeElement && document.activeElement.closest('.script-row') ? parseInt(document.activeElement.closest('.script-row').dataset.id) : null;
+          const activeContinuous = document.activeElement && document.activeElement.closest('.script-continuous-content');
+          if(state.currentRole !== 'viewer') { 
+              const activeTab = document.querySelector('.tab-content.active').id; 
+              if(activeTab === 'tab-board') UI.renderBoard(); 
+              if(activeTab === 'tab-script' && !activeId && !activeContinuous) UI.renderScript();
+              if(activeTab === 'tab-stats') Stats.render();
+              if(activeTab === 'tab-actors') UI.renderDataTab('actors', els.actorContainer);
+          } else { UI.renderAll(); }
+      },
+
+      // Filet de sécurité : recharge le projet quand le diff n'a pas pu être transmis
+      // (patch trop gros, écriture hors save(), payload postgres_changes tronqué)
+      refetchRemote: () => {
+          if(StoreRealtime._refetchTimer) clearTimeout(StoreRealtime._refetchTimer);
+          StoreRealtime._refetchTimer = setTimeout(async () => {
+              try {
+                  const id = state.currentProjectId;
+                  if(!id) return;
+                  const { data: row, error } = await supabase.from('projects').select('data').eq('id', id).maybeSingle();
+                  if(error || !row || !row.data) return;
+                  StoreRealtime.applyRemote(row.data);
+              } catch(e) { console.warn('[Realtime] refetch:', e && e.message); }
+          }, 400);
+      },
+
+      // Diffuse le diff calculé par StoreSave.save aux autres onglets connectés
+      broadcastPatch: (patch) => {
+          try {
+              if(!state.dbListener) return;
+              const payload = { from: StoreRealtime.clientId };
+              if(patch && JSON.stringify(patch).length <= StoreRealtime.BROADCAST_MAX) payload.patch = patch;
+              else payload.full = true; // écriture complète ou diff trop volumineux : les autres rechargeront
+              state.dbListener.send({ type: 'broadcast', event: 'patch', payload: payload });
+          } catch(e) { console.warn('[Realtime] broadcast:', e && e.message); }
+      },
+
       startRealtimeListener: (id) => {
           // Pas de realtime en mode fichier local
           if(window.location.protocol === 'file:') return;
@@ -15289,39 +15354,25 @@ const LockManager = {
           }
           
           state.dbListener = supabase
-              .channel('project_' + id)
+              .channel('project_' + id, { config: { broadcast: { self: false } } })
               .on('postgres_changes', 
                   { event: 'UPDATE', schema: 'public', table: 'projects', filter: 'id=eq.' + id },
                   (payload) => {
-                      const val = payload.new.data;
-                      if(!val) return;
-                      // Phase 0 : merge sélectif — n'écrase pas une clé modifiée localement et non encore sauvegardée
-                      const base_ = state.savedBaseline;
-                      if(base_) {
-                          for(const k in val) {
-                              if(JSON.stringify(state.data[k]) !== JSON.stringify(base_[k])) continue; // modif locale en cours : on protège
-                              state.data[k] = val[k];
-                              base_[k] = JSON.parse(JSON.stringify(val[k]));
-                          }
-                      } else {
-                          state.data = { ...state.data, ...val };
-                      }
-                      if(document.activeElement !== els.title) els.title.value = state.data.title;
-                      // Ne pas re-rendre un éditeur synopsis en cours de saisie (l'écho du save remettrait le curseur au début)
-                      const _synFocusId = (document.activeElement || {}).id;
-                      if(_synFocusId !== 'synopsisEditor') Synopsis.renderTree('synopsis');
-                      if(_synFocusId !== 'shortEditor') Synopsis.renderTree('short');
-                      if(_synFocusId !== 'longEditor') Synopsis.renderTree('long');
-                      Synopsis.updateBoard();
-                      const activeId = document.activeElement && document.activeElement.closest('.script-row') ? parseInt(document.activeElement.closest('.script-row').dataset.id) : null;
-                      const activeContinuous = document.activeElement && document.activeElement.closest('.script-continuous-content');
-                      if(state.currentRole !== 'viewer') { 
-                          const activeTab = document.querySelector('.tab-content.active').id; 
-                          if(activeTab === 'tab-board') UI.renderBoard(); 
-                          if(activeTab === 'tab-script' && !activeId && !activeContinuous) UI.renderScript();
-                          if(activeTab === 'tab-stats') Stats.render();
-                          if(activeTab === 'tab-actors') UI.renderDataTab('actors', els.actorContainer);
-                      } else { UI.renderAll(); }
+                      // Un broadcast vient d'appliquer ce changement : on ne le refait pas
+                      if(Date.now() - StoreRealtime._lastBroadcastAt < 1500) return;
+                      const val = payload.new && payload.new.data;
+                      // Payload tronqué (projet > 1 Mo) ou colonne non publiée : on recharge au lieu d'abandonner
+                      if(!val) { StoreRealtime.refetchRemote(); return; }
+                      StoreRealtime.applyRemote(val);
+                  }
+              )
+              .on('broadcast', { event: 'patch' },
+                  (msg) => {
+                      const p = msg && msg.payload;
+                      if(!p || p.from === StoreRealtime.clientId) return;
+                      StoreRealtime._lastBroadcastAt = Date.now();
+                      if(p.full) { StoreRealtime.refetchRemote(); return; }
+                      StoreRealtime.applyRemote(p.patch);
                   }
               )
               .subscribe();
@@ -15540,6 +15591,9 @@ const LockManager = {
           
           // Phase 0 : la baseline reflète désormais l'état persisté
           state.savedBaseline = JSON.parse(JSON.stringify(cleanData));
+          
+          // Diffusion du diff aux autres onglets (canal broadcast : quelques Ko, indépendant du poids du projet)
+          StoreRealtime.broadcastPatch(savePatch);
           
           // Marquer que la sauvegarde est terminée
           state.savingInProgress = false;
@@ -70405,6 +70459,7 @@ const Weather = {
           if(Router._muted) return;
           try {
               const r = Router.current();
+              if(r) { try { document.title = Router._title(r); } catch(e) {} }
               if(!r || r === Router.path()) return;
               if(replace) window.history.replaceState({ r: r }, '', r);
               else window.history.pushState({ r: r }, '', r);
@@ -70446,6 +70501,14 @@ const Weather = {
               try { if(deep) { if(!Router.apply(p)) Router.sync(); } else Router.sync(); }
               catch(e) { console.warn('[Router] boot:', e); Router.sync(); }
           }, deep ? 450 : 60);
+      },
+
+      // Titre d'onglet navigateur selon la route
+      _titles: { '/connexion':'Connexion', '/inscription':'Inscription', '/hub':'Mes projets', '/monprofil':'Mon profil', '/contacts':'Contacts', '/univers':'Univers', '/forum':'Forum', '/cours':'Cours', '/admin':'Administration' },
+      _title: (r) => {
+          if(r && r.indexOf('/projet/') === 0) return ((state.data && state.data.title) ? state.data.title : 'Projet') + ' — Moteur';
+          if(Router._titles[r]) return Router._titles[r] + ' — Moteur';
+          return "Moteur - Logiciel d'écriture de scénario et gestion de production film";
       },
 
       // Mémorise la route demandée avant l'écran de connexion (deep link)
@@ -70523,14 +70586,16 @@ const Weather = {
     <div class="terms-modal-body">
       <p><strong>Bienvenue sur Moteur !</strong> Avant de continuer, merci de prendre connaissance des conditions suivantes :</p>
       
-      <h3>🔒 Confidentialité des données</h3>
-      <p>Moteur est actuellement en phase <strong>pré-alpha</strong>. En utilisant cette plateforme, vous acceptez que :</p>
+      <h3>🔒 Confidentialité des données (RGPD)</h3>
+      <p>Moteur est actuellement en phase <strong>pré-alpha</strong> : des bugs peuvent survenir et des données pourraient être perdues — conservez des sauvegardes externes de vos travaux importants.</p>
       <ul>
-        <li>Vos données personnelles (email, nom, profils) sont stockées de manière sécurisée sur nos serveurs européens (conformité RGPD).</li>
-        <li>Vos projets et contenus créatifs restent votre propriété exclusive.</li>
-        <li>Nous pouvons collecter des données d'usage anonymisées pour améliorer le service.</li>
-        <li>En phase pré-alpha, des bugs peuvent survenir et des données pourraient être perdues. Nous vous conseillons de conserver des sauvegardes externes de vos travaux importants.</li>
-        <li>Vous pouvez demander la suppression de votre compte et de vos données à tout moment.</li>
+        <li><strong>Responsable du traitement :</strong> Guillaume de Mauroy — contact@moteur.studio.</li>
+        <li><strong>Données collectées :</strong> email et mot de passe du compte (authentification assurée par Supabase, mot de passe jamais accessible en clair) ; informations de profil que vous choisissez de renseigner (nom, photo, téléphone, ville, compétences…) ; contenus de vos projets (textes, images, fichiers). Vos projets et contenus créatifs restent votre propriété exclusive.</li>
+        <li><strong>Finalités :</strong> fournir le service (compte, sauvegarde, collaboration, recherche de profils), envoyer les emails liés au fonctionnement (invitations, convocations — acheminés par le prestataire Brevo), assurer la sécurité de la plateforme. Aucune publicité, aucune revente de données, aucun traqueur publicitaire ou statistique tiers.</li>
+        <li><strong>Hébergement :</strong> données et fichiers stockés chez Supabase sur des serveurs situés dans l'Union européenne ; le site est servi par GitHub Pages.</li>
+        <li><strong>Durées de conservation :</strong> vos données sont conservées tant que votre compte est actif. Un projet supprimé est placé 30 jours en corbeille (restaurable) puis définitivement effacé, fichiers compris. Les fichiers partagés dans le talkie-walkie sont supprimés après 48 heures.</li>
+        <li><strong>Cookies &amp; stockage local :</strong> uniquement techniques (session de connexion, préférences d'affichage). Aucun cookie publicitaire.</li>
+        <li><strong>Vos droits :</strong> accès, rectification, effacement, portabilité, opposition — sur simple demande à contact@moteur.studio, y compris la suppression totale de votre compte. Réclamation possible auprès de la CNIL (cnil.fr).</li>
       </ul>
       
       <h3>💶 Tarification</h3>
@@ -70558,7 +70623,8 @@ const Weather = {
 
       <h3>📇 Mentions légales</h3>
       <ul>
-        <li><strong>Éditeur :</strong> moteur.studio</li>
+        <li><strong>Éditeur :</strong> Guillaume de Mauroy (personne physique) — site édité sous le nom moteur.studio.</li>
+        <li><strong>Directeur de la publication :</strong> Guillaume de Mauroy</li>
         <li><strong>Contact :</strong> contact@moteur.studio</li>
         <li><strong>Hébergement :</strong> GitHub Pages (GitHub, Inc.) — données applicatives hébergées par Supabase sur des serveurs situés dans l'Union européenne (conformité RGPD).</li>
       </ul>
