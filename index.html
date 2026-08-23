@@ -296,6 +296,32 @@ Cocher [x] au fil de l'eau ; ne pas changer la numerotation en cours de route.
    / state.currentCanInvite figes par Store.loadProject) : la personne doit rouvrir
    le projet. Les messages de confirmation le disent.
 
+   TROIS NIVEAUX DE VISIBILITE (23 aout) — la croix rouge fait DISPARAITRE l'onglet.
+   ❌ l'onglet n'apparait pas du tout dans sa navigation (sous-onglets, bandeau plat,
+      et la CATEGORIE elle-meme disparait si aucun de ses onglets n'est autorise —
+      sinon on ouvrirait une categorie sur le vide) ;
+   👁️ l'onglet apparait, consultable, et NE POSE AUCUN VERROU ;
+   ✏️ l'onglet apparait, modifiable, et pose un verrou.
+   POINT CLE : le verrou suit desormais la PERMISSION DE L'ONGLET
+   (Permissions.tabWritable, memorise dans LockManager.currentEditable a chaque
+   onTabEnter) et non plus le seul role. Depuis que le role se deduit des cases,
+   une seule ✏️ rend quelqu'un editeur : sans ce test il verrouillerait aussi tous
+   les onglets qu'il ne fait que consulter et bloquerait les autres pour rien.
+   Corollaire : sur un onglet seulement consultable, le bandeau « En travaux par X »
+   ne s'affiche plus — il laisserait croire que quelqu'un empeche une modification
+   de toute facon impossible.
+   Un onglet SANS section connue dans Permissions.SECTION_BY_TAB (moodboard,
+   episodes, saisons, contrats, depenses) reste VISIBLE : ne jamais faire
+   disparaitre un onglet par simple absence de la carte.
+
+   A FAIRE PLUS TARD, IMPORTANT — CLOISONNER VRAIMENT LES DONNEES. Les ❌ masquent
+   les onglets DANS LE NAVIGATEUR de la personne, mais la base lui envoie le projet
+   ENTIER (budget, contrats, coordonnees des comediens) des lors qu'elle peut le
+   voir. Quelqu'un d'un peu technique lit tout. Une vraie cloison suppose de
+   decouper le projet en morceaux separes en base et de filtrer cote serveur —
+   gros chantier, a ouvrir avant tout usage ou la confidentialite compte
+   reellement (production avec budget sensible, contrats nominatifs).
+
 7b-bis. VERROU COLLABORATIF PAR ONGLET — TRAITE EN PARTIE (23 aout).
    CE QU'IL FAUT AVOIR COMPRIS AVANT DE ROUVRIR : la frontiere des domaines
    n'est pas un choix d'ergonomie, c'est celle de la SAUVEGARDE. StoreSave.save
@@ -15116,6 +15142,7 @@ const LockManager = {
           state.domainLocks = {};
           LockManager.currentDomain = null;
           LockManager.pendingDomain = null;
+          LockManager.currentEditable = false; // v570 : recalcule a chaque onTabEnter
           // v569 : retrait de la réaffectation dataset.tab par position — chaque
           // .tab-btn porte déjà son data-tab correct depuis le HTML statique.
           LockManager.refresh(projectId);
@@ -15158,7 +15185,7 @@ const LockManager = {
               }
               LockManager.applyUI();
               const d = LockManager.currentDomain;
-              if(d && state.currentRole !== 'viewer' && !map[d] && !LockManager._yieldedRecently(d)) LockManager.acquire(d);
+              if(d && LockManager.currentEditable && !map[d] && !LockManager._yieldedRecently(d)) LockManager.acquire(d);
           } catch(e) { console.warn('[LockManager] Échec du poll des verrous:', e && e.message); }
       },
 
@@ -15200,7 +15227,7 @@ const LockManager = {
       // La présence a changé : quelqu'un arrive → je réclame mon onglet courant ; et on rafraîchit l'UI.
       onPresenceChange: () => {
           const d = LockManager.currentDomain;
-          if(!LockManager.isAlone() && d && state.currentRole !== 'viewer'
+          if(!LockManager.isAlone() && d && LockManager.currentEditable
              && !LockManager._mine((state.domainLocks||{})[d]) && !LockManager.held[d]
              && !LockManager._yieldedRecently(d)) {
               LockManager.acquire(d);
@@ -15264,6 +15291,7 @@ const LockManager = {
           const tabs = UI.categoryTabs[category] || [];
           const labels = UI.categoryLabels[category] || {};
           let visibleTabs = tabs.filter(t => !(UI.hiddenTabs || []).includes(t));
+          visibleTabs = visibleTabs.filter(t => (typeof Permissions === 'undefined') || Permissions.tabVisible(t)); // v570 : ❌ = invisible
           if(state.currentProjectType !== 'series') visibleTabs = visibleTabs.filter(t => t !== 'episodes' && t !== 'seasons');
           subnav.innerHTML = visibleTabs.map(tab => `<button class="tab-subbtn${tab === activeTab ? ' active' : ''}" data-tab="${tab}" onclick="app.UI.switchTab('${tab}')">${labels[tab] || tab}</button>`).join('');
           subnav.dataset.category = category;
@@ -15437,8 +15465,13 @@ const LockManager = {
           }
           LockManager.currentDomain = newDomain;
           if(newDomain) delete LockManager.yielded[newDomain]; // clic volontaire : reprise possible
+          // v570 : le verrou suit la PERMISSION DE L'ONGLET, plus seulement le role.
+          // Depuis que le role se deduit des cases, une seule ✏️ suffit a rendre quelqu'un
+          // editeur ; sans ce test il verrouillerait aussi les onglets qu'il ne fait que
+          // CONSULTER (👁️), et bloquerait les autres pour rien. Regarder ne gene personne.
+          LockManager.currentEditable = (typeof Permissions === 'undefined') ? (state.currentRole !== 'viewer') : Permissions.tabWritable(tabName);
           LockManager.applyUI();
-          if(newDomain && state.currentRole !== 'viewer' && !LockManager.isAlone()) LockManager.acquire(newDomain);
+          if(newDomain && LockManager.currentEditable && !LockManager.isAlone()) LockManager.acquire(newDomain);
       },
 
       applyUI: () => {
@@ -15554,10 +15587,15 @@ const LockManager = {
           if(!active) return;
           const tabName = active.id.replace('tab-','');
           const d = LockDomains.forTab(tabName);
-          const editable = LockManager._editable(d);
-          active.classList.toggle('is-domain-locked', !editable);
           const oldBan = active.querySelector('.dlock-banner');
           if(oldBan) oldBan.remove();
+          // v570 : sur un onglet que je n'ai le droit que de CONSULTER (👁️), le bandeau
+          // de verrou n'a aucun sens — je ne pourrais pas modifier de toute facon, et il
+          // laisserait croire que quelqu'un m'en empeche. La lecture seule y est deja
+          // assuree par les permissions.
+          if(!LockManager.currentEditable) { active.classList.remove('is-domain-locked'); return; }
+          const editable = LockManager._editable(d);
+          active.classList.toggle('is-domain-locked', !editable);
           if(!editable) {
               const lock = d ? (state.domainLocks||{})[d] : null;
               const banner = document.createElement('div');
@@ -15566,7 +15604,7 @@ const LockManager = {
                   const who = LockManager._who(lock);
                   banner.innerHTML = '🚧 En travaux par <strong></strong> — lecture seule. ';
                   banner.querySelector('strong').textContent = who;
-                  if(state.currentRole !== 'viewer' && !LockManager.fromCategory) {
+                  if(LockManager.currentEditable && !LockManager.fromCategory) {
                       const askBtn = document.createElement('button');
                       askBtn.textContent = '✋ Demander la main';
                       askBtn.style.cssText = 'margin-left:6px;padding:3px 10px;border:1px solid rgba(217,119,6,.45);border-radius:6px;background:transparent;color:inherit;cursor:pointer;font-size:12px;';
@@ -18741,7 +18779,14 @@ openBoardPrintEpisodeChooser: () => {
         // Masquer/afficher les catégories
         document.querySelectorAll('.tab-category[data-category]').forEach(cat => {
             const catName = cat.getAttribute('data-category');
-            cat.style.display = UIHidden.hiddenCategories.includes(catName) ? 'none' : '';
+            // v570 : une categorie dont AUCUN onglet n'est autorise disparait aussi —
+            // sinon un invite restreint verrait des categories qui s'ouvrent sur le vide.
+            const tabs = (UI.categoryTabs && UI.categoryTabs[catName]) || [];
+            const rienDeVisible = tabs.length > 0 && !tabs.some(t =>
+                !UIHidden.hiddenTabs.includes(t)
+                && ((typeof Permissions === 'undefined') || Permissions.tabVisible(t))
+                && (state.currentProjectType === 'series' || (t !== 'episodes' && t !== 'seasons')));
+            cat.style.display = (UIHidden.hiddenCategories.includes(catName) || rienDeVisible) ? 'none' : '';
         });
         
         // Mettre à jour le bouton des éléments masqués (catégories + onglets)
@@ -18868,7 +18913,9 @@ openBoardPrintEpisodeChooser: () => {
         // systèmes, même en mode Catégories — voir plan RESTE À FAIRE, étape 4-bis)
         document.querySelectorAll('.tab-btn[data-tab]').forEach(tab => {
             const tabName = tab.getAttribute('data-tab');
-            tab.style.display = UIHidden.hiddenTabs.includes(tabName) ? 'none' : '';
+            // v570 : masquage manuel OU permission fermee (❌)
+            const interdit = (typeof Permissions !== 'undefined') && !Permissions.tabVisible(tabName);
+            tab.style.display = (UIHidden.hiddenTabs.includes(tabName) || interdit) ? 'none' : '';
         });
         // Construction du menu #hiddenTabsToggle/#hiddenTabsMenu retirée v569 :
         // ce menu vivait dans le bandeau classique, inatteignable (étape 4).
@@ -18943,6 +18990,8 @@ openBoardPrintEpisodeChooser: () => {
         
         // Filtrer les onglets masqués
         let visibleTabs = tabs.filter(t => !UI.hiddenTabs.includes(t));
+        // v570 : et ceux que les permissions ferment (❌) — l'onglet n'apparait pas du tout.
+        visibleTabs = visibleTabs.filter(t => (typeof Permissions === 'undefined') || Permissions.tabVisible(t));
         
         // Phase S3.4 + S7.3 : masquer 'episodes' et 'seasons' si ce n'est pas une série
         const isSeries = state.currentProjectType === 'series';
@@ -37756,6 +37805,41 @@ const Permissions = {
     // ligne d'un coup, et le role en base (project_members.role) se DEDUIT ensuite
     // des cases (voir _deriveRole). Avant, role et cases se reglaient separement et
     // pouvaient se contredire — cocher 15 ✏️ sur un « lecteur » n'avait aucun effet.
+    // v570 — Carte ONGLET -> SECTION de permission, centralisee ici. Elle existait en
+    // trois exemplaires recopies dans le fichier (switchTab, Tutorial...) ; celle-ci
+    // fait desormais reference pour la visibilite et les verrous.
+    SECTION_BY_TAB: {
+        'presentation': 'presentation', 'synopsis': 'synopsis', 'board': 'sequencier',
+        'titlepage': 'scenario', 'script': 'scenario', 'storyboard': 'storyboard',
+        'chars': 'personnages', 'locs': 'lieux', 'actors': 'comediens',
+        'resources': 'ressources', 'crew': 'equipe', 'orgs': 'equipe',
+        'breakdown': 'depouillement', 'stats': 'stats', 'planning': 'planning'
+    },
+
+    sectionOf: (tabName) => Permissions.SECTION_BY_TAB[tabName] || null,
+
+    // TROIS NIVEAUX, decides le 23 aout :
+    //   ❌  l'onglet N'APPARAIT PAS dans sa navigation (et pas seulement « bloque au clic ») ;
+    //   👁️  l'onglet apparait, consultable, et NE POSE AUCUN VERROU — regarder ne gene personne ;
+    //   ✏️  l'onglet apparait, modifiable, et pose un verrou.
+    // Un onglet sans section connue (moodboard, episodes, contracts...) reste visible :
+    // ne jamais faire disparaitre un onglet par simple absence de la carte ci-dessus.
+    tabVisible: (tabName) => {
+        if(state.currentRole === 'owner') return true;
+        const sec = Permissions.sectionOf(tabName);
+        if(!sec) return true;
+        return Permissions.canAccess(sec);
+    },
+
+    // Cet onglet me donne-t-il le droit d'ecrire (donc de poser un verrou) ?
+    tabWritable: (tabName) => {
+        if(state.currentRole === 'owner') return true;
+        if(state.currentRole === 'viewer') return false;
+        const sec = Permissions.sectionOf(tabName);
+        if(!sec) return true;
+        return Permissions.canEdit(sec);
+    },
+
     _emailByKey: {},
 
     ROLE_PRESETS: {
@@ -38140,6 +38224,9 @@ const Permissions = {
         
         try {
             await Store.save();
+            // v570 : les ❌ font disparaitre des onglets — reconstruire la navigation
+            // pour que le proprietaire voie l'effet, et surtout pour l'auto-attribution.
+            try { UIHidden.applyHiddenTabs(); UIHidden.applyHiddenCategories(); } catch(e) {}
             const memberCount = Object.keys(permsByEmail).length;
             History.log('PERMISSIONS', `Permissions modifiées pour ${memberCount} membre${memberCount > 1 ? 's' : ''}`);
             Utils.toast('Permissions sauvegardées !' + (rolesChanges > 0
