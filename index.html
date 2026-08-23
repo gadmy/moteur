@@ -147,14 +147,13 @@ Cocher [x] au fil de l'eau ; ne pas changer la numerotation en cours de route.
     d'une reaffectation dataset.tab par position devenue totalement
     redondante (chaque .tab-btn porte deja son data-tab correct dans le
     HTML statique).
-    QUESTION DE FOND, PAS TRANCHEE : #tabsNav reste dans le DOM, invisible
-    et inoffensif. Le retirer VRAIMENT (markup + CSS) impose de reecrire les
-    points 2, 4 et 5 ci-dessus pour qu'ils ne dependent plus de ce DOM —
-    trois reecritures dans des systemes distincts (presentation, verrous
-    collaboratifs, tour), chacune a valider au navigateur, pour un gain
-    invisible pour l'utilisateur (le bandeau est deja masque). A ne
-    poursuivre que si Guillaume juge que la purete du code justifie le
-    risque et le temps ; sinon laisser en l'etat (deja sans danger).
+    QUESTION TRANCHEE LE 23 AOUT : CHANTIER CLOS, NE PAS ROUVRIR. #tabsNav reste
+    dans le DOM, invisible et inoffensif. Le retirer VRAIMENT (markup + CSS)
+    imposerait de reecrire les points 2, 4 et 5 ci-dessus pour qu'ils ne
+    dependent plus de ce DOM — trois reecritures dans des systemes distincts
+    (presentation, verrous collaboratifs, tour), chacune a valider au
+    navigateur, pour un gain invisible pour l'utilisateur (le bandeau est deja
+    masque). Le rapport risque / benefice ne le justifie pas.
 
     NETTOYAGE DU CODE MORT SANS RISQUE (fait le 20 aout) : retrait complet
     du menu "onglets masques" du bandeau classique (#hiddenTabsToggle,
@@ -223,8 +222,69 @@ Cocher [x] au fil de l'eau ; ne pas changer la numerotation en cours de route.
    payant (la LCEN le demande en principe pour un editeur personne physique a
    titre professionnel).
 
-7b. COLLABORATION — vraie acceptation d'invitation (C3), verrou collaboratif par
-   onglet.
+7b. COLLABORATION — ACCEPTATION D'INVITATION : FAITE (23 aout, validee au
+   navigateur). Une invitation est desormais une ligne project_members au statut
+   'pending' : elle n'ouvre RIEN tant qu'elle n'est pas acceptee (can_view_project
+   et can_edit_project filtrent sur le statut, donc les fichiers du bucket aussi).
+   Elle apparait chez l'invite en CARTE GRISEE dans la grille du tableau de bord,
+   avec Accepter / Refuser, et un apercu de la seule fiche de presentation au
+   survol ou au clic (fonction serveur my_pending_invitations : genre, format,
+   duree, type de production, pitch, synopsis court — jamais casting, planning,
+   budget ni scenario ; l'affiche n'est pas montree, le bucket etant ferme aux
+   non-membres). Acceptation par la fonction serveur invitation_accept, qui ne
+   touche QUE le statut : passer par une policy UPDATE aurait permis a un invite
+   en lecture de se promouvoir editeur, une policy portant sur la ligne entiere.
+   QUITTER LE PROJET : FAIT. La policy DELETE « owner or self » l'autorisait deja,
+   il ne manquait que le bouton — la corbeille des cartes projet devient une porte
+   pour un non-proprietaire (le bouton corbeille sortait sans rien faire pour eux
+   depuis toujours). Le proprietaire n'a pas le bouton : il supprime son projet.
+   BUG DE FOND CORRIGE : checkPendingInvitations essayait de s'auto-ajouter au
+   projet, ce que la policy INSERT (reservee au proprietaire) refusait — echec
+   silencieux, suivi d'un toast « invitation acceptee » mensonger. Module supprime,
+   ainsi que son doublon dans la table messages.
+   RESTE OUVERT ICI : un EDITEUR NE PEUT PAS INVITER (policy INSERT reservee au
+   proprietaire) — deja vrai avant, en echec silencieux. Decision produit a prendre.
+
+   DROIT D'INVITER DELEGABLE (23 aout) : colonne « Peut inviter » dans Gerer les
+   acces. Le droit vit dans project_members.can_invite et NON dans state.data :
+   la policy INSERT le lit, la case agit donc reellement. Un delegue ne peut
+   inscrire qu'une invitation EN ATTENTE, au role lecteur ou editeur, SANS le
+   droit d'inviter (verrouille par le WITH CHECK) — sinon il pourrait s'ajouter
+   un complice proprietaire ou deleguer a son tour. Il ne peut pas non plus
+   modifier une ligne existante (policy UPDATE reservee au proprietaire) : le
+   cas est annonce a l'ecran au lieu d'echouer en silence.
+
+7b-bis. VERROU COLLABORATIF PAR ONGLET — TRAITE EN PARTIE (23 aout).
+   CE QU'IL FAUT AVOIR COMPRIS AVANT DE ROUVRIR : la frontiere des domaines
+   n'est pas un choix d'ergonomie, c'est celle de la SAUVEGARDE. StoreSave.save
+   ne pousse que les cles modifiees, mais il les pousse ENTIERES (RPC
+   patch_project_data, fusion jsonb au premier niveau). Deux personnes qui
+   ecrivent 'scenes' en meme temps ne fusionnent pas : la derniere ecrase la
+   premiere, sans message. Le domaine 'scenes' regroupe donc Scenario,
+   Depouillement, Sequencier, Saisons et Episodes PARCE QUE SANS CE
+   REGROUPEMENT ON PERDRAIT DU TRAVAIL. Decouper le verrou sans toucher a la
+   sauvegarde recreerait exactement ce bug silencieux.
+   FAIT : 'scriptreport' sorti du domaine 'scenes' et pourvu du sien. Verifie
+   ligne a ligne : il LIT les scenes (8 fois) et les plans (6 fois), n'en ecrit
+   AUCUN, et n'ecrit que scriptReports. Un verrou protege ce qu'on ecrit, pas ce
+   qu'on lit ; une lecture en retard n'a jamais fait perdre de donnee, et ce
+   module lisait deja les plans du Storyboard, domaine separe de longue date.
+   FAIT : le bandeau « En travaux par X » NOMME desormais les autres onglets pris
+   par le meme verrou (LockDomains.siblingLabels, Saisons/Episodes masques hors
+   projet serie), et l'infobulle de la pastille nomme la section. Sans cela on
+   voit le Depouillement bloque alors que la personne est dans le Scenario, sans
+   comprendre le rapport — l'essentiel de l'agacement venait de la.
+   NON FAIT, ET ASSUME POUR L'INSTANT : le vrai decoupage de 'scenes'. Il
+   suppose d'apprendre a la base a fusionner SCENE PAR SCENE, voire champ par
+   champ (scriptContent d'un cote, breakdown de l'autre), avec un suivi cote
+   client de ce qui a change — et les creations, suppressions et
+   reordonnancements de scenes NE SE FUSIONNENT PAS, c'est l'ordre d'une liste.
+   Ecarte le 23 aout pour quatre raisons : pas encore d'utilisateurs reels ;
+   cible (tournages amateurs a 3-4) ou deux personnes ecrivant LA MEME scene a
+   la meme seconde est rare ; le verrou actuel fait son travail (demander la
+   main, liberer) ; et le risque de ce chantier est la PERTE DE DONNEES, qui ne
+   leve aucune erreur. A rouvrir le jour ou un utilisateur dit « on s'est marche
+   dessus », pas avant.
 
 7c. TYPES DE DOCUMENTS MANQUANTS — vehicules, costumes / maquillage par jour.
 
@@ -234,6 +294,38 @@ Cocher [x] au fil de l'eau ; ne pas changer la numerotation en cours de route.
    le materiel liste dans une scene existe dans l'inventaire de l'onglet
    Ressources. NB : Resources.link (code mort supprime a l'etape 2) etait un
    embryon de cette liaison — s'en inspirer.
+
+================================================================================
+                    MIGRATIONS SQL APPLIQUEES (hors fichier)
+================================================================================
+23 aout 2026 (chantier acceptation d'invitation) :
+- project_members : colonne status text NOT NULL DEFAULT 'accepted'
+  (tout l'existant est donc considere accepte, aucun acces perdu).
+- can_view_project / can_edit_project : ajout du filtre
+  coalesce(pm.status,'accepted') = 'accepted'. SANS CE FILTRE L'ACCEPTATION
+  N'EST QU'UN DECOR : ces deux fonctions commandent aussi l'acces au bucket.
+- my_pending_invitations() : SECURITY DEFINER, renvoie MES invitations en
+  attente avec le titre du projet et la seule fiche de presentation (jsonb).
+  C'est la seule breche voulue : sans elle l'invite ne saurait pas a quoi il
+  dit oui. Si on veut y ajouter un champ, c'est ICI et nulle part ailleurs.
+- invitation_accept(p_project uuid) : SECURITY DEFINER, bascule MA ligne
+  'pending' -> 'accepted'. Volontairement une fonction et non une policy
+  UPDATE : une policy porte sur la LIGNE ENTIERE, un invite en lecture aurait
+  pu se promouvoir editeur.
+- Aucune policy ajoutee : la policy DELETE « owner or self » preexistante
+  couvre a la fois Refuser et Quitter le projet.
+
+23 aout 2026 (delegation du droit d'inviter) :
+- project_members : colonne can_invite boolean NOT NULL DEFAULT false.
+- can_invite_to_project(p_id uuid) : SECURITY DEFINER. Indispensable : une
+  policy posee SUR project_members qui interroge project_members boucle a
+  l'infini ; SECURITY DEFINER coupe la recursion.
+- Policy INSERT remplacee (« Project members insertable by owner » devient
+  « ... by owner or delegate »). Le WITH CHECK epingle ce qu'un delegue a le
+  droit d'ecrire : status='pending', role dans (viewer, editor), can_invite
+  = false. NE PAS RELACHER CES TROIS CONDITIONS : sans elles un delegue
+  s'ajoute un complice proprietaire ou delegue a son tour.
+- UPDATE et DELETE inchanges (proprietaire, plus soi-meme pour DELETE).
 
 ================================================================================
                     JOURNAL DU CHANTIER FEUILLE DE SERVICE
@@ -3636,20 +3728,28 @@ body.focus-mode .tab-content.active { padding-top: 60px; }
 .focus-toolbar .focus-tab-title { font-weight: 600; font-size: 1rem; color: var(--text-main); }
 .focus-toolbar .focus-project-title { font-size: 0.85rem; color: var(--text-sec); margin-left: 10px; }
 
-/* v570 — Invitations recues en attente d'acceptation (tableau de bord) */
-#pending-invitations { margin: 0 0 22px; display: flex; flex-direction: column; gap: 10px; }
-.pinv-card { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 10px;
-  background: var(--panel-bg); border: 1px solid var(--primary); animation: slideUp 0.3s ease; }
-.pinv-icon { font-size: 1.5rem; flex-shrink: 0; }
-.pinv-body { flex: 1; min-width: 0; }
-.pinv-title { font-weight: 600; color: var(--text-main); }
-.pinv-meta { font-size: 0.85rem; color: var(--text-sec); margin-top: 2px; }
-.pinv-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.pinv-refuse { padding: 6px 14px; font-size: 0.85rem; }
-@media (max-width: 640px) {
-  .pinv-card { flex-wrap: wrap; }
-  .pinv-actions { width: 100%; justify-content: flex-end; }
-}
+/* v570 — Invitation recue en attente : carte grisee a sa place dans la grille */
+.pinv-card { position: relative; opacity: 0.72; border-style: dashed !important; cursor: pointer;
+  transition: opacity 0.15s ease, border-color 0.15s ease; }
+.pinv-card:hover { opacity: 1; border-color: var(--primary) !important; }
+.pinv-badge { color: var(--primary) !important; border-color: var(--primary) !important; }
+.pinv-hint { font-size: 0.78rem; color: var(--text-sec); font-style: italic; margin-top: 6px; }
+.pinv-actions { display: flex; gap: 8px; margin-top: 12px; }
+.pinv-actions button { flex: 1; padding: 7px 10px; font-size: 0.85rem; border-radius: 6px; cursor: pointer; }
+.pinv-preview { position: fixed; z-index: 9000; width: 320px; max-width: calc(100vw - 24px);
+  max-height: 60vh; overflow-y: auto; padding: 16px 18px; border-radius: 10px;
+  background: var(--panel-bg); border: 1px solid var(--primary);
+  box-shadow: 0 12px 34px rgba(0,0,0,0.28); animation: slideUp 0.18s ease; }
+.pinv-preview h4 { margin: 0 0 4px; font-size: 1rem; color: var(--text-main); }
+.pinv-preview .pinv-pv-sub { font-size: 0.8rem; color: var(--text-sec); margin-bottom: 10px; }
+.pinv-preview .pinv-pv-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.pinv-preview .pinv-pv-tag { font-size: 0.72rem; padding: 3px 8px; border-radius: 20px;
+  border: 1px solid var(--border); color: var(--text-sec); }
+.pinv-preview .pinv-pv-block { font-size: 0.85rem; color: var(--text-main); line-height: 1.5;
+  white-space: pre-wrap; margin-bottom: 10px; }
+.pinv-preview .pinv-pv-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-sec); margin-bottom: 3px; }
+.pinv-preview .pinv-pv-empty { font-size: 0.85rem; color: var(--text-sec); font-style: italic; }
 
 /* Cards projet dashboard */
 .project-card, .new-project-card { animation: slideUp 0.3s ease; }
@@ -6521,8 +6621,6 @@ body.presentation-mode .presentation-bar {
     <!-- HUB CENTRAL -->
     <div id="hub-content" class="hub-main">
       <h2 style="margin:0 0 20px;">📁 Mes Projets</h2>
-      <!-- v570 : invitations recues en attente d'acceptation (Invitations.renderPending) -->
-      <div id="pending-invitations" style="display:none;"></div>
       <div id="project-list" class="project-grid"></div>
     </div>
   </div>
@@ -14297,8 +14395,7 @@ showDashboard: async () => {
     });
     } // fin guard focusKeyListenerAttached
 
-    // v570 : afficher les invitations en attente d'acceptation sur le tableau de bord
-    Invitations.renderPending();
+    // v570 : les invitations en attente sont chargees par UIDashboard.renderProjectList.
     // V1.4.2: Initialiser les notifications
     Notifications.init();
     // V2.1.2: Initialiser module Admin
@@ -14908,7 +15005,13 @@ showDashboard: async () => {
   // Un domaine = les onglets qui écrivent une ou plusieurs clés communes (cf. audit interconnexions).
   const LockDomains = {
       defs: {
-          scenes:       { label: 'Scènes',       keys: ['scenes','seasons','episodes','tags','groups','scriptMeta','scriptReports'], tabs: ['script','breakdown','board','seasons','episodes','scriptreport'] },
+          scenes:       { label: 'Scènes',       keys: ['scenes','seasons','episodes','tags','groups','scriptMeta'],            tabs: ['script','breakdown','board','seasons','episodes'] },
+          // v570 : Rapports de script sorti du domaine 'scenes'. Verifie ligne a ligne :
+          // il LIT les scenes (8 fois) et les plans (6 fois) mais n'en ecrit AUCUN ;
+          // sa seule ecriture est scriptReports. Un verrou protege ce qu'on ECRIT, pas
+          // ce qu'on lit — une lecture legerement en retard ne perd rien (c'est deja le
+          // cas entre ce module et le Storyboard, domaine separe de longue date).
+          scriptreport: { label: 'Rapports de script', keys: ['scriptReports'],                                                 tabs: ['scriptreport'] },
           casting:      { label: 'Casting',      keys: ['characters','actors'],                                                       tabs: ['chars','actors'] },
           planning:     { label: 'Planning',     keys: ['shootingDays','workplanOverrides','publicCallsheets'],                       tabs: ['planning'] },
           budget:       { label: 'Budget',       keys: ['budget','expenses'],                                                         tabs: ['expenses'] },
@@ -14926,6 +15029,29 @@ showDashboard: async () => {
               if(LockDomains.defs[id].tabs.includes(tabName)) return id;
           }
           return null;
+      },
+      // v570 — Libelle lisible d'un onglet, repris des sous-menus de navigation
+      // (emoji retire : il ne sert a rien dans une phrase).
+      tabLabel: (tabName) => {
+          try {
+              const cats = (typeof UICategories !== 'undefined' && UICategories.categoryLabels) || {};
+              for(const c in cats) {
+                  if(cats[c][tabName]) return cats[c][tabName].replace(/^[^\p{L}]+/u, '').trim();
+              }
+          } catch(e) {}
+          return tabName;
+      },
+      // Les AUTRES onglets couverts par le meme verrou, en clair. Sert au bandeau :
+      // sans cela, l'utilisateur voit le Depouillement verrouille alors que la
+      // personne travaille dans le Scenario, sans comprendre le rapport.
+      siblingLabels: (domain, exceptTab) => {
+          const def = LockDomains.defs[domain];
+          if(!def) return [];
+          const serie = (state.currentProjectType === 'series');
+          return def.tabs
+              .filter(t => t !== exceptTab)
+              .filter(t => serie || (t !== 'episodes' && t !== 'seasons'))
+              .map(t => LockDomains.tabLabel(t));
       }
   };
 
@@ -15292,7 +15418,9 @@ const LockManager = {
                   const who = LockManager._who(lock);
                   const av = document.createElement('span');
                   av.className = 'dlock-avatar-tab';
-                  av.title = 'En travaux — ' + who;
+                  const dom = LockDomains.forTab(btn.dataset.tab);
+                  const grp = (dom && LockDomains.defs[dom]) ? LockDomains.defs[dom].label : '';
+                  av.title = 'En travaux — ' + who + (grp ? ' (section « ' + grp + ' »)' : '');
                   av.textContent = (who[0]||'?').toUpperCase();
                   btn.appendChild(av);
               }
@@ -15360,6 +15488,18 @@ const LockManager = {
                       askBtn.style.cssText = 'margin-left:6px;padding:3px 10px;border:1px solid rgba(217,119,6,.45);border-radius:6px;background:transparent;color:inherit;cursor:pointer;font-size:12px;';
                       askBtn.onclick = () => LockManager.ping(d, who);
                       banner.appendChild(askBtn);
+                  }
+                  // v570 : dire QUELS onglets partagent ce verrou. Sans cela on voit le
+                  // Depouillement bloque alors que la personne est dans le Scenario, sans
+                  // comprendre le rapport — les onglets qui ecrivent les memes donnees
+                  // sont forcement verrouilles ensemble, sinon l'un ecraserait l'autre.
+                  const sibs = LockDomains.siblingLabels(d, tabName);
+                  if(sibs.length) {
+                      const note = document.createElement('div');
+                      note.style.cssText = 'margin-top:4px;font-size:11px;opacity:.8;';
+                      note.textContent = 'Ces onglets écrivent les mêmes données et sont donc pris ensemble : '
+                          + sibs.join(', ') + '.';
+                      banner.appendChild(note);
                   }
               } else if(LockManager._yieldedRecently(d)) {
                   banner.innerHTML = '✋ Vous avez libéré cette section — recliquez sur l\'onglet pour reprendre la main.';
@@ -16220,7 +16360,7 @@ const LockManager = {
           // I5e : récupérer les projets où je suis membre AVEC le profil actif
           // (fallback sur email si profile_id est NULL pour les anciens projets)
           // v570 : les invitations en attente d'acceptation n'apparaissent PAS dans la liste
-          // des projets (elles sont proposees separement par Invitations.renderPending).
+          // des projets (elles apparaissent en cartes grisees, voir Invitations.buildCard).
           let membershipQuery = supabase
               .from('project_members')
               .select('project_id, role, profile_id')
@@ -16711,7 +16851,7 @@ const LockManager = {
               // I5g: récupérer TOUTES les memberships (peut y en avoir plusieurs pour le même email)
               const { data: memberships } = await supabase
                   .from('project_members')
-                  .select('role, profile_id')
+                  .select('role, profile_id, can_invite')
                   .eq('project_id', id)
                   .eq('email', myEmail)
                   .eq('status', 'accepted'); // v570 : une invitation en attente n'ouvre rien
@@ -16756,6 +16896,11 @@ const LockManager = {
               if (!role && project.owner_email === myEmail) role = 'owner';
               if (!role) throw new Error("Accès refusé.");
               state.currentRole = role;
+              // v570 : droit d'inviter — le proprietaire l'a toujours, un membre
+              // seulement s'il a recu la delegation (colonne can_invite, verifiee
+              // aussi cote base par la policy INSERT : la case n'est pas decorative).
+              state.currentCanInvite = (role === 'owner')
+                  || !!(memberships || []).some(m => m.can_invite === true);
               
               const parsed = project.data;
               if(!parsed) throw new Error("Projet vide ou introuvable");
@@ -16950,6 +17095,34 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               await UI.renderDashboard(); 
           } 
       },
+      // v570 — Quitter un projet auquel on a ete invite. La policy DELETE de
+      // project_members autorise deja « le proprietaire OU soi-meme » : rien a
+      // ajouter cote base. Le proprietaire, lui, ne peut pas quitter son propre
+      // projet (le bouton ne lui est pas propose) : il le supprime.
+      leaveProject: async (id, role, e) => {
+          if(e) e.stopPropagation();
+          if(!id || !state.currentUser) return;
+          if(role === 'owner') { Utils.toast('Vous êtes propriétaire de ce projet : supprimez-le au lieu de le quitter.', 'warning'); return; }
+          const card = document.querySelector('.project-card[data-project-id="' + id + '"] .p-title');
+          const titre = (card && card.textContent) || 'ce projet';
+          const ok = await ConfirmModal.show({
+              title: 'Quitter ce projet ?',
+              message: 'Vous perdrez l\'accès à « ' + Utils.escape(titre) +' ». Le projet et votre travail ne sont pas supprimés : le propriétaire pourra vous réinviter.',
+              icon: '🚪',
+              dangerous: true,
+              confirmText: 'Quitter'
+          });
+          if(!ok) return;
+          const { error } = await supabase
+              .from('project_members')
+              .delete()
+              .eq('project_id', id)
+              .eq('email', state.currentUser.email.toLowerCase());
+          if(error) { console.error(error); Utils.toast('Erreur : impossible de quitter le projet.', 'error'); return; }
+          Utils.toast('Vous avez quitté « ' + titre + ' ».', 'success');
+          await UI.renderDashboard();
+      },
+
       getTrashedProjects: async () => {
           if(!state.currentUser) return [];
           const myEmail = state.currentUser.email.toLowerCase();
@@ -19383,8 +19556,6 @@ initCategoriesDragDrop: () => {
         // B3 P1 : Projets d'abord
         document.getElementById('hub-content').style.display = '';
         await UIDashboard.renderProjectList();
-        // v570 : invitations recues en attente d'acceptation
-        try { if(typeof Invitations !== 'undefined') await Invitations.renderPending(); } catch(e) {}
     },
     
     // T6 : menu "Deplacer vers..." sur une carte projet (liste arborescente des dossiers).
@@ -19729,6 +19900,16 @@ initCategoriesDragDrop: () => {
         
         // T6 : zone dossiers (fil d'Ariane + sous-dossiers du dossier courant)
         UIDashboard._renderFolderArea();
+
+        // v570 : invitations recues en attente — cartes grisees en tete, a la racine
+        // (une invitation n'a pas encore de dossier de classement).
+        try {
+            if(typeof Invitations !== 'undefined' && !UIDashboard.currentFolderId) {
+                Invitations.hidePreview();
+                const pend = await Invitations.loadPending();
+                pend.forEach(inv => els.projectList.appendChild(Invitations.buildCard(inv)));
+            }
+        } catch(e) { console.warn('[Dashboard] invitations en attente:', e && e.message); }
         
         // Nouveau projet / Importer : desormais des boutons dans la barre dossiers (voir _renderFolderArea).
         
@@ -19759,7 +19940,10 @@ initCategoriesDragDrop: () => {
                     ? `<div class="p-series-line"><span class="p-series-badge" title="Projet série">📺 ${p.episodeCount} épisode${p.episodeCount>1?'s':''}</span></div>`
                     : '';
                 
-                card.innerHTML = `<span class="p-role-badge" style="color:${badgeColor}; border-color:${badgeColor}">${badgeText}</span><div><div class="p-title">${Utils.escape(p.title)}</div>${seriesBadge}<div class="p-meta">Modifié : ${p.date} ${priorityBadge}</div><div class="p-meta" style="margin-top:2px;" title="Poids des données du projet">💾 ${Utils.formatWeight(p.weightBytes)}</div></div><div class="p-actions"><button class="p-btn-priority" onclick="app.UIDashboard.showMoveMenu(event, '${p.id}')" title="Déplacer vers un dossier">📁</button><button class="p-btn-priority" onclick="app.UIDashboard.showPriorityMenu(event, '${p.id}')" title="Priorité">🏷️</button><button class="p-btn-del" onclick="app.Store.deleteProject('${p.id}', '${p.role}', event)">🗑️</button></div>`; 
+                const ownerBtn = (p.role === 'owner')
+                    ? `<button class="p-btn-del" title="Mettre à la corbeille" onclick="app.Store.deleteProject('${p.id}', '${p.role}', event)">🗑️</button>`
+                    : `<button class="p-btn-del" title="Quitter ce projet" onclick="app.Store.leaveProject('${p.id}', '${p.role}', event)">🚪</button>`;
+                card.innerHTML = `<span class="p-role-badge" style="color:${badgeColor}; border-color:${badgeColor}">${badgeText}</span><div><div class="p-title">${Utils.escape(p.title)}</div>${seriesBadge}<div class="p-meta">Modifié : ${p.date} ${priorityBadge}</div><div class="p-meta" style="margin-top:2px;" title="Poids des données du projet">💾 ${Utils.formatWeight(p.weightBytes)}</div></div><div class="p-actions"><button class="p-btn-priority" onclick="app.UIDashboard.showMoveMenu(event, '${p.id}')" title="Déplacer vers un dossier">📁</button><button class="p-btn-priority" onclick="app.UIDashboard.showPriorityMenu(event, '${p.id}')" title="Priorité">🏷️</button>${ownerBtn}</div>`; 
                 card.onclick = (e) => { if(!e.target.closest('.p-actions')) Store.loadProject(p.id); };
                 card.setAttribute('role', 'button'); card.setAttribute('tabindex', '0');
                 
@@ -21811,7 +21995,7 @@ const tabToSection = {
   
  const Actions = {
       // ===================== SCÈNES =====================
-      openShareModal: () => { if(state.currentRole !== 'owner') return Utils.toast("Seul le propriétaire peut partager.", "warning"); els.shareModal.style.display = 'flex'; },
+      openShareModal: () => { if(state.currentRole !== 'owner' && !state.currentCanInvite) return Utils.toast("Vous n'avez pas l'autorisation d'inviter sur ce projet.", "warning"); els.shareModal.style.display = 'flex'; },
       
       // V62: NOUVELLE GESTION DES VERSIONS
       // [Phase D] Fonctions snapshot (openVersionModal, createManualSnapshot, createAutoSnapshot,
@@ -37354,7 +37538,7 @@ const Permissions = {
     // ===== LOGIQUE D'ACCÈS (calcul des droits) =====
     // ============================================================
     // Obtenir les permissions d'un membre du projet
-    renderInvitesTable: async (members, accessEmails) => {
+    renderInvitesTable: async (members, opts) => {
         const div = document.getElementById('perm-invites-table');
         if(!div) return;
         div.innerHTML = '<p style="color:var(--text-sec); font-style:italic;">Chargement…</p>';
@@ -37382,15 +37566,51 @@ const Permissions = {
             const inviteMembers = pure.map(m => ({
                 email: m.email,
                 name: nameById[m.profile_id] || m.email,
-                role: m.role === 'editor' ? 'Invité · Éditeur' : 'Invité · Lecture',
+                // v570 : une invitation non acceptee ne donne aucun acces — le dire ici.
+                role: (m.status === 'pending')
+                    ? '⏳ En attente de réponse'
+                    : (m.role === 'editor' ? 'Invité · Éditeur' : 'Invité · Lecture'),
                 photo: null,
                 _memberId: m.id
             }));
-            div.innerHTML = Permissions.buildTable(inviteMembers, 'invite', { revoke: true, accessEmails: accessEmails || new Set(inviteMembers.map(m => (m.email || '').toLowerCase())) });
+            div.innerHTML = Permissions.buildTable(inviteMembers, 'invite', Object.assign({ revoke: true }, opts || {}, {
+                accessEmails: (opts && opts.accessEmails) || new Set(inviteMembers.map(m => (m.email || '').toLowerCase()))
+            }));
         } catch(e) {
             console.error('renderInvitesTable:', e);
             div.innerHTML = '<p style="color:var(--danger,#dc2626);">Erreur de chargement des invités.</p>';
         }
+    },
+
+    // v570 — Colonne « Peut inviter ». Le droit vit dans project_members.can_invite,
+    // PAS dans state.data : la policy INSERT de la base le lit, donc la case agit
+    // reellement au lieu d'etre decorative. Bascule immediate en base (pas de
+    // passage par le bouton Sauvegarder, qui n'ecrit que le JSON du projet).
+    _inviteCell: (member, options) => {
+        const em = (member.email || '').toLowerCase();
+        if(!em || !options.accessEmails || !options.accessEmails.has(em)) {
+            return '<span style="color:var(--text-sec); font-size:0.75rem;" title="Cette personne n\'a pas encore accès au projet">—</span>';
+        }
+        if(options.ownerEmails && options.ownerEmails.has(em)) {
+            return '<span title="Le propriétaire peut toujours inviter">✅</span>';
+        }
+        if(options.pendingEmails && options.pendingEmails.has(em)) {
+            return '<span style="color:var(--text-sec); font-size:0.75rem;" title="Invitation pas encore acceptée">—</span>';
+        }
+        const checked = options.inviteEmails && options.inviteEmails.has(em) ? 'checked' : '';
+        return `<input type="checkbox" ${checked} onchange="app.Permissions.toggleInvite('${Utils.escape(member.email)}', this.checked)" style="width:18px; height:18px; cursor:pointer;" title="Autoriser à inviter d'autres membres">`;
+    },
+
+    toggleInvite: async (email, allowed) => {
+        if(state.currentRole !== 'owner') { Utils.toast('Seul le propriétaire peut déléguer le droit d\'inviter.', 'error'); Permissions.renderTables(); return; }
+        const { error } = await supabase
+            .from('project_members')
+            .update({ can_invite: !!allowed })
+            .eq('project_id', state.currentProjectId)
+            .eq('email', (email || '').toLowerCase());
+        if(error) { console.error(error); Utils.toast('Erreur : droit d\'inviter non enregistré.', 'error'); Permissions.renderTables(); return; }
+        if(typeof History !== 'undefined' && History.log) History.log('SHARE', (allowed ? 'Droit d\'inviter accordé à ' : 'Droit d\'inviter retiré à ') + email);
+        Utils.toast(allowed ? email + ' peut maintenant inviter.' : email + ' ne peut plus inviter.', 'success');
     },
 
     revokeAccess: async (email) => {
@@ -37550,11 +37770,17 @@ const Permissions = {
     renderTables: async () => {
         let _members = [];
         try {
-            const { data } = await supabase.from('project_members').select('id, email, profile_id, role').eq('project_id', state.currentProjectId);
+            const { data } = await supabase.from('project_members').select('id, email, profile_id, role, status, can_invite').eq('project_id', state.currentProjectId);
             _members = data || [];
         } catch(e) { console.error('renderTables members:', e); }
         const _accessEmails = new Set(_members.map(m => (m.email || '').toLowerCase()).filter(Boolean));
-        const _opts = { revoke: true, accessEmails: _accessEmails };
+        // v570 : qui a recu le droit d'inviter (colonne project_members.can_invite),
+        // et qui est proprietaire (droit implicite, non revocable).
+        const _inviteEmails = new Set(_members.filter(m => m.can_invite === true).map(m => (m.email || '').toLowerCase()));
+        const _ownerEmails = new Set(_members.filter(m => m.role === 'owner').map(m => (m.email || '').toLowerCase()));
+        const _pendingEmails = new Set(_members.filter(m => m.status === 'pending').map(m => (m.email || '').toLowerCase()));
+        const _opts = { revoke: true, accessEmails: _accessEmails, invite: true,
+                        inviteEmails: _inviteEmails, ownerEmails: _ownerEmails, pendingEmails: _pendingEmails };
 
         // Table des comédiens
         const actorsDiv = document.getElementById('perm-actors-table');
@@ -37577,7 +37803,7 @@ const Permissions = {
         }
 
         // Table des invités (asynchrone : project_members)
-        Permissions.renderInvitesTable(_members, _accessEmails);
+        Permissions.renderInvitesTable(_members, _opts);
     },
     
     buildTable: (members, type, options = {}) => {
@@ -37600,6 +37826,7 @@ const Permissions = {
                             </span>
                         </th>`;
                     }).join('')}
+                    ${options.invite ? '<th style="height:140px; vertical-align:bottom; min-width:96px;" title="Autoriser cette personne à inviter d\'autres membres">Peut inviter</th>' : ''}
                     ${options.revoke ? '<th style="height:140px; vertical-align:bottom;">Action</th>' : ''}
                 </tr>
             </thead>
@@ -37643,6 +37870,7 @@ const Permissions = {
                         </select>
                     </td>
                 `).join('')}
+                ${options.invite ? `<td style="text-align:center; vertical-align:middle;">${Permissions._inviteCell(member, options)}</td>` : ''}
                 ${options.revoke ? `<td style="text-align:center; vertical-align:middle;">${ (member.email && options.accessEmails && options.accessEmails.has((member.email || '').toLowerCase()) && (member.email || '').toLowerCase() !== (state.currentUser?.email || '').toLowerCase()) ? `<button onclick="app.Permissions.revokeAccess('${Utils.escape(member.email)}')" style="padding:4px 10px; background:var(--danger,#dc2626); color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:0.8rem;">Révoquer</button>` : '' }</td>` : ''}
             </tr>`;
         });
@@ -37653,7 +37881,8 @@ const Permissions = {
         html += `<div style="margin-top:10px; font-size:0.8rem; color:var(--text-sec);">
             <span style="margin-right:15px;">❌ Aucun accès</span>
             <span style="margin-right:15px;">👁️ Lecture seule</span>
-            <span>✏️ Modification</span>
+            <span style="margin-right:15px;">✏️ Modification</span>
+            ${options.invite ? '<span>☑ Peut inviter : autorise cette personne à faire entrer d\'autres membres (jamais en tant que propriétaire, et sans pouvoir déléguer à son tour).</span>' : ''}
         </div>`;
         
         return html;
@@ -60564,33 +60793,43 @@ const Invitations = {
     checkEmail: async (email) => {
         const statusEl = document.getElementById('share-email-status');
         const messageSection = document.getElementById('share-message-section');
-        
-        if(!email || !email.includes('@')) {
+        if(!statusEl || !messageSection) return;
+
+        const saisi = (email || '').trim().toLowerCase();
+        if(!saisi || !saisi.includes('@')) {
             statusEl.style.display = 'none';
             messageSection.style.display = 'none';
             return;
         }
-        
-        const emailKey = Utils.sanitizeEmail(email);
-        
+
+        // v570 — CORRECTION : cette fonction interrogeait la base avec l'adresse de
+        // L'UTILISATEUR COURANT au lieu de celle qu'on saisit, puis appelait
+        // profileSnap.exists(), methode inexistante heritee de l'epoque Firebase.
+        // Elle levait donc une exception a tous les coups et le bandeau ne
+        // s'affichait jamais. On interroge owner_email, seule cle fiable d'un compte.
         try {
-            const { data: profileData } = await supabase.from('user_profiles').select('*').eq('email', state.currentUser.email.toLowerCase()).maybeSingle();
-            const profileSnap = { val: () => profileData };
-            
-            if(profileSnap.exists()) {
-                statusEl.innerHTML = '✅ <strong>Utilisateur existant</strong> - Il aura accès immédiatement';
+            const { data: profils, error } = await supabase
+                .from('user_profiles')
+                .select('id')
+                .eq('owner_email', saisi)
+                .limit(1);
+            if(error) throw error;
+
+            const compteExiste = !!(profils && profils.length > 0);
+            statusEl.style.display = 'block';
+            if(compteExiste) {
+                statusEl.innerHTML = '✅ <strong>Utilisateur existant</strong> — l\'invitation l\'attendra sur son tableau de bord';
                 statusEl.style.background = 'rgba(40,167,69,0.1)';
                 statusEl.style.color = 'var(--success)';
-                statusEl.style.display = 'block';
-                messageSection.style.display = 'none';
             } else {
-                statusEl.innerHTML = '📧 <strong>Nouvel utilisateur</strong> - Une invitation sera envoyée par email';
+                statusEl.innerHTML = '📧 <strong>Nouvel utilisateur</strong> — un e-mail l\'invitera à créer son compte';
                 statusEl.style.background = 'rgba(43,110,246,0.1)';
                 statusEl.style.color = 'var(--primary)';
-                statusEl.style.display = 'block';
-                messageSection.style.display = 'block';
             }
+            // Le message personnalise part dans l'e-mail : utile dans les deux cas.
+            messageSection.style.display = 'block';
         } catch(e) {
+            console.warn('[Invitations] checkEmail:', e && e.message);
             statusEl.style.display = 'none';
             messageSection.style.display = 'block';
         }
@@ -60686,9 +60925,6 @@ const Invitations = {
             return;
         }
         
-        // I5f: profil propriétaire (depuis le profil actif)
-        const fromProfileId = ActiveProfile.getId() || null;
-        
         if(!state.currentProjectId) return;
         
         const btn = document.getElementById('share-confirm-btn');
@@ -60696,10 +60932,10 @@ const Invitations = {
         btn.innerHTML = '<span class="spinner"></span>Envoi...';
         btn.classList.add('btn-loading');
         
-        const emailKey = Utils.sanitizeEmail(email);
+        // v570 : emailKey / fromProfileId / inviterEmail retirees — elles n'alimentaient
+        // que l'insertion en double dans « messages », supprimee avec l'acceptation.
         const pid = state.currentProjectId;
         const projectTitle = state.data.title || 'Sans titre';
-        const inviterEmail = state.currentUser.email;
         const inviterName = state.currentUser.email.split('@')[0];
         
         try {
@@ -60723,6 +60959,12 @@ const Invitations = {
                 .maybeSingle();
             
             if(existingMember) {
+                // v570 : seul le proprietaire peut modifier une ligne existante (policy UPDATE).
+                // Un delegue qui reinvite quelqu'un de deja present echouerait en silence.
+                if(state.currentRole !== 'owner') {
+                    Utils.toast('Cette personne fait déjà partie du projet ou a déjà été invitée. Seul le propriétaire peut changer son rôle.', 'warning', 6000);
+                    return;
+                }
                 await supabase
                     .from('project_members')
                     .update({ role: role, profile_id: targetProfileId })
@@ -60832,13 +61074,12 @@ ${window.location.origin}${window.location.pathname}
     // Elle ne donne AUCUN acces : can_view_project / can_edit_project l'ignorent.
     // La personne invitee l'accepte (fonction serveur invitation_accept) ou la
     // refuse (suppression de sa propre ligne, deja autorisee par la policy DELETE).
+    // La carte grisee apparait DANS la grille des projets, a la racine.
     _pending: [],
 
-    // Charge mes invitations en attente et affiche le bandeau du tableau de bord.
-    renderPending: async () => {
-        const host = document.getElementById('pending-invitations');
-        if(!host) return;
-        if(!state.currentUser) { host.innerHTML = ''; host.style.display = 'none'; return; }
+    // Charge mes invitations en attente (appelee par UIDashboard.renderProjectList).
+    loadPending: async () => {
+        if(!state.currentUser) { Invitations._pending = []; return []; }
         try {
             const { data, error } = await supabase.rpc('my_pending_invitations');
             if(error) throw error;
@@ -60847,41 +61088,104 @@ ${window.location.origin}${window.location.pathname}
             console.warn('[Invitations] Lecture des invitations en attente impossible:', e && e.message);
             Invitations._pending = [];
         }
-        const list = Invitations._pending;
-        if(!list.length) { host.innerHTML = ''; host.style.display = 'none'; return; }
-        host.style.display = '';
-        host.innerHTML = list.map(inv => {
-            const who = (inv.inviter_email || '').split('@')[0] || 'Quelqu\'un';
-            const roleLabel = inv.role === 'editor' ? 'Editeur' : (inv.role === 'owner' ? 'Proprietaire' : 'Lecteur');
-            const pid = Utils.escape(inv.project_id);
-            return `<div class="pinv-card">
-                <div class="pinv-icon">📨</div>
-                <div class="pinv-body">
-                    <div class="pinv-title">${Utils.escape(inv.project_title || 'Projet sans titre')}</div>
-                    <div class="pinv-meta">${Utils.escape(who)} vous invite en tant que ${roleLabel}.</div>
-                </div>
-                <div class="pinv-actions">
-                    <button class="btn btn--primary btn--sm" onclick="app.Invitations.accept('${pid}')">Accepter</button>
-                    <button class="select-outline pinv-refuse" onclick="app.Invitations.refuse('${pid}')">Refuser</button>
-                </div>
-            </div>`;
-        }).join('');
+        return Invitations._pending;
     },
 
-    // Accepte : bascule ma ligne en 'accepted' cote serveur, puis rafraichit la liste.
+    _roleLabel: (r) => (r === 'editor' ? 'Éditeur' : (r === 'owner' ? 'Propriétaire' : 'Lecteur')),
+
+    // Construit la carte grisee d'une invitation (meme gabarit qu'une carte projet).
+    buildCard: (inv) => {
+        const card = document.createElement('div');
+        card.className = 'project-card pinv-card';
+        card.dataset.pinv = inv.project_id;
+        const who = (inv.inviter_email || '').split('@')[0] || 'Quelqu\'un';
+        const seriesBadge = (inv.project_type === 'series')
+            ? `<div class="p-series-line"><span class="p-series-badge" title="Projet série">📺 ${inv.episode_count || 0} épisode${(inv.episode_count || 0) > 1 ? 's' : ''}</span></div>`
+            : '';
+        card.innerHTML = `<span class="p-role-badge pinv-badge">INVITATION</span>`
+            + `<div><div class="p-title">${Utils.escape(inv.project_title || 'Projet sans titre')}</div>`
+            + seriesBadge
+            + `<div class="p-meta">${Utils.escape(who)} vous invite en tant que ${Invitations._roleLabel(inv.role)}</div>`
+            + `<div class="pinv-hint">Survolez la carte pour découvrir le projet</div></div>`
+            + `<div class="pinv-actions">`
+            + `<button class="btn btn--primary btn--sm">Accepter</button>`
+            + `<button class="select-outline">Refuser</button>`
+            + `</div>`;
+        const btns = card.querySelectorAll('.pinv-actions button');
+        btns[0].onclick = (e) => { e.stopPropagation(); Invitations.hidePreview(); Invitations.accept(inv.project_id); };
+        btns[1].onclick = (e) => { e.stopPropagation(); Invitations.hidePreview(); Invitations.refuse(inv.project_id); };
+        // Survol (bureau) ET clic (tactile) : meme panneau d'apercu.
+        card.addEventListener('mouseenter', () => Invitations.showPreview(card, inv));
+        card.addEventListener('mouseleave', () => Invitations.hidePreview());
+        card.addEventListener('click', (e) => {
+            if(e.target.closest('.pinv-actions')) return;
+            if(Invitations._previewFor === inv.project_id) Invitations.hidePreview();
+            else Invitations.showPreview(card, inv);
+        });
+        return card;
+    },
+
+    // ——— Apercu de la fiche de presentation ———
+    // Seule la fiche Presentation est exposee cote serveur (my_pending_invitations) :
+    // ni casting, ni planning, ni budget, ni scenario. L'affiche n'est pas montree,
+    // le stockage des images etant ferme aux non-membres.
+    _previewEl: null,
+    _previewFor: null,
+
+    showPreview: (card, inv) => {
+        Invitations.hidePreview();
+        const p = inv.presentation || {};
+        const tags = ['genre', 'format', 'duration', 'productionType']
+            .map(k => (p[k] || '').trim()).filter(Boolean);
+        const pitch = (p.description || '').trim();
+        const synopsis = (p.synopsisShort || '').trim();
+        let body = '';
+        if(tags.length) body += `<div class="pinv-pv-tags">${tags.map(t => `<span class="pinv-pv-tag">${Utils.escape(t)}</span>`).join('')}</div>`;
+        if(pitch) body += `<div class="pinv-pv-label">Présentation</div><div class="pinv-pv-block">${Utils.escape(pitch)}</div>`;
+        if(synopsis) body += `<div class="pinv-pv-label">Synopsis</div><div class="pinv-pv-block">${Utils.escape(synopsis)}</div>`;
+        if(!body) body = `<div class="pinv-pv-empty">La fiche de présentation de ce projet n'est pas encore remplie.</div>`;
+        const el = document.createElement('div');
+        el.className = 'pinv-preview';
+        el.innerHTML = `<h4>${Utils.escape(inv.project_title || 'Projet sans titre')}</h4>`
+            + `<div class="pinv-pv-sub">Invitation de ${Utils.escape((inv.inviter_email || '').split('@')[0] || 'quelqu\'un')}</div>`
+            + body;
+        el.addEventListener('mouseenter', () => clearTimeout(Invitations._hideT));
+        el.addEventListener('mouseleave', () => Invitations.hidePreview());
+        document.body.appendChild(el);
+        // Positionnement : a droite de la carte si la place existe, sinon a gauche, sinon dessous.
+        const r = card.getBoundingClientRect();
+        const w = el.offsetWidth, h = el.offsetHeight;
+        let left = r.right + 12;
+        if(left + w > window.innerWidth - 12) left = r.left - w - 12;
+        if(left < 12) left = Math.max(12, Math.min(r.left, window.innerWidth - w - 12));
+        let top = r.top;
+        if(top + h > window.innerHeight - 12) top = Math.max(12, window.innerHeight - h - 12);
+        el.style.left = left + 'px';
+        el.style.top = top + 'px';
+        Invitations._previewEl = el;
+        Invitations._previewFor = inv.project_id;
+    },
+
+    _hideT: null,
+    hidePreview: () => {
+        clearTimeout(Invitations._hideT);
+        if(Invitations._previewEl) { Invitations._previewEl.remove(); Invitations._previewEl = null; }
+        Invitations._previewFor = null;
+    },
+
+    // Accepte : bascule ma ligne en 'accepted' cote serveur, puis rafraichit la grille.
     accept: async (projectId) => {
         if(!projectId || !state.currentUser) return;
         const inv = (Invitations._pending || []).find(i => i.project_id === projectId);
         try {
             const { error } = await supabase.rpc('invitation_accept', { p_project: projectId });
             if(error) throw error;
-            Utils.toast('Invitation acceptee' + (inv && inv.project_title ? ' : ' + inv.project_title : '') + ' !', 'success');
+            Utils.toast('Invitation acceptée' + (inv && inv.project_title ? ' : ' + inv.project_title : '') + ' !', 'success');
         } catch(e) {
             Utils.toast('Impossible d\'accepter l\'invitation pour le moment.', 'error');
             console.warn('[Invitations] accept:', e && e.message);
             return;
         }
-        await Invitations.renderPending();
         try { if(typeof UIDashboard !== 'undefined') await UIDashboard.renderProjectList(); } catch(e) {}
     },
 
@@ -60892,7 +61196,7 @@ ${window.location.origin}${window.location.pathname}
         const titre = (inv && inv.project_title) || 'ce projet';
         const ok = await ConfirmModal.show({
             title: 'Refuser l\'invitation ?',
-            message: 'Vous n\'aurez pas acces a « ' + titre + ' ». La personne qui vous a invite pourra vous reinviter plus tard.',
+            message: 'Vous n\'aurez pas accès à « ' + Utils.escape(titre) + ' ». La personne qui vous a invité pourra vous réinviter plus tard.',
             icon: '📭',
             confirmText: 'Refuser',
             dangerous: true
@@ -60905,13 +61209,13 @@ ${window.location.origin}${window.location.pathname}
                 .eq('project_id', projectId)
                 .eq('email', state.currentUser.email.toLowerCase());
             if(error) throw error;
-            Utils.toast('Invitation refusee.', 'info');
+            Utils.toast('Invitation refusée.', 'info');
         } catch(e) {
             Utils.toast('Impossible de refuser l\'invitation pour le moment.', 'error');
             console.warn('[Invitations] refuse:', e && e.message);
             return;
         }
-        await Invitations.renderPending();
+        try { if(typeof UIDashboard !== 'undefined') await UIDashboard.renderProjectList(); } catch(e) {}
     }
 };
 
@@ -61806,6 +62110,10 @@ ${window.location.origin}${window.location.pathname}
           
           <h3>Plusieurs casquettes sur un projet</h3>
           <p>Tu invites une personne par son email ; elle rejoint le projet avec son profil unique. Tu peux aussi t'inviter toi-même dans un autre rôle — par exemple si tu montes un film et que tu y joues : ton projet te voit alors avec deux étiquettes (propriétaire ET acteur·ice). Parfait pour l'auto-distribution et les micro-budgets.</p>
+
+          <h3>L'invitation se refuse</h3>
+          <p>Inviter quelqu'un ne lui ouvre pas le projet d'office. L'invitation apparaît sur son tableau de bord sous la forme d'une <strong>carte grisée</strong> : en la survolant, la personne découvre la fiche de présentation du film (genre, format, durée, pitch, synopsis) et rien d'autre — ni casting, ni planning, ni budget. Elle choisit alors d'<strong>accepter</strong> ou de <strong>refuser</strong>.</p>
+          <p>Tant qu'elle n'a pas répondu, elle apparaît « ⏳ En attente de réponse » dans <em>Gérer les accès &gt; Invités</em>. Le bouton <strong>Révoquer</strong> te sert à annuler l'invitation, et rien ne t'empêche de réinviter plus tard une personne qui avait refusé.</p>
           
           <h3>Temps réel</h3>
           <p>Les modifications se synchronisent instantanément entre tous les membres connectés. Si quelqu'un modifie une scène pendant que tu la regardes, tu vois le changement apparaître.</p>
@@ -61818,7 +62126,7 @@ ${window.location.origin}${window.location.pathname}
           
           <h3>Gestion des permissions</h3>
           <p>Le propriétaire peut à tout moment <strong>changer le rôle</strong> d'un membre (editor → viewer par exemple), ou <strong>retirer l'accès</strong>. Il peut aussi définir des permissions fines par onglet (qui peut éditer quoi).</p>
-          <div class="tuto-tip"><strong>⚠️ Contrôle :</strong> Seul le propriétaire peut supprimer le projet ou changer les permissions. Les autres membres peuvent quitter le projet à tout moment.</div>
+          <div class="tuto-tip"><strong>⚠️ Contrôle :</strong> Seul le propriétaire peut supprimer le projet ou changer les permissions. Les autres membres peuvent le quitter à tout moment : sur la carte du projet, au tableau de bord, la corbeille est remplacée par une porte 🚪. Quitter ne supprime rien — le propriétaire peut réinviter.</div>
         `
       },
       {
