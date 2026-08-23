@@ -337,6 +337,31 @@ Cocher [x] au fil de l'eau ; ne pas changer la numerotation en cours de route.
    Tutorial.openTabHelp, pointe vers les CHAPITRES DU GUIDE et non vers les
    permissions : elle est legitime, ne pas la fusionner.
 
+   LECTURE SEULE VISUELLE (23 aout) — sur un onglet en 👁️, les champs restaient
+   CLIQUABLES et MODIFIABLES. Rien ne s'enregistrait, mais on pouvait saisir
+   n'importe quoi et en faire une capture d'ecran credible. Nouvelle classe
+   .is-perm-readonly (Permissions.applyReadOnlyUI, posee en fin de switchTab,
+   APRES le rendu de l'onglet sinon la banniere serait effacee) : pointer-events
+   coupes sur champs, listes, boutons et zones editables, plus une banniere bleue
+   « Lecture seule ». Volontairement SANS opacite reduite, contrairement au verrou
+   collaboratif : on reste sur un onglet en lecture pour LIRE, parfois longtemps.
+
+   PRISE EN COMPTE EN DIRECT (23 aout) — un changement d'acces s'applique sans
+   rechargement. Deux canaux, parce que les droits vivent a deux endroits :
+   - memberPermissions vit dans le projet, donc il arrive par la synchro temps
+     reel ; StoreRealtime.applyRemote appelle Permissions.refreshLive des que la
+     cle est presente dans le lot recu ;
+   - role et can_invite vivent dans project_members, table SANS temps reel : ils
+     sont relus par refreshLive, rappelee par le battement LockManager._tick
+     (60 s). C'est le filet pour « Peut inviter », ecrit en base sans sauvegarde
+     du projet, donc sans aucun evenement.
+   Si l'onglet ouvert vient d'etre ferme, on bascule sur le premier onglet encore
+   autorise avec un message — sinon on resterait sur un contenu devenu interdit.
+   ATTENTION AUX RAPPELS PERIODIQUES : refreshLive tourne toutes les minutes.
+   applyReadOnlyUI sort sans toucher au DOM si l'etat n'a pas bouge, et onTabEnter
+   n'est rappelee que si le droit d'ecrire a REELLEMENT change — sinon on
+   relacherait et reprendrait le verrou chaque minute pour rien.
+
 7b-bis. VERROU COLLABORATIF PAR ONGLET — TRAITE EN PARTIE (23 aout).
    CE QU'IL FAUT AVOIR COMPRIS AVANT DE ROUVRIR : la frontiere des domaines
    n'est pas un choix d'ergonomie, c'est celle de la SAUVEGARDE. StoreSave.save
@@ -5831,6 +5856,19 @@ body.presentation-mode .presentation-bar {
   .tab-content.is-domain-locked .script-editor-box { pointer-events: none; opacity: .65; }
   .tab-content.is-domain-locked .dlock-banner,
   .tab-content.is-domain-locked .dlock-banner button { pointer-events: auto; opacity: 1; }
+  /* v570 — Lecture seule par PERMISSION (👁️), distincte du verrou collaboratif.
+     Pas d'opacite reduite ici : on reste sur cet onglet pour LIRE, parfois longtemps.
+     Les champs restent lisibles mais ne repondent plus au clic. */
+  .tab-content.is-perm-readonly input,
+  .tab-content.is-perm-readonly textarea,
+  .tab-content.is-perm-readonly select,
+  .tab-content.is-perm-readonly button,
+  .tab-content.is-perm-readonly [contenteditable],
+  .tab-content.is-perm-readonly .script-editor-box { pointer-events: none; }
+  .tab-content.is-perm-readonly .perm-ro-banner,
+  .tab-content.is-perm-readonly .perm-ro-banner button { pointer-events: auto; }
+  .perm-ro-banner { background: rgba(37,99,235,.12); border: 1px solid rgba(37,99,235,.4); color: #2563eb; padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; }
+
   .dlock-banner { background: rgba(217,119,6,.16); border: 1px solid rgba(217,119,6,.45); color: #c77f0a; padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; }
   .miniview-btn { border: 1px solid var(--border); background: transparent; color: inherit; border-radius: 6px; padding: 3px 8px; cursor: pointer; font-size: 12px; }
   .miniview-btn:hover { background: var(--panel-bg); }
@@ -15654,6 +15692,10 @@ const LockManager = {
       _tick: async () => {
           // Filet de sécurité : réévaluer présence/verrous même si un événement s'est perdu
           try { LockManager.onPresenceChange(); } catch(e) {}
+          // v570 : et relire nos droits — « Peut inviter » et un changement de rôle
+          // s'écrivent dans project_members SANS sauvegarde du projet, donc sans
+          // événement temps réel côté projet.
+          try { if(typeof Permissions !== 'undefined') Permissions.refreshLive(); } catch(e) {}
           try { if(state._renderPresenceNow) state._renderPresenceNow(); } catch(e) {}
           try { if(typeof GlobalPresence !== 'undefined') GlobalPresence.renderBadges(); } catch(e) {}
           // Exclusion après 3 min d'inactivité : UNIQUEMENT dans l'éditeur d'un projet ET à plusieurs réellement connectés.
@@ -16165,6 +16207,10 @@ const LockManager = {
               if(activeTab === 'tab-stats') Stats.render();
               if(activeTab === 'tab-actors') UI.renderDataTab('actors', els.actorContainer);
           } else { UI.renderAll(); }
+          // v570 : une mise a jour distante peut porter memberPermissions (le proprietaire
+          // vient de changer les acces) — on relit nos droits et on reconstruit la
+          // navigation, sans rechargement de page.
+          try { if(typeof Permissions !== 'undefined' && val && val.memberPermissions) Permissions.refreshLive(); } catch(e) {}
       },
 
       // Filet de sécurité : recharge le projet quand le diff n'a pas pu être transmis
@@ -21836,6 +21882,9 @@ initCategoriesDragDrop: () => {
           if(tabName === 'orgs') { Orgs.render(); Orgs.syncFromUniverse().then(() => Orgs.render()); }
           if(tabName === 'presentation') Presentation.init();
           if(typeof LockManager !== 'undefined') LockManager.onTabEnter(tabName);
+          // v570 : verrouillage visuel des champs si l'onglet n'est qu'en lecture (👁️).
+          // Apres le rendu de l'onglet, sinon la banniere serait effacee par celui-ci.
+          if(typeof Permissions !== 'undefined') Permissions.applyReadOnlyUI();
           Router.sync(true);
       },
       
@@ -37852,6 +37901,91 @@ const Permissions = {
         const sec = Permissions.sectionOf(tabName);
         if(!sec) return true;
         return Permissions.canEdit(sec);
+    },
+
+    // v570 — Verrouille VISUELLEMENT l'onglet actif quand il n'est qu'en lecture (👁️).
+    // Sans cela les champs restaient cliquables et modifiables : rien n'etait
+    // enregistre, mais on pouvait saisir n'importe quoi et en faire une capture.
+    applyReadOnlyUI: () => {
+        try {
+            const active = document.querySelector('.tab-content.active');
+            if(!active) return;
+            const tabName = active.id.replace('tab-', '');
+            const ro = !Permissions.tabWritable(tabName);
+            const dejaPose = active.classList.contains('is-perm-readonly');
+            const banniere = active.querySelector('.perm-ro-banner');
+            // Appelee aussi au battement : ne rien remuer si l'etat n'a pas bouge.
+            if(ro === dejaPose && !!banniere === ro) return;
+            if(banniere) banniere.remove();
+            active.classList.toggle('is-perm-readonly', ro);
+            if(ro) {
+                const b = document.createElement('div');
+                b.className = 'perm-ro-banner';
+                b.textContent = '👁 Lecture seule — vous n\'avez pas les droits de modification sur cet onglet.';
+                active.prepend(b);
+            }
+        } catch(e) { console.warn('[Permissions] applyReadOnlyUI:', e && e.message); }
+    },
+
+    // v570 — Prise en compte SANS RECHARGEMENT d'un changement d'accès. Le rôle et le
+    // droit d'inviter ne vivent pas dans le projet mais dans project_members : ils ne
+    // remontent donc pas par la synchro temps réel du projet, il faut les relire.
+    // Appelée après chaque mise à jour distante du projet et par le battement des verrous.
+    _liveBusy: false,
+    refreshLive: async () => {
+        if(Permissions._liveBusy || !state.currentProjectId || !state.currentUser) return;
+        if(state.currentRole === 'owner') { Permissions.applyReadOnlyUI(); return; }
+        Permissions._liveBusy = true;
+        try {
+            const { data } = await supabase
+                .from('project_members')
+                .select('role, can_invite')
+                .eq('project_id', state.currentProjectId)
+                .eq('email', state.currentUser.email.toLowerCase())
+                .eq('status', 'accepted');
+            if(data && data.length) {
+                const roleOrder = { owner: 3, editor: 2, viewer: 1 };
+                const best = data.slice().sort((a, b) => (roleOrder[b.role] || 0) - (roleOrder[a.role] || 0))[0];
+                if(best.role && best.role !== state.currentRole) {
+                    state.currentRole = best.role;
+                    Utils.toast('Vos droits sur ce projet viennent de changer.', 'info', 5000);
+                }
+                state.currentCanInvite = (best.role === 'owner') || data.some(m => m.can_invite === true);
+            }
+        } catch(e) { console.warn('[Permissions] refreshLive:', e && e.message); }
+        Permissions._liveBusy = false;
+        Permissions.applyAccessUI();
+    },
+
+    // Reconstruit la navigation selon les accès courants, et évacue l'onglet ouvert
+    // s'il vient d'être fermé (sinon on resterait sur un contenu devenu interdit).
+    applyAccessUI: () => {
+        try { UIHidden.applyHiddenTabs(); } catch(e) {}
+        try { UIHidden.applyHiddenCategories(); } catch(e) {}
+        const active = document.querySelector('.tab-content.active');
+        const tabName = active ? active.id.replace('tab-', '') : null;
+        if(tabName && !Permissions.tabVisible(tabName)) {
+            const cats = (typeof UI !== 'undefined' && UI.categoryTabs) || {};
+            let cible = null;
+            for(const c in cats) {
+                const t = cats[c].find(x => Permissions.tabVisible(x) && !(UI.hiddenTabs || []).includes(x)
+                    && (state.currentProjectType === 'series' || (x !== 'episodes' && x !== 'seasons')));
+                if(t) { cible = t; break; }
+            }
+            Utils.toast('Cet onglet ne vous est plus accessible.', 'warning', 5000);
+            if(cible) UI.switchTab(cible);
+            return;
+        }
+        Permissions.applyReadOnlyUI();
+        // Ne re-declencher la logique de verrou que si le droit d'ecrire a REELLEMENT
+        // change : cette fonction tourne aussi au battement (toutes les minutes), et
+        // rappeler onTabEnter a vide relacherait puis reprendrait le verrou pour rien.
+        try {
+            if(typeof LockManager !== 'undefined' && tabName
+               && LockManager.currentEditable !== Permissions.tabWritable(tabName)) {
+                LockManager.onTabEnter(tabName);
+            }
+        } catch(e) {}
     },
 
     _emailByKey: {},
