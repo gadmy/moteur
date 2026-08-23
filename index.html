@@ -25,7 +25,7 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 
 ================================================================================
-                    RESTE À FAIRE — ÉTAT AU DÉMARRAGE (v568)
+                    RESTE À FAIRE — ÉTAT AU DÉMARRAGE (v570)
 ================================================================================
 
 FEUILLE DE SERVICE — CHANTIER REFERME ET VALIDE
@@ -78,13 +78,16 @@ Cocher [x] au fil de l'eau ; ne pas changer la numerotation en cours de route.
     ~500 lignes retirees, zero changement de comportement, node --check OK.
     Resources.link a ete lue avant suppression : embryon de liaison
     Ressources <-> Depouillement, voir etape 7d.
-    SOUS-SYSTEME MORT CONFIRME (a traiter en lot dedie, PAS encore fait) :
-    Contracts.renderForm, renderPersonList, selectPerson, preview,
-    generatePDF, showMissingInfoWarning, sendMissingInfoEmail,
-    forceGeneratePDF (ancienne modale de generation de contrat, integralement
-    remplacee par le Hub). Confirme mort par recherche croisee le 20 aout ;
-    non retire par prudence, la chaine n'a pas ete cartographiee jusqu'au
-    bout (CSS .contracts-* associe a verifier aussi).
+    SOUS-SYSTEME MORT : SUPPRIME LE 20 AOUT (lot dedie, apres l'etape 6).
+    Contracts.closeModal, renderForm, renderPersonList, selectPerson, preview,
+    generatePDF, showMissingInfoWarning, sendMissingInfoEmail, forceGeneratePDF,
+    doGeneratePDF (ancienne modale de generation de contrat, integralement
+    remplacee par le Hub) + tout ContractsTemplates + les 3 proprietes d'etat
+    (currentType / selectedPerson / selectedPersonType) + le CSS associe.
+    ~940 lignes. Verifie avant coupe : le Hub a ses propres textes
+    (Contracts.defaultBody) et sa propre generation PDF (Contracts.exportPDF),
+    il ne piochait rien dans l'ancien. .contracts-modal / -box / -header et
+    .expense-btn-edit sont VIVANTES et conservees.
     RAPPEL FAUX POSITIFS (audit CSS futur) : classes Leaflet / marker-cluster
     (posees par les libs a l'execution), ccol-dot-* et ctr-badge-* (construites
     par concatenation du statut) ne sont PAS du code mort malgre l'absence de
@@ -171,21 +174,26 @@ Cocher [x] au fil de l'eau ; ne pas changer la numerotation en cours de route.
     retirees. ~150 lignes en moins au total sur ce lot. node --check OK,
     zero candidat mort restant a la reverification complete.
 
-[ ] ETAPE 5 — CARTE OSM, dette rouverte en v567, cause inconnue. Diagnostic
-    EN LIGNE obligatoire.
-   La carte Leaflet de la feuille reste vide UNE FOIS EN LIGNE : l'explication
-   « bloquees en file:// » est donc fausse et la piste est a reprendre a zero.
-   A regarder : la console du navigateur (requetes de tuiles en erreur), la CSP,
-   le referrer envoye a tile.openstreetmap.org (leur politique d'usage refuse
-   certains referrers vides), et le fait que le conteneur soit bien dimensionne
-   au moment du montage (Leaflet dessine gris si la carte est montee dans un
-   conteneur masque — invalidateSize).
+[x] ETAPE 5 (close le 20 aout) — CARTE OSM. Fausse alerte. Retestee en ligne
+    (deux lieux, deux jours de tournage differents) : la carte s'affiche
+    correctement. Une explication et un message d'avertissement existaient
+    deja dans le code depuis une session anterieure (« tuiles bloquees :
+    normal en ouvrant le fichier en local, la carte s'affiche une fois le
+    site en ligne ») ; la note de la v567 affirmant le contraire (carte vide
+    meme en ligne) etait donc probablement issue d'un test fait par erreur
+    en local (file://), pas d'une vraie regression en ligne. Rien corrige,
+    rien a corriger.
 
-[ ] ETAPE 6 — GARDES SUR LES DEUX SAUVEGARDES FRAGILES, ET DETTE DE FOND.
-   Version courte a faire : poser sur PublicProfile.saveFormToCurrentProfile
-   et ExpensesBudget.saveCategoryBudget la meme garde _loadedFor que
-   Presentation.save et TitlePage.save (« si mon formulaire n'a pas ete
-   charge pour le projet courant, je n'ecris rien »).
+[x] ETAPE 6 (faite et validee au navigateur le 20 aout) — GARDES SUR LES DEUX
+   SAUVEGARDES FRAGILES, ET DETTE DE FOND.
+   FAIT : PublicProfile.saveFormToCurrentProfile porte la garde _loadedFor
+   (marquee sur l'ID du profil par loadProfileToForm, pas sur son rang dans la
+   liste, qui bouge a chaque suppression). ExpensesBudget.saveCategoryBudget
+   porte une garde adaptee a son cas — sa modale est fabriquee a la volee par
+   editCategoryBudget, donc _budgetModalFor retient le PROJET ET LA CATEGORIE
+   d'ouverture, plus un test d'existence du champ : refus si l'un des deux a
+   change ou si la modale n'est plus a l'ecran (elle plantait sec sur un champ
+   absent). Refus = console.warn et rien d'ecrit, comme Presentation.save.
    La dette de fond, toujours valable :
    26 fonctions reconstruisent une partie de l'etat depuis les champs d'un
    ecran : PublicProfile.saveFormToCurrentProfile (54 lectures),
@@ -199,15 +207,17 @@ Cocher [x] au fil de l'eau ; ne pas changer la numerotation en cours de route.
    ecrire UN champ depuis ailleurs, ecriture ciblee sur state.data, puis
    Store.save(), puis rechargement du formulaire concerne s'il existe. Modeles :
    Presentation.setLogo et Presentation.saveLegalModal.
-   GARDES DEJA POSEES : Presentation.save et TitlePage.save sortent sans rien
-   ecrire si leur formulaire n'a pas ete charge POUR LE PROJET COURANT
-   (_loadedFor compare a state.currentProjectId).
-   Les deux plus exposees restent PublicProfile.saveFormToCurrentProfile et
-   ExpensesBudget.saveCategoryBudget : aucune garde.
+   GARDES DEJA POSEES (les 4 fonctions les plus exposees sont couvertes) :
+   Presentation.save, TitlePage.save, PublicProfile.saveFormToCurrentProfile,
+   ExpensesBudget.saveCategoryBudget. Les 22 autres restent sans garde : elles
+   ne sont dangereuses que si on les appelle depuis un autre ecran — c'est une
+   regle de conduite, pas un chantier.
 
 [ ] ETAPE 7 — CHANTIERS PRODUIT (ordre a decider ensemble) :
 
 7a. STRIPE / ENTITE LEGALE / FEATURE GATING (chantier payant)
+   >>> EN PAUSE — PAS D'ACTUALITE POUR L'INSTANT (decide le 23 aout).
+   Ne pas ouvrir ce chantier tant que Guillaume ne le rouvre pas explicitement.
    Prerequis juridique inscrit en v561 : le domicile de l'editeur est
    volontairement omis des mentions legales, a trancher AVANT le passage au
    payant (la LCEN le demande en principe pour un editeur personne physique a
@@ -447,6 +457,18 @@ DOUBLONS ET INCOHERENCES ASSUMES
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v569 (23 Août 2026) — Gardes sur les sauvegardes fragiles (étape 6) + suppression de l'ancien système de contrats + « Mes contrats » remis en service + éditeur de contrat en pleine largeur
+  - ÉTAPE 6 DU PLAN — GARDES SUR LES DEUX SAUVEGARDES FRAGILES. PublicProfile.saveFormToCurrentProfile reconstruit le profil entier depuis 54 champs du formulaire ; appelée avant que loadProfileToForm l'ait rempli, ou après un changement de profil, elle écrasait un profil rempli avec un formulaire vide ou avec les données du précédent. Elle porte maintenant la garde _loadedFor, marquée par loadProfileToForm sur l'ID du profil et non sur son rang dans la liste (le rang bouge à chaque suppression). ExpensesBudget.saveCategoryBudget relève d'un cas différent : sa modale est fabriquée à la volée par editCategoryBudget, donc _budgetModalFor retient le PROJET ET LA CATÉGORIE d'ouverture, plus un test d'existence du champ — refus si l'un des deux a changé (le budget du projet A partait dans le projet B après une bascule) ou si la modale n'est plus à l'écran (elle plantait sec sur un champ absent). Refus = console.warn et rien d'écrit, comme Presentation.save. Quatre des 26 sauvegardes qui relisent le DOM sont désormais couvertes ; les 22 autres restent une règle de conduite, pas un chantier.
+  - ANCIEN SYSTÈME DE CONTRATS SUPPRIMÉ (lot dédié laissé ouvert par v568) — 894 lignes. La chaîne des 10 fonctions de l'ancienne modale de génération (closeModal, renderForm, renderPersonList, selectPerson, preview, generatePDF, showMissingInfoWarning, sendMissingInfoEmail, forceGeneratePDF, doGeneratePDF), tout le bloc ContractsTemplates et ses 4 modèles juridiques (CDDU, prestation, autorisation d'image, accord de bénévolat), les 3 propriétés d'état devenues orphelines (currentType / selectedPerson / selectedPersonType), l'export de ContractsTemplates dans le return de l'IIFE, et 165 lignes de CSS. VÉRIFIÉ AVANT COUPE, dans les deux sens : le Hub a ses propres textes (Contracts.defaultBody) et sa propre génération PDF (Contracts.exportPDF), il ne piochait rien dans l'ancien ; aucune fonction supprimée n'était appelée hors de la grappe morte, aucun appel du Hub ne pointe désormais dans le vide. DEUX PIÈGES ÉVITÉS : .contract-btn-secondary partageait sa règle CSS avec .expense-btn-edit, VIVANTE (boutons Dupliquer / Modifier de chaque fiche de dépense) — règle conservée seule ; .contracts-modal, .contracts-box et .contracts-header portent un nom trompeur mais sont utilisées par le Hub — conservées.
+  - « MES CONTRATS » REMIS EN SERVICE, EN FICHES — la fenêtre listant tous les contrats du projet existait et fonctionnait mais était devenue INATTEIGNABLE : openList n'était plus appelée que par elle-même (duplicate la rouvre, removeContract la rafraîchit), aucun bouton de l'interface n'y menait. Vérifié sur le fichier d'avant les coupes du jour : elle était déjà orpheline, ce n'est pas une régression du nettoyage — la porte d'entrée avait disparu lors d'un remaniement du Hub sans que le code suive. Bouton « 📁 Mes contrats » ajouté dans la barre d'outils du Hub, à droite des tris. La liste en lignes (.ctr-list-row et son CSS) est remplacée par le format compact commun aux onglets Comédiens / Techniciens / Ressources : .compact-cards-grid, pastille ronde portant l'icône du type, titre, nom de la partie, badge de statut, et trois ronds au survol (PDF, dupliquer, supprimer). Nouveau Contracts.openFromList : ferme la fenêtre avant de basculer sur l'éditeur, sinon elle masquait le contrat qu'on venait d'ouvrir.
+  - ÉDITEUR DE CONTRAT EN PLEINE LARGEUR — la 3e colonne du Hub était écrasée entre deux colonnes de 300 px figées. Deux paliers : à l'ouverture d'un contrat (.ccol-wrap-editing) les colonnes passent à 200 et 190 px ; dès que la souris entre dans l'éditeur ou que le curseur s'y place (.ccol-wrap-wide, posé en JS par Contracts._bindWide / _setWide sur mouseover et focusin délégués au host), la colonne du milieu s'efface et celle de gauche se réduit à une bande de 62 px d'avatars, TOUJOURS CLIQUABLE — c'est le seul chemin de retour, la survoler rétablit la vue normale. État conservé d'un rendu à l'autre (renderHub reconstruit le HTML, donc la classe est réappliquée) et remis à plat dès que _editing repasse à null. Écouteurs posés une seule fois sur le host via un drapeau _wideBound, les enfants étant recréés à chaque rendu.
+  - STRIPE / FEATURE GATING MIS EN PAUSE — l'étape 7a est marquée « pas d'actualité pour l'instant » dans le plan, à ne pas rouvrir sans demande explicite.
+  - NAVIGATION AU SURVOL RETIRÉE (retour utilisateur) — l'aperçu de page au survol d'un onglet et le déroulé de catégorie au survol de la souris sont débranchés : tout se fait au clic. La barre de sous-onglets d'une catégorie active reste ouverte en permanence (elle se repliait à hauteur zéro et ne s'ouvrait qu'au survol de la zone des catégories — cause trouvée en CSS, pas en JS). Le timer de 2 s qui affichait la barre temporairement après un changement de catégorie est retiré, devenu contradictoire.
+  - AUDIT COMPLET DU FICHIER — première passe demandée : code mort, doublons, cohérence du RESTE À FAIRE, liens entre onglets et feuille de service, problèmes CSS/JS, plan de travail en 8 étapes. A servi de feuille de route au reste de la version.
+  - CGU BLOQUANTES ET TRACÉES — la fenêtre CGU gagne une case à cocher (J'ai pris connaissance…), décochée à chaque ouverture, qui verrouille le bouton Fermer tant qu'elle n'est pas cochée. L'acceptation est écrite dans user_profiles (terms_accepted / terms_accepted_at, colonnes déjà existantes depuis v560) via Terms.confirm, avec repli sur un insert si la fiche n'existait pas. Terms.checkAndGate, appelé dans Auth.showDashboard avant Router.boot, BLOQUE l'accès au tableau de bord tant que l'acceptation n'est pas enregistrée en base (comptes admin exemptés via Admin.isAdmin, comptes déjà acceptés — notamment toute nouvelle inscription — non impactés). Panneau Admin > Utilisateurs : nouvelle colonne CGU (✅/❌, date au survol), select('*') déjà suffisant. Cas non gate vérifié : ouverture de la modale depuis l'écran d'inscription (compte pas encore créé) ferme sans tenter d'écrire en base.
+  - GRAND NETTOYAGE DU CODE MORT — trois vagues successives. 15 fonctions jamais appelées supprimées (Presentation.autocomplete + selectAutocomplete, Resources.link — embryon de liaison Ressources/Dépouillement, lu avant suppression —, Resources.getOwnerText, Contracts.openModal, Planning.getBreakdownItemsForPerson, FDSLive._toggleRaw, CardModal.updateField, ScriptReport.generatePDF, Icons.render/emoji, Contacts.isInContacts, Tour.goTo, Universe.closeProjects, ProjectFolders.all, Weather.renderCard) + doublon 'orgs':'equipe' + CSS de l'ancienne feuille de service pré-WYSIWYG. Puis 78 façades de délégation mortes (posées par prudence lors des découpages de juin) supprimées une à une ; leur retrait a mis à nu 9 fonctions supplémentaires devenues orphelines à leur tour (menus déroulants UITheme, drag sidebar ScriptEditorContinuous, doublons de rendu UniverseFan/UniverseMap), toutes vérifiées puis retirées, sauf le sous-système Contracts.renderForm et sa chaîne (confirmé mort, laissé en l'état par prudence — bloc plus enchevêtré, à traiter en lot dédié). Enfin le menu « onglets masqués » du bandeau classique (inatteignable depuis le retrait du mode Classique) et sa cascade de 7 façades orphelines. BUG RÉEL CORRIGÉ AU PASSAGE (pas du code mort) : les boutons radio « Rapports de script » du modal Export appelaient app.Actions.expToggleSrScenes, qui n'existait que sur ActionsExport — échec silencieux depuis leur création, la liste des scènes ne se peuplait jamais. Deux façades ajoutées. Second bug latent corrigé : UI.switchTab ciblait le bouton actif par position dans une liste figée de 15 noms (il manquait moodboard et scriptreport) plutôt que par data-tab — invisible tant que le mode Classique était inaccessible, mais aurait pu allumer le mauvais bouton après un réordonnancement par glisser-déposer.
+  - RETRAIT DU MODE DE NAVIGATION CLASSIQUE — le menu Options d'affichage ne propose plus que Mode Focus et Catégories (repère non cliquable, seul mode désormais). Retirés : entrée Classique, section POSITION, section MODE (défilant/adaptatif), une ligne de texte parasite qui s'affichait littéralement dans le menu. Migration automatique : les 4 lectures de fmp_nav_mode forcent 'categories' même si l'ancienne valeur stockée est 'classic', sans migration SQL. DÉCOUVERTE : #tabsNav (bandeau plat) ne peut pas être retiré du DOM sans casser cinq systèmes qui le lisent en coulisses même en mode Catégories (switchTab, PresentMode, raccourci clavier Ctrl+flèches, LockManager, Tour) — cartographié, chantier de démantèlement complet mis en pause (étape 4-bis du plan), le bandeau restant invisible et inoffensif en l'état.
+  - CARTE OSM — fausse alerte. La dette rouverte en v567 (« la carte reste vide même en ligne ») ne s'est pas reproduite : retestée en ligne sur deux lieux et deux jours de tournage différents, la carte s'affiche normalement. Le test de v567 avait probablement été fait par erreur en local (file://) sans s'en rendre compte. Rien corrigé, rien à corriger.
 v567 (20 Août 2026) — Convocations individuelles rebranchées (saisie jetée en silence depuis v566) + Pick-up et PAT rendus aux techniciens
   - CONVOCATIONS INDIVIDUELLES MORTES DEPUIS v566 — les cases Conv., Pick-up, HMC, PAT et les consignes individuelles de la feuille portent des identifiants « call-<champ>-<type>-<personId> », pas « edit-* ». FDSLive.get / push ne traduisaient que le préfixe « edit- » et retombaient sinon sur un getElementById : ces identifiants visaient les inputs du pane Formulaire, supprimé en v566. La saisie partait donc dans le vide, et les valeurs déjà enregistrées ne s'affichaient plus — alors que le PDF continuait de les imprimer. D'où le symptôme trompeur : les jours créés avant v566 sortaient remplis, les nouveaux vides, ce qui faisait passer la panne pour un problème de colonne manquante. Nouveau FDSLive.callKey + CALL_PROPS (time → callTime, pickup → pickupTime, hmc → hmcTime, pat → patTime, notes → notes), lu par PlanningTransport.model.get et écrit par model.ensure. Découpage sur les trois premiers tirets seulement, un projet importé pouvant porter des identifiants de personne contenant des tirets (vérifié hors navigateur sur neuf formes, dont « x-y-z » et les rejets « call-time-other-9 » / « call-bogus-actor-9 »).
   - LEÇON INSCRITE EN TÊTE — le repli sur le DOM masquait l'absence de traducteur au lieu de la signaler. C'est exactement le mécanisme qui avait déjà vidé callSheet au retrait du pane : un champ qui n'existe plus ne provoque pas d'erreur, il rend une chaîne vide.
@@ -3614,6 +3636,21 @@ body.focus-mode .tab-content.active { padding-top: 60px; }
 .focus-toolbar .focus-tab-title { font-weight: 600; font-size: 1rem; color: var(--text-main); }
 .focus-toolbar .focus-project-title { font-size: 0.85rem; color: var(--text-sec); margin-left: 10px; }
 
+/* v570 — Invitations recues en attente d'acceptation (tableau de bord) */
+#pending-invitations { margin: 0 0 22px; display: flex; flex-direction: column; gap: 10px; }
+.pinv-card { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 10px;
+  background: var(--panel-bg); border: 1px solid var(--primary); animation: slideUp 0.3s ease; }
+.pinv-icon { font-size: 1.5rem; flex-shrink: 0; }
+.pinv-body { flex: 1; min-width: 0; }
+.pinv-title { font-weight: 600; color: var(--text-main); }
+.pinv-meta { font-size: 0.85rem; color: var(--text-sec); margin-top: 2px; }
+.pinv-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.pinv-refuse { padding: 6px 14px; font-size: 0.85rem; }
+@media (max-width: 640px) {
+  .pinv-card { flex-wrap: wrap; }
+  .pinv-actions { width: 100%; justify-content: flex-end; }
+}
+
 /* Cards projet dashboard */
 .project-card, .new-project-card { animation: slideUp 0.3s ease; }
 .project-grid .project-card:nth-child(1) { animation-delay: 0.05s; }
@@ -5014,170 +5051,11 @@ body.dark-mode .scene-status-badge.final { background: #1b3d1f; color: #81c784; 
     margin: 0;
     font-size: 1.3rem;
 }
-.contracts-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 20px;
-}
-.contracts-tabs {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 15px;
-}
-.contracts-tab {
-    padding: 10px 20px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--bg);
-    cursor: pointer;
-    font-weight: 500;
-    transition: all 0.2s;
-}
-.contracts-tab:hover {
-    border-color: var(--primary);
-}
-.contracts-tab.active {
-    background: var(--primary);
-    color: white;
-    border-color: var(--primary);
-}
-.contract-form {
-    display: grid;
-    gap: 15px;
-}
-.contract-form-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 15px;
-}
-.contract-form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-}
-.contract-form-group label {
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: var(--text-sec);
-}
-.contract-form-group input,
-.contract-form-group select,
-.contract-form-group textarea {
-    padding: 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--input-bg);
-    color: var(--text-main);
-    font-size: 0.95rem;
-}
-.contract-preview {
-    background: white;
-    color: #333;
-    padding: 30px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    font-family: 'Times New Roman', serif;
-    font-size: 12pt;
-    line-height: 1.6;
-    max-height: 500px;
-    overflow-y: auto;
-}
-.contract-preview h1 {
-    text-align: center;
-    font-size: 16pt;
-    margin-bottom: 20px;
-}
-.contract-preview h2 {
-    font-size: 12pt;
-    margin-top: 20px;
-    margin-bottom: 10px;
-    border-bottom: 1px solid #333;
-}
-.contract-preview .signature-zone {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 40px;
-}
-.contract-preview .signature-box {
-    width: 45%;
-    text-align: center;
-}
-.contract-preview .signature-line {
-    border-top: 1px solid #333;
-    margin-top: 60px;
-    padding-top: 5px;
-}
-.contract-actions {
-    display: flex;
-    gap: 10px;
-    justify-content: flex-end;
-    margin-top: 20px;
-    padding-top: 20px;
-    border-top: 1px solid var(--border);
-}
-.contract-btn {
-    padding: 12px 25px;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: bold;
-    font-size: 0.95rem;
-    transition: all 0.2s;
-}
-.contract-btn-primary {
-    background: var(--primary);
-    color: white;
-}
-.contract-btn-primary:hover {
-    opacity: 0.9;
-}
-.contract-btn-secondary, .expense-btn-edit {
+/* Bouton secondaire des depenses (dupliquer / modifier) : le seul rescape
+   du CSS de l'ancienne modale de contrat, supprimee en v569. */
+.expense-btn-edit {
     background: var(--border);
     color: var(--text-main);
-}
-.contract-btn-secondary:hover {
-    background: var(--text-sec);
-    color: var(--panel-bg);
-}
-.person-select-list {
-    display: grid;
-    gap: 10px;
-    max-height: 300px;
-    overflow-y: auto;
-}
-.person-select-item {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-    padding: 12px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-.person-select-item:hover {
-    border-color: var(--primary);
-}
-.person-select-item.selected {
-    border-color: var(--primary);
-    background: rgba(79, 70, 229, 0.1);
-}
-.person-select-item .status-badge {
-    font-size: 0.75rem;
-    padding: 3px 8px;
-    border-radius: 4px;
-    background: var(--border);
-}
-.person-select-item .status-badge.intermittent {
-    background: #E3F2FD;
-    color: #1565C0;
-}
-.person-select-item .status-badge.micro-entrepreneur {
-    background: #FFF3E0;
-    color: #E65100;
 }
 
 /* ========== STATISTIQUES AVANCÉES ========== */
@@ -5887,12 +5765,10 @@ body.presentation-mode .presentation-bar {
   .ctr-cs th, .ctr-cs td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
   .ctr-cs th { background: #f3f3f3; font-weight: 700; }
   .ctr-cs td:first-child { font-weight: 600; white-space: nowrap; }
-  .ctr-list { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; max-height: 70vh; overflow-y: auto; }
-  .ctr-list-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); flex-wrap: wrap; }
-  .ctr-list-info { flex: 1 1 220px; min-width: 0; }
-  .ctr-list-title { font-weight: 700; }
-  .ctr-list-meta { font-size: 0.8rem; color: var(--text-sec); margin-top: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .ctr-list-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ctr-list { padding: 14px 16px; max-height: 70vh; overflow-y: auto; }
+  .ctr-list-count { font-size: 0.8rem; font-weight: 600; color: var(--text-sec); background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1px 8px; margin-left: 6px; vertical-align: middle; }
+  .ctr-card-badge { margin-top: 6px; }
+  .chub-all-btn { margin-left: auto; }
   .ctr-badge { padding: 1px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; color: #fff; }
   .ctr-badge-draft { background: #9e9e9e; }
   .ctr-badge-to_sign { background: #f59e0b; }
@@ -5900,8 +5776,30 @@ body.presentation-mode .presentation-bar {
   .ctr-badge-archived { background: #6b7280; }
   .ccol-wrap { display: flex; gap: 14px; height: calc(100vh - 230px); min-height: 440px; }
   .ccol { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; min-height: 0; }
-  .ccol-1 { flex: 0 0 300px; }
-  .ccol-2 { flex: 0 0 300px; }
+  .ccol-1 { flex: 0 0 300px; transition: flex-basis .18s ease; }
+  .ccol-2 { flex: 0 0 300px; transition: flex-basis .18s ease; }
+  /* Editeur ouvert : les deux colonnes de gauche se resserrent pour laisser
+     la place au contrat. Elles restent lisibles et cliquables. */
+  .ccol-wrap-editing .ccol-1 { flex: 0 0 200px; }
+  .ccol-wrap-editing .ccol-2 { flex: 0 0 190px; }
+  /* Travail en cours dans l'editeur (souris ou curseur dedans) : le contrat
+     prend presque toute la page. La colonne de gauche se reduit a une bande
+     d'avatars, toujours cliquable pour changer de fiche ; la colonne du
+     milieu s'efface. Survoler la bande de gauche rend la vue normale. */
+  .ccol-wrap-wide .ccol-1 { flex: 0 0 62px; align-items: center; }
+  .ccol-wrap-wide .ccol-2 { flex: 0 0 0px; padding: 0; border-width: 0; opacity: 0; overflow: hidden; }
+  .ccol-wrap-wide .ccol-1 .chub-toolbar,
+  .ccol-wrap-wide .ccol-1 .ccol-item-name,
+  .ccol-wrap-wide .ccol-1 .ccol-dots,
+  .ccol-wrap-wide .ccol-1 .ccol-group-head span:last-child,
+  .ccol-wrap-wide .ccol-1 .ccol-group-count { display: none; }
+  .ccol-wrap-wide .ccol-1 .ccol-list { width: 100%; align-items: center; }
+  .ccol-wrap-wide .ccol-1 .ccol-item { justify-content: center; padding: 5px; gap: 0; }
+  .ccol-wrap-wide .ccol-1 .ccol-group-body { align-items: center; }
+  @media (max-width: 1200px) {
+    .ccol-wrap-editing .ccol-1 { flex: 0 0 170px; }
+    .ccol-wrap-editing .ccol-2 { flex: 0 0 160px; }
+  }
   .ccol-3 { flex: 1 1 auto; min-width: 0; padding: 0; overflow: hidden; }
   .ccol-3 .ctr-ed { display: flex; flex-direction: column; height: 100%; }
   .ccol-3 .ctr-editor-header { padding: 12px 14px; border-bottom: 1px solid var(--border); }
@@ -6201,7 +6099,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv568</p>
+      <p>vv570</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -6623,6 +6521,8 @@ body.presentation-mode .presentation-bar {
     <!-- HUB CENTRAL -->
     <div id="hub-content" class="hub-main">
       <h2 style="margin:0 0 20px;">📁 Mes Projets</h2>
+      <!-- v570 : invitations recues en attente d'acceptation (Invitations.renderPending) -->
+      <div id="pending-invitations" style="display:none;"></div>
       <div id="project-list" class="project-grid"></div>
     </div>
   </div>
@@ -14397,8 +14297,8 @@ showDashboard: async () => {
     });
     } // fin guard focusKeyListenerAttached
 
-    // V84: Vérifier les invitations en attente
-    Invitations.checkPendingInvitations();
+    // v570 : afficher les invitations en attente d'acceptation sur le tableau de bord
+    Invitations.renderPending();
     // V1.4.2: Initialiser les notifications
     Notifications.init();
     // V2.1.2: Initialiser module Admin
@@ -16319,10 +16219,13 @@ const LockManager = {
           
           // I5e : récupérer les projets où je suis membre AVEC le profil actif
           // (fallback sur email si profile_id est NULL pour les anciens projets)
+          // v570 : les invitations en attente d'acceptation n'apparaissent PAS dans la liste
+          // des projets (elles sont proposees separement par Invitations.renderPending).
           let membershipQuery = supabase
               .from('project_members')
               .select('project_id, role, profile_id')
-              .eq('email', myEmail);
+              .eq('email', myEmail)
+              .eq('status', 'accepted');
           
           const { data: memberships, error: memberError } = await membershipQuery;
           
@@ -16810,7 +16713,8 @@ const LockManager = {
                   .from('project_members')
                   .select('role, profile_id')
                   .eq('project_id', id)
-                  .eq('email', myEmail);
+                  .eq('email', myEmail)
+                  .eq('status', 'accepted'); // v570 : une invitation en attente n'ouvre rien
               
               // Vérifier si owner
               const { data: project, error: projError } = await supabase
@@ -19479,6 +19383,8 @@ initCategoriesDragDrop: () => {
         // B3 P1 : Projets d'abord
         document.getElementById('hub-content').style.display = '';
         await UIDashboard.renderProjectList();
+        // v570 : invitations recues en attente d'acceptation
+        try { if(typeof Invitations !== 'undefined') await Invitations.renderPending(); } catch(e) {}
     },
     
     // T6 : menu "Deplacer vers..." sur une carte projet (liste arborescente des dossiers).
@@ -35899,6 +35805,10 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     // ============================================================
     // Charge un profil dans le formulaire
     loadProfileToForm: (profile) => {
+        // Marque le formulaire comme peuple POUR CE PROFIL : saveFormToCurrentProfile
+        // reconstruit le profil entier depuis le DOM et n'a de sens qu'apres ce
+        // remplissage. Voir la garde posee en tete de cette fonction.
+        PublicProfile._loadedFor = profile?.id || null;
         // Casquettes (facettes) : cocher depuis profile.facets (migration douce si absent)
         profile.facets = PublicProfile._normalizeFacets(profile.facets, { profile_type: profile.type, is_public: profile.is_public });
         document.getElementById('profile-type-actor').checked = profile.facets.actor.enabled;
@@ -36094,6 +36004,17 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     // Sauvegarde le formulaire dans le profil actuel
     saveFormToCurrentProfile: () => {
         if(PublicProfile.currentProfileIndex < 0) return;
+        
+        // GARDE : cette fonction reconstruit le profil depuis les 54 champs du
+        // formulaire de l'onglet Profil. Appelee avant que loadProfileToForm ne
+        // l'ait rempli — ou apres un changement de profil —, elle ecrirait des
+        // champs vides ou ceux du profil precedent par-dessus les donnees
+        // reelles. Pour ecrire un champ isole depuis ailleurs : ecriture ciblee
+        // sur l'objet profil, puis PublicProfile.saveCurrentProfile().
+        if(PublicProfile._loadedFor !== PublicProfile.profiles[PublicProfile.currentProfileIndex]?.id) {
+            console.warn('[PublicProfile] saveFormToCurrentProfile() ignoré : formulaire non chargé pour ce profil.');
+            return;
+        }
         
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
         
@@ -49643,11 +49564,6 @@ const orgGroups = (state.data.groups || []).filter(g => g.type === 'org');
 if(typeof window !== 'undefined') window.Orgs = Orgs;
 
 const Contracts = {
-    // ===================== ÉTAT & MODALE =====================
-    currentType: 'image',
-    selectedPerson: null,
-    selectedPersonType: null,
-
     // ===================== STORE CONTRATS (Lot 0 : modèle + persistance) =====================
     // Un contrat = { id, partyType, partyId, partyName, type, status, title, blocks[], createdAt, updatedAt }
     // partyType : 'actor' | 'crew' | 'org'   —   type : 'image' | 'cddu' | 'prestation' | 'benevole'
@@ -49809,7 +49725,8 @@ const Contracts = {
         const sortMode = Contracts._hubSort || 'alpha';
         const toolbar = '<div class="chub-toolbar"><span class="chub-toolbar-label">Trier :</span>'
             + '<button class="chub-sort-btn ' + (sortMode === 'alpha' ? 'active' : '') + '" onclick="app.Contracts.setHubSort(\'alpha\')">A → Z</button>'
-            + '<button class="chub-sort-btn ' + (sortMode === 'metier' ? 'active' : '') + '" onclick="app.Contracts.setHubSort(\'metier\')">Par métier</button></div>';
+            + '<button class="chub-sort-btn ' + (sortMode === 'metier' ? 'active' : '') + '" onclick="app.Contracts.setHubSort(\'metier\')">Par métier</button>'
+            + '<button class="chub-sort-btn chub-all-btn" onclick="app.Contracts.openList()">📁 Mes contrats</button></div>';
         const dotHTML = (p) => {
             const cs = (Contracts.store.forParty(p.ref.t, p.id) || []);
             if(!cs.length) return '<span class="ccol-dots"><span class="ccol-dot ccol-dot-none" title="Aucun contrat">0</span></span>';
@@ -49864,17 +49781,46 @@ const Contracts = {
         } else {
             col2 = '<div class="ccol-empty">Sélectionne une fiche à gauche pour voir ou créer ses contrats.</div>';
         }
-        host.innerHTML = '<div class="ccol-wrap">'
+        host.innerHTML = '<div class="ccol-wrap' + (Contracts._editing ? ' ccol-wrap-editing' : '') + '">'
             + '<div class="ccol ccol-1">' + toolbar + '<div class="ccol-list">' + listHTML + '</div></div>'
             + '<div class="ccol ccol-2">' + col2 + '</div>'
             + '<div class="ccol ccol-3" id="ccol-3"></div>'
             + '</div>';
         const ed = Contracts._editing ? Contracts.store.get(Contracts._editing) : null;
+        Contracts._bindWide(host);
         if(ed && Contracts._ctx) Contracts.renderEditor(ed);
         else { const c3 = document.getElementById('ccol-3'); if(c3) c3.innerHTML = '<div class="ccol-empty" style="padding:50px 20px;">Sélectionne un contrat (ou crée-en un) pour l\u2019éditer ici.</div>'; }
     },
 
     _hubSort: 'alpha',
+    // Mode large : le contrat occupe presque toute la page pendant qu'on
+    // travaille dessus. Bascule au survol (ou au curseur) de la 3e colonne ;
+    // revient a la normale des qu'on survole la bande de gauche.
+    _wide: false,
+    _setWide: (on) => {
+        if(Contracts._wide === on) return;
+        Contracts._wide = on;
+        const w = document.querySelector('#contracts-hub .ccol-wrap');
+        if(w) w.classList.toggle('ccol-wrap-wide', on);
+    },
+    _bindWide: (host) => {
+        // Etat conserve d'un rendu a l'autre (renderHub reconstruit le HTML)
+        const w = host.querySelector('.ccol-wrap');
+        if(w && Contracts._wide && Contracts._editing) w.classList.add('ccol-wrap-wide');
+        if(!Contracts._editing) Contracts._wide = false;
+        if(host._wideBound) return;
+        host._wideBound = true;
+        const inEditor = (el) => !!(el && el.closest && el.closest('.ccol-3'));
+        const inSides = (el) => !!(el && el.closest && (el.closest('.ccol-1') || el.closest('.ccol-2')));
+        host.addEventListener('mouseover', (e) => {
+            if(!Contracts._editing) return;
+            if(inEditor(e.target)) Contracts._setWide(true);
+            else if(inSides(e.target)) Contracts._setWide(false);
+        });
+        host.addEventListener('focusin', (e) => {
+            if(Contracts._editing && inEditor(e.target)) Contracts._setWide(true);
+        });
+    },
     setHubSort: (mode) => { if(Contracts._editing) Contracts._persist(); Contracts._hubSort = mode; Contracts.renderHub(); },
     _sel: null,
     _pickerOpen: false,
@@ -50323,37 +50269,54 @@ const Contracts = {
     _typeLabel: { image: '📸 Droit à l\u2019image', cddu: '📋 CDDU', prestation: '📄 Prestation', benevole: '❤️ Bénévole' },
     _statusLabel: { draft: 'Brouillon', to_sign: 'À signer', signed: 'Signé', archived: 'Archivé' },
 
+    // Fenetre « Mes contrats » : tous les contrats du projet en cartes
+    // compactes, meme format que Comediens / Techniciens / Ressources.
+    // Clic sur la carte = ouvrir dans l'editeur. Ronds au survol : PDF,
+    // dupliquer, supprimer.
     openList: () => {
         const old = document.getElementById('ctr-list'); if(old) old.remove();
+        const esc = Utils.escape;
         const all = (Contracts.store.all() || []).slice().sort((a,b) => (b.updatedAt||'').localeCompare(a.updatedAt||''));
         const modal = document.createElement('div');
         modal.className = 'contracts-modal'; modal.id = 'ctr-list';
         modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
+        const typeIcon = { image: '📸', cddu: '📋', prestation: '📄', benevole: '❤️' };
         let rows;
         if(!all.length) {
-            rows = '<div style="padding:30px; text-align:center; color:var(--text-sec);">Aucun contrat enregistré pour le moment.</div>';
+            rows = '<div class="ccol-empty" style="padding:40px 20px;">Aucun contrat enregistré sur ce projet.</div>';
         } else {
-            rows = all.map(ct => {
+            rows = '<div class="compact-cards-grid">' + all.map(ct => {
                 const tlabel = Contracts._typeLabel[ct.type] || ct.type;
                 const slabel = Contracts._statusLabel[ct.status] || ct.status;
-                const title = ct.title ? Utils.escape(ct.title) : (tlabel + ' — ' + Utils.escape(ct.partyName || '—'));
-                return '<div class="ctr-list-row">'
-                    + '<div class="ctr-list-info"><div class="ctr-list-title">' + title + '</div>'
-                    + '<div class="ctr-list-meta">' + tlabel + ' · ' + Utils.escape(ct.partyName || '—') + ' <span class="ctr-badge ctr-badge-' + (ct.status||'draft') + '">' + slabel + '</span></div></div>'
-                    + '<div class="ctr-list-actions">'
-                    + '<button class="chub-sort-btn" onclick="app.Contracts.openExisting(\'' + ct.id + '\')">Ouvrir</button>'
-                    + '<button class="chub-sort-btn" onclick="app.Contracts.exportPDF(\'' + ct.id + '\')">PDF</button>'
-                    + '<button class="chub-sort-btn" onclick="app.Contracts.duplicate(\'' + ct.id + '\')">Dupliquer</button>'
-                    + '<button class="chub-sort-btn" onclick="app.Contracts.removeContract(\'' + ct.id + '\')">🗑</button>'
-                    + '</div></div>';
-            }).join('');
+                const title = ct.title ? esc(ct.title) : tlabel;
+                const actions = '<div class="compact-card-actions">'
+                    + '<button class="edit-btn" title="Exporter en PDF" onclick="event.stopPropagation(); app.Contracts.exportPDF(\'' + ct.id + '\')">📄</button>'
+                    + '<button class="merge-btn" title="Dupliquer" onclick="event.stopPropagation(); app.Contracts.duplicate(\'' + ct.id + '\')">📋</button>'
+                    + '<button class="delete-btn" title="Supprimer" onclick="event.stopPropagation(); app.Contracts.removeContract(\'' + ct.id + '\')">🗑️</button>'
+                    + '</div>';
+                return '<div class="compact-card" onclick="app.Contracts.openFromList(\'' + ct.id + '\')">'
+                    + actions
+                    + '<div class="compact-card-photo">' + (typeIcon[ct.type] || '📄') + '</div>'
+                    + '<div class="compact-card-name">' + title + '</div>'
+                    + '<div class="compact-card-role">' + esc(ct.partyName || '—') + '</div>'
+                    + '<div class="ctr-card-badge"><span class="ctr-badge ctr-badge-' + (ct.status || 'draft') + '">' + slabel + '</span></div>'
+                    + '</div>';
+            }).join('') + '</div>';
         }
-        modal.innerHTML = '<div class="contracts-box" style="max-width:640px;">'
-            + '<div class="contracts-header"><h3>📁 Mes contrats</h3><button class="history-close-btn" onclick="document.getElementById(\'ctr-list\').remove()">✕</button></div>'
+        modal.innerHTML = '<div class="contracts-box" style="max-width:760px;">'
+            + '<div class="contracts-header"><h3>📁 Mes contrats <span class="ctr-list-count">' + all.length + '</span></h3><button class="history-close-btn" onclick="document.getElementById(\'ctr-list\').remove()">✕</button></div>'
             + '<div class="ctr-list">' + rows + '</div>'
             + '</div>';
         document.body.appendChild(modal);
     },
+
+    // Ouvrir un contrat depuis la fenetre « Mes contrats » : on ferme la
+    // fenetre avant de basculer sur l'editeur du Hub.
+    openFromList: (id) => {
+        const m = document.getElementById('ctr-list'); if(m) m.remove();
+        Contracts.openExisting(id);
+    },
+
     openExisting: (id) => {
         const ct = Contracts.store.get(id); if(!ct) return;
         const list = ct.partyType === 'actor' ? (state.data.actors||[]) : (ct.partyType === 'org' ? (state.data.orgs||[]) : (state.data.crew||[]));
@@ -50417,786 +50380,15 @@ const Contracts = {
         } finally {
             if(tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
         }
-    },
-
-    // Contracts.openModal (45 l.) retirée v569, jamais appelée : ancienne
-    // modale de génération de contrat, remplacée par le Hub de contrats
-    // (Contracts.newContract / openExisting / le tableau ccol-*).
-    // NOTE : closeModal / switchTab / renderForm plus bas ne sont plus
-    // appelées QUE depuis ce bloc supprimé ou entre elles — sous-système
-    // probablement mort dans son ensemble, à ré-auditer dans un lot dédié.
-    closeModal: () => {
-        const modal = document.getElementById('contracts-modal');
-        if(modal) modal.remove();
-        Contracts.selectedPerson = null;
-        Contracts.selectedPersonType = null;
-    },
-    
-    // Contracts.switchTab retirée v569 : orpheline en cascade depuis le
-    // retrait d'openModal (étape 2), son seul appelant.
-    
-    // ===================== FORMULAIRE & SÉLECTION =====================
-    renderForm: (type) => {
-        const actors = (state.data.actors || []).filter(a => a.name);
-        const crew = (state.data.crew || []).filter(c => c.name);
-        const project = state.data.presentation || {};
-        
-        let personListHTML = '';
-        
-        if(type === 'cddu') {
-            // Filtrer intermittents
-            const intermittents = [
-                ...actors.filter(a => a.professionalStatus === 'intermittent').map(a => ({...a, _type: 'actor'})),
-                ...crew.filter(c => c.professionalStatus === 'intermittent').map(c => ({...c, _type: 'crew'}))
-            ];
-            personListHTML = Contracts.renderPersonList(intermittents, 'intermittent');
-        } else if(type === 'prestation') {
-            // Filtrer micro-entrepreneurs
-            const micros = [
-                ...actors.filter(a => a.professionalStatus === 'micro-entrepreneur').map(a => ({...a, _type: 'actor'})),
-                ...crew.filter(c => c.professionalStatus === 'micro-entrepreneur').map(c => ({...c, _type: 'crew'}))
-            ];
-            personListHTML = Contracts.renderPersonList(micros, 'micro-entrepreneur');
-        } else if(type === 'benevole') {
-            // Filtrer bénévoles
-            const benevoles = [
-                ...actors.filter(a => a.collabType === 'benevole').map(a => ({...a, _type: 'actor'})),
-                ...crew.filter(c => c.collabType === 'benevole').map(c => ({...c, _type: 'crew'}))
-            ];
-            personListHTML = Contracts.renderPersonList(benevoles, 'benevole');
-        } else {
-            // Droit à l'image - tous
-            const all = [
-                ...actors.map(a => ({...a, _type: 'actor'})),
-                ...crew.map(c => ({...c, _type: 'crew'}))
-            ];
-            personListHTML = Contracts.renderPersonList(all, 'all');
-        }
-        
-        const today = new Date().toISOString().split('T')[0];
-        
-        return `
-            <div class="contract-form">
-                <h4 class="mb-15-m0">1. Sélectionner la personne</h4>
-                <div class="person-select-list">
-                    ${personListHTML || '<p style="color:var(--text-sec);text-align:center;padding:20px;">Aucune personne avec ce statut. Configurez le statut dans les fiches Comédien·ne·s ou Équipe.</p>'}
-                </div>
-                
-                <h4 style="margin:20px 0 15px;">2. Informations du contrat</h4>
-                <div class="contract-form-row">
-                    <div class="contract-form-group">
-                        <label>Date de début</label>
-                        <input type="date" id="contract-date-start" value="${project.dateShootingStart || today}">
-                    </div>
-                    <div class="contract-form-group">
-                        <label>Date de fin</label>
-                        <input type="date" id="contract-date-end" value="${project.dateShootingEnd || today}">
-                    </div>
-                    <div class="contract-form-group">
-                        <label>Lieu de travail</label>
-                        <input type="text" id="contract-lieu" value="${project.city || ''}" placeholder="Ville de tournage">
-                    </div>
-                </div>
-                ${type === 'cddu' ? `
-                <div class="contract-form-row">
-                    <div class="contract-form-group">
-                        <label>Convention collective</label>
-                        <select id="contract-convention">
-                            <option value="Production cinématographique">Production cinématographique</option>
-                            <option value="Production audiovisuelle">Production audiovisuelle</option>
-                            <option value="Spectacle vivant">Spectacle vivant</option>
-                            <option value="Prestation technique">Prestation technique</option>
-                        </select>
-                    </div>
-                    <div class="contract-form-group">
-                        <label>Durée totale estimée (heures)</label>
-                        <input type="number" id="contract-heures" value="35" placeholder="35">
-                    </div>
-                </div>
-                ` : ''}
-                ${type === 'image' ? `
-                <div class="contract-form-row">
-                    <div class="contract-form-group">
-                        <label>Type d'utilisation</label>
-                        <select id="contract-usage">
-                            <option value="Tous supports">Tous supports (cinéma, TV, web, etc.)</option>
-                            <option value="Cinéma uniquement">Cinéma uniquement</option>
-                            <option value="Web uniquement">Web uniquement</option>
-                            <option value="Usage interne">Usage interne uniquement</option>
-                        </select>
-                    </div>
-                    <div class="contract-form-group">
-                        <label>Durée de cession</label>
-                        <select id="contract-duree-cession">
-                            <option value="illimitée">Durée illimitée</option>
-                            <option value="5 ans">5 ans</option>
-                            <option value="10 ans">10 ans</option>
-                            <option value="durée du projet">Durée du projet</option>
-                        </select>
-                    </div>
-                </div>
-                ` : ''}
-                
-                <div class="contract-actions">
-                    <button class="contract-btn contract-btn-secondary" onclick="app.Contracts.closeModal()">Annuler</button>
-                    <button class="contract-btn contract-btn-primary" onclick="app.Contracts.preview()">👁️ Aperçu</button>
-                    <button class="contract-btn contract-btn-primary" onclick="app.Contracts.generatePDF()">📄 Générer PDF</button>
-                </div>
-            </div>
-        `;
-    },
-    
-    renderPersonList: (persons, statusFilter) => {
-        if(!persons || persons.length === 0) return '';
-        
-        return persons.map((p, i) => {
-            const statusLabel = p.professionalStatus === 'intermittent' ? 'Intermittent·e' : 
-                               p.professionalStatus === 'micro-entrepreneur' ? 'Micro-entrepreneur·e' : '';
-            const statusClass = p.professionalStatus || '';
-            const typeLabel = p._type === 'actor' ? '🎭 Comédien·ne' : '🎬 Technicien·ne';
-            const isSelected = Contracts.selectedPerson && Contracts.selectedPerson.id === p.id;
-            
-            return `
-                <div class="person-select-item ${isSelected ? 'selected' : ''}" onclick="app.Contracts.selectPerson('${p._type}', '${p.id}')">
-                    <div class="flex-1">
-                        <strong>${Utils.escape(p.name)}</strong>
-                        <div style="font-size:0.85rem;color:var(--text-sec);">${typeLabel} ${p.role ? '- ' + p.role : ''}</div>
-                    </div>
-                    ${statusLabel ? `<span class="status-badge ${statusClass}">${statusLabel}</span>` : ''}
-                </div>
-            `;
-        }).join('');
-    },
-    
-    selectPerson: (type, id) => {
-        const list = type === 'actor' ? state.data.actors : state.data.crew;
-        Contracts.selectedPerson = list.find(p => p.id === id);
-        Contracts.selectedPersonType = type;
-        
-        document.querySelectorAll('.person-select-item').forEach(item => {
-            item.classList.remove('selected');
-        });
-        event.currentTarget.classList.add('selected');
-    },
-    
-    preview: () => {
-        if(!Contracts.selectedPerson) {
-            Utils.toast('Veuillez sélectionner une personne', 'warning');
-            return;
-        }
-        
-        const html = Contracts.generateContractHTML();
-        
-        const previewModal = document.createElement('div');
-        previewModal.className = 'contracts-modal';
-        previewModal.onclick = (e) => { if(e.target === previewModal) previewModal.remove(); };
-        
-        previewModal.innerHTML = `
-            <div class="contracts-box" style="max-width:800px;">
-                <div class="contracts-header">
-                    <h3>👁️ Aperçu du contrat</h3>
-                    <button class="history-close-btn" onclick="this.closest('.contracts-modal').remove()">✕</button>
-                </div>
-                <div class="contracts-content">
-                    <div class="contract-preview">${html}</div>
-                    <div class="contract-actions">
-                        <button class="contract-btn contract-btn-secondary" onclick="this.closest('.contracts-modal').remove()">Fermer</button>
-                        <button class="contract-btn contract-btn-primary" onclick="app.Contracts.generatePDF()">📄 Générer PDF</button>
-                    </div>
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(previewModal);
-    },
-    
-    // ===================== GÉNÉRATION HTML (contrat & bénévole) =====================
-    generateContractHTML: (...a) => ContractsTemplates.generateContractHTML(...a),
-    generateBenevoleHTML: (...a) => ContractsTemplates.generateBenevoleHTML(...a),
-    
-    // ===================== PDF & INFOS MANQUANTES =====================
-    generatePDF: () => {
-        if(!Contracts.selectedPerson) {
-            Utils.toast('Veuillez sélectionner une personne', 'warning');
-            return;
-        }
-        
-        // Vérifier les infos manquantes selon le type de contrat
-        const p = Contracts.selectedPerson;
-        const type = Contracts.currentType;
-        const missing = [];
-        
-        if(!p.address) missing.push('Adresse');
-        
-        if(type === 'cddu') {
-            if(!p.numSecu) missing.push('N° Sécurité Sociale');
-            if(!p.numCongesSpectacles) missing.push('N° Congés Spectacles');
-        }
-        
-        if(type === 'prestation') {
-            if(!p.siret) missing.push('N° SIRET');
-        }
-        
-        if(missing.length > 0) {
-            Contracts.showMissingInfoWarning(missing);
-            return;
-        }
-        
-        Contracts.doGeneratePDF();
-    },
-    
-    // Afficher l'avertissement des infos manquantes
-    showMissingInfoWarning: (missing) => {
-        const p = Contracts.selectedPerson;
-        
-        const modal = document.createElement('div');
-        modal.id = 'contract-missing-modal';
-        modal.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); display:flex; justify-content:center; align-items:center; z-index: var(--z-modal);';
-        modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
-        
-        modal.innerHTML = `
-            <div class="modal-panel-450">
-                <h3 style="margin:0 0 20px; color:#FF9800;">⚠️ Informations manquantes</h3>
-                <p class="mb-15">Pour générer le contrat de <strong>${Utils.escape(p.name)}</strong>, il manque :</p>
-                <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:20px;">
-                    ${missing.map(m => `<span style="background:var(--danger); color:white; padding:5px 12px; border-radius:6px; font-size:0.9rem;">❌ ${m}</span>`).join('')}
-                </div>
-                ${p.email ? `<p style="color:var(--text-sec); margin-bottom:15px; font-size:0.9rem;">Vous pouvez envoyer un rappel à ${p.name} pour qu'il complète son profil.</p>` : `<p style="color:var(--text-sec); margin-bottom:15px; font-size:0.9rem;">Cette personne n'a pas d'email. Complétez sa fiche manuellement.</p>`}
-                <div style="display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap;">
-                    <button onclick="document.getElementById('contract-missing-modal').remove()" class="btn btn--outline">Annuler</button>
-                    ${p.email ? `<button onclick="app.Contracts.sendMissingInfoEmail()" class="btn btn--primary">📧 Envoyer rappel</button>` : ''}
-                    <button onclick="app.Contracts.forceGeneratePDF()" style="padding:10px 20px; background:#FF9800; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">📄 Générer quand même</button>
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(modal);
-    },
-    
-    // Envoyer email de rappel pour contrat
-    sendMissingInfoEmail: async () => {
-        const p = Contracts.selectedPerson;
-        if(!p || !p.email) return;
-        
-        const type = Contracts.currentType;
-        const issues = [];
-        
-        if(!p.address) issues.push('ton adresse');
-        if(type === 'cddu') {
-            if(!p.numSecu) issues.push('ton numéro de Sécurité Sociale');
-            if(!p.numCongesSpectacles) issues.push('ton numéro Congés Spectacles');
-        }
-        if(type === 'prestation' && !p.siret) {
-            issues.push('ton numéro SIRET');
-        }
-        
-        const projectTitle = state.data.title || 'Sans titre';
-        const contractType = type === 'cddu' ? 'CDDU' : (type === 'prestation' ? 'contrat de prestation' : 'autorisation droit à l\'image');
-        
-        try {
-            await supabase.functions.invoke('super-action', { body: {
-                to: p.email,
-                toName: p.name,
-                type: 'generic',
-                data: {
-                    subject: `🎬 ${projectTitle} - Infos requises pour ton contrat`,
-                    title: 'Informations requises pour ton contrat',
-                    message: `Salut ${Utils.escape(p.name)} ! 👋\n\nLe projet "${projectTitle}" a besoin de quelques informations pour générer ton ${contractType}.\n\nIl manque : ${issues.join(', ')}\n\nPeux-tu mettre à jour ton profil sur moteur.studio quand tu as 2 minutes ?\n\nMerci ! 🎬`
-                }
-            } });
-            
-            Utils.toast(`📧 Email envoyé à ${p.name}`, 'success');
-            document.getElementById('contract-missing-modal')?.remove();
-        } catch(e) {
-            console.error('Erreur envoi email:', e);
-            Utils.toast('Erreur lors de l\'envoi', 'error');
-        }
-    },
-    
-    // Forcer la génération malgré les infos manquantes
-    forceGeneratePDF: () => {
-        document.getElementById('contract-missing-modal')?.remove();
-        Contracts.doGeneratePDF();
-    },
-    
-    // Génération effective du PDF
-    doGeneratePDF: async () => {
-        const html = Contracts.generateContractHTML();
-        await LazyLib.load('pdfexport'); const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('p', 'mm', 'a4');
-        
-        // Titre selon le type
-        const titles = {
-            'cddu': 'CDDU',
-            'prestation': 'Contrat_Prestation',
-            'image': 'Autorisation_Image',
-            'benevole': 'Accord_Benevole'
-        };
-        
-        const fileName = `${titles[Contracts.currentType]}_${Contracts.selectedPerson.name.replace(/\s+/g, '_')}_${state.data.title?.replace(/\s+/g, '_') || 'Projet'}.pdf`;
-        
-        // Utiliser html2canvas si disponible, sinon méthode simple
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = `<div style="font-family: Times New Roman, serif; font-size: 11pt; padding: 20px; max-width: 170mm;">${html}</div>`;
-        tempDiv.style.position = 'absolute';
-        tempDiv.style.left = '-9999px';
-        document.body.appendChild(tempDiv);
-        
-        doc.html(tempDiv, {
-            callback: function(doc) {
-                doc.save(fileName);
-                document.body.removeChild(tempDiv);
-                Utils.toast('Contrat PDF généré !', 'success');
-                History.log('ADD', `Génération contrat ${Contracts.currentType.toUpperCase()} pour ${Contracts.selectedPerson.name}`);
-            },
-            x: 15,
-            y: 15,
-            width: 180,
-            windowWidth: 700
-        });
     }
+
+    // Ancienne modale de generation de contrat (openModal + sa chaine de
+    // 10 fonctions) et ses modeles ContractsTemplates : SUPPRIMES en v569.
+    // Integralement remplacee par le Hub de contrats (newContract /
+    // openExisting / openEditor / defaultBody / exportPDF), qui a ses propres
+    // textes et sa propre generation PDF.
 };
 
-const ContractsTemplates = {
-    generateContractHTML: () => {
-        const p = Contracts.selectedPerson;
-        const project = state.data.presentation || {};
-        const type = Contracts.currentType;
-        
-        const dateStart = document.getElementById('contract-date-start')?.value || '';
-        const dateEnd = document.getElementById('contract-date-end')?.value || '';
-        const lieu = document.getElementById('contract-lieu')?.value || '';
-        
-        const formatDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '___________';
-        
-        if(type === 'cddu') {
-            const convention = document.getElementById('contract-convention')?.value || 'Production cinématographique';
-            const heures = document.getElementById('contract-heures')?.value || '35';
-            const role = Contracts.selectedPersonType === 'actor' ? 
-                (state.data.characters?.find(c => c.actor_id === p.id)?.name || 'Comédien·ne') : 
-                (p.role || 'Technicien·ne');
-            
-            return `
-                <h1>CONTRAT À DURÉE DÉTERMINÉE D'USAGE (CDDU)</h1>
-                <p class="text-italic-center">Conformément aux articles L.1242-2, L.1242-7 et D.1242-1 du Code du travail</p>
-                
-                <h2>PRÉAMBULE – MOTIF DE RECOURS</h2>
-                <p>Le présent contrat est conclu dans le cadre d'un <strong>emploi à caractère temporaire</strong> 
-                pour lequel il est d'usage constant, dans le secteur de la production cinématographique et audiovisuelle, 
-                de ne pas recourir au contrat à durée indéterminée en raison de la nature de l'activité exercée 
-                et du caractère par nature temporaire de cet emploi (article D.1242-1 du Code du travail).<br>
-                <strong>Ce contrat n'a pas pour objet de pourvoir durablement un emploi lié à l'activité normale et permanente de l'entreprise.</strong></p>
-                
-                <h2>ENTRE LES SOUSSIGNÉ·E·S</h2>
-                <p><strong>L'Employeur :</strong><br>
-                Nom / Dénomination sociale : ${Utils.escape(project.producer) || '___________________'}<br>
-                Adresse : ${Utils.escape(project.addressLegal || project.city) || '___________________'}<br>
-                SIRET : ${Utils.escape(project.siret) || '___________________'}<br>
-                Code APE/NAF : ${Utils.escape(project.ape) || '___________________'}<br>
-                N° Licence entrepreneur spectacle : ${Utils.escape(project.licence) || '___________________'}<br>
-                Représenté·e par : ${Utils.escape(project.director) || '___________________'}, en qualité de ${Utils.escape(project.directorTitle) || '___________________'}</p>
-                
-                <p style="font-size:0.9em;color:#666;"><em>La Déclaration Préalable à l'Embauche (DPAE) a été effectuée auprès de l'URSSAF 
-                de ${Utils.escape(project.urssaf) || '___________________'} le ___________________.</em></p>
-                
-                <p><strong>Et le/la Salarié·e – Intermittent·e du spectacle :</strong><br>
-                Nom et prénom : ${Utils.escape(p.name)}<br>
-                Né·e le : ___________________ à ___________________<br>
-                Nationalité : ___________________<br>
-                Adresse : ${Utils.escape(p.address) || '___________________'}<br>
-                N° de Sécurité sociale : ${Utils.escape(p.numSecu) || '___________________'}<br>
-                N° Congés Spectacles : ${Utils.escape(p.numCongesSpectacles) || '___________________'}<br>
-                N° d'objet (Pôle emploi spectacle) : ___________________<br>
-                Emploi/métier : ${Utils.escape(role)}</p>
-                
-                <h2>ARTICLE 1 – OBJET DU CONTRAT</h2>
-                <p>Le présent contrat a pour objet d'engager le/la salarié·e en qualité de <strong>${Utils.escape(role)}</strong> 
-                pour le projet intitulé « <strong>${Utils.escape(state.data.title) || 'Sans titre'}</strong> ».</p>
-                
-                <h2>ARTICLE 2 – NATURE DU CONTRAT</h2>
-                <p>Le/la salarié·e est engagé·e dans le cadre d'un contrat à durée déterminée d'usage (CDDU), 
-                conformément aux articles L.1242-2 et suivants du Code du travail, spécifiques aux professions du spectacle.</p>
-                
-                <h2>ARTICLE 3 – DURÉE DU CONTRAT</h2>
-                <p>Le présent contrat prend effet le <strong>${formatDate(dateStart)}</strong> et se termine le <strong>${formatDate(dateEnd)}</strong>.<br>
-                Durée totale estimée : <strong>${heures} heures</strong>.</p>
-                
-                <h2>ARTICLE 4 – LIEU DE TRAVAIL</h2>
-                <p>Le lieu de travail principal est fixé à : <strong>${Utils.escape(lieu) || '___________________'}</strong>.<br>
-                Des déplacements pourront être nécessaires selon les besoins de la production.</p>
-                
-                <h2>ARTICLE 5 – RÉMUNÉRATION</h2>
-                <p>Le/la salarié·e percevra une rémunération brute de <strong>${Pay.gross(p) || '___'} ${p.rateCurrency || '€'}</strong> par ${p.rateType || 'jour'}.<br>
-                Cette rémunération est soumise aux cotisations sociales en vigueur.</p>
-                
-                <h2>ARTICLE 6 – CONVENTION COLLECTIVE</h2>
-                <p>Le présent contrat est régi par la convention collective de la <strong>${convention}</strong>.</p>
-                
-                <h2>ARTICLE 7 – CAISSE DE RETRAITE ET PRÉVOYANCE</h2>
-                <p>Caisse de retraite complémentaire : AUDIENS<br>
-                Adresse : 74 rue Jean Bleuzen, 92170 Vanves</p>
-                
-                <h2>ARTICLE 8 – CONGÉS SPECTACLES</h2>
-                <p>Les congés payés seront versés par la Caisse des Congés Spectacles.<br>
-                N° d'affiliation employeur : ${Utils.escape(project.congesSpectacles) || '___________________'}</p>
-                
-                <h2>ARTICLE 9 – ABATTEMENT POUR FRAIS PROFESSIONNELS</h2>
-                <p>L'emploi occupé ouvre droit à la déduction forfaitaire spécifique pour frais professionnels 
-                prévue par l'arrêté du 20 décembre 2002. Le/la salarié·e déclare :<br>
-                ☐ Accepter l'application de cet abattement<br>
-                ☐ Refuser l'application de cet abattement<br>
-                <em style="font-size:0.85em;color:#666;">Note : L'application de cet abattement a pour conséquence de minorer l'assiette 
-                des cotisations sociales et donc les droits sociaux (retraite, indemnités journalières, allocations chômage).</em></p>
-                
-                <h2>ARTICLE 10 – FIN DE CONTRAT</h2>
-                <p>À l'issue du contrat, l'employeur remettra au/à la salarié·e :<br>
-                • Un certificat de travail<br>
-                • Une attestation Pôle emploi (AEM – Attestation Employeur Mensuelle)<br>
-                • Un reçu pour solde de tout compte<br>
-                • Le dernier bulletin de salaire<br>
-                • Un certificat congés spectacles</p>
-                
-                <h2>ARTICLE 11 – JURIDICTION COMPÉTENTE</h2>
-                <p>En cas de litige relatif à l'exécution du présent contrat, les parties conviennent de rechercher 
-                une solution amiable. À défaut, le Conseil de Prud'hommes compétent sera celui du lieu de travail 
-                ou du domicile du/de la salarié·e.</p>
-                
-                <div class="signature-zone">
-                    <div class="signature-box">
-                        <p>Fait à ${Utils.escape(lieu) || '___________'}, le ${formatDate(new Date().toISOString())}</p>
-                        <p><strong>L'Employeur</strong></p>
-                        <p class="signature-line">Signature et cachet</p>
-                    </div>
-                    <div class="signature-box">
-                        <p>Lu et approuvé,</p>
-                        <p><strong>Le/La Salarié·e</strong></p>
-                        <p class="signature-line">${Utils.escape(p.name)}</p>
-                    </div>
-                </div>
-            `;
-        } else if(type === 'prestation') {
-            return `
-                <h1>CONTRAT DE PRESTATION DE SERVICES</h1>
-                
-                <h2>ENTRE LES SOUSSIGNÉ·E·S</h2>
-                <p><strong>Le/La Client·e :</strong><br>
-                Nom / Dénomination sociale : ${Utils.escape(project.producer) || '___________________'}<br>
-                Adresse : ${Utils.escape(project.addressLegal || project.city) || '___________________'}<br>
-                SIRET : ${Utils.escape(project.siret) || '___________________'}<br>
-                Représenté·e par : ${Utils.escape(project.director) || '___________________'}, en qualité de ${Utils.escape(project.directorTitle) || '___________________'}</p>
-                
-                <p><strong>Et le/la Prestataire (Micro-entrepreneur·e) :</strong><br>
-                Nom et prénom : ${Utils.escape(p.name)}<br>
-                Adresse : ${Utils.escape(p.address) || '___________________'}<br>
-                SIRET : ${Utils.escape(p.siret) || '___________________'}<br>
-                Activité : ${Utils.escape(p.role) || 'Prestation technique'}</p>
-                
-                <h2>ARTICLE 1 – OBJET DU CONTRAT</h2>
-                <p>Le/la prestataire s'engage à réaliser pour le/la client·e la mission suivante :<br>
-                <strong>${Utils.escape(p.role) || 'Prestation technique'}</strong> pour le projet « <strong>${Utils.escape(state.data.title) || 'Sans titre'}</strong> ».</p>
-                
-                <h2>ARTICLE 2 – DURÉE DE LA MISSION</h2>
-                <p>La mission débute le <strong>${formatDate(dateStart)}</strong> et se termine le <strong>${formatDate(dateEnd)}</strong>.</p>
-                
-                <h2>ARTICLE 3 – LIEU D'EXÉCUTION</h2>
-
-                <p>La prestation sera réalisée à : <strong>${Utils.escape(lieu) || '___________________'}</strong>.</p>
-                
-                <h2>ARTICLE 4 – RÉMUNÉRATION</h2>
-                <p>En contrepartie de la réalisation de la mission, le/la client·e versera au/à la prestataire la somme de :<br>
-                <strong>${Pay.gross(p) || '___'} ${p.rateCurrency || '€'} HT</strong> par ${p.rateType || 'jour'}.<br>
-                TVA non applicable, article 293 B du CGI (si applicable).</p>
-                
-                <h2>ARTICLE 5 – MODALITÉS DE PAIEMENT</h2>
-                <p>Le paiement sera effectué par virement bancaire sous 30 jours à réception de la facture.</p>
-                
-                <h2>ARTICLE 6 – INDÉPENDANCE</h2>
-                <p>Le/la prestataire exerce son activité de manière indépendante et n'est soumis·e à aucun lien de subordination. 
-                Il/elle organise librement son travail dans le respect des délais convenus.</p>
-                
-                <h2>ARTICLE 7 – ASSURANCE</h2>
-                <p>Le/la prestataire déclare :<br>
-                • Être assuré·e au titre de sa responsabilité civile professionnelle<br>
-                • N° de police : ___________________<br>
-                • Compagnie d'assurance : ___________________<br>
-                Et s'engage à maintenir cette assurance pendant toute la durée de la mission.</p>
-                
-                <h2>ARTICLE 8 – PROPRIÉTÉ INTELLECTUELLE</h2>
-                <p>Sauf accord contraire écrit, les créations réalisées dans le cadre de la présente mission 
-                (images, sons, textes, graphismes, etc.) sont la propriété exclusive du/de la client·e 
-                dès leur création et leur paiement intégral.<br><br>
-                Le/la prestataire cède au/à la client·e, à titre exclusif, l'ensemble des droits patrimoniaux 
-                attachés aux créations, pour tous supports et tous modes d'exploitation, pour le monde entier 
-                et pour toute la durée légale de protection des droits d'auteur.<br><br>
-                Cette cession inclut notamment les droits de reproduction, représentation, adaptation, 
-                traduction et exploitation commerciale.</p>
-                
-                <h2>ARTICLE 9 – CONFIDENTIALITÉ</h2>
-                <p>Le/la prestataire s'engage à garder strictement confidentielles toutes les informations 
-                relatives au projet et au/à la client·e dont il/elle pourrait avoir connaissance dans le cadre 
-                de l'exécution de la présente mission.<br>
-                Cette obligation de confidentialité restera en vigueur pendant une durée de 2 ans après la fin du contrat.</p>
-                
-                <h2>ARTICLE 10 – RÉSILIATION</h2>
-                <p><strong>Résiliation pour convenance :</strong> Chaque partie peut résilier le présent contrat 
-                moyennant un préavis de ___ jours ouvrés notifié par écrit (email avec accusé de réception ou LRAR).<br><br>
-                <strong>Résiliation pour faute :</strong> En cas de manquement grave d'une partie à ses obligations, 
-                l'autre partie pourra résilier le contrat de plein droit, 8 jours après mise en demeure restée infructueuse.<br><br>
-                <strong>Conséquences :</strong> En cas de résiliation, le/la prestataire sera rémunéré·e pour les prestations 
-                déjà réalisées et acceptées par le/la client·e.</p>
-                
-                <h2>ARTICLE 11 – SOUS-TRAITANCE</h2>
-                <p>Le/la prestataire ne pourra sous-traiter tout ou partie de la mission sans l'accord préalable 
-                et écrit du/de la client·e.</p>
-                
-                <h2>ARTICLE 12 – LITIGE ET DROIT APPLICABLE</h2>
-                <p>Le présent contrat est soumis au droit français.<br>
-                En cas de litige, les parties s'engagent à rechercher une solution amiable. 
-                À défaut d'accord dans un délai de 30 jours, le litige sera soumis aux tribunaux compétents 
-                du ressort du siège social du/de la client·e.</p>
-                
-                <h2>ARTICLE 13 – DÉCLARATIONS DU/DE LA PRESTATAIRE</h2>
-                <p>Le/la prestataire déclare :<br>
-                ☐ Être régulièrement inscrit·e au Registre du Commerce ou au Répertoire des Métiers<br>
-                ☐ Être à jour de ses obligations fiscales et sociales<br>
-                ☐ Ne pas être en situation de dépendance économique vis-à-vis du/de la client·e</p>
-                
-                <p style="margin-top:20px;padding:10px;background:#fff3cd;border:1px solid #ffc107;font-size:0.85em;">
-                <strong>⚠️ Attention :</strong> Le recours à un·e prestataire auto-entrepreneur·e est licite 
-                uniquement si celui/celle-ci exerce son activité de manière réellement indépendante, 
-                sans lien de subordination. À défaut, le contrat pourrait être requalifié en contrat de travail.</p>
-                
-                <div class="signature-zone">
-                    <div class="signature-box">
-                        <p>Fait à ${Utils.escape(lieu) || '___________'}, le ${formatDate(new Date().toISOString())}</p>
-                        <p>En deux exemplaires originaux</p>
-                        <p><strong>Le/La Client·e</strong></p>
-                        <p class="signature-line">Signature et cachet</p>
-                    </div>
-                    <div class="signature-box">
-                        <p>Lu et approuvé,</p>
-                        <p><strong>Le/La Prestataire</strong></p>
-                        <p>${Utils.escape(p.name)}</p>
-                        <p class="signature-line">Signature précédée de « Lu et approuvé »</p>
-                    </div>
-                </div>
-            `;
-        } else if(type === 'benevole') {
-            // Accord Bénévole
-            return Contracts.generateBenevoleHTML(p, project, dateStart, dateEnd, lieu, formatDate);
-        } else {
-            // Droit à l'image
-            const usage = document.getElementById('contract-usage')?.value || 'Tous supports';
-            const dureeCession = document.getElementById('contract-duree-cession')?.value || 'illimitée';
-            
-            return `
-                <h1>AUTORISATION D'EXPLOITATION DU DROIT À L'IMAGE</h1>
-                <p class="text-italic-center">Articles 9 du Code civil et 226-1 du Code pénal</p>
-                
-                <h2>ARTICLE 1 – IDENTITÉ DU/DE LA SIGNATAIRE</h2>
-                <p>Je soussigné·e :<br>
-                Nom et prénom : ${Utils.escape(p.name)}<br>
-                Né·e le : ___________________ à ___________________<br>
-                Nationalité : ___________________<br>
-                Adresse : ${Utils.escape(p.address) || '___________________'}<br>
-                Email : ${Utils.escape(p.email) || '___________________'}<br>
-                Téléphone : ${Utils.escape(p.phone) || '___________________'}</p>
-                
-                <p style="margin-top:15px;padding:10px;border:1px solid #333;"><strong>☐ Personne majeure</strong> agissant en mon nom propre<br><br>
-                <strong>☐ Représentant légal d'un·e mineur·e</strong><br>
-                Nom du/de la mineur·e : ___________________<br>
-                Né·e le : ___________________ à ___________________<br>
-                Lien avec le/la mineur·e : ☐ Père ☐ Mère ☐ Tuteur/Tutrice légal·e<br>
-                <em style="font-size:0.85em;">L'autorisation des deux parents ou du tuteur légal est requise pour tout·e mineur·e.</em></p>
-                
-                <h2>ARTICLE 2 – BÉNÉFICIAIRE DE L'AUTORISATION</h2>
-                <p>J'autorise expressément :<br>
-                La société / personne : ${Utils.escape(project.producer) || '___________________'}<br>
-                Adresse : ${Utils.escape(project.addressLegal || project.city) || '___________________'}<br>
-                SIRET : ${Utils.escape(project.siret) || '___________________'}<br>
-                Représentée par : ${Utils.escape(project.director) || '___________________'}, en qualité de ${Utils.escape(project.directorTitle) || '___________________'}<br>
-                Pour le projet intitulé : « <strong>${Utils.escape(state.data.title) || 'Sans titre'}</strong> »</p>
-                
-                <h2>ARTICLE 3 – OBJET DE L'AUTORISATION</h2>
-                <p>À fixer, reproduire, représenter et exploiter mon image (et/ou celle du/de la mineur·e que je représente) 
-                captée lors des prises de vues réalisées :<br>
-                Du : <strong>${formatDate(dateStart)}</strong> au <strong>${formatDate(dateEnd)}</strong><br>
-                Lieu : <strong>${Utils.escape(lieu) || '___________________'}</strong></p>
-                
-                <h2>ARTICLE 4 – SUPPORTS ET MODES D'EXPLOITATION</h2>
-                <p>Cette autorisation est consentie pour les utilisations suivantes :<br>
-                <strong>${usage}</strong></p>
-                <p>Supports autorisés :<br>
-                ☐ Exploitation cinématographique (salles)<br>
-                ☐ Diffusion télévisuelle (hertzienne, câble, satellite, TNT)<br>
-                ☐ Supports vidéo (DVD, Blu-ray, VOD, SVOD)<br>
-                ☐ Internet et réseaux sociaux<br>
-                ☐ Supports promotionnels (affiches, bandes-annonces, making-of)<br>
-                ☐ Festivals et projections publiques<br>
-                ☐ Usage pédagogique et culturel<br>
-                ☐ Tous supports connus ou inconnus à ce jour</p>
-                
-                <h2>ARTICLE 5 – ÉTENDUE TERRITORIALE ET DURÉE</h2>
-                <p><strong>Territoire :</strong> Monde entier / ou limité à : ___________________<br>
-                <strong>Durée :</strong> ${dureeCession}<br>
-                <em style="font-size:0.85em;">En
- cas de durée illimitée, l'autorisation est consentie pour toute la durée légale de protection 
-                des droits de propriété intellectuelle et de leurs éventuelles prolongations.</em></p>
-                
-                <h2>ARTICLE 6 – CONTREPARTIE FINANCIÈRE</h2>
-                <p>${Pay.gross(p) ? `Cette autorisation est consentie moyennant la somme forfaitaire de <strong>${Pay.gross(p)} ${p.rateCurrency || '€'}</strong> (${p.rateType === 'jour' ? 'par jour' : p.rateType === 'heure' ? 'par heure' : 'forfait global'}).` : 'Cette autorisation est consentie <strong>à titre gratuit</strong>, le/la signataire reconnaissant avoir été informé·e de la possibilité de demander une rémunération.'}</p>
-                
-                <h2>ARTICLE 7 – ENGAGEMENTS DU BÉNÉFICIAIRE</h2>
-                <p>Le bénéficiaire s'engage à ce que l'exploitation de l'image :<br>
-                • Ne porte pas atteinte à la dignité, à l'honneur ou à la réputation du/de la signataire<br>
-                • Ne dénature pas le contexte dans lequel les images ont été captées<br>
-                • Ne soit pas utilisée dans un contexte pornographique, diffamatoire ou contraire aux bonnes mœurs<br>
-                • Respecte le droit moral du/de la signataire</p>
-                
-                <h2>ARTICLE 8 – DROIT DE RETRAIT</h2>
-                <p>Conformément aux articles 9 du Code civil, le/la signataire conserve le droit de retirer 
-                son autorisation à tout moment, par lettre recommandée avec accusé de réception adressée au bénéficiaire.<br>
-                Ce retrait ne pourra toutefois pas affecter les exploitations déjà réalisées ou en cours au moment de la notification, 
-                ni ouvrir droit à indemnisation.</p>
-                
-                <h2>ARTICLE 9 – PROTECTION DES DONNÉES PERSONNELLES (RGPD)</h2>
-                <p style="font-size:0.9em;">Conformément au Règlement Général sur la Protection des Données (UE 2016/679) et à la loi Informatique et Libertés, 
-                le/la signataire dispose d'un droit d'accès, de rectification, d'effacement, de limitation, d'opposition 
-                et de portabilité des données le/la concernant.<br>
-                Ces droits peuvent être exercés auprès de : ${Utils.escape(project.producer) || '___________________'}<br>
-                Email : ___________________<br>
-                Les données collectées seront conservées pour la durée nécessaire à l'exploitation autorisée.</p>
-                
-                <h2>ARTICLE 10 – DÉCLARATIONS</h2>
-                <p>Le/la signataire déclare :<br>
-                ☐ Avoir pris connaissance de l'intégralité du présent document<br>
-                ☐ Avoir eu la possibilité de poser des questions et d'obtenir des réponses<br>
-                ☐ Ne pas être lié·e par un contrat exclusif relatif à l'utilisation de son image<br>
-                ☐ Donner son consentement libre, spécifique, éclairé et univoque</p>
-                
-                <div class="signature-zone">
-                    <div class="signature-box">
-                        <p>Fait à ${Utils.escape(lieu) || '___________'}, le ${formatDate(new Date().toISOString())}</p>
-                        <p>En deux exemplaires originaux</p>
-                        <p><strong>Le/La Bénéficiaire</strong></p>
-                        <p class="signature-line">Signature et cachet</p>
-                    </div>
-                    <div class="signature-box">
-                        <p>Lu et approuvé,<br>Mention manuscrite « Bon pour accord »</p>
-                        <p><strong>Le/La Signataire</strong></p>
-                        <p>${Utils.escape(p.name)}</p>
-                        <p class="signature-line">Signature précédée de la mention<br>« Lu et approuvé, bon pour accord »</p>
-                    </div>
-                </div>
-            `;
-        }
-    },
-    
-    // Générer le HTML pour l'Accord Bénévole
-    generateBenevoleHTML: (p, project, dateStart, dateEnd, lieu, formatDate) => {
-        const role = p._type === 'actor' ? 
-            (state.data.characters?.find(c => c.actor_id === p.id)?.name || 'Comédien·ne') : 
-            (p.role || 'Technicien·ne bénévole');
-        
-        return `
-            <h1>ACCORD DE COLLABORATION BÉNÉVOLE</h1>
-            <p class="text-italic-center">Engagement moral et éthique de collaboration</p>
-            
-            <h2>PRÉAMBULE</h2>
-            <p>Le présent accord définit les conditions d'une collaboration <strong>bénévole</strong> dans le cadre 
-            d'un projet audiovisuel à but non lucratif ou à budget limité. Il n'établit aucun lien de subordination 
-            et ne constitue pas un contrat de travail. Chaque partie s'engage librement et de bonne foi.</p>
-            
-            <h2>ENTRE</h2>
-            <p><strong>Le/La Porteur·se de projet :</strong><br>
-            Nom / Structure : ${Utils.escape(project.producer) || '___________________'}<br>
-            Adresse : ${Utils.escape(project.addressLegal || project.city) || '___________________'}<br>
-            Représenté·e par : ${Utils.escape(project.director) || '___________________'}<br>
-            Email : ${Utils.escape(project.emailLegal) || '___________________'}</p>
-            
-            <p><strong>Et le/la Collaborateur·rice bénévole :</strong><br>
-            Nom et prénom : ${Utils.escape(p.name)}<br>
-            Adresse : ${Utils.escape(p.address) || '___________________'}<br>
-            Email : ${Utils.escape(p.email) || '___________________'}<br>
-            Téléphone : ${Utils.escape(p.phone) || '___________________'}</p>
-            
-            <h2>ARTICLE 1 – OBJET DE LA COLLABORATION</h2>
-            <p>Le/la collaborateur·rice bénévole accepte de participer au projet intitulé 
-            « <strong>${Utils.escape(state.data.title) || 'Sans titre'}</strong> » 
-            en qualité de <strong>${Utils.escape(role)}</strong>.</p>
-            
-            <h2>ARTICLE 2 – PÉRIODE DE COLLABORATION</h2>
-            <p>La collaboration est prévue du <strong>${formatDate(dateStart)}</strong> au <strong>${formatDate(dateEnd)}</strong>.<br>
-            Lieu principal : <strong>${Utils.escape(lieu) || '___________________'}</strong><br>
-            Les horaires et jours de présence seront définis d'un commun accord.</p>
-            
-            <h2>ARTICLE 3 – NATURE BÉNÉVOLE</h2>
-            <p>Les parties reconnaissent expressément que cette collaboration est <strong>bénévole</strong> :<br>
-            • Aucune rémunération ne sera versée<br>
-            • Aucun lien de subordination n'existe entre les parties<br>
-            • Le/la collaborateur·rice est libre d'organiser sa participation<br>
-            • Le/la collaborateur·rice peut mettre fin à sa participation à tout moment</p>
-            
-            <h2>ARTICLE 4 – DÉFRAIEMENTS</h2>
-            <p>Le/la porteur·se de projet s'engage, dans la mesure du possible, à prendre en charge :<br>
-            ☐ Les repas sur le lieu de tournage/travail<br>
-            ☐ Les frais de transport (sur justificatifs)<br>
-            ☐ L'hébergement si nécessaire<br>
-            <em style="font-size:0.9em;">Les modalités précises seront définies avant chaque journée de collaboration.</em></p>
-            
-            <h2>ARTICLE 5 – ENGAGEMENTS MUTUELS</h2>
-            <p><strong>Le/la porteur·se de projet s'engage à :</strong><br>
-            • Traiter le/la collaborateur·rice avec respect et bienveillance<br>
-            • Fournir les informations nécessaires à la bonne réalisation du projet<br>
-            • Assurer des conditions de travail sécurisées<br>
-            • Mentionner le/la collaborateur·rice au générique du projet (sauf demande contraire)</p>
-            
-            <p><strong>Le/la collaborateur·rice s'engage à :</strong><br>
-            • Participer de bonne foi et avec professionnalisme<br>
-            • Respecter les consignes de sécurité et d'organisation<br>
-            • Prévenir en cas d'absence ou d'empêchement<br>
-            • Respecter la confidentialité du projet</p>
-            
-            <h2>ARTICLE 6 – CRÉDITS ET RECONNAISSANCE</h2>
-            <p>Le/la collaborateur·rice figurera au générique du projet sous le nom :<br>
-            <strong>${Utils.escape(p.name)}</strong><br>
-            Fonction/Rôle : <strong>${Utils.escape(role)}</strong><br><br>
-            ☐ Je souhaite apparaître au générique<br>
-            ☐ Je ne souhaite pas apparaître au générique</p>
-            
-            <h2>ARTICLE 7 – PROPRIÉTÉ INTELLECTUELLE</h2>
-            <p>Le/la collaborateur·rice accepte que sa contribution soit intégrée au projet final. 
-            En contrepartie de cette collaboration bénévole et de la mention au générique, 
-            il/elle cède gracieusement les droits d'exploitation de sa contribution pour ce projet uniquement.</p>
-            
-            <h2>ARTICLE 8 – ASSURANCE</h2>
-            <p>Le/la porteur·se de projet déclare :<br>
-            ☐ Disposer d'une assurance responsabilité civile couvrant les collaborateurs<br>
-            ☐ Ne pas disposer d'assurance spécifique (le/la collaborateur·rice participe à ses risques)</p>
-            
-            <h2>ARTICLE 9 – ESPRIT DE L'ACCORD</h2>
-            <p style="font-style:italic;">Cet accord repose sur la confiance mutuelle, le respect et l'envie commune de réaliser 
-            un projet créatif. Les parties s'engagent à communiquer ouvertement et à résoudre tout différend 
-            de manière amiable et constructive. L'aventure humaine compte autant que le résultat final.</p>
-            
-            <div class="signature-zone">
-                <div class="signature-box">
-                    <p>Fait à ${Utils.escape(lieu) || '___________'}, le ${formatDate(new Date().toISOString())}</p>
-                    <p>En deux exemplaires</p>
-                    <p><strong>Le/La
- Porteur·se de projet</strong></p>
-                    <p class="signature-line">Signature</p>
-                </div>
-                <div class="signature-box">
-                    <p>Lu et approuvé,<br>« Je m'engage librement »</p>
-                    <p><strong>Le/La Collaborateur·rice</strong></p>
-                    <p>${Utils.escape(p.name)}</p>
-                    <p class="signature-line">Signature</p>
-                </div>
-            </div>
-        `;
-    },
-};
 
 // ========== NOTIFICATIONS ==========
 
@@ -54769,12 +53961,29 @@ const ExpensesBudget = {
             </div>
         `;
         
+        // Marque la modale comme ouverte POUR CE PROJET ET CETTE CATEGORIE :
+        // saveCategoryBudget relit ses quatre champs et n'a de sens que sur la
+        // modale reellement affichee. Voir la garde en tete de cette fonction.
+        ExpensesBudget._budgetModalFor = (state.currentProjectId || '') + '|' + catId;
+        
         document.body.appendChild(modal);
         document.getElementById('cat-budget-ht').focus();
     },
     
     // Sauvegarder le budget d'une catégorie
     saveCategoryBudget: (catId) => {
+        // GARDE : cette fonction relit les champs d'une modale creee a la volee
+        // par editCategoryBudget. Appelee sans elle (ou apres un changement de
+        // projet, ou sur une autre categorie que celle ouverte), elle plantait
+        // sur un champ absent ou ecrivait le budget du projet precedent dans le
+        // suivant. Pour ecrire un previsionnel depuis ailleurs : ecriture
+        // ciblee sur state.data.budget.previsionnel, puis Store.save().
+        if(ExpensesBudget._budgetModalFor !== (state.currentProjectId || '') + '|' + catId
+           || !document.getElementById('cat-budget-ht')) {
+            console.warn('[ExpensesBudget] saveCategoryBudget() ignoré : modale non ouverte pour ce projet/cette catégorie.');
+            return;
+        }
+        
         const budgetHT = parseFloat(document.getElementById('cat-budget-ht').value) || 0;
         const budgetTTC = parseFloat(document.getElementById('cat-budget-ttc').value) || 0;
         const managerEmail = document.getElementById('cat-manager').value;
@@ -61270,7 +60479,7 @@ const Messages = {
         }),
         'invitation': (data) => ({
             title: 'Invitation a rejoindre un projet sur moteur.studio',
-            message: `${data.senderName} vous a invite a rejoindre le projet "${data.projectTitle}" en tant que ${data.role} sur moteur.studio. Le projet est deja accessible dans votre espace : connectez-vous sur https://moteur.studio pour le decouvrir (vous pourrez le quitter a tout moment).`
+            message: `${data.senderName} vous invite a rejoindre le projet "${data.projectTitle}" en tant que ${data.role} sur moteur.studio. Connectez-vous sur https://moteur.studio : l'invitation vous attend sur votre tableau de bord, a vous d'accepter ou de refuser. Si vous acceptez, vous pourrez quitter le projet a tout moment.`
         }),
         'contact': (data) => ({
             title: 'Nouveau message',
@@ -61526,40 +60735,14 @@ const Invitations = {
                         email: email, // clé de filtrage utilisée par getProjectsList
                         profile_id: targetProfileId, // I5f : profil cible (peut être null)
                         role: role,
+                        status: 'pending', // v570 : consentement — la personne doit accepter
                         invited_by: state.currentUser.id,
                         invited_at: new Date().toISOString()
                     });
             }
             
-            // Stocker une invitation en attente (notification au prochain login) pour les comptes
-            // sans profil public — informatif, le membership est déjà créé ci-dessus.
-            if(!userExists) {
-                // I5f: id auto-généré par Postgres (gen_random_uuid)
-                await supabase
-                    .from('messages')
-                    .insert({
-                        to_email: email,
-                        from_email: inviterEmail,
-                        from_name: inviterName,
-                        from_profile_id: fromProfileId, // I5f : signé par profil propriétaire
-                        to_profile_id: targetProfileId, // I5f : ciblé sur le profil choisi
-                        type: 'pending_invitation',
-                        subject: `Invitation au projet "${projectTitle}"`,
-                        content: message || '',
-                        data: {
-                            projectId: pid,
-                            projectTitle: projectTitle,
-                            role: role,
-                            invitedBy: inviterEmail,
-                            invitedAt: new Date().toISOString(),
-                            message: message,
-                            targetProfileId: targetProfileId,
-                            fromProfileId: fromProfileId
-                        },
-                        read: false,
-                        created_at: new Date().toISOString()
-                    });
-            }
+            // v570 : plus de doublon dans « messages ». L'invitation en attente EST la ligne
+            // project_members au statut 'pending' ; le tableau de bord la propose a l'acceptation.
             
             // Cloche in-app + email externe direct (plus de message interne)
             const roleLabel = role === 'editor' ? 'Éditeur' : 'Lecteur';
@@ -61579,12 +60762,8 @@ const Invitations = {
             }
             
             const roleForLog = role === 'editor' ? 'Éditeur' : 'Lecteur';
-            History.log('SHARE', userExists 
-                ? `${email} ajouté au projet (${roleForLog})` 
-                : `Invitation envoyée à ${email} (${roleForLog})`);
-            Utils.toast(userExists 
-                ? `${email} a maintenant accès au projet !` 
-                : `Invitation envoyée à ${email} !`, 'success');
+            History.log('SHARE', `Invitation envoyée à ${email} (${roleForLog})`);
+            Utils.toast(`Invitation envoyée à ${email} — en attente de sa réponse.`, 'success', 5000);
             
             document.getElementById('share-modal').style.display = 'none';
             document.getElementById('share-email').value = '';
@@ -61648,69 +60827,91 @@ ${window.location.origin}${window.location.pathname}
         window.open(`mailto:${toEmail}?subject=${subject}&body=${body}`, '_blank');
     },
 
-    // ===================== INVITATIONS EN ATTENTE =====================
-	    // Vérifie les invitations en attente à la connexion
-    checkPendingInvitations: async () => {
-        if(!state.currentUser) return;
-        
+    // ===================== INVITATIONS EN ATTENTE (v570) =====================
+    // Une invitation en attente EST une ligne project_members au statut 'pending'.
+    // Elle ne donne AUCUN acces : can_view_project / can_edit_project l'ignorent.
+    // La personne invitee l'accepte (fonction serveur invitation_accept) ou la
+    // refuse (suppression de sa propre ligne, deja autorisee par la policy DELETE).
+    _pending: [],
+
+    // Charge mes invitations en attente et affiche le bandeau du tableau de bord.
+    renderPending: async () => {
+        const host = document.getElementById('pending-invitations');
+        if(!host) return;
+        if(!state.currentUser) { host.innerHTML = ''; host.style.display = 'none'; return; }
         try {
-            // Chercher les invitations en attente dans les messages
-            const { data: pendingInvitations, error } = await supabase
-                .from('messages')
-                .select('*')
-                .eq('to_email', state.currentUser.email.toLowerCase())
-                .eq('type', 'pending_invitation')
-                .eq('read', false);
-            
+            const { data, error } = await supabase.rpc('my_pending_invitations');
             if(error) throw error;
-            
-            if(pendingInvitations && pendingInvitations.length > 0) {
-                const count = pendingInvitations.length;
-                const projects = pendingInvitations.map(inv => inv.data?.projectTitle || 'Projet').join(', ');
-                
-                // Traiter chaque invitation - ajouter l'utilisateur au projet
-                for(const inv of pendingInvitations) {
-                    const invData = inv.data || {};
-                    if(invData.projectId) {
-                        // I5f: récupérer le profil cible depuis la colonne DB ou le JSON data
-                        const targetProfileId = inv.to_profile_id || invData.targetProfileId || null;
-                        
-                        // Ajouter comme membre du projet avec email + profil
-                        await supabase
-                            .from('project_members')
-                            .upsert({
-                                project_id: invData.projectId,
-                                user_id: state.currentUser.id,
-                                email: state.currentUser.email.toLowerCase(), // I5f: pour filtrage
-                                profile_id: targetProfileId, // I5f: profil ciblé
-                                role: invData.role || 'viewer',
-                                invited_by: null,
-                                invited_at: invData.invitedAt || new Date().toISOString()
-                            }, { onConflict: 'project_id,user_id' });
-                    }
-                    
-                    // Marquer l'invitation comme lue
-                    await supabase
-                        .from('messages')
-                        .update({ read: true })
-                        .eq('id', inv.id);
-                }
-                
-                // Notifier l'utilisateur
-                setTimeout(() => {
-                    Utils.toast(`🎉 ${count} invitation(s) acceptée(s) : ${projects}`, 'success', 6000);
-                }, 500);
-                
-                // T10 fix : rafraîchir le dashboard pour afficher les projets nouvellement rejoints.
-                // Les invitations sont traitées au démarrage, souvent après le 1er rendu du dashboard,
-                // donc sans ce refresh les projets acceptés restaient invisibles jusqu'au rechargement.
-                if(typeof UI !== 'undefined' && UI.renderDashboard) {
-                    await UI.renderDashboard();
-                }
-            }
+            Invitations._pending = data || [];
         } catch(e) {
-            console.error('Erreur vérification invitations:', e);
+            console.warn('[Invitations] Lecture des invitations en attente impossible:', e && e.message);
+            Invitations._pending = [];
         }
+        const list = Invitations._pending;
+        if(!list.length) { host.innerHTML = ''; host.style.display = 'none'; return; }
+        host.style.display = '';
+        host.innerHTML = list.map(inv => {
+            const who = (inv.inviter_email || '').split('@')[0] || 'Quelqu\'un';
+            const roleLabel = inv.role === 'editor' ? 'Editeur' : (inv.role === 'owner' ? 'Proprietaire' : 'Lecteur');
+            const pid = Utils.escape(inv.project_id);
+            return `<div class="pinv-card">
+                <div class="pinv-icon">📨</div>
+                <div class="pinv-body">
+                    <div class="pinv-title">${Utils.escape(inv.project_title || 'Projet sans titre')}</div>
+                    <div class="pinv-meta">${Utils.escape(who)} vous invite en tant que ${roleLabel}.</div>
+                </div>
+                <div class="pinv-actions">
+                    <button class="btn btn--primary btn--sm" onclick="app.Invitations.accept('${pid}')">Accepter</button>
+                    <button class="select-outline pinv-refuse" onclick="app.Invitations.refuse('${pid}')">Refuser</button>
+                </div>
+            </div>`;
+        }).join('');
+    },
+
+    // Accepte : bascule ma ligne en 'accepted' cote serveur, puis rafraichit la liste.
+    accept: async (projectId) => {
+        if(!projectId || !state.currentUser) return;
+        const inv = (Invitations._pending || []).find(i => i.project_id === projectId);
+        try {
+            const { error } = await supabase.rpc('invitation_accept', { p_project: projectId });
+            if(error) throw error;
+            Utils.toast('Invitation acceptee' + (inv && inv.project_title ? ' : ' + inv.project_title : '') + ' !', 'success');
+        } catch(e) {
+            Utils.toast('Impossible d\'accepter l\'invitation pour le moment.', 'error');
+            console.warn('[Invitations] accept:', e && e.message);
+            return;
+        }
+        await Invitations.renderPending();
+        try { if(typeof UIDashboard !== 'undefined') await UIDashboard.renderProjectList(); } catch(e) {}
+    },
+
+    // Refuse : supprime ma propre ligne (policy DELETE « owner or self »).
+    refuse: async (projectId) => {
+        if(!projectId || !state.currentUser) return;
+        const inv = (Invitations._pending || []).find(i => i.project_id === projectId);
+        const titre = (inv && inv.project_title) || 'ce projet';
+        const ok = await ConfirmModal.show({
+            title: 'Refuser l\'invitation ?',
+            message: 'Vous n\'aurez pas acces a « ' + titre + ' ». La personne qui vous a invite pourra vous reinviter plus tard.',
+            icon: '📭',
+            confirmText: 'Refuser',
+            dangerous: true
+        });
+        if(!ok) return;
+        try {
+            const { error } = await supabase
+                .from('project_members')
+                .delete()
+                .eq('project_id', projectId)
+                .eq('email', state.currentUser.email.toLowerCase());
+            if(error) throw error;
+            Utils.toast('Invitation refusee.', 'info');
+        } catch(e) {
+            Utils.toast('Impossible de refuser l\'invitation pour le moment.', 'error');
+            console.warn('[Invitations] refuse:', e && e.message);
+            return;
+        }
+        await Invitations.renderPending();
     }
 };
 
@@ -72415,7 +71616,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, ContractsTemplates, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Tutorial, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo };
+  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Tutorial, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo };
 })();
 </script>
 
