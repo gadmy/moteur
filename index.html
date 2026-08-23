@@ -362,6 +362,35 @@ Cocher [x] au fil de l'eau ; ne pas changer la numerotation en cours de route.
    n'est rappelee que si le droit d'ecrire a REELLEMENT change — sinon on
    relacherait et reprendrait le verrou chaque minute pour rien.
 
+   COULEURS DE PASTILLE ALIGNEES (23 aout) — les avatars de presence en haut de page
+   utilisaient Utils.getColor(adresse), tandis que les pastilles d'onglet avaient des
+   couleurs FIXES (rouge pour un verrou, gris-bleu pour un spectateur). Impossible de
+   relier une pastille a une personne quand plusieurs travaillent en meme temps. Les
+   trois systemes (verrou d'onglet, spectateur d'onglet, pastille de categorie)
+   passent desormais par Utils.getColor sur l'ADRESSE — jamais sur le nom, deux
+   comptes pouvant porter le meme (cas reel rencontre : deux « Guillaume Adrien »,
+   memes initiales GA, couleurs bien distinctes car l'adresse differe). La
+   distinction ECRIT / REGARDE ne passe donc plus par la teinte mais par l'opacite
+   (.9 contre .55, classe .dlock-watching) et par l'infobulle (🚧 / 👁).
+
+   BLOCAGE RENFORCE (23 aout) — les DEUX systemes de lecture seule (verrou
+   collaboratif .is-domain-locked et permission .is-perm-readonly) ne visaient que
+   les champs, listes, boutons et zones editables. Or beaucoup d'elements cliquables
+   de l'app n'en sont pas : cartes de scene du sequencier, vignettes de storyboard,
+   fiches personnage sont de simples blocs avec une action au clic. Ils passaient au
+   travers et donnaient l'illusion qu'on pouvait agir.
+   - VERROU (situation temporaire, quelqu'un d'autre travaille) : tout le contenu de
+     l'onglet est bloque (> *:not(.dlock-banner)), seule la banniere reste cliquable
+     pour « Demander la main ». Effet de bord assume : texte non selectionnable.
+   - PERMISSION (situation permanente, on est la pour LIRE) : on ne bloque PAS le
+     contenu entier, sinon un lecteur ne pourrait plus selectionner ni copier ce
+     qu'il a le droit de lire. On vise tout ce qui porte une action, y compris
+     [onclick] / [ondblclick] / [draggable].
+   PIEGE ASSOCIE : les deux bannieres vivent DANS l'onglet alors que la classe de
+   blocage est sur le conteneur — un re-rendu (StoreRealtime.applyRemote) effacait la
+   banniere en laissant le blocage, donc bloque sans explication. applyRemote repose
+   desormais les deux bannieres apres son rendu.
+
 7b-bis. VERROU COLLABORATIF PAR ONGLET — TRAITE EN PARTIE (23 aout).
    CE QU'IL FAUT AVOIR COMPRIS AVANT DE ROUVRIR : la frontiere des domaines
    n'est pas un choix d'ergonomie, c'est celle de la SAUVEGARDE. StoreSave.save
@@ -5848,22 +5877,32 @@ body.presentation-mode .presentation-bar {
 .td-padded { padding:12px 10px; text-align:left; font-size:0.85rem; }
 .hub-nav-btn { background:var(--panel-bg); color:var(--text-main); border:1px solid var(--border); padding:10px 15px; border-radius:6px; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:6px; }
   /* Phase 2 : verrous d'édition par domaine */
-  .tab-content.is-domain-locked input,
-  .tab-content.is-domain-locked textarea,
-  .tab-content.is-domain-locked select,
-  .tab-content.is-domain-locked button,
-  .tab-content.is-domain-locked [contenteditable],
-  .tab-content.is-domain-locked .script-editor-box { pointer-events: none; opacity: .65; }
+  /* v570 — Verrou collaboratif : on bloque TOUT le contenu de l'onglet, pas une liste
+     d'elements. L'ancienne regle ne visait que champs / listes / boutons / zones
+     editables : les cartes de scene, vignettes de storyboard et fiches personnage sont
+     de simples blocs avec une action au clic, elles passaient donc au travers et
+     donnaient l'illusion qu'on pouvait agir. Seule la banniere reste cliquable
+     (« Demander la main »). Effet de bord assume : le texte n'est plus selectionnable
+     a la souris pendant qu'un autre travaille — situation temporaire. */
+  .tab-content.is-domain-locked > *:not(.dlock-banner) { pointer-events: none; opacity: .65; }
   .tab-content.is-domain-locked .dlock-banner,
   .tab-content.is-domain-locked .dlock-banner button { pointer-events: auto; opacity: 1; }
   /* v570 — Lecture seule par PERMISSION (👁️), distincte du verrou collaboratif.
      Pas d'opacite reduite ici : on reste sur cet onglet pour LIRE, parfois longtemps.
-     Les champs restent lisibles mais ne repondent plus au clic. */
+     Et contrairement au verrou, on ne bloque pas le contenu ENTIER : un lecteur doit
+     pouvoir selectionner et copier ce qu'il a le droit de lire (synopsis, notes...).
+     On vise donc tout ce qui porte une action, y compris les blocs cliquables
+     (cartes de scene, vignettes, fiches) que l'ancienne liste laissait passer. */
   .tab-content.is-perm-readonly input,
   .tab-content.is-perm-readonly textarea,
   .tab-content.is-perm-readonly select,
   .tab-content.is-perm-readonly button,
   .tab-content.is-perm-readonly [contenteditable],
+  .tab-content.is-perm-readonly [onclick],
+  .tab-content.is-perm-readonly [ondblclick],
+  .tab-content.is-perm-readonly [onchange],
+  .tab-content.is-perm-readonly [draggable="true"],
+  .tab-content.is-perm-readonly label,
   .tab-content.is-perm-readonly .script-editor-box { pointer-events: none; }
   .tab-content.is-perm-readonly .perm-ro-banner,
   .tab-content.is-perm-readonly .perm-ro-banner button { pointer-events: auto; }
@@ -5905,7 +5944,10 @@ body.presentation-mode .presentation-bar {
   .tmp-hq-marker { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; background: var(--panel-bg); border: 1px solid var(--primary); border-radius: 14px; padding: 3px 9px; font-size: 12px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,.3); transform: translate(-6px, -100%); }
   .dlock-badge { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; margin-left: 4px; vertical-align: middle; }
   .tab-subbtn.dlock-occupied, .tab-btn.dlock-occupied, .tab-category.dlock-occupied { position: relative; }
-  .dlock-avatar-tab { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: #c0392b; color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; opacity: .55; pointer-events: none; z-index: 3; }
+  .dlock-avatar-tab { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: #c0392b; color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; opacity: .9; pointer-events: none; z-index: 3; }
+  /* v570 : couleur = la personne (identique a son avatar de presence) ; l'opacite dit
+     ce qu'elle fait — franche si elle ECRIT, discrete si elle ne fait que REGARDER. */
+  .dlock-avatar-tab.dlock-watching { opacity: .55; }
   .project-card { position: relative; }
   .gp-badges { position: absolute; bottom: 6px; right: 8px; display: flex; gap: 3px; z-index: 2; }
   .gp-avatar { width: 20px; height: 20px; border-radius: 50%; color: #fff; font-size: 9px; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; border: 2px solid var(--panel-bg); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
@@ -15556,9 +15598,14 @@ const LockManager = {
                   const who = LockManager._who(lock);
                   const av = document.createElement('span');
                   av.className = 'dlock-avatar-tab';
+                  // v570 : MEME couleur que l'avatar de presence en haut de page —
+                  // Utils.getColor sur l'ADRESSE, jamais sur le nom : deux comptes
+                  // peuvent porter le meme nom (cas reel : deux « Guillaume Adrien »).
+                  const em = (lock.holder_email || '').toLowerCase();
+                  if(em) av.style.background = Utils.getColor(em);
                   const dom = LockDomains.forTab(btn.dataset.tab);
                   const grp = (dom && LockDomains.defs[dom]) ? LockDomains.defs[dom].label : '';
-                  av.title = 'En travaux — ' + who + (grp ? ' (section « ' + grp + ' »)' : '');
+                  av.title = '🚧 En travaux — ' + who + (grp ? ' (section « ' + grp + ' »)' : '');
                   av.textContent = (who[0]||'?').toUpperCase();
                   btn.appendChild(av);
               }
@@ -15594,6 +15641,10 @@ const LockManager = {
                   av.className = 'dlock-watcher';
                   av.style.setProperty('--c', (11 + i * 5) + 'px');
                   av.style.setProperty('--s', (37 + i * 18) + 'px');
+                  // v570 : couleur de la personne, identique a son avatar de presence.
+                  // C'est l'OPACITE qui distingue « regarde » de « ecrit », plus la teinte.
+                  const em = (r.user_email || '').toLowerCase();
+                  if(em) av.style.background = Utils.getColor(em);
                   av.textContent = ((r.user_email || '?').charAt(0)).toUpperCase();
                   av.title = '👁 Regarde — ' + (r.user_email || '').split('@')[0];
                   btn.appendChild(av);
@@ -15616,11 +15667,13 @@ const LockManager = {
                   const l = lockFor(t);
                   if(l) {
                       const q = LockManager._who(l);
-                      if(!vus[q + '|' + t]) { vus[q + '|' + t] = 1; out.push({ qui: q, tab: t, ecrit: true }); }
+                      const e2 = (l.holder_email || '').toLowerCase();
+                      if(!vus[q + '|' + t]) { vus[q + '|' + t] = 1; out.push({ qui: q, mail: e2, tab: t, ecrit: true }); }
                   }
                   watchersFor(t).forEach(r => {
                       const q = (r.user_email || '').split('@')[0];
-                      if(!vus[q + '|' + t]) { vus[q + '|' + t] = 1; out.push({ qui: q, tab: t, ecrit: false }); }
+                      const e2 = (r.user_email || '').toLowerCase();
+                      if(!vus[q + '|' + t]) { vus[q + '|' + t] = 1; out.push({ qui: q, mail: e2, tab: t, ecrit: false }); }
                   });
               });
               return out;
@@ -15633,7 +15686,10 @@ const LockManager = {
               const vedette = ecrivains[0] || occ[0];
               const av = document.createElement('span');
               av.className = 'dlock-avatar-tab';
-              if(!ecrivains.length) av.style.background = '#6b7280'; // personne n'ecrit : gris (simples spectateurs)
+              // v570 : couleur de la personne mise en avant (celle qui ecrit en priorite),
+              // identique a son avatar de presence en haut de page.
+              if(vedette.mail) av.style.background = Utils.getColor(vedette.mail);
+              if(!ecrivains.length) av.classList.add('dlock-watching'); // personne n'ecrit : plus discret
               av.textContent = (vedette.qui[0] || '?').toUpperCase() + (occ.length > 1 ? '+' : '');
               av.title = occ.map(o => (o.ecrit ? '🚧 ' : '👁 ') + o.qui + ' — ' + LockDomains.tabLabel(o.tab)).join('\n');
               btn.appendChild(av);
@@ -16207,6 +16263,11 @@ const LockManager = {
               if(activeTab === 'tab-stats') Stats.render();
               if(activeTab === 'tab-actors') UI.renderDataTab('actors', els.actorContainer);
           } else { UI.renderAll(); }
+          // v570 : un re-rendu efface les bannieres, qui vivent DANS l'onglet, alors que
+          // la classe de blocage reste sur le conteneur — on se retrouverait bloque sans
+          // explication. On les repose.
+          try { if(typeof LockManager !== 'undefined') LockManager.applyUI(); } catch(e) {}
+          try { if(typeof Permissions !== 'undefined') Permissions.applyReadOnlyUI(); } catch(e) {}
           // v570 : une mise a jour distante peut porter memberPermissions (le proprietaire
           // vient de changer les acces) — on relit nos droits et on reconstruit la
           // navigation, sans rechargement de page.
