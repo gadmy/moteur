@@ -254,6 +254,48 @@ Cocher [x] au fil de l'eau ; ne pas changer la numerotation en cours de route.
    modifier une ligne existante (policy UPDATE reservee au proprietaire) : le
    cas est annonce a l'ecran au lieu d'echouer en silence.
 
+   CORRIGE LE 23 AOUT, TROU REEL TROUVE EN TESTANT : en mode Categories on ne
+   pouvait voir qui travaille ou QUE si l'on se trouvait deja dans la meme
+   categorie que la personne. Les pastilles se posent sur les boutons d'onglets,
+   or seuls ceux de la categorie affichee existent a l'ecran ; les autres ne
+   vivaient que sur le bandeau plat #tabsNav, masque depuis l'etape 4. Et les
+   boutons de CATEGORIE etaient explicitement nettoyes (« trop charge »), choix
+   pris a l'epoque ou le bandeau plat servait encore de filet. Ils portent
+   desormais une pastille (rouge si quelqu'un ECRIT, grise si simples
+   spectateurs, « + » s'ils sont plusieurs, infobulle nommant chacun et son
+   onglet). LEÇON : chaque fois qu'on masque un element, verifier ce qui
+   s'appuyait dessus — c'est la deuxieme fois avec #tabsNav.
+
+   UNIFICATION DU 23 AOUT — LE ROLE SE DEDUIT DES CASES, ON NE REGLE PLUS QU'UNE
+   CHOSE. Il y avait deux reglages independants et capables de se contredire : le
+   ROLE (project_members.role, verifie par la BASE via can_edit_project) et les ✏️
+   du tableau (state.data.memberPermissions, verifies par le NAVIGATEUR seul).
+   Partout le test est « lecture seule OU permission fine insuffisante » et
+   StoreSave.save sort sans ecrire des que le role vaut viewer : cocher les
+   quinze colonnes en ✏️ sur un invite en LECTURE ne produisait AUCUN effet, sans
+   le moindre message. Desormais : trois presets de role remplissent la ligne
+   d'un coup (Lecteur = tout en lecture ; Editeur = tout en modification, stats
+   en lecture ; Invite restreint = tout ferme sauf la fiche projet en lecture),
+   et le role en base est DEDUIT a la sauvegarde — au moins une ✏️ = editeur,
+   sinon lecteur. La contradiction est devenue mecaniquement impossible.
+   BUG CORRIGE AU PASSAGE : les sections 'presentation' et 'ressources' etaient
+   citees par le mapping tabToSection de switchTab mais absentes de
+   CONFIG.permissionSections ET de tous les presets. canAccess renvoyait donc
+   toujours faux : LES ONGLETS PRESENTATION ET RESSOURCES ETAIENT INACCESSIBLES
+   A TOUT NON-PROPRIETAIRE, editeur compris. Les deux sections sont ajoutees, et
+   Permissions._normalize donne desormais 'read' a toute section absente des
+   permissions enregistrees — sans quoi ajouter une section au tableau la
+   rendrait inaccessible a tous les membres deja enregistres. Filet permanent.
+   A SAVOIR, ET NON CORRIGE : LES PERMISSIONS FINES NE PROTEGENT RIEN. Elles
+   organisent l'espace de travail, elles ne cloisonnent pas les donnees : la base
+   envoie le projet ENTIER (budget, contrats, coordonnees) a quiconque peut le
+   voir, et ce sont les ❌ qui masquent les onglets DANS SON PROPRE NAVIGATEUR.
+   Une vraie cloison imposerait de decouper le projet en morceaux separes en base
+   et de filtrer cote serveur : autre chantier, non ouvert.
+   NB : role et can_invite ne sont lus qu'a l'OUVERTURE du projet (state.currentRole
+   / state.currentCanInvite figes par Store.loadProject) : la personne doit rouvrir
+   le projet. Les messages de confirmation le disent.
+
 7b-bis. VERROU COLLABORATIF PAR ONGLET — TRAITE EN PARTIE (23 aout).
    CE QU'IL FAUT AVOIR COMPRIS AVANT DE ROUVRIR : la frontiere des domaines
    n'est pas un choix d'ergonomie, c'est celle de la SAUVEGARDE. StoreSave.save
@@ -11193,6 +11235,11 @@ crewRoles: {
     
     // Liste des sections avec leurs labels
     permissionSections: [
+        // v570 : 'presentation' et 'ressources' etaient citees par le mapping de
+        // switchTab mais absentes d'ici ET de tous les presets — canAccess renvoyait
+        // donc toujours faux et CES DEUX ONGLETS ETAIENT INACCESSIBLES a tout
+        // non-proprietaire, editeur compris. Ajoutees.
+        { id: 'presentation', label: '🎬 Fiche projet' },
         { id: 'synopsis', label: '📝 Synopsis' },
         { id: 'scenario', label: '📜 Scénario' },
         { id: 'sequencier', label: '🎬 Séquencier' },
@@ -11202,6 +11249,7 @@ crewRoles: {
         { id: 'storyboard_actors', label: '🎭 Acteurs (storyboard)' },
         { id: 'personnages', label: '👥 Personnages' },
         { id: 'lieux', label: '📍 Lieux' },
+        { id: 'ressources', label: '🎒 Ressources' },
         { id: 'comediens', label: '🎭 Comédiens' },
         { id: 'equipe', label: '🎥 Technicien.nes' },
         { id: 'depouillement', label: '📋 Dépouillement' },
@@ -15461,9 +15509,45 @@ const LockManager = {
                   btn.appendChild(av);
               });
           });
-          // Onglets-categories : PAS de badge (trop charge) — on nettoie d'eventuels residus
-          document.querySelectorAll('.tab-category .dlock-avatar-tab, .tab-category .dlock-badge').forEach(el => el.remove());
+          // v570 — PASTILLE SUR LES BOUTONS DE CATEGORIE. Auparavant on les nettoyait
+          // volontairement (« trop charge »), choix pris a l'epoque ou le bandeau plat
+          // #tabsNav servait de filet. Depuis le retrait du mode Classique il est
+          // masque : sans pastille de categorie, on ne peut voir qui travaille ou QUE
+          // si l'on se trouve deja dans la meme categorie que la personne. Trou reel.
+          document.querySelectorAll('.tab-category .dlock-avatar-tab, .tab-category .dlock-badge, .tab-category .dlock-watcher').forEach(el => el.remove());
           document.querySelectorAll('.tab-category.dlock-occupied').forEach(el => el.classList.remove('dlock-occupied'));
+          const catOccupants = (cat) => {
+              const tabs = ((typeof UI !== 'undefined' && UI.categoryTabs) ? UI.categoryTabs[cat] : null) || [];
+              const out = [];
+              const vus = {};
+              tabs.forEach(t => {
+                  if((UI.hiddenTabs || []).includes(t)) return;
+                  if(state.currentProjectType !== 'series' && (t === 'episodes' || t === 'seasons')) return;
+                  const l = lockFor(t);
+                  if(l) {
+                      const q = LockManager._who(l);
+                      if(!vus[q + '|' + t]) { vus[q + '|' + t] = 1; out.push({ qui: q, tab: t, ecrit: true }); }
+                  }
+                  watchersFor(t).forEach(r => {
+                      const q = (r.user_email || '').split('@')[0];
+                      if(!vus[q + '|' + t]) { vus[q + '|' + t] = 1; out.push({ qui: q, tab: t, ecrit: false }); }
+                  });
+              });
+              return out;
+          };
+          document.querySelectorAll('.tab-category[data-category]').forEach(btn => {
+              const occ = catOccupants(btn.dataset.category);
+              if(!occ.length) return;
+              btn.classList.add('dlock-occupied');
+              const ecrivains = occ.filter(o => o.ecrit);
+              const vedette = ecrivains[0] || occ[0];
+              const av = document.createElement('span');
+              av.className = 'dlock-avatar-tab';
+              if(!ecrivains.length) av.style.background = '#6b7280'; // personne n'ecrit : gris (simples spectateurs)
+              av.textContent = (vedette.qui[0] || '?').toUpperCase() + (occ.length > 1 ? '+' : '');
+              av.title = occ.map(o => (o.ecrit ? '🚧 ' : '👁 ') + o.qui + ' — ' + LockDomains.tabLabel(o.tab)).join('\n');
+              btn.appendChild(av);
+          });
           // lecture seule + bandeau de l'onglet actif
           if(LockManager.previewTab) return; // un aperçu est affiché : ne pas interférer
           const active = document.querySelector('.tab-content.active');
@@ -37597,6 +37681,8 @@ const Permissions = {
                 role: (m.status === 'pending')
                     ? '⏳ En attente de réponse'
                     : (m.role === 'editor' ? 'Invité · Éditeur' : 'Invité · Lecture'),
+                _rawRole: m.role,
+                _pending: (m.status === 'pending'),
                 photo: null,
                 _memberId: m.id
             }));
@@ -37607,6 +37693,21 @@ const Permissions = {
             console.error('renderInvitesTable:', e);
             div.innerHTML = '<p style="color:var(--danger,#dc2626);">Erreur de chargement des invités.</p>';
         }
+    },
+
+    // v570 — Cellule « rôle ». Le rôle n'est PLUS choisi : il est DEDUIT des cases de
+    // la ligne (au moins une ✏️ = Éditeur) et pousse en base a la sauvegarde. Regler
+    // les deux separement permettait de se contredire — 15 ✏️ sur un « lecteur »
+    // n'avaient aucun effet, la lecture seule etant testee avant la permission fine.
+    _roleCell: (member, type, emailKey) => {
+        if(type !== 'invite') {
+            return Utils.escape(type === 'actor' ? 'Comédien.ne' : (member.role || 'Technicien'));
+        }
+        if(member._pending) {
+            return '<span title="Tant que la personne n\'a pas accepté, elle n\'a aucun accès">' + Utils.escape(member.role) + '</span>';
+        }
+        const lab = (member._rawRole === 'editor') ? '✏️ Éditeur' : '👁️ Lecture seule';
+        return '<span id="perm-derived-' + emailKey + '" title="Rôle déduit des cases de cette ligne : au moins une ✏️ donne Éditeur.">' + lab + '</span>';
     },
 
     // v570 — Colonne « Peut inviter ». Le droit vit dans project_members.can_invite,
@@ -37651,6 +37752,43 @@ const Permissions = {
         Permissions.renderTables();
     },
 
+    // v570 — PRESETS DE ROLE. Le tableau devient le SEUL reglage : on remplit une
+    // ligne d'un coup, et le role en base (project_members.role) se DEDUIT ensuite
+    // des cases (voir _deriveRole). Avant, role et cases se reglaient separement et
+    // pouvaient se contredire — cocher 15 ✏️ sur un « lecteur » n'avait aucun effet.
+    _emailByKey: {},
+
+    ROLE_PRESETS: {
+        '__viewer': { label: 'Lecteur (tout en lecture)',        mode: 'read' },
+        '__editor': { label: 'Éditeur (tout en modification)',   mode: 'write' },
+        '__guest':  { label: 'Invité restreint (fiche projet seule)', mode: 'guest' }
+    },
+
+    _rolePresetPerms: (mode) => {
+        const out = {};
+        CONFIG.permissionSections.forEach(s => {
+            if(mode === 'read') out[s.id] = 'read';
+            else if(mode === 'write') out[s.id] = (s.id === 'stats') ? 'read' : 'write';
+            else out[s.id] = (s.id === 'presentation') ? 'read' : 'none';
+        });
+        return out;
+    },
+
+    // Une section absente des permissions enregistrees vaut LECTURE, jamais blocage :
+    // sans cela, ajouter une section au tableau la rendrait inaccessible a tous les
+    // membres deja enregistres (c'est ce qui est arrive a 'presentation' et
+    // 'ressources', citees par switchTab mais jamais definies).
+    _normalize: (perms) => {
+        const out = Object.assign({}, perms || {});
+        CONFIG.permissionSections.forEach(s => { if(!out[s.id]) out[s.id] = 'read'; });
+        return out;
+    },
+
+    // Le role decoule des cases : au moins une modification -> editeur, sinon lecteur.
+    _deriveRole: (perms) => {
+        return CONFIG.permissionSections.some(s => (perms || {})[s.id] === 'write') ? 'editor' : 'viewer';
+    },
+
     getForMember: (member, type) => {
         // type = 'actor' ou 'crew'
         if(type === 'actor') {
@@ -37686,20 +37824,20 @@ const Permissions = {
         
         // Vérifier dans les permissions personnalisées du projet
         if(state.data?.memberPermissions?.[Utils.sanitizeEmail(userEmail)]) {
-            return state.data.memberPermissions[Utils.sanitizeEmail(userEmail)];
+            return Permissions._normalize(state.data.memberPermissions[Utils.sanitizeEmail(userEmail)]);
         }
         
         // Chercher dans les comédiens
         const actor = state.data?.actors?.find(a => a.email === userEmail);
-        if(actor) return Permissions.getForMember(actor, 'actor');
+        if(actor) return Permissions._normalize(Permissions.getForMember(actor, 'actor'));
         
         // Chercher dans l'équipe
         const crew = state.data?.crew?.find(c => c.email === userEmail);
-        if(crew) return Permissions.getForMember(crew, 'crew');
+        if(crew) return Permissions._normalize(Permissions.getForMember(crew, 'crew'));
         
         // Par défaut selon le rôle ACL
         if(state.currentRole === 'editor') {
-            return CONFIG.defaultPermissions['chef_de_poste'];
+            return Permissions._normalize(CONFIG.defaultPermissions['chef_de_poste']);
         }
         
         return CONFIG.defaultPermissions['technicien'];
@@ -37861,9 +37999,12 @@ const Permissions = {
         
         members.forEach((member, idx) => {
             const emailKey = member.email ? Utils.sanitizeEmail(member.email) : `${type}_${idx}`;
+            // v570 : la cle est une adresse assainie ; on garde l'adresse reelle pour
+            // pouvoir ecrire le role deduit dans project_members a la sauvegarde.
+            if(member.email) Permissions._emailByKey[emailKey] = member.email;
             const currentPerms = state.data.memberPermissions?.[emailKey] || Permissions.getForMember(member, type);
             const photoHTML = member.photo ? `<img src="${member.photo}" alt="Photo du membre de l'équipe">` : '👤';
-            const roleLabel = type === 'actor' ? 'Comédien.ne' : (member.role || 'Technicien');
+            // v570 : le libellé du rôle passe par Permissions._roleCell (sélecteur pour les invités).
             
             html += `<tr>
                 <td>
@@ -37871,13 +38012,16 @@ const Permissions = {
                         <div class="permissions-user-photo">${photoHTML}</div>
                         <div>
                             <div class="permissions-user-name">${Utils.escape(member.name)}</div>
-                            <div class="permissions-user-role">${Utils.escape(roleLabel)}</div>
+                            <div class="permissions-user-role">${Permissions._roleCell(member, type, emailKey)}</div>
                         </div>
                     </div>
                 </td>
                 <td>
                     <select class="perm-select" onchange="app.Permissions.applyPreset('${emailKey}', '${type}', ${idx}, this.value)">
                         <option value="">Personnalisé</option>
+                        <option value="__viewer">👁️ Lecteur (tout)</option>
+                        <option value="__editor">✏️ Éditeur (tout)</option>
+                        <option value="__guest">🚪 Invité restreint</option>
                         <option value="comedien" ${type === 'actor' ? 'selected' : ''}>Comédien</option>
                         <option value="technicien">Technicien</option>
                         <option value="chef_de_poste">Chef de poste</option>
@@ -37890,7 +38034,7 @@ const Permissions = {
                 </td>
                 ${sections.map(s => `
                     <td class="rotated-cell">
-                        <select class="perm-select" id="perm-${emailKey}-${s.id}" data-email="${emailKey}" data-section="${s.id}" title="${Utils.escape(s.label)}">
+                        <select class="perm-select" id="perm-${emailKey}-${s.id}" data-email="${emailKey}" data-section="${s.id}" title="${Utils.escape(s.label)}" onchange="app.Permissions._refreshDerived('${emailKey}')">
                             <option value="none" ${currentPerms[s.id] === 'none' ? 'selected' : ''}>❌</option>
                             <option value="read" ${currentPerms[s.id] === 'read' ? 'selected' : ''}>👁️</option>
                             <option value="write" ${currentPerms[s.id] === 'write' ? 'selected' : ''}>✏️</option>
@@ -37909,6 +38053,7 @@ const Permissions = {
             <span style="margin-right:15px;">❌ Aucun accès</span>
             <span style="margin-right:15px;">👁️ Lecture seule</span>
             <span style="margin-right:15px;">✏️ Modification</span>
+            <span style="margin-right:15px;">Le rôle se déduit de la ligne : au moins une ✏️ = Éditeur, sinon Lecture seule.</span>
             ${options.invite ? '<span>☑ Peut inviter : autorise cette personne à faire entrer d\'autres membres (jamais en tant que propriétaire, et sans pouvoir déléguer à son tour).</span>' : ''}
         </div>`;
         
@@ -37918,7 +38063,9 @@ const Permissions = {
     applyPreset: (emailKey, type, idx, preset) => {
         if(!preset) return;
         
-        const perms = CONFIG.defaultPermissions[preset];
+        // v570 : les trois presets de role remplissent la ligne entiere.
+        const rp = Permissions.ROLE_PRESETS[preset];
+        const perms = rp ? Permissions._rolePresetPerms(rp.mode) : CONFIG.defaultPermissions[preset];
         if(!perms) return;
         
         CONFIG.permissionSections.forEach(s => {
@@ -37927,6 +38074,21 @@ const Permissions = {
                 select.value = perms[s.id] || 'none';
             }
         });
+        Permissions._refreshDerived(emailKey);
+    },
+
+    // Met a jour l'etiquette de role deduite d'une ligne, sans attendre la sauvegarde.
+    _refreshDerived: (emailKey) => {
+        const cell = document.getElementById('perm-derived-' + emailKey);
+        if(!cell) return;
+        const perms = {};
+        CONFIG.permissionSections.forEach(s => {
+            const sel = document.getElementById(`perm-${emailKey}-${s.id}`);
+            if(sel) perms[s.id] = sel.value;
+        });
+        const r = Permissions._deriveRole(perms);
+        cell.textContent = (r === 'editor') ? '✏️ Éditeur' : '👁️ Lecture seule';
+        cell.title = 'Rôle déduit des cases de cette ligne : au moins une ✏️ donne Éditeur.';
     },
     
     saveAll: async () => {
@@ -37955,11 +38117,34 @@ const Permissions = {
         
         state.data.memberPermissions = permsByEmail;
         
+        // v570 — LE ROLE SE DEDUIT DES CASES. Au moins une ✏️ = editeur en base, sinon
+        // lecteur. C'est ce qui rend les deux reglages impossibles a contredire : plus
+        // besoin de penser au role, il suit. Ne concerne que les vrais membres du projet.
+        let rolesChanges = 0;
+        try {
+            const { data: membres } = await supabase
+                .from('project_members')
+                .select('id, email, role')
+                .eq('project_id', state.currentProjectId);
+            for(const m of (membres || [])) {
+                if(m.role === 'owner') continue;
+                const key = Utils.sanitizeEmail(m.email || '');
+                const p = permsByEmail[key];
+                if(!p) continue; // personne sans ligne dans le tableau : on ne touche a rien
+                const voulu = Permissions._deriveRole(p);
+                if(voulu === m.role) continue;
+                const { error } = await supabase.from('project_members').update({ role: voulu }).eq('id', m.id);
+                if(!error) rolesChanges++;
+            }
+        } catch(e) { console.warn('[Permissions] mise à jour des rôles:', e && e.message); }
+        
         try {
             await Store.save();
             const memberCount = Object.keys(permsByEmail).length;
             History.log('PERMISSIONS', `Permissions modifiées pour ${memberCount} membre${memberCount > 1 ? 's' : ''}`);
-            Utils.toast('Permissions sauvegardées !', 'success');
+            Utils.toast('Permissions sauvegardées !' + (rolesChanges > 0
+                ? ' ' + rolesChanges + ' rôle(s) mis à jour — les personnes concernées doivent rouvrir le projet.'
+                : ''), 'success', rolesChanges > 0 ? 7000 : 3000);
             Permissions.closeModal();
         } catch(e) {
             console.error('Erreur sauvegarde permissions:', e);
