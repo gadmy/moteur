@@ -414,6 +414,8 @@ v576 (31 Août 2026) — Lot « petites dettes » : la fiche Ressource s'ouvre e
   - DEUX EXCEPTIONS DANS L'EXCEPTION, sinon la liste rouvrait ce qu'elle prétendait fermer : la croix de fermeture d'une planche SUPPRIME la planche, et l'onglet « + Nouvelle » du mood board en CRÉE une — tous deux portent la même classe que les onglets de planche. Le second a reçu sa propre classe pour être distingué, les deux restent bloqués.
   - LE PLAN DU STORYBOARD S'OUVRE EN LECTURE SEULE. Même refus sec que la fiche Ressource (« si rôle = viewer, on sort ») : on ne pouvait pas REGARDER un plan. La fenêtre s'ouvre désormais pour tous ceux qui ont accès au storyboard, avec le titre « 👁 Plan X.Y (lecture seule) », le verrou visuel posé sur son contenu et le bouton Sauvegarder MASQUÉ — un bouton qui ne peut rien enregistrer vaut mieux caché qu'affiché. Garde d'écriture ajoutée dans saveCurrentShot, qui n'en avait aucune.
   - LE CALENDRIER NE FABRIQUE PLUS DE JOURS PAR ACCIDENT. Cliquer une case VIDE du planning ne lit pas, ça CRÉE un jour de tournage : sans garde-fou, rendre le calendrier vivant pour un lecteur lui aurait fait naître des jours. Une case occupée ouvre la feuille de service, une case vide répond « aucun jour de tournage à cette date » à qui n'a pas le droit d'écrire. Dans la même veine, changer de planche au mood board n'enregistre plus rien pour un lecteur (l'initialisation paresseuse de la planche poussait une sauvegarde au passage).
+  - LA ZONE CENTRALE DU MOOD BOARD ÉCHAPPAIT À TOUT (signalé par Guillaume au test). Le verrou de lecture seule ne connaît que le CLIC ; or la planche fonctionne à la SOURIS — appui, déplacement, poignées de déformation, poignée de rotation — et rien de tout cela ne porte d'attribut onclick. On pouvait donc, en 👁️, déplacer les objets, les redimensionner, les faire tourner, ouvrir le clic droit et modifier le texte. C'était le trou le plus large de tout le chantier des droits : aucune règle CSS ne pouvait l'attraper. Réponse unique, MoodBoard.canWrite(), interrogée par TREIZE points d'entrée : le clic droit (il n'ouvre que des commandes d'écriture, il ne s'affiche plus du tout), les trois transformations, le dépôt de fichiers sur la planche, la mise à jour du texte, monter/descendre, lier, dupliquer, supprimer, renommer une palette, changer la couleur d'une forme, créer et supprimer une planche. La SÉLECTION d'un objet reste possible : elle ne fait qu'alimenter le panneau d'information, qui est une lecture.
+  - LEÇON À RETENIR POUR LES PROCHAINS ÉCRANS : partout où l'on manipule à la souris plutôt qu'au clic (mood board, storyboard dessiné, toile des liaisons), le verrou CSS ne protège RIEN et la garde doit être posée dans le code, fonction par fonction. Le CSS ne sait bloquer que ce qui se déclare cliquable.
 v575 (26 Août 2026) — Étapes 8a et 8d : le socle des liaisons et la toile + dépouillement en trois colonnes avec fiches + droits des fiches unifiés (trois trous bouchés) + audit complet et purge de l'en-tête
   - LE SOCLE DES LIAISONS (8a). Module Links, une seule voix pour « à quoi cet objet est-il relié ? » sur les ONZE familles. Il DÉLÈGUE aux lectures existantes (scenesForFiche, shootDaysForFiche, linkedExpenses…) au lieu de les réécrire — deux implémentations de la même question finissent par diverger, c'est précisément ce qu'on corrige. Il n'ajoute que les sens qui MANQUAIENT : ce qu'un comédien ou technicien PRÊTE au tournage (réciproque de res.owner, lisible nulle part), les plans d'une scène, les convoqués d'un jour. Les éléments dépouillés non rattachés sont rendus comme voisins avec linked:false — les ignorer ferait disparaître d'un écran de synthèse des éléments bien présents dans le film. Expenses.linkLabel / linkIcon délèguent à Links.label / Links.icon : c'était la seule table « famille → nom » du fichier, la laisser là obligeait tout autre écran à la recopier. Vérifié hors navigateur sur un projet de test : neuf familles interrogées dans les deux sens, fiche inexistante = liste vide sans planter.
   - LA TOILE DES LIAISONS (8d), EN FENÊTRE ET NON EN ONGLET (menu Projet ▾). Choix assumé contre la lettre du plan : la toile montre UNE fiche au centre, un onglet s'ouvrirait sur rien et il faudrait y poser le sélecteur qui est déjà dans la fenêtre ; et un 21e onglet = colonne de permissions + catégorie + étape de Tour + domaine de verrou, pour un écran dont on ne sait pas encore s'il restera. La promouvoir en onglet plus tard n'est que du câblage. Une fiche au centre, ses voisins directs autour, une couleur par famille, clic = recentrage, bouton Retour, sélecteur de départ groupé par familles. Les pastilles de famille servent de FILTRE (un décor à quarante scènes noierait le reste), plafond à 40 voisins annoncé au lieu d'une pelote. « Ouvrir la fiche » FERME la toile d'abord — leçon du troisième étage d'empilement de v574. Les permissions sont respectées : jours, dépenses et plans n'apparaissent pas à qui n'a pas accès à leurs sections, sinon la toile serait une porte dérobée vers les montants.
@@ -27180,6 +27182,18 @@ const MoodBoard = {
         MoodBoard.updateEmptyState();
     },
     
+    // 31 aout — LE VERROU DE LECTURE SEULE DU MOOD BOARD. La zone centrale
+    // echappe entierement au verrou CSS : elle ne fonctionne pas au clic mais a
+    // la SOURIS (mousedown / deplacement / poignees), et rien de tout cela ne
+    // porte d'attribut onclick. On pouvait donc deplacer, redimensionner,
+    // tourner, editer le texte et ouvrir le clic droit sur un onglet en 👁️.
+    // Une seule reponse, interrogee par tous les points d'entree.
+    canWrite: () => {
+        if(typeof Permissions === 'undefined' || !Permissions.canEdit) return true;
+        if(state.currentRole === 'viewer') return false;
+        return Permissions.canEdit('moodboard');
+    },
+    
     // Initialiser les événements du canvas
     setupCanvasEvents: () => {
         const wrapper = document.getElementById('moodboardCanvasWrapper');
@@ -27189,6 +27203,10 @@ const MoodBoard = {
         // Menu radial au clic droit
         wrapper.addEventListener('contextmenu', (e) => {
             e.preventDefault();
+            // Le clic droit n'ouvre QUE des commandes d'ecriture (ajouter,
+            // dupliquer, supprimer, modifier le texte) : rien a montrer en
+            // lecture seule.
+            if(!MoodBoard.canWrite()) return;
             const board = MoodBoard.getCurrentBoard();
             if(!board) return;
             
@@ -27264,6 +27282,7 @@ const MoodBoard = {
         wrapper.addEventListener('drop', (e) => {
             e.preventDefault();
             wrapper.style.background = '';
+            if(!MoodBoard.canWrite()) return;
             const files = e.dataTransfer.files;
             if(files.length > 0) {
                 const rect = canvas.getBoundingClientRect();
@@ -27333,6 +27352,7 @@ const MoodBoard = {
     
     // ===== GESTION DES PLANCHES =====
     createBoard: async () => {
+        if(!MoodBoard.canWrite()) { Utils.toast("Vous n'avez pas les droits de modification sur le mood board.", 'error'); return; }
         // Créer une modale personnalisée avec nom + liaison
         return new Promise((resolve) => {
             const modal = document.createElement('div');
@@ -27524,6 +27544,7 @@ const MoodBoard = {
     },
     
     deleteBoard: async (boardId) => {
+        if(!MoodBoard.canWrite()) { Utils.toast("Vous n'avez pas les droits de modification sur le mood board.", 'error'); return; }
         const board = (state.data.moodboards || []).find(b => b.id === boardId);
         if(!board) return;
         
@@ -27760,6 +27781,7 @@ const MoodBoard = {
     },
     
     moveElementUp: (elementId) => {
+        if(!MoodBoard.canWrite()) return;
         const board = MoodBoard.getCurrentBoard();
         if(!board) return;
         
@@ -27780,6 +27802,7 @@ const MoodBoard = {
     },
     
     moveElementDown: (elementId) => {
+        if(!MoodBoard.canWrite()) return;
         const board = MoodBoard.getCurrentBoard();
         if(!board) return;
         
@@ -27929,12 +27952,17 @@ const MoodBoard = {
         
         // Sélection au clic
         el.addEventListener('mousedown', (e) => {
-            if(e.target.classList.contains('resize-handle')) {
-                MoodBoard.startResize(elementId, e);
-            } else if(e.target.classList.contains('rotate-handle')) {
-                MoodBoard.startRotate(elementId, e);
-            } else if(!e.target.classList.contains('moodboard-element-text')) {
-                MoodBoard.startDrag(elementId, e);
+            // En lecture seule on garde la SELECTION (elle sert au panneau
+            // d'information, qui est une lecture) mais aucune des trois
+            // transformations : deplacer, redimensionner, tourner.
+            if(MoodBoard.canWrite()) {
+                if(e.target.classList.contains('resize-handle')) {
+                    MoodBoard.startResize(elementId, e);
+                } else if(e.target.classList.contains('rotate-handle')) {
+                    MoodBoard.startRotate(elementId, e);
+                } else if(!e.target.classList.contains('moodboard-element-text')) {
+                    MoodBoard.startDrag(elementId, e);
+                }
             }
             MoodBoard.selectElement(elementId);
             e.stopPropagation();
@@ -27962,6 +27990,7 @@ const MoodBoard = {
     },
     
     startRotate: (elementId, e) => {
+        if(!MoodBoard.canWrite()) return;
         const board = MoodBoard.getCurrentBoard();
         const element = board?.elements.find(el => el.id === elementId);
         if(!element) return;
@@ -28002,6 +28031,7 @@ const MoodBoard = {
     },
     
     startDrag: (elementId, e) => {
+        if(!MoodBoard.canWrite()) return;
         const board = MoodBoard.getCurrentBoard();
         const element = board?.elements.find(el => el.id === elementId);
         if(!element) return;
@@ -28039,6 +28069,7 @@ const MoodBoard = {
     },
     
     startResize: (elementId, e) => {
+        if(!MoodBoard.canWrite()) return;
         const board = MoodBoard.getCurrentBoard();
         const element = board?.elements.find(el => el.id === elementId);
         if(!element) return;
@@ -28101,6 +28132,7 @@ const MoodBoard = {
     },
     
     updateElementContent: (elementId, content) => {
+        if(!MoodBoard.canWrite()) return;
         const board = MoodBoard.getCurrentBoard();
         const element = board?.elements.find(el => el.id === elementId);
         if(!element) return;
@@ -28179,6 +28211,7 @@ const MoodBoard = {
     },
     
     linkElement: async (elementId) => {
+        if(!MoodBoard.canWrite()) return;
         const board = MoodBoard.getCurrentBoard();
         const element = board?.elements.find(el => el.id === elementId);
         if(!element) return;
@@ -28298,6 +28331,7 @@ const MoodBoard = {
     },
     
     duplicateElement: (elementId) => {
+        if(!MoodBoard.canWrite()) return;
         const board = MoodBoard.getCurrentBoard();
         const element = board?.elements.find(el => el.id === elementId);
         if(!element) return;
@@ -28318,6 +28352,7 @@ const MoodBoard = {
     },
     
     deleteElement: async (elementId) => {
+        if(!MoodBoard.canWrite()) { Utils.toast("Vous n'avez pas les droits de modification sur le mood board.", 'error'); return; }
         const board = MoodBoard.getCurrentBoard();
         if(!board) return;
         
@@ -29001,6 +29036,7 @@ const MoodBoard = {
     },
     
     renamePalette: async (elementId) => {
+        if(!MoodBoard.canWrite()) return;
         const board = MoodBoard.getCurrentBoard();
         const element = board?.elements.find(el => el.id === elementId);
         if(!element) return;
@@ -29018,6 +29054,7 @@ const MoodBoard = {
     },
     
     changeShapeColor: async (elementId) => {
+        if(!MoodBoard.canWrite()) return;
         const board = MoodBoard.getCurrentBoard();
         const element = board?.elements.find(el => el.id === elementId);
         if(!element) return;
