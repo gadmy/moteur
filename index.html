@@ -408,6 +408,8 @@ v576 (31 Août 2026) — Lot « petites dettes » : la fiche Ressource s'ouvre e
   - LE VERROU VISUEL DEVIENT RÉUTILISABLE HORS DE LA FENÊTRE DE FICHE. Les règles de lecture seule ne visaient que .card-edit-modal-body : la fenêtre Ressource, construite à la volée par UI.showModal, y échappait — bannière affichée mais champs restés cliquables. Le sélecteur passe sur une classe de PORTÉE, .perm-ro-scope, que #card-edit-modal-body porte en dur et que toute fenêtre fabriquée à la main peut poser sur son enveloppe. Même règle, même classe, une seule copie. Dans la foulée, le bouton « Enregistrer » est RETIRÉ en lecture seule : un bouton qui ne fait rien est un piège, il valait mieux ne plus l'afficher que le laisser mentir.
   - QUATRE IDS MORTS PURGÉS (constat de l'audit v575). classic-mode-options dans UITheme.setNavMode, tabs-mode-section / position-section-label / position-disabled-hint dans updatePositionMenuState : tous disparus avec le menu Classique à l'étape 4, tous protégés par un if, donc inoffensifs mais trompeurs — on lit du code qui pilote des éléments inexistants. Retirés avec un commentaire daté à leur place pour qu'on ne les réécrive pas. Même traitement pour .moodboard-palette-submenu : deux règles CSS et un querySelector pour un élément que rien ne crée nulle part ; hideRadialMenu ne cherche plus que le panneau texte, qui existe réellement.
   - COÛT MOYEN / JOUR : LE CHIFFRE VOULAIT ENFIN DIRE QUELQUE CHOSE. Il divisait le dépensé TOTAL par le nombre de jours de tournage — droits d'auteur, post-production et assurances compris. Arithmétiquement juste, sans signification : une journée de plateau ne coûte pas l'étalonnage. Nouvelle table Expenses.SHOOT_CATEGORIES (personnel, interprétation, charges sociales, décors et costumes, transports et régie, moyens techniques) ; les postes CNC 1, 8 et 9 en sont écartés, ce sont précisément ceux qui ne dépendent pas du nombre de jours passés sur le plateau. Les salaires ESTIMÉS du mode Détaillé n'y entrent pas non plus : ce sont des prévisions, les mélanger ferait bouger la moyenne sans qu'un euro soit sorti. Carte renommée « Coût moyen / jour de tournage », avec le détail de ce qui est compté en infobulle.
+  - LA VRAIE CAUSE, TROUVÉE APRÈS TEST DE GUILLAUME : LE CSS TUAIT LE CLIC. Retirer le refus dans Resources.edit ne suffisait pas — sur un onglet en 👁️, la règle `.tab-content.is-perm-readonly [onclick]` rendait la carte compacte MORTE : on voyait les fiches sans pouvoir en ouvrir une seule. Les personnages, comédiens et décors y échappaient PAR HASARD, leur clic étant posé en JS (card.onclick = …) et non en attribut, donc invisible au sélecteur ; Ressources, Structures, Véhicules, Contrats, Dépenses et Jours l'écrivent en attribut et tombaient tous dedans. Exception posée : `.compact-card` redevient cliquable, ses boutons d'action (crayon, corbeille, fusion) restent bloqués par les règles button/[onclick], et la fenêtre ouverte pose son propre verrou. OUVRIR UNE FICHE EST UNE LECTURE.
+  - CONTRECOUP FERMÉ DANS LA FOULÉE : rendre la carte cliquable la rendait aussi DÉPLAÇABLE (même spécificité que la règle [draggable], la dernière écrite gagnant) — un collaborateur en lecture aurait pu ranger les fiches dans d'autres groupes, et GroupDnD.move enregistrait sans rien vérifier. Deux gardes : le glisser est refusé au départ si la carte est dans un onglet en lecture seule, et move() contrôle canEditFiche de la collection concernée (personnages, comédiens, décors, équipe, structures). Griser n'est qu'un affichage tant que l'enregistrement ne contrôle rien.
 v575 (26 Août 2026) — Étapes 8a et 8d : le socle des liaisons et la toile + dépouillement en trois colonnes avec fiches + droits des fiches unifiés (trois trous bouchés) + audit complet et purge de l'en-tête
   - LE SOCLE DES LIAISONS (8a). Module Links, une seule voix pour « à quoi cet objet est-il relié ? » sur les ONZE familles. Il DÉLÈGUE aux lectures existantes (scenesForFiche, shootDaysForFiche, linkedExpenses…) au lieu de les réécrire — deux implémentations de la même question finissent par diverger, c'est précisément ce qu'on corrige. Il n'ajoute que les sens qui MANQUAIENT : ce qu'un comédien ou technicien PRÊTE au tournage (réciproque de res.owner, lisible nulle part), les plans d'une scène, les convoqués d'un jour. Les éléments dépouillés non rattachés sont rendus comme voisins avec linked:false — les ignorer ferait disparaître d'un écran de synthèse des éléments bien présents dans le film. Expenses.linkLabel / linkIcon délèguent à Links.label / Links.icon : c'était la seule table « famille → nom » du fichier, la laisser là obligeait tout autre écran à la recopier. Vérifié hors navigateur sur un projet de test : neuf familles interrogées dans les deux sens, fiche inexistante = liste vide sans planter.
   - LA TOILE DES LIAISONS (8d), EN FENÊTRE ET NON EN ONGLET (menu Projet ▾). Choix assumé contre la lettre du plan : la toile montre UNE fiche au centre, un onglet s'ouvrirait sur rien et il faudrait y poser le sélecteur qui est déjà dans la fenêtre ; et un 21e onglet = colonne de permissions + catégorie + étape de Tour + domaine de verrou, pour un écran dont on ne sait pas encore s'il restera. La promouvoir en onglet plus tard n'est que du câblage. Une fiche au centre, ses voisins directs autour, une couleur par famille, clic = recentrage, bouton Retour, sélecteur de départ groupé par familles. Les pastilles de famille servent de FILTRE (un décor à quarante scènes noierait le reste), plafond à 40 voisins annoncé au lieu d'une pelote. « Ouvrir la fiche » FERME la toile d'abord — leçon du troisième étage d'empilement de v574. Les permissions sont respectées : jours, dépenses et plans n'apparaissent pas à qui n'a pas accès à leurs sections, sinon la toile serait une porte dérobée vers les montants.
@@ -5789,6 +5791,17 @@ body.presentation-mode .presentation-bar {
   .tab-content.is-perm-readonly .script-editor-box { pointer-events: none; }
   .tab-content.is-perm-readonly .perm-ro-banner,
   .tab-content.is-perm-readonly .perm-ro-banner button { pointer-events: auto; }
+  /* 31 aout — OUVRIR UNE FICHE EST UNE LECTURE, PAS UNE ECRITURE. La regle
+     [onclick] ci-dessus rendait les cartes compactes MORTES sur un onglet en
+     👁️ : on voyait les fiches sans pouvoir en ouvrir une seule. Les familles
+     personnage / comedien / decor y echappaient PAR HASARD — leur clic est pose
+     en JS (card.onclick = ...), sans attribut onclick, donc invisible au
+     selecteur ; Ressources, Structures, Vehicules, Contrats, Depenses et Jours
+     l'ecrivent en attribut et tombaient dedans. La carte redevient cliquable ;
+     ses boutons d'action (crayon, corbeille, fusion) restent bloques par les
+     regles button/[onclick] ci-dessus, et la fenetre ouverte pose son propre
+     verrou. */
+  .tab-content.is-perm-readonly .compact-card { pointer-events: auto; }
   /* 26 aout — LES FENETRES DE FICHE ECHAPPAIENT A CE VERROU. Il ne visait que
      l'onglet actif ; or une fenetre de fiche vit dans le corps de la page, en
      dehors de l'onglet. Une fiche ouverte depuis un onglet en lecture seule
@@ -11726,6 +11739,15 @@ crewRoles: {
       },
 
       move: (coll, idx, groupId) => {
+          // Ceinture et bretelles : le glisser est deja refuse au depart sur un
+          // onglet en lecture seule, mais l'ecriture se verifie ici aussi —
+          // griser n'est qu'un affichage tant que l'enregistrement ne controle rien.
+          const KIND = { characters: 'character', actors: 'actor', locations: 'location', crew: 'crew', orgs: 'org' };
+          if(typeof Permissions !== 'undefined' && Permissions.canEditFiche && KIND[coll]
+             && !Permissions.canEditFiche(KIND[coll])) {
+              Utils.toast("Vous n'avez pas les droits de modification sur cette section.", 'error');
+              return;
+          }
           const arr = state.data[coll];
           const item = arr && arr[idx];
           if(!item) return;
@@ -11764,6 +11786,13 @@ crewRoles: {
       _onStart: (e) => {
           const card = e.target.closest ? e.target.closest('.compact-card[draggable="true"]') : null;
           if(!card) return;
+          // 31 aout — GARDE DE LECTURE SEULE. Les cartes redeviennent cliquables
+          // sur un onglet en 👁️ (ouvrir une fiche est une lecture) ; il faut donc
+          // dire ici, et non par le CSS, que les DEPLACER reste interdit. Sans
+          // cela un collaborateur en lecture pourrait ranger les fiches dans
+          // d'autres groupes, et move() enregistrerait.
+          const tab = card.closest ? card.closest('.tab-content.is-perm-readonly') : null;
+          if(tab) { try { e.preventDefault(); } catch(_) {} return; }
           GroupDnD._el = card;
           GroupDnD._coll = card.dataset.dndColl;
           GroupDnD._idx = parseInt(card.dataset.dndIdx, 10);
