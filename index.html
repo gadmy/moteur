@@ -42458,7 +42458,12 @@ doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
                 ? `${shootDay.lunchStart || '--:--'} - ${shootDay.lunchEnd || '--:--'}` : '';
             const sunDay = PlanningFDS.sun(shootDay.locationLat, shootDay.locationLng, startDate);
             afarRow(hdCols2, [
-                `JOUR ${dayIdx + 1} / ${days.length}`,
+                // 31 aout : « JOUR 1 / 1 » sur une feuille exportee seule etait
+                // faux et inquietant. Le rang vient du planning, pas de la
+                // selection imprimee.
+                (shootDay.dayNumber
+                    ? `JOUR ${shootDay.dayNumber} / ${allDays.filter(d => d && (d.dayType || 'tournage') === 'tournage').length}`
+                    : Planning.dayShortLabel(shootDay)),
                 'Horaires de tournage :',
                 `${shootDay.crewCall || '--:--'} - ${shootDay.estimatedWrap || '--:--'}`
             ], { height: 6.5, fontSize: 9, boldCols: [0, 1] });
@@ -42891,15 +42896,34 @@ doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
             }
             
             // ===== PRÉVISIONS DU LENDEMAIN (format AFAR page 3) =====
-            const nextDay = days[dayIdx + 1] || null;
+            // 31 aout — LE LENDEMAIN SE CHERCHE DANS LE PLANNING, PAS DANS
+            // L'EXPORT. On lisait days[dayIdx + 1], c'est-a-dire le jour suivant
+            // DANS LA SELECTION IMPRIMEE : exporter une seule feuille laissait
+            // donc tout le bloc vide, alors que le lendemain existe bel et bien
+            // dans le projet. Or ce bloc n'a de sens que pour l'equipe qui
+            // recoit la feuille la veille au soir : il doit annoncer le vrai
+            // jour d'apres. On cherche desormais, dans TOUS les jours de
+            // tournage, le premier qui suive la date courante.
+            const _dCur = new Date(shootDay.startDate || shootDay.date || 0);
+            const nextDay = allDays
+                .filter(d => d && (d.dayType || 'tournage') === 'tournage')
+                .filter(d => {
+                    const dd = new Date(d.startDate || d.date || 0);
+                    return !isNaN(dd) && !isNaN(_dCur) && dd > _dCur;
+                })
+                .sort((a, b) => new Date(a.startDate || a.date || 0) - new Date(b.startDate || b.date || 0))[0] || null;
             const nextDateObj = nextDay ? new Date(nextDay.startDate || nextDay.date || 0) : null;
             const nextDateStr = (nextDateObj && !isNaN(nextDateObj))
                 ? nextDateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : '';
             const nextScenes = nextDay ? (nextDay.scenes || []).map(ref => allScenes.find(s => s.id === ref.sceneId)).filter(Boolean) : [];
             const uniq = (arr) => arr.filter((v, i, a) => v && a.indexOf(v) === i);
             const prevLabelW = usableWidth * 0.24;
+            // Le rang annonce est celui du lendemain dans le PLANNING (son
+            // dayNumber), plus sa position dans la selection imprimee : sur une
+            // feuille exportee seule, « JOUR 2 / 1 » n'avait aucun sens.
+            const _totalT = allDays.filter(d => d && (d.dayType || 'tournage') === 'tournage').length;
             afarLabelBar('PRÉVISIONS DU ' + (nextDateStr ? nextDateStr.toUpperCase() : 'LENDEMAIN')
-                + (nextDay ? '   (JOUR ' + (dayIdx + 2) + ' / ' + days.length + ')' : ''), { height: 5 });
+                + (nextDay && nextDay.dayNumber ? '   (JOUR ' + nextDay.dayNumber + ' / ' + _totalT + ')' : ''), { height: 5 });
             afarKVRow('Horaires :', nextDay ? `${nextDay.crewCall || '--:--'} - ${nextDay.estimatedWrap || '--:--'}` : '', { labelW: prevLabelW });
             afarKVRow('Séquences :', uniq(nextScenes.map(sc => sceneLabel(sc).replace(/^#/, ''))).join('  '), { labelW: prevLabelW });
             afarKVRow('Effets :', uniq(nextScenes.map(sc => afarEffet(sc.title))).join('  -  '), { labelW: prevLabelW });
