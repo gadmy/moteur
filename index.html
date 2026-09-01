@@ -432,6 +432,8 @@ v576 (31 Août 2026) — Lot « petites dettes » : la fiche Ressource s'ouvre e
   - UN SEUL ENDROIT NOMME UN JOUR. Sept écrans fabriquaient leur propre formule (« Jour » + numéro, avec repli sur le rang dans la liste quand le numéro manquait) : autant de formules à corriger, et elles auraient divergé. Planning.dayShortLabel et dayLabel remplacent les sept — feuille de service, historique, exports PDF, liste des convocations, socle des liaisons. Vérifié hors navigateur sur un planning volontairement mélangé : trois jours de tournage dans le désordre + un repérage + un essai costume, numéros corrects au premier passage, aucun changement au second.
   - LE NUMÉRO N'ÉTAIT AFFICHÉ NULLE PART (remarque de Guillaume juste après la livraison, et il avait raison : à quoi bon numéroter si le numéro ne se voit pas). Le bandeau de tête de la feuille de service n'annonçait que la date, alors que c'est précisément ainsi qu'une équipe désigne sa journée — « on est en J4 ». Le bandeau porte désormais le rang du jour : « FEUILLE DE SERVICE — J4 — JEUDI 12 MARS 2026 », et pour une journée qui n'est pas du tournage, sa nature à la place du numéro : « FEUILLE DE SERVICE — REPÉRAGE — LUNDI 2 MARS 2026 ». Même chose sur le PDF exporté, sinon la feuille imprimée aurait continué de le taire.
   - LE NUMÉRO EST PROVISOIRE TANT QUE LE JOUR N'EST PAS ENREGISTRÉ. La renumérotation générale ne tourne qu'à la sauvegarde : un jour neuf n'a pas encore de numéro, et un jour dont on vient de changer la date porterait l'ancien. Une fonction calcule donc le rang à la volée, SANS RIEN ÉCRIRE, à partir de la date saisie — le bandeau réagit en direct quand on déplace la journée. Le type de journée a été ajouté aux champs qui rafraîchissent la feuille : passer un jour de « tournage » à « repérage » change le bandeau. Vérifié hors navigateur sur quatre cas (jour intercalé, jour ajouté en fin, repérage, jour sans date).
+  - D'OÙ VENAIENT LES DOUBLONS (question de Guillaume devant les fiches en double de « Rencontre sous les Caraïbes » — sept comédiens partageaient UN SEUL identifiant). DEUX BUGS, tous deux dans Breakdown.createFiche, la fabrique qui crée une fiche depuis le dépouillement. PREMIER : l'identifiant valait `'act_' + Date.now()`, l'horloge à la milliseconde et rien d'autre. Dépouiller plusieurs noms d'un coup fabriquait donc plusieurs fiches DANS LA MÊME MILLISECONDE, toutes avec le même identifiant — l'application ne pouvait plus les distinguer, et toute liaison vers l'une pointait sur les sept. Reproduit hors navigateur : sept créations en boucle donnaient 1 identifiant distinct, contre 7 après correction. SECOND : aucune recherche préalable, si bien que dépouiller « ALIX BERGER » créait un second personnage alors que char_alix existait. Utils.generateUniqueId (horloge + suffixe aléatoire) existait depuis toujours, et autoCreateResource, dix lignes plus bas, faisait DÉJÀ les deux gestes correctement — chercher d'abord, créer ensuite avec un identifiant sûr. Seul ce bloc-là les ignorait.
+  - PUIS LA MÊME FAUTE PARTOUT AILLEURS : dix-huit fabrications d'identifiant construites sur la seule horloge, sans suffixe. Groupes, planches et éléments de mood board, véhicules, dépenses, profils publics, comédiens et techniciens ajoutés depuis la recherche globale, décors et personnages créés à la main. Chacune est un doublon en puissance dès que deux créations tombent dans la même milliseconde — ce qui arrive à tous les coups sur un import, une duplication ou un clic répété. Toutes passent désormais par Utils.generateUniqueId. LEÇON : le générateur sûr existait, il suffisait de s'en servir ; c'est le genre de dette qui ne se voit pas tant qu'on crée les fiches une par une à la main.
 v575 (26 Août 2026) — Étapes 8a et 8d : le socle des liaisons et la toile + dépouillement en trois colonnes avec fiches + droits des fiches unifiés (trois trous bouchés) + audit complet et purge de l'en-tête
   - LE SOCLE DES LIAISONS (8a). Module Links, une seule voix pour « à quoi cet objet est-il relié ? » sur les ONZE familles. Il DÉLÈGUE aux lectures existantes (scenesForFiche, shootDaysForFiche, linkedExpenses…) au lieu de les réécrire — deux implémentations de la même question finissent par diverger, c'est précisément ce qu'on corrige. Il n'ajoute que les sens qui MANQUAIENT : ce qu'un comédien ou technicien PRÊTE au tournage (réciproque de res.owner, lisible nulle part), les plans d'une scène, les convoqués d'un jour. Les éléments dépouillés non rattachés sont rendus comme voisins avec linked:false — les ignorer ferait disparaître d'un écran de synthèse des éléments bien présents dans le film. Expenses.linkLabel / linkIcon délèguent à Links.label / Links.icon : c'était la seule table « famille → nom » du fichier, la laisser là obligeait tout autre écran à la recopier. Vérifié hors navigateur sur un projet de test : neuf familles interrogées dans les deux sens, fiche inexistante = liste vide sans planter.
   - LA TOILE DES LIAISONS (8d), EN FENÊTRE ET NON EN ONGLET (menu Projet ▾). Choix assumé contre la lettre du plan : la toile montre UNE fiche au centre, un onglet s'ouvrirait sur rien et il faudrait y poser le sélecteur qui est déjà dans la fenêtre ; et un 21e onglet = colonne de permissions + catégorie + étape de Tour + domaine de verrou, pour un écran dont on ne sait pas encore s'il restera. La promouvoir en onglet plus tard n'est que du câblage. Une fiche au centre, ses voisins directs autour, une couleur par famille, clic = recentrage, bouton Retour, sélecteur de départ groupé par familles. Les pastilles de famille servent de FILTRE (un décor à quarante scènes noierait le reste), plafond à 40 voisins annoncé au lieu d'une pelote. « Ouvrir la fiche » FERME la toile d'abord — leçon du troisième étage d'empilement de v574. Les permissions sont respectées : jours, dépenses et plans n'apparaissent pas à qui n'a pas accès à leurs sections, sinon la toile serait une porte dérobée vers les montants.
@@ -17048,7 +17050,7 @@ const LockManager = {
           
           if(selectedProfiles.length === 0) {
               empty.crew.push({
-                  id: 'crew_owner_' + Date.now(),
+                  id: 'crew_owner_' + Utils.generateUniqueId(),
                   name: ownerName,
                   email: myEmail,
                   role: 'Porteur de projet',
@@ -24098,7 +24100,7 @@ initCategoriesDragDrop: () => {
             return;
         }
         
-        const newGroup = { id: 'g'+Date.now(), name: icon + ' ' + name, type: type, icon: icon };
+        const newGroup = { id: 'g'+Utils.generateUniqueId(), name: icon + ' ' + name, type: type, icon: icon };
         state.data.groups.push(newGroup);
         History.log('ADD', `Ajout groupe : ${icon} ${name}`, {
             target: { kind: 'group', id: newGroup.id, label: name }
@@ -24452,7 +24454,7 @@ initCategoriesDragDrop: () => {
               Utils.toast('Vous n\'avez pas la permission d\'ajouter des comédiens.', 'error');
               return;
           }
-          const newActor = { id: 'act_'+Date.now(), name: '', gender: "", bio: "", email: "", phone: "", address: "", city: "", website: "", photo: "", group_id: "", hasVehicle: false, vehicleType: "", vehiclePlate: "", vehicleSeats: "", vehicleTrunk: false, vehicleNotes: "", salaryGross: "", salaryNet: "", salaryBudget: "", dailyRate: "", rateCurrency: "€", rateType: "Jour", availabilityText: "", availabilityDates: [], color: "", height: "", weight: "", age: "", eyeColor: "", hairColor: "", hairLength: "", ethnicity: "", corpulence: "", sports: "", languages: "", demoreel: "", galleryPhotos: [] }; state.data.actors.push(newActor); History.log('ADD', `Ajout comédien`, { target: { kind: 'actor', id: newActor.id, label: 'Nouveau comédien' }, link: { kind: 'actor', id: newActor.id } }); Store.save(); UI.renderDataTab('actors', els.actorContainer); CardModal.open('actors', state.data.actors.length - 1); },
+          const newActor = { id: 'act_'+Utils.generateUniqueId(), name: '', gender: "", bio: "", email: "", phone: "", address: "", city: "", website: "", photo: "", group_id: "", hasVehicle: false, vehicleType: "", vehiclePlate: "", vehicleSeats: "", vehicleTrunk: false, vehicleNotes: "", salaryGross: "", salaryNet: "", salaryBudget: "", dailyRate: "", rateCurrency: "€", rateType: "Jour", availabilityText: "", availabilityDates: [], color: "", height: "", weight: "", age: "", eyeColor: "", hairColor: "", hairLength: "", ethnicity: "", corpulence: "", sports: "", languages: "", demoreel: "", galleryPhotos: [] }; state.data.actors.push(newActor); History.log('ADD', `Ajout comédien`, { target: { kind: 'actor', id: newActor.id, label: 'Nouveau comédien' }, link: { kind: 'actor', id: newActor.id } }); Store.save(); UI.renderDataTab('actors', els.actorContainer); CardModal.open('actors', state.data.actors.length - 1); },
       addDataItem: async (type) => {
           if(type === 'actors') { Actions.addActor(); return; }
           const labels = { characters: { perm: 'personnages', singular: 'personnage', title: 'Nouveau personnage', placeholder: 'Nom du personnage…' }, locations: { perm: 'decors', singular: 'décor', title: 'Nouveau décor', placeholder: 'Nom du décor (ex: GRENIER MAISON PATERNELLE)…' } };
@@ -24466,7 +24468,7 @@ initCategoriesDragDrop: () => {
           if(type === 'characters') {
               const exists = state.data.characters.find(c => c.name.toLowerCase() === trimmed.toLowerCase());
               if(exists) { Utils.toast('Ce personnage existe déjà', 'warning'); return; }
-              const newChar = { id: 'char_'+Date.now(), name: trimmed, bio: '', group_id: '', gender: '' };
+              const newChar = { id: 'char_'+Utils.generateUniqueId(), name: trimmed, bio: '', group_id: '', gender: '' };
               state.data.characters.push(newChar);
               History.log('ADD', `Ajout personnage : ${trimmed}`, { target: { kind: 'character', id: newChar.id, label: trimmed }, link: { kind: 'character', id: newChar.id } });
               Store.save();
@@ -24475,7 +24477,7 @@ initCategoriesDragDrop: () => {
               const upperName = trimmed.toUpperCase();
               const exists = state.data.locations.find(l => l.name.toUpperCase() === upperName);
               if(exists) { Utils.toast('Ce décor existe déjà', 'warning'); return; }
-              const newLoc = { id: 'loc_'+Date.now(), name: upperName, desc: '', group_id: '', realName: '', address: '', contactName: '', contactPhone: '', accessNotes: '', galleryPhotos: [] };
+              const newLoc = { id: 'loc_'+Utils.generateUniqueId(), name: upperName, desc: '', group_id: '', realName: '', address: '', contactName: '', contactPhone: '', accessNotes: '', galleryPhotos: [] };
               state.data.locations.push(newLoc);
               History.log('ADD', `Ajout décor : ${upperName}`, { target: { kind: 'location', id: newLoc.id, label: upperName }, link: { kind: 'location', id: newLoc.id } });
               Store.save();
@@ -26741,31 +26743,58 @@ initCategoriesDragDrop: () => {
       // Les structures sont reprises telles quelles des createurs de chaque
       // onglet : une fiche creee ici doit etre indiscernable d'une fiche creee
       // a la main, sous peine de champs manquants a l'affichage.
+      //
+      // 31 aout — DEUX BUGS CORRIGES ICI, A L'ORIGINE DES DOUBLONS CONSTATES
+      // dans « Rencontre sous les Caraibes » :
+      //   1. l'identifiant valait 'act_' + Date.now(). Depouiller plusieurs
+      //      noms d'un coup fabriquait donc plusieurs fiches DANS LA MEME
+      //      MILLISECONDE, et toutes recevaient le MEME identifiant. Sept
+      //      comediens partageaient ainsi act_1787582855026 : l'application ne
+      //      pouvait plus les distinguer, et toute liaison vers l'un d'eux
+      //      pointait sur les sept. Utils.generateUniqueId ajoute un suffixe
+      //      aleatoire et existait deja ; autoCreateResource, juste en dessous,
+      //      s'en servait correctement. Seul ce bloc l'ignorait.
+      //   2. aucune recherche prealable : depouiller « ALIX BERGER » creait un
+      //      SECOND personnage alors que char_alix existait. La aussi,
+      //      autoCreateResource faisait deja le bon geste (chercher, puis
+      //      creer seulement si rien ne correspond). On l'applique aux quatre
+      //      autres familles, en comparant les noms sans casse ni espaces
+      //      superflus.
       createFiche: (kind, name, cat) => {
           const nm = String(name || '').trim();
           if(!nm) return null;
           if(kind === 'resource') return Breakdown.autoCreateResource(nm, cat);
+          
+          // Fiche portant deja ce nom ? On rend la sienne plutot que d'en
+          // fabriquer une seconde.
+          const COLL = { character: 'characters', location: 'locations', actor: 'actors', crew: 'crew' };
+          const coll = COLL[kind];
+          if(!coll) return null;
+          const cible = nm.toLowerCase();
+          const deja = (state.data[coll] || []).find(x => x && String(x.name || '').trim().toLowerCase() === cible);
+          if(deja) return deja.id;
+          
           if(kind === 'character') {
-              const c = { id: 'char_' + Date.now(), name: nm, bio: '', group_id: '', gender: '' };
+              const c = { id: 'char_' + Utils.generateUniqueId(), name: nm, bio: '', group_id: '', gender: '' };
               (state.data.characters = state.data.characters || []).push(c);
               History.log('ADD', `Ajout personnage : ${nm}`, { target: { kind: 'character', id: c.id, label: nm }, link: { kind: 'character', id: c.id } });
               return c.id;
           }
           if(kind === 'location') {
               const up = nm.toUpperCase();
-              const l = { id: 'loc_' + Date.now(), name: up, desc: '', group_id: '', realName: '', address: '', contactName: '', contactPhone: '', accessNotes: '', galleryPhotos: [] };
+              const l = { id: 'loc_' + Utils.generateUniqueId(), name: up, desc: '', group_id: '', realName: '', address: '', contactName: '', contactPhone: '', accessNotes: '', galleryPhotos: [] };
               (state.data.locations = state.data.locations || []).push(l);
               History.log('ADD', `Ajout décor : ${up}`, { target: { kind: 'location', id: l.id, label: up }, link: { kind: 'location', id: l.id } });
               return l.id;
           }
           if(kind === 'actor') {
-              const a = { id: 'act_' + Date.now(), name: nm, gender: '', bio: '', email: '', phone: '', address: '', city: '', website: '', photo: '', group_id: '', hasVehicle: false, vehicleType: '', vehiclePlate: '', vehicleSeats: '', vehicleTrunk: false, vehicleNotes: '', salaryGross: '', salaryNet: '', salaryBudget: '', dailyRate: '', rateCurrency: '€', rateType: 'Jour', availabilityText: '', availabilityDates: [], color: '', height: '', weight: '', age: '', eyeColor: '', hairColor: '', hairLength: '', ethnicity: '', corpulence: '', sports: '', languages: '', demoreel: '', galleryPhotos: [] };
+              const a = { id: 'act_' + Utils.generateUniqueId(), name: nm, gender: '', bio: '', email: '', phone: '', address: '', city: '', website: '', photo: '', group_id: '', hasVehicle: false, vehicleType: '', vehiclePlate: '', vehicleSeats: '', vehicleTrunk: false, vehicleNotes: '', salaryGross: '', salaryNet: '', salaryBudget: '', dailyRate: '', rateCurrency: '€', rateType: 'Jour', availabilityText: '', availabilityDates: [], color: '', height: '', weight: '', age: '', eyeColor: '', hairColor: '', hairLength: '', ethnicity: '', corpulence: '', sports: '', languages: '', demoreel: '', galleryPhotos: [] };
               (state.data.actors = state.data.actors || []).push(a);
               History.log('ADD', `Ajout comédien : ${nm}`, { target: { kind: 'actor', id: a.id, label: nm }, link: { kind: 'actor', id: a.id } });
               return a.id;
           }
           if(kind === 'crew') {
-              const m = { id: 'crew_' + Date.now(), name: nm, gender: '', role: '', email: '', phone: '', address: '', city: '', photo: '', hasVehicle: false, vehicleType: '', vehiclePlate: '', vehicleSeats: '', vehicleTrunk: false, vehicleNotes: '', availabilityText: '', availabilityDates: [], salaryGross: '', salaryNet: '', salaryBudget: '', dailyRate: '', rateCurrency: '€', rateType: 'Jour', notes: '', group_id: '', demoreel: '', galleryPhotos: [] };
+              const m = { id: 'crew_' + Utils.generateUniqueId(), name: nm, gender: '', role: '', email: '', phone: '', address: '', city: '', photo: '', hasVehicle: false, vehicleType: '', vehiclePlate: '', vehicleSeats: '', vehicleTrunk: false, vehicleNotes: '', availabilityText: '', availabilityDates: [], salaryGross: '', salaryNet: '', salaryBudget: '', dailyRate: '', rateCurrency: '€', rateType: 'Jour', notes: '', group_id: '', demoreel: '', galleryPhotos: [] };
               (state.data.crew = state.data.crew || []).push(m);
               History.log('ADD', `Ajout technicien : ${nm}`, { target: { kind: 'crew', id: m.id, label: nm }, link: { kind: 'crew', id: m.id } });
               return m.id;
@@ -27544,7 +27573,7 @@ const MoodBoard = {
                 if(!state.data.moodboards) state.data.moodboards = [];
                 
                 const board = {
-                    id: 'mb_' + Date.now(),
+                    id: 'mb_' + Utils.generateUniqueId(),
                     name: name,
                     format: 'a4-portrait',
                     linkedTo: linkedTo,
@@ -28425,7 +28454,7 @@ const MoodBoard = {
         if(!element) return;
         
         const newElement = JSON.parse(JSON.stringify(element));
-        newElement.id = 'el_' + Date.now();
+        newElement.id = 'el_' + Utils.generateUniqueId();
         newElement.x += 30;
         newElement.y += 30;
         newElement.createdAt = Date.now();
@@ -29196,7 +29225,7 @@ const MoodBoard = {
         if(!shape) return;
         
         const element = {
-            id: 'el_' + Date.now(),
+            id: 'el_' + Utils.generateUniqueId(),
             type: 'shape',
             shapeId: shapeId,
             x: MoodBoard.contextX,
@@ -29222,7 +29251,7 @@ const MoodBoard = {
         if(!board) return;
         
         const element = {
-            id: 'el_' + Date.now(),
+            id: 'el_' + Utils.generateUniqueId(),
             type: 'palette',
             x: MoodBoard.contextX,
             y: MoodBoard.contextY,
@@ -29349,7 +29378,7 @@ const MoodBoard = {
         if(!board) return;
         
         const element = {
-            id: 'el_' + Date.now(),
+            id: 'el_' + Utils.generateUniqueId(),
             type: 'link',
             x: MoodBoard.contextX,
             y: MoodBoard.contextY,
@@ -35234,7 +35263,7 @@ container.innerHTML = filtered.map(res => {
               History.log('EDIT', `Modification ${catLabel} : ${name}`, { target: { kind: 'resource', id: editId, label: name }, link: { kind: 'resource', id: editId } });
           } else {
               const newResource = {
-                  id: 'res_' + Date.now(),
+                  id: 'res_' + Utils.generateUniqueId(),
                   name,
                   category,
                   photo,
@@ -37793,7 +37822,7 @@ const ProfileGallery = {
         try {
             // Créer un nouveau profil à partir du claim
             const newProfile = {
-                id: 'profile_' + Date.now(),
+                id: 'profile_' + Utils.generateUniqueId(),
                 type: claim.type,
                 name: claim.name,
                 email: state.currentUser.email,
@@ -40975,7 +41004,7 @@ const GlobalSearch = {
         
         // Créer une copie pour le projet
         const newEntry = { ...person };
-        newEntry.id = (isActors ? 'act_' : 'crew_') + Date.now();
+        newEntry.id = (isActors ? 'act_' : 'crew_') + Utils.generateUniqueId();
         newEntry.availabilityDates = [];
         delete newEntry.profileComplete;
         delete newEntry.updatedAt;
@@ -54927,7 +54956,7 @@ const Presentation = {
                 return;
             }
             memberData = {
-                id: 'new_' + Date.now(),
+                id: 'new_' + Utils.generateUniqueId(),
                 type: 'new',
                 name: newName,
                 email: document.getElementById('team-member-new-email').value.trim(),
@@ -57495,7 +57524,7 @@ const ExpensesCRUD = {
             History.log('EDIT', `Modification dépense : ${title} (${amountStr})`, { target: { kind: 'expense', id: editId, label: title }, link: { kind: 'expense', id: editId } });
         } else {
             // Création
-            expenseData.id = 'exp_' + Date.now();
+            expenseData.id = 'exp_' + Utils.generateUniqueId();
             expenseData.createdAt = new Date().toISOString();
             expenseData.createdBy = state.currentUser?.email;
             expenseData.createdByName = state.userProfile?.displayName || state.currentUser?.email?.split('@')[0];
@@ -57773,7 +57802,7 @@ const ExpensesCRUD = {
         
         const newExpense = {
             ...expense,
-            id: 'exp_' + Date.now(),
+            id: 'exp_' + Utils.generateUniqueId(),
             title: expense.title + ' (copie)',
             status: 'pending',
             date: new Date().toISOString().split('T')[0],
@@ -69674,7 +69703,7 @@ const SceneVersions = {
         // que rien ne le signale. Copie profonde, sinon la version pointerait
         // sur les memes objets que la scene et suivrait ses modifications.
         const version = {
-            id: 'v_' + Date.now(),
+            id: 'v_' + Utils.generateUniqueId(),
             date: new Date().toISOString(),
             dateDisplay: new Date().toLocaleString('fr-FR'),
             title: scene.title,
@@ -69831,7 +69860,7 @@ const SceneVersions = {
         
         // Sauvegarder l'état actuel avant restauration
         const currentVersion = {
-            id: 'v_' + Date.now(),
+            id: 'v_' + Utils.generateUniqueId(),
             date: new Date().toISOString(),
             dateDisplay: new Date().toLocaleString('fr-FR'),
             title: scene.title,
