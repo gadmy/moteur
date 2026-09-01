@@ -16902,7 +16902,7 @@ const LockManager = {
           }
       },
       // V62: Initialisation du tableau snapshots
-      getEmpty: () => ({ _schemaVersion: Store.SCHEMA_VERSION, title: "Nouveau Film", filmId: 'film_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11), synopsis: "", synopsisShort: "", synopsisLong: "", scriptMeta: { author: "", coAuthor: "", contact: "", copyright: "", draft: "Premier jet", draftDate: "", source: "", notes: "" }, snapshots: [], scenes: [], characters: [], actors: [], locations: [], resources: [], crew: [], shootingDays: [], tags: CONFIG.defaultTags, groups: [...CONFIG.defaultGroups, ...CONFIG.crewGroups], shots: [], counter: 1, uiConfig: { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [] }, budget: { total: 0, currency: '€', manager: '', managerEmailNotif: true, envelopes: {}, deptManagers: {} }, expenses: [], presentation: { title: '', genre: '', format: '', duration: '', productionType: '', description: '', team: [], associations: [], enterprises: [], needsCrew: {}, needsActors: [], image: '' }, memberPermissions: {}, chatChannels: [], chatExtraMembers: [], workplanOverrides: {}, scriptReports: {}, contracts: [], episodes: [], seasons: [] }),
+      getEmpty: () => ({ _schemaVersion: Store.SCHEMA_VERSION, title: "Nouveau Film", filmId: 'film_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11), synopsis: "", synopsisShort: "", synopsisLong: "", scriptMeta: { author: "", coAuthor: "", contact: "", copyright: "", draft: "Premier jet", draftDate: "", source: "", notes: "" }, snapshots: [], scenes: [], characters: [], actors: [], locations: [], resources: [], crew: [], shootingDays: [], tags: CONFIG.defaultTags, groups: [...CONFIG.defaultGroups, ...CONFIG.crewGroups], shots: [], counter: 1, uiConfig: { tabColors: {}, categoryColors: {}, subColors: {}, tabsOrder: [], categoriesOrder: [], hiddenTabs: [] }, budget: { total: 0, currency: '€', manager: '', managerEmailNotif: true, envelopes: {}, deptManagers: {} }, expenses: [], /* needsCrew / needsActors retires le 1er septembre : doublons morts de crewNeeds / actorNeeds, les seuls que l'ecran ecrit. Leur presence ici a fait ecrire l'export PDF sur les mauvaises clefs pendant des mois. */ presentation: { title: '', genre: '', format: '', duration: '', productionType: '', description: '', team: [], associations: [], enterprises: [], crewNeeds: {}, actorNeeds: [], image: '' }, memberPermissions: {}, chatChannels: [], chatExtraMembers: [], workplanOverrides: {}, scriptReports: {}, contracts: [], episodes: [], seasons: [] }),
       getProjectsList: async () => { 
           if(!state.currentUser) return []; 
           const myEmail = state.currentUser.email.toLowerCase();
@@ -56294,21 +56294,44 @@ const Presentation = {
         }
         
         // === BESOINS ÉQUIPE ===
-        if(p.needsCrew && Object.keys(p.needsCrew).length > 0) {
+        // 1er septembre — DEUX SECTIONS QUI NE S'IMPRIMAIENT JAMAIS. L'export
+        // lisait p.needsCrew et p.needsActors ; l'ecran ecrit p.crewNeeds et
+        // p.actorNeeds. Les deux noms se ressemblent au point qu'on ne voit
+        // rien en relisant, et les deux clefs vides existent bel et bien dans
+        // les donnees (elles viennent de Store.getEmpty, jamais renommees) :
+        // le if sortait donc proprement, sans erreur, et le PDF perdait en
+        // silence les besoins equipe ET le casting recherche. Meme famille de
+        // faute que les trois graphiques de l'export Statistiques, corriges le
+        // meme jour. Les libelles passent par crewPositions, sinon le PDF
+        // afficherait des identifiants techniques (dop, chef_elec...).
+        const besoinsEquipe = p.crewNeeds || {};
+        const posesRetenues = Object.entries(besoinsEquipe).filter(([, n]) => n && n.needed);
+        const besoinsPerso = p.customCrewNeeds || [];
+        if(posesRetenues.length > 0 || besoinsPerso.length > 0) {
             y += 4;
             section('BESOINS ÉQUIPE');
-            Object.entries(p.needsCrew).forEach(([role, count]) => {
-                keyVal(PdfTheme.cleanText(role), count);
+            posesRetenues.forEach(([posId, n]) => {
+                const pos = Presentation.crewPositions.find(x => x.id === posId);
+                keyVal(PdfTheme.cleanText(pos ? pos.name : posId), String(n.count || 1));
+            });
+            besoinsPerso.forEach(cn => {
+                keyVal(PdfTheme.cleanText(cn.name || ''), String(cn.count || 1));
             });
         }
         
         // === BESOINS COMÉDIENS ===
-        if(p.needsActors && p.needsActors.length > 0) {
+        if(p.actorNeeds && p.actorNeeds.length > 0) {
             y += 4;
             section('BESOINS COMÉDIENS');
-            p.needsActors.forEach(need => {
-                const text = typeof need === 'string' ? need : (need.character || need.name || JSON.stringify(need));
-                keyVal('-', PdfTheme.cleanText(String(text)));
+            p.actorNeeds.forEach(need => {
+                if(typeof need === 'string') { keyVal('-', PdfTheme.cleanText(need)); return; }
+                const nom = need.roleName || need.character || need.name || '';
+                const bouts = [];
+                if(need.count && need.count > 1) bouts.push(need.count + ' role(s)');
+                if(need.gender) bouts.push(need.gender);
+                if(need.ageMin || need.ageMax) bouts.push((need.ageMin || '?') + '-' + (need.ageMax || '?') + ' ans');
+                if(need.description) bouts.push(need.description);
+                keyVal(PdfTheme.cleanText(nom || '-'), PdfTheme.cleanText(bouts.join(', ')));
             });
         }
         
