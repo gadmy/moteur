@@ -434,6 +434,7 @@ v576 (31 Août 2026) — Lot « petites dettes » : la fiche Ressource s'ouvre e
   - LE NUMÉRO EST PROVISOIRE TANT QUE LE JOUR N'EST PAS ENREGISTRÉ. La renumérotation générale ne tourne qu'à la sauvegarde : un jour neuf n'a pas encore de numéro, et un jour dont on vient de changer la date porterait l'ancien. Une fonction calcule donc le rang à la volée, SANS RIEN ÉCRIRE, à partir de la date saisie — le bandeau réagit en direct quand on déplace la journée. Le type de journée a été ajouté aux champs qui rafraîchissent la feuille : passer un jour de « tournage » à « repérage » change le bandeau. Vérifié hors navigateur sur quatre cas (jour intercalé, jour ajouté en fin, repérage, jour sans date).
   - D'OÙ VENAIENT LES DOUBLONS (question de Guillaume devant les fiches en double de « Rencontre sous les Caraïbes » — sept comédiens partageaient UN SEUL identifiant). DEUX BUGS, tous deux dans Breakdown.createFiche, la fabrique qui crée une fiche depuis le dépouillement. PREMIER : l'identifiant valait `'act_' + Date.now()`, l'horloge à la milliseconde et rien d'autre. Dépouiller plusieurs noms d'un coup fabriquait donc plusieurs fiches DANS LA MÊME MILLISECONDE, toutes avec le même identifiant — l'application ne pouvait plus les distinguer, et toute liaison vers l'une pointait sur les sept. Reproduit hors navigateur : sept créations en boucle donnaient 1 identifiant distinct, contre 7 après correction. SECOND : aucune recherche préalable, si bien que dépouiller « ALIX BERGER » créait un second personnage alors que char_alix existait. Utils.generateUniqueId (horloge + suffixe aléatoire) existait depuis toujours, et autoCreateResource, dix lignes plus bas, faisait DÉJÀ les deux gestes correctement — chercher d'abord, créer ensuite avec un identifiant sûr. Seul ce bloc-là les ignorait.
   - PUIS LA MÊME FAUTE PARTOUT AILLEURS : dix-huit fabrications d'identifiant construites sur la seule horloge, sans suffixe. Groupes, planches et éléments de mood board, véhicules, dépenses, profils publics, comédiens et techniciens ajoutés depuis la recherche globale, décors et personnages créés à la main. Chacune est un doublon en puissance dès que deux créations tombent dans la même milliseconde — ce qui arrive à tous les coups sur un import, une duplication ou un clic répété. Toutes passent désormais par Utils.generateUniqueId. LEÇON : le générateur sûr existait, il suffisait de s'en servir ; c'est le genre de dette qui ne se voit pas tant qu'on crée les fiches une par une à la main.
+  - LE GROUPE « FIGURATION » ÉTAIT RECONNU PAR SON NOM, AU CARACTÈRE PRÈS (trouvé en nettoyant les émoticônes des noms de groupe du projet de démonstration). Cinq endroits testaient l'égalité stricte `g.name === 'Figuration'` : la feuille de figuration à l'écran et en PDF, le dossier de production, les contrats. Coller une émoticône devant le nom, ou l'appeler « Figuration ronde », suffisait à rendre le groupe INVISIBLE à ces cinq endroits — la feuille de figuration se vidait sans le moindre message d'erreur. Or les noms de groupe sont fabriqués en collant l'icône devant le texte, donc l'émoticône fait bel et bien partie du nom : le piège était armé. Test tolérant partout (`/figuration/i`), celui que Figuration.GROUP_IDS employait déjà correctement dix lignes plus loin. Encore un cas où la bonne façon de faire existait dans le fichier et où le reste ne s'en servait pas.
 v575 (26 Août 2026) — Étapes 8a et 8d : le socle des liaisons et la toile + dépouillement en trois colonnes avec fiches + droits des fiches unifiés (trois trous bouchés) + audit complet et purge de l'en-tête
   - LE SOCLE DES LIAISONS (8a). Module Links, une seule voix pour « à quoi cet objet est-il relié ? » sur les ONZE familles. Il DÉLÈGUE aux lectures existantes (scenesForFiche, shootDaysForFiche, linkedExpenses…) au lieu de les réécrire — deux implémentations de la même question finissent par diverger, c'est précisément ce qu'on corrige. Il n'ajoute que les sens qui MANQUAIENT : ce qu'un comédien ou technicien PRÊTE au tournage (réciproque de res.owner, lisible nulle part), les plans d'une scène, les convoqués d'un jour. Les éléments dépouillés non rattachés sont rendus comme voisins avec linked:false — les ignorer ferait disparaître d'un écran de synthèse des éléments bien présents dans le film. Expenses.linkLabel / linkIcon délèguent à Links.label / Links.icon : c'était la seule table « famille → nom » du fichier, la laisser là obligeait tout autre écran à la recopier. Vérifié hors navigateur sur un projet de test : neuf familles interrogées dans les deux sens, fiche inexistante = liste vide sans planter.
   - LA TOILE DES LIAISONS (8d), EN FENÊTRE ET NON EN ONGLET (menu Projet ▾). Choix assumé contre la lettre du plan : la toile montre UNE fiche au centre, un onglet s'ouvrirait sur rien et il faudrait y poser le sélecteur qui est déjà dans la fenêtre ; et un 21e onglet = colonne de permissions + catégorie + étape de Tour + domaine de verrou, pour un écran dont on ne sait pas encore s'il restera. La promouvoir en onglet plus tard n'est que du câblage. Une fiche au centre, ses voisins directs autour, une couleur par famille, clic = recentrage, bouton Retour, sélecteur de départ groupé par familles. Les pastilles de famille servent de FILTRE (un décor à quarante scènes noierait le reste), plafond à 40 voisins annoncé au lieu d'une pelote. « Ouvrir la fiche » FERME la toile d'abord — leçon du troisième étage d'empilement de v574. Les permissions sont respectées : jours, dépenses et plans n'apparaissent pas à qui n'a pas accès à leurs sections, sinon la toile serait une porte dérobée vers les montants.
@@ -36338,7 +36339,13 @@ container.innerHTML = filtered.map(res => {
     _renderFiguPage: (doc, day, layout) => {
         const { margin, pageWidth, pageHeight } = layout;
         const usableWidth = pageWidth - margin * 2;
-        const figGroupIds = (state.data.groups || []).filter(g => g.type === 'actor' && g.name === 'Figuration').map(g => g.id);
+        // 31 aout : le groupe Figuration etait reconnu par une egalite STRICTE
+        // sur son nom, a CINQ endroits (feuille de figuration ecran et PDF,
+        // dossier de production, contrats). Lui coller une emoticone ou le
+        // renommer « Figuration ronde » suffisait a le rendre invisible : la
+        // feuille se vidait sans le moindre message. Test tolerant partout,
+        // celui que Figuration.GROUP_IDS employait deja correctement.
+        const figGroupIds = (state.data.groups || []).filter(g => g.type === 'actor' && /figuration/i.test(g.name || '')).map(g => g.id);
         const repertoire = (state.data.actors || []).filter(a => figGroupIds.includes(a.group_id));
         const cs = Figuration._fcs(day);
         const C = PdfTheme.COLORS;
@@ -36439,7 +36446,7 @@ container.innerHTML = filtered.map(res => {
         if(!day) { c.innerHTML = '<div class="text-sec" style="padding:12px;">Aucun jour.</div>'; return; }
         const esc = Utils.escape;
         const cs = Figuration._fcs(day);
-        const figGroupIds = (state.data.groups || []).filter(g => g.type === 'actor' && g.name === 'Figuration').map(g => g.id);
+        const figGroupIds = (state.data.groups || []).filter(g => g.type === 'actor' && /figuration/i.test(g.name || '')).map(g => g.id);
         const repertoire = (state.data.actors || []).filter(a => figGroupIds.includes(a.group_id));
         const transportModes = Figuration._transportModes;
         const fmt = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '';
@@ -42594,7 +42601,7 @@ doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
             y += 2;
             
             // Familles de comédiens (portée : tout le rendu du jour, prévisions incluses)
-            const figuGroupIds = actorGroups.filter(g => g.name === 'Figuration').map(g => g.id);
+            const figuGroupIds = actorGroups.filter(g => /figuration/i.test(g.name || '')).map(g => g.id);
             const silGroupIds  = actorGroups.filter(g => /silhouette/i.test(g.name)).map(g => g.id);
             const dblGroupIds  = actorGroups.filter(g => /doublure/i.test(g.name)).map(g => g.id);
             // Tout comédien qui n'est ni figurant, ni silhouette, ni doublure relève des rôles
@@ -52884,7 +52891,7 @@ const Contracts = {
         if(t === 'actor') {
             const a = (state.data.actors || []).find(x => x && x.id === ct.partyId);
             if(!a) return 'Autres';
-            const figIds = (state.data.groups || []).filter(g => g.type === 'actor' && g.name === 'Figuration').map(g => g.id);
+            const figIds = (state.data.groups || []).filter(g => g.type === 'actor' && /figuration/i.test(g.name || '')).map(g => g.id);
             return figIds.includes(a.group_id) ? 'Figurants' : 'Comédien·ne';
         }
         if(t === 'crew') {
@@ -52992,7 +52999,7 @@ const Contracts = {
             else if(!byKey[key].avatar && avatar) byKey[key].avatar = avatar;
             if(func && byKey[key].funcs.indexOf(func) === -1) byKey[key].funcs.push(func);
         };
-        const figGroupIds = (state.data.groups || []).filter(g => g.type === 'actor' && g.name === 'Figuration').map(g => g.id);
+        const figGroupIds = (state.data.groups || []).filter(g => g.type === 'actor' && /figuration/i.test(g.name || '')).map(g => g.id);
         (state.data.actors || []).forEach((a, i) => {
             if(!a.name) return;
             const roles = characters.filter(c => c.actor_id === a.id).map(c => c.name).filter(Boolean);
