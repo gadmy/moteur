@@ -11784,6 +11784,14 @@ crewRoles: {
       currentUser: null, 
       currentProjectId: null, 
       currentRole: 'viewer', 
+      // v578 (cloisonnement) : ce que le SERVEUR m'a accorde sur ce projet.
+      // dataScope    = mon niveau ('none' / 'read' / 'write') par section.
+      // dataMissingKeys = les cles que le serveur a retirees de la reponse.
+      // Les deux sont poses par Store.loadProject et remis a null a la
+      // fermeture. Ne jamais les deduire du navigateur : ils viennent de la
+      // base, c'est tout leur interet.
+      dataScope: null,
+      dataMissingKeys: [], 
       currentEditingId: null, 
       activeBdSceneId: null, 
       scriptAC: { active: false, index: -1, colIndex: 0, columns: [], items: [], enabled: (localStorage.getItem('moteur_scriptAC_enabled') !== 'false') }, 
@@ -15150,12 +15158,11 @@ showDashboard: async () => {
           const details = [];
           
           for(const project of ownedProjects) {
-              const { data: projectRow } = await supabase
-                  .from('projects')
-                  .select('data')
-                  .eq('id', project.id)
-                  .maybeSingle();
-              const projectData = projectRow?.data;
+              // v578 (cloisonnement) : la colonne n'est plus lue directement.
+              // Ne concerne que MES projets (filtre role === 'owner' ci-dessus),
+              // donc la fonction serveur renvoie tout : le tarif est inchange.
+              const { data: projectRow } = await supabase.rpc('project_data_for_me', { p_id: project.id });
+              const projectData = projectRow || null;
               const price = Pricing.calculateProjectPrice(projectData);
               
               totalMonthly += price.total;
@@ -15477,7 +15484,14 @@ showDashboard: async () => {
               const newTime = Utils.estimateTime(content);
               state.data.scenes[idx].scriptContent = content;
               state.data.scenes[idx].time = newTime;
-              const {error: saveErr} = await supabase.from('projects').update({ data: state.data }).eq('id', state.currentProjectId);
+              // v578 (cloisonnement) : on poussait state.data EN ENTIER a chaque
+              // frappe dans le scenario. Sur un projet transmis partiellement, cela
+              // renverrait les cles vides recreees par getEmpty et effacerait en base
+              // le budget ou les contrats. On ne pousse plus que les scenes.
+              const {error: saveErr} = await supabase.rpc('patch_project_data', {
+                  p_id: state.currentProjectId,
+                  p_patch: { scenes: state.data.scenes }
+              });
               if(saveErr) Utils.toast('Erreur de sauvegarde', 'error');
           } 
       }, 500),
@@ -15485,8 +15499,15 @@ showDashboard: async () => {
       updateTitle: Utils.debounce(async (val) => { 
           if(!state.currentProjectId || state.currentRole === 'viewer') return; 
           state.data.title = val;
-          const {error: e1} = await supabase.from('projects').update({ title: val, data: state.data }).eq('id', state.currentProjectId);
-          if(e1) Utils.toast('Erreur sauvegarde titre', 'error');
+          // v578 (cloisonnement) : meme raison que updateScene. Le titre vit a deux
+          // endroits — la colonne 'title' et la cle 'title' du JSON ; on ecrit les
+          // deux, mais sans jamais renvoyer le reste du projet.
+          const {error: e1} = await supabase.rpc('patch_project_data', {
+              p_id: state.currentProjectId,
+              p_patch: { title: val }
+          });
+          const {error: e1b} = await supabase.from('projects').update({ title: val }).eq('id', state.currentProjectId);
+          if(e1 || e1b) Utils.toast('Erreur sauvegarde titre', 'error');
       }, 1000)
   };
 
@@ -16574,6 +16595,9 @@ const LockManager = {
       clientId: 'c' + Math.random().toString(36).slice(2) + Date.now().toString(36),
       _lastBroadcastAt: 0,
       _refetchTimer: null,
+      // v578 : plus utilise depuis que le canal rapide n'envoie qu'un signal et
+      // non plus le contenu (cloisonnement). Conserve : le jour ou l'on saura
+      // tailler un patch par destinataire, c'est ce plafond qu'il faudra respecter.
       BROADCAST_MAX: 180000, // ~180 Ko : marge sous le plafond broadcast (256 Ko en plan Free)
 
       // Applique un jeu de clés distantes sur state.data (merge sélectif + rendu)
@@ -16625,9 +16649,17 @@ const LockManager = {
               try {
                   const id = state.currentProjectId;
                   if(!id) return;
-                  const { data: row, error } = await supabase.from('projects').select('data').eq('id', id).maybeSingle();
-                  if(error || !row || !row.data) return;
-                  StoreRealtime.applyRemote(row.data);
+                  // v578 (cloisonnement) : on repasse par la fonction serveur, jamais
+                  // par la colonne. Un rechargement qui court-circuiterait le filtre
+                  // rendrait tout le reste inutile — il suffirait d'attendre qu'un
+                  // collegue sauvegarde pour recevoir le projet entier.
+                  const { data: row, error } = await supabase.rpc('project_data_for_me', { p_id: id });
+                  if(error || !row) return;
+                  const scoped = { ...row };
+                  if(scoped._scope) { state.dataScope = scoped._scope; }
+                  if(Array.isArray(scoped._withheld)) { state.dataMissingKeys = scoped._withheld; }
+                  delete scoped._scope; delete scoped._withheld;
+                  StoreRealtime.applyRemote(scoped);
               } catch(e) { console.warn('[Realtime] refetch:', e && e.message); }
           }, 400);
       },
@@ -16636,9 +16668,17 @@ const LockManager = {
       broadcastPatch: (patch) => {
           try {
               if(!state.dbListener) return;
-              const payload = { from: StoreRealtime.clientId };
-              if(patch && JSON.stringify(patch).length <= StoreRealtime.BROADCAST_MAX) payload.patch = patch;
-              else payload.full = true; // écriture complète ou diff trop volumineux : les autres rechargeront
+              // v578 (cloisonnement) : ON N'ENVOIE PLUS LE CONTENU, seulement le
+              // signal. Le canal rapide diffusait le patch tel quel a tous les
+              // abonnes du projet : celui qui modifiait le budget l'envoyait donc
+              // aussi a ceux qui n'ont pas acces aux Depenses. Le filtre depend du
+              // DESTINATAIRE, pas de l'emetteur — un patch juste ne peut pas etre
+              // taille a l'avance pour chacun. Chaque poste recharge par la
+              // fonction serveur, qui sait pour qui elle repond.
+              // COUT ASSUME : un rechargement (debounce 400 ms) au lieu d'une
+              // fusion locale. On garde le canal parce qu'il reste bien plus
+              // rapide que d'attendre l'evenement Postgres.
+              const payload = { from: StoreRealtime.clientId, full: true };
               state.dbListener.send({ type: 'broadcast', event: 'patch', payload: payload });
           } catch(e) { console.warn('[Realtime] broadcast:', e && e.message); }
       },
@@ -16658,10 +16698,14 @@ const LockManager = {
                   (payload) => {
                       // Un broadcast vient d'appliquer ce changement : on ne le refait pas
                       if(Date.now() - StoreRealtime._lastBroadcastAt < 1500) return;
-                      const val = payload.new && payload.new.data;
-                      // Payload tronqué (projet > 1 Mo) ou colonne non publiée : on recharge au lieu d'abandonner
-                      if(!val) { StoreRealtime.refetchRemote(); return; }
-                      StoreRealtime.applyRemote(val);
+                      // v578 (cloisonnement) : on N'UTILISE PLUS payload.new.data, meme
+                      // s'il arrive. Postgres diffusait le projet ENTIER a tous les
+                      // abonnes a chaque sauvegarde : filtrer l'ouverture sans fermer
+                      // cette porte-la n'aurait servi a rien. La publication est
+                      // desormais restreinte aux colonnes de signalement (bloc 5 du
+                      // fichier SQL) ; ce message ne dit plus que « ca a bouge », et
+                      // c'est la fonction filtree qui fournit le contenu.
+                      StoreRealtime.refetchRemote();
                   }
               )
               .on('broadcast', { event: 'patch' },
@@ -16677,13 +16721,17 @@ const LockManager = {
       },
       
       loadFromSupabase: async (projectId) => {
-          const { data: project } = await supabase
-              .from('projects')
-              .select('data')
-              .eq('id', projectId)
-              .maybeSingle();
-          if(project && project.data) {
-              state.data = { ...state.data, ...project.data };
+          // v578 (cloisonnement) : passe par la fonction serveur comme tous les
+          // autres chemins de lecture. On retire _scope avant de fusionner : la
+          // carte des droits n'est pas une donnee du projet et n'a rien a faire
+          // dans state.data, d'ou elle repartirait en sauvegarde.
+          const { data: project } = await supabase.rpc('project_data_for_me', { p_id: projectId });
+          if(project) {
+              const scoped = { ...project };
+              if(scoped._scope) { state.dataScope = scoped._scope; }
+              if(Array.isArray(scoped._withheld)) { state.dataMissingKeys = scoped._withheld; }
+              delete scoped._scope; delete scoped._withheld;
+              state.data = { ...state.data, ...scoped };
               UI.renderAll();
           }
       },
@@ -16794,6 +16842,15 @@ const LockManager = {
               for(const k in cleanData) {
                   if(JSON.stringify(cleanData[k]) !== JSON.stringify(saveBase[k])) savePatch[k] = cleanData[k];
               }
+              // v578 (cloisonnement) : une cle que le serveur ne m'a PAS envoyee a
+              // ete recreee vide par Store.getEmpty. Normalement elle ne bouge pas et
+              // ne rentre donc pas dans le patch — mais si un ecran la touchait par
+              // megarde, on renverrait un tableau vide et on EFFACERAIT en base le
+              // budget ou les contrats de tout le monde, sans erreur ni message.
+              // On les retire du patch de force. Le declencheur SQL dit la meme chose
+              // cote serveur : deux verrous valent mieux qu'un pour une perte de
+              // donnees silencieuse.
+              (state.dataMissingKeys || []).forEach(k => { delete savePatch[k]; });
               if(Object.keys(savePatch).length === 0) {
                   // Rien n'a changé : pas d'écriture inutile
                   state.savingInProgress = false;
@@ -16825,6 +16882,13 @@ const LockManager = {
                       // Écriture partielle côté serveur (merge jsonb) : ne touche que les clés modifiées
                       const res = await supabase.rpc('patch_project_data', { p_id: id, p_patch: savePatch });
                       error = res.error;
+                  } else if((state.dataMissingKeys || []).length > 0) {
+                      // v578 : ECRITURE COMPLETE INTERDITE sur un projet ampute.
+                      // Sans baseline, la voie de secours pousse cleanData EN ENTIER,
+                      // donc aussi les cles vides recreees par getEmpty : elle
+                      // effacerait ce qu'on n'a jamais eu le droit de lire. On refuse
+                      // plutot que d'ecraser, et on le dit.
+                      error = { code: 'CLOISON', message: 'Sauvegarde complete impossible : ce projet vous est transmis partiellement. Rechargez la page.' };
                   } else {
                       const res = await supabase
                           .from('projects')
@@ -16992,17 +17056,34 @@ const LockManager = {
           // Filtrer par profil actif : garder les memberships où profile_id matche OU où profile_id est NULL (legacy)
           const filteredMemberships = memberships; // mono-profil : plus de filtre par profil
           
+          // v578 (cloisonnement) : l'ecran d'accueil chargeait le JSON COMPLET de
+          // chaque projet, juste pour en tirer trois valeurs — la priorite, l'ordre
+          // et le poids. Tous les projets partages etaient donc entierement dans la
+          // page AVANT qu'on en ouvre un seul. On demande maintenant ces trois
+          // valeurs, et rien d'autre, a projects_meta_for_me.
+          const metaFor = async (ids) => {
+              const out = {};
+              if(!ids || ids.length === 0) return out;
+              try {
+                  const { data: rows, error } = await supabase.rpc('projects_meta_for_me', { p_ids: ids });
+                  if(error) { console.warn('[Cloisonnement] projects_meta_for_me:', error.message); return out; }
+                  (rows || []).forEach(r => { out[r.id] = r; });
+              } catch(e) { console.warn('[Cloisonnement] projects_meta_for_me:', e && e.message); }
+              return out;
+          };
+          
           if (filteredMemberships.length === 0) {
               // Fallback : projets dont je suis owner mais pas encore dans project_members
               const { data: ownedProjects } = await supabase
                   .from('projects')
-                  .select('id, title, created_at, owner_email, owner_profile_id, project_type, episode_count, data')
+                  .select('id, title, created_at, owner_email, owner_profile_id, project_type, episode_count')
                   .eq('owner_email', myEmail)
                   .is('deleted_at', null);
               
               if (!ownedProjects) return [];
               
               const filtered = ownedProjects; // mono-profil
+              const metaOwned = await metaFor(filtered.map(p => p.id));
               
               return filtered.map(p => ({ 
                   id: p.id, 
@@ -17012,20 +17093,21 @@ const LockManager = {
                   role: 'owner',
                   project_type: p.project_type || 'film',
                   episodeCount: p.episode_count || 0,
-                  priority: p.data?.priority || null,
-                  order: p.data?.order,
-                  weightBytes: new TextEncoder().encode(JSON.stringify(p.data || {})).length
+                  priority: metaOwned[p.id]?.priority || null,
+                  order: metaOwned[p.id]?.sort_order,
+                  weightBytes: metaOwned[p.id]?.weight_bytes || 0
               }));
           }
           
           const projectIds = filteredMemberships.map(m => m.project_id);
           const { data: projects, error: projError } = await supabase
               .from('projects')
-              .select('id, title, created_at, owner_email, owner_profile_id, project_type, episode_count, data')
+              .select('id, title, created_at, owner_email, owner_profile_id, project_type, episode_count')
               .in('id', projectIds)
               .is('deleted_at', null);
           
           if (projError || !projects) return [];
+          const metaShared = await metaFor(projects.map(p => p.id));
           
           return projects.map(p => {
               const membership = filteredMemberships.find(m => m.project_id === p.id);
@@ -17037,9 +17119,9 @@ const LockManager = {
                   role: membership?.role || 'member',
                   project_type: p.project_type || 'film',
                   episodeCount: p.episode_count || 0,
-                  priority: p.data?.priority || null,
-                  order: p.data?.order,
-                  weightBytes: new TextEncoder().encode(JSON.stringify(p.data || {})).length
+                  priority: metaShared[p.id]?.priority || null,
+                  order: metaShared[p.id]?.sort_order,
+                  weightBytes: metaShared[p.id]?.weight_bytes || 0
               };
           });
       },
@@ -17455,6 +17537,13 @@ const LockManager = {
           try { ActiveProfile.renderAllSelectors(); } catch(e) {}
       },
       
+      // v578 (cloisonnement) : ce projet m'est-il transmis PARTIELLEMENT ?
+      // Vrai des que le serveur a retire au moins une cle. Toute operation qui
+      // remplace ou exporte le projet ENTIER doit s'y refuser : elle
+      // travaillerait sur une copie amputee sans le savoir. Une seule question,
+      // posee au meme endroit par tout le monde.
+      isPartial: () => (state.dataMissingKeys || []).length > 0,
+
       loadProject: async (id) => {
           if(!state.currentUser) return;
           // Flush immédiat des modifs debouncées du projet courant (si on change de projet)
@@ -17475,9 +17564,15 @@ const LockManager = {
                   .eq('status', 'accepted'); // v570 : une invitation en attente n'ouvre rien
               
               // Vérifier si owner
+              // v578 (cloisonnement) : la colonne 'data' N'EST PLUS LUE ICI. On ne
+              // demande que les colonnes d'identite du projet ; le contenu arrive
+              // separement, filtre par le serveur (voir plus bas). Tant qu'on lisait
+              // 'data' directement, les ❌ du tableau des acces ne cachaient les
+              // onglets QUE dans le navigateur : le budget et les contrats etaient
+              // deja dans la page, lisibles depuis la console.
               const { data: project, error: projError } = await supabase
                   .from('projects')
-                  .select('*')
+                  .select('id, title, created_at, owner_email, owner_profile_id, project_type, episode_count, deleted_at')
                   .eq('id', id)
                   .maybeSingle();
               
@@ -17520,9 +17615,47 @@ const LockManager = {
               state.currentCanInvite = (role === 'owner')
                   || !!(memberships || []).some(m => m.can_invite === true);
               
-              const parsed = project.data;
-              if(!parsed) throw new Error("Projet vide ou introuvable");
+              // v578 (cloisonnement) : le contenu du projet est demande au serveur,
+              // qui retire les cles des onglets fermes AVANT de repondre. La reponse
+              // porte aussi _scope : mon niveau sur chaque section. Sans lui,
+              // l'application ne saurait pas distinguer « il n'y a pas de depenses »
+              // de « je n'ai pas le droit de les voir » — et afficherait un budget a
+              // zero au lieu d'un onglet absent.
+              const { data: scoped, error: scopeErr } = await supabase
+                  .rpc('project_data_for_me', { p_id: id });
+              if(scopeErr || !scoped) {
+                  console.error('[Cloisonnement] project_data_for_me:', scopeErr);
+                  throw new Error("Projet vide ou introuvable");
+              }
+              const parsed = scoped;
+              state.dataScope = parsed._scope || null;
+              // Quelles cles le serveur a-t-il retirees ? C'est LUI qui le dit
+              // (_withheld), on ne le devine pas : le navigateur ne connait pas la
+              // liste complete des cles possibles, et celle qu'il oublierait serait
+              // justement celle qu'une sauvegarde de secours effacerait. Cette liste
+              // interdit ensuite l'ecriture complete (voir StoreSave.save).
+              state.dataMissingKeys = Array.isArray(parsed._withheld) ? parsed._withheld : [];
+              // Ni la carte des droits ni la liste ne font partie du projet : elles
+              // ne doivent jamais partir en sauvegarde ni entrer dans la baseline.
+              delete parsed._scope;
+              delete parsed._withheld;
               const safeData = { ...Store.getEmpty(), ...parsed };
+              // v578 (cloisonnement) : Store.getEmpty ne connait pas toutes les cles
+              // du projet — orgs, vehicles, moodboards, titlePage et les modeles de
+              // contrat n'y figurent pas. Retirees par le serveur, elles vaudraient
+              // « indefini » et feraient planter les ecrans qui les parcourent. On
+              // leur redonne une forme vide, la meme que sur un projet neuf : l'ecran
+              // affiche « rien », ce qui est exactement le message voulu.
+              const FORMES_VIDES = {
+                  orgs: [], vehicles: [], moodboards: [], titlePage: {},
+                  contractTemplates: [], contractTemplatesHidden: [],
+                  figurants: [], figurantGroups: []
+              };
+              (state.dataMissingKeys || []).forEach(k => {
+                  if(safeData[k] === undefined && FORMES_VIDES[k] !== undefined) {
+                      safeData[k] = JSON.parse(JSON.stringify(FORMES_VIDES[k]));
+                  }
+              });
               
               if(!safeData.actors) safeData.actors = [];
               if(!safeData.snapshots) safeData.snapshots = []; // V62 Security
@@ -17774,8 +17907,8 @@ CONFIG.crewGroups.forEach(defaultGrp => {
           return true;
       },
 
-      clearCurrent: async () => { if(state.currentRole === 'viewer') return; if(await ConfirmModal.confirmDelete("Toutes les données du projet seront effacées.", "Vider tout ?")){ state.data = Store.getEmpty(); Store.save(); UI.renderAll(); } },
-      importJSON: (e) => { if(state.currentRole === 'viewer') return; const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>{ try{ state.data = JSON.parse(ev.target.result); Store.save(); UI.renderAll(); UI.switchTab('synopsis'); Utils.toast('Import réussi !', 'success'); } catch(x){ Utils.toast('Erreur fichier.', 'error'); } }; r.readAsText(f); e.target.value=''; },
+      clearCurrent: async () => { if(state.currentRole === 'viewer') return; if(Store.isPartial()) { Utils.toast("Ce projet vous est transmis partiellement : vous ne pouvez pas le vider. Seul le propriétaire le peut.", 'error', 8000); return; } if(await ConfirmModal.confirmDelete("Toutes les données du projet seront effacées.", "Vider tout ?")){ state.data = Store.getEmpty(); Store.save(); UI.renderAll(); } },
+      importJSON: (e) => { if(state.currentRole === 'viewer') return; if(Store.isPartial()) { Utils.toast("Ce projet vous est transmis partiellement : un import remplacerait tout le contenu par une copie incomplète. Opération refusée.", 'error', 9000); e.target.value=''; return; } const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>{ try{ state.data = JSON.parse(ev.target.result); Store.save(); UI.renderAll(); UI.switchTab('synopsis'); Utils.toast('Import réussi !', 'success'); } catch(x){ Utils.toast('Erreur fichier.', 'error'); } }; r.readAsText(f); e.target.value=''; },
       
       // saveDebounced / saveFlush (B.1.5 → StoreSave)
       saveDebounced: () => StoreSave.saveDebounced(),
@@ -20134,6 +20267,12 @@ initCategoriesDragDrop: () => {
         // On est de retour au dashboard : on oublie le projet précédent
         NavMemory.setProject(null);
         NavMemory.setTab(null, null);
+        // v578 (cloisonnement) : la carte des droits appartient AU PROJET qu'on
+        // vient de quitter. La laisser en place ferait juger le projet suivant
+        // avec les droits du precedent — et, sur un projet dont on est
+        // proprietaire, on se verrait refuser ses propres onglets.
+        state.dataScope = null;
+        state.dataMissingKeys = [];
         
         // Si on avait un projet en mémoire, le rouvrir après que le dashboard soit chargé
         if(_lastProjectId) {
@@ -20287,17 +20426,17 @@ initCategoriesDragDrop: () => {
         if(menu) menu.remove();
         
         try {
-            // Charger les données actuelles du projet
-            const { data: project } = await supabase
-                .from('projects')
-                .select('data')
-                .eq('id', projectId)
-                .maybeSingle();
-            
-            if (project) {
-                const updatedData = { ...project.data, priority: priority || null };
-                await supabase.from('projects').update({ data: updatedData }).eq('id', projectId);
-            }
+            // v578 (cloisonnement) : on ecrivait la priorite en RELISANT tout le
+            // projet puis en le REECRIVANT en entier. Deux defauts : on lisait la
+            // colonne 'data' d'un projet dont on n'est peut-etre que membre, et la
+            // reecriture complete pouvait ecraser le travail de quelqu'un d'autre
+            // entre la lecture et l'ecriture. On ne pousse plus que la cle
+            // concernee, par la fusion serveur.
+            const { error: prioErr } = await supabase.rpc('patch_project_data', {
+                p_id: projectId,
+                p_patch: { priority: priority || null }
+            });
+            if(prioErr) throw prioErr;
             
             Utils.toast(priority ? `Priorité "${priority}" définie` : 'Priorité supprimée', 'success');
             UIDashboard.renderProjectList();
@@ -20331,11 +20470,9 @@ initCategoriesDragDrop: () => {
         try {
             for (let idx = 0; idx < list.length; idx++) {
                 const p = list[idx];
-                const { data: proj } = await supabase.from('projects').select('data').eq('id', p.id).maybeSingle();
-                if (proj) {
-                    const updatedData = { ...proj.data, order: idx };
-                    await supabase.from('projects').update({ data: updatedData }).eq('id', p.id);
-                }
+                // v578 (cloisonnement) : meme correction que pour la priorite —
+                // on ne relit plus le projet entier pour y reecrire un seul nombre.
+                await supabase.rpc('patch_project_data', { p_id: p.id, p_patch: { order: idx } });
             }
             
             // Reconstruire la liste
@@ -25072,6 +25209,7 @@ initCategoriesDragDrop: () => {
       saveNewTag: () => { const name = document.getElementById('tag-new-name').value.trim(); const color = document.getElementById('tag-new-color').value; if(!name) return Utils.toast("Nom requis", "warning"); const newTag = { id: 't'+Date.now(), name: name, color: color }; state.data.tags.push(newTag); Store.save(); Actions.setTag(newTag.id); els.tagModal.style.display='none'; },
       // ===================== EXPORT PDF (délégué à ActionsExport) =====================
       openExportModal: (...a) => ActionsExport.openExportModal(...a),
+      expApplyPermissions: (...a) => ActionsExport.expApplyPermissions(...a),
       expToggleAll: (...a) => ActionsExport.expToggleAll(...a),
       expToggleAllCovers: (...a) => ActionsExport.expToggleAllCovers(...a),
       expToggleMerged: (...a) => ActionsExport.expToggleMerged(...a),
@@ -25104,6 +25242,12 @@ initCategoriesDragDrop: () => {
       
       openExportModal: () => { 
           els.exportModal.style.display = 'flex';
+          // v578 (cloisonnement) : on masque les lignes des onglets fermes. Sans ce
+          // filtre, un membre qui n'a pas acces au Budget verrait quand meme la case
+          // « Budget » et obtiendrait un PDF vide — un document faux, ce qui est pire
+          // qu'un document absent : rien ne lui dirait que le budget existe ailleurs.
+          // On decoche aussi, sinon « Tout cocher » les rembarquerait.
+          ActionsExport.expApplyPermissions();
           // [Rapports script] Peupler la liste des scènes ayant des fiches
           if(Actions.expPopulateSrScenes) Actions.expPopulateSrScenes();
           // [Séquencier] Peupler les cases de saisons (séries uniquement)
@@ -25114,6 +25258,32 @@ initCategoriesDragDrop: () => {
           Actions.expSetupDragAndDrop();
       },
       
+      // v578 (cloisonnement) : correspondance ligne d'export -> section de droits.
+      // Trois lignes n'ont volontairement pas de section : « Rapport de production »
+      // et « Statistiques » sont des syntheses calculees a partir de ce qu'on a deja
+      // le droit de voir, et la page de titre n'est plus dans la liste.
+      EXPORT_SECTION: {
+          synopsis: 'synopsis', board: 'sequencier', script: 'scenario',
+          moodboard: 'moodboard', storyboard: 'storyboard',
+          presentation: 'presentation', chars: 'personnages', actors: 'comediens',
+          locs: 'lieux', breakdown: 'depouillement', crew: 'equipe', orgs: 'equipe',
+          resources: 'ressources', planning: 'planning',
+          scriptreports: 'scriptreport', budget: 'depenses', stats: 'stats'
+      },
+
+      expApplyPermissions: () => {
+          document.querySelectorAll('#export-modal .exp-section-row').forEach(row => {
+              const sec = ActionsExport.EXPORT_SECTION[row.dataset.section];
+              if(!sec) return;
+              const ok = (typeof Permissions === 'undefined') || Permissions.canAccess(sec);
+              row.style.display = ok ? '' : 'none';
+              if(!ok) {
+                  const chk = row.querySelector('.exp-section-chk');
+                  if(chk) chk.checked = false;
+              }
+          });
+      },
+
       // Toggle "Tout cocher" : bascule l'état en lisant data-active du bouton
       expToggleAll: () => {
           const btn = document.getElementById('exp-toggle-all');
@@ -38365,20 +38535,25 @@ const ProfileGallery = {
             
             // Mettre à jour l'acteur/technicien dans le projet d'origine avec le lien vers le profil public
             if(claim.projectId && claim.localId) {
-                const { data: project } = await supabase
-                    .from('projects')
-                    .select('data')
-                    .eq('id', claim.projectId)
-                    .maybeSingle();
+                // v578 (cloisonnement) : lecture par la fonction serveur, et ecriture
+                // limitee a la SEULE cle concernee. Avant, on relisait puis on
+                // reecrivait le projet ENTIER pour poser un identifiant de profil sur
+                // une fiche : toute modification faite ailleurs entre la lecture et
+                // l'ecriture etait perdue.
+                const { data: projData } = await supabase.rpc('project_data_for_me', { p_id: claim.projectId });
                 
-                if(project && project.data) {
-                    const dataArray = claim.type === 'actor' ? project.data.actors : project.data.crew;
+                if(projData) {
+                    const listKey = claim.type === 'actor' ? 'actors' : 'crew';
+                    const dataArray = projData[listKey];
                     if(dataArray) {
                         const idx = dataArray.findIndex(p => p.id === claim.localId);
                         if(idx !== -1) {
                             dataArray[idx].publicProfileId = newProfile.id;
-                            const {error: claimErr} = await supabase.from('projects').update({ data: project.data }).eq('id', claim.projectId);
-            if(claimErr) Utils.toast('Erreur mise à jour projet', 'error');
+                            const {error: claimErr} = await supabase.rpc('patch_project_data', {
+                                p_id: claim.projectId,
+                                p_patch: { [listKey]: dataArray }
+                            });
+                            if(claimErr) Utils.toast('Erreur mise à jour projet', 'error');
                         }
                     }
                 }
@@ -38446,12 +38621,12 @@ const ProfileGallery = {
             
             for(const project of projectsList) {
                 // Charger les données complètes du projet (actors + crew)
-                const { data: projectData } = await supabase
-                    .from('projects')
-                    .select('data')
-                    .eq('id', project.id)
-                    .maybeSingle();
-                const data = projectData?.data;
+                // v578 (cloisonnement) : la fonction serveur repond ce a quoi j'ai
+                // droit. Sur un projet ou l'onglet Comediens ou Equipe m'est ferme,
+                // la liste correspondante n'arrive pas — et c'est le comportement
+                // voulu : je n'y apparais pas non plus.
+                const { data: projectData } = await supabase.rpc('project_data_for_me', { p_id: project.id });
+                const data = projectData || null;
                 if(!data) continue;
                 
                 const projectInfo = { projectId: project.id, projectTitle: project.title || 'Sans titre', ownership: project.role };
@@ -40748,9 +40923,25 @@ const Permissions = {
         return CONFIG.defaultPermissions['technicien'];
     },
     
+    // v578 (cloisonnement) — LE SERVEUR FAIT FOI.
+    // A l'ouverture du projet, la base renvoie sa propre carte des droits
+    // (state.dataScope). Quand elle est la, on la croit ELLE et non plus le
+    // calcul local : c'est la meme fonction SQL qui a decide quelles cles
+    // envoyer. Sans cela le navigateur pourrait s'accorder un acces que le
+    // serveur a refuse, et afficher un onglet vide en guise d'explication.
+    // Repli sur le calcul local tant que dataScope n'existe pas (tableau de
+    // bord, projet pas encore ouvert).
+    serverLevel: (section) => {
+        const sc = state.dataScope;
+        if(!sc || !section) return null;
+        return sc[section] || null;
+    },
+
     // Vérifier si l'utilisateur peut accéder à une section
     canAccess: (section) => {
         if(state.currentRole === 'owner') return true;
+        const lvl = Permissions.serverLevel(section);
+        if(lvl) return lvl !== 'none';
         const perms = Permissions.getCurrentUserPermissions();
         return perms[section] && perms[section] !== 'none';
     },
@@ -40758,6 +40949,8 @@ const Permissions = {
     // Vérifier si l'utilisateur peut modifier une section
     canEdit: (section) => {
         if(state.currentRole === 'owner') return true;
+        const lvl = Permissions.serverLevel(section);
+        if(lvl) return lvl === 'write';
         const perms = Permissions.getCurrentUserPermissions();
         return perms[section] === 'write';
     },
@@ -52099,6 +52292,15 @@ const MoteurArchive = {
     // Génère un fichier .moteur.zip qui peut être réimporté pour restaurer le projet complet.
     // Inclut : project.json + toutes les images Storage + manifest signé.
     exportMoteurZip: async () => {
+        // v578 (cloisonnement) : cette archive se presente comme une sauvegarde
+        // COMPLETE, « en cas de crash ». Sur un projet transmis partiellement elle
+        // serait silencieusement amputee — et c'est le pire des cas, parce qu'on ne
+        // s'en apercevrait qu'au moment de restaurer, quand il est trop tard.
+        // Mieux vaut ne rien donner qu'une sauvegarde qui ment.
+        if(typeof Store !== 'undefined' && Store.isPartial && Store.isPartial()) {
+            Utils.toast("Ce projet vous est transmis partiellement : l'archive serait incomplète. Seul le propriétaire peut en faire une sauvegarde complète.", 'error', 9000);
+            return;
+        }
         try {
             await MoteurArchive.ensureJSZip();
         } catch(e) {
@@ -61322,10 +61524,10 @@ const Admin = {
             if(error) throw error;
             
             // Charger tous les projets
-            const { data: projects } = await supabase
-                .from('projects')
-                .select('title, owner_email, created_at, data')
-                .order('created_at', { ascending: false });
+            // v578 (cloisonnement) : on chargeait le JSON de TOUS les projets de la
+            // plateforme pour n'en afficher que le poids. La fonction serveur rend
+            // le poids sans le contenu.
+            const { data: projects } = await supabase.rpc('admin_project_sizes');
             
             // Associer les projets aux utilisateurs
             Admin.allProjects = projects || [];
@@ -61377,7 +61579,7 @@ const Admin = {
                             ? u.projects.map(p => `<div style="font-size: 0.8rem; margin-bottom: 3px;">
                                 <span style="color: var(--text-main);">${Utils.escape(p.title || 'Sans titre')}</span>
                                 <span style="color: var(--text-sec); font-size: 0.75rem;">(${new Date(p.created_at).toLocaleDateString('fr-FR')})</span>
-                                <span style="color: var(--text-sec); font-size: 0.75rem;"> — 💾 ${Utils.formatWeight(new TextEncoder().encode(JSON.stringify(p.data || {})).length)}</span>
+                                <span style="color: var(--text-sec); font-size: 0.75rem;"> — 💾 ${Utils.formatWeight(p.weight_bytes || 0)}</span>
                             </div>`).join('')
                             : '<span style="color: var(--text-sec); font-size: 0.8rem;">-</span>';
                         
@@ -66717,13 +66919,13 @@ const Comments = {
             state.data.comments[Comments.currentSceneId][commentId] = comment;
             
             // Sauvegarder dans Supabase
-            await supabase
-                .from('projects')
-                .update({ 
-                    data: state.data,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', state.currentProjectId);
+            // v578 (cloisonnement) : on ne pousse que les commentaires. Ces quatre
+            // ecritures renvoyaient state.data en entier, ce qui, sur un projet
+            // transmis partiellement, aurait efface les cles non recues.
+            await supabase.rpc('patch_project_data', {
+                p_id: state.currentProjectId,
+                p_patch: { comments: state.data.comments }
+            });
             
             document.getElementById('comment-input').value = '';
             Comments.load();
@@ -66760,13 +66962,13 @@ const Comments = {
             state.data.comments[Comments.currentSceneId][commentId].replies[replyId] = reply;
             
             // Sauvegarder dans Supabase
-            await supabase
-                .from('projects')
-                .update({ 
-                    data: state.data,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', state.currentProjectId);
+            // v578 (cloisonnement) : on ne pousse que les commentaires. Ces quatre
+            // ecritures renvoyaient state.data en entier, ce qui, sur un projet
+            // transmis partiellement, aurait efface les cles non recues.
+            await supabase.rpc('patch_project_data', {
+                p_id: state.currentProjectId,
+                p_patch: { comments: state.data.comments }
+            });
             
             Comments.load();
             Utils.toast('Réponse ajoutée', 'success');
@@ -66783,13 +66985,13 @@ const Comments = {
             }
             
             // Sauvegarder dans Supabase
-            await supabase
-                .from('projects')
-                .update({ 
-                    data: state.data,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', state.currentProjectId);
+            // v578 (cloisonnement) : on ne pousse que les commentaires. Ces quatre
+            // ecritures renvoyaient state.data en entier, ce qui, sur un projet
+            // transmis partiellement, aurait efface les cles non recues.
+            await supabase.rpc('patch_project_data', {
+                p_id: state.currentProjectId,
+                p_patch: { comments: state.data.comments }
+            });
             
             Comments.load();
             Comments.updateBadge(Comments.currentSceneId);
@@ -66809,13 +67011,13 @@ const Comments = {
             }
             
             // Sauvegarder dans Supabase
-            await supabase
-                .from('projects')
-                .update({ 
-                    data: state.data,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', state.currentProjectId);
+            // v578 (cloisonnement) : on ne pousse que les commentaires. Ces quatre
+            // ecritures renvoyaient state.data en entier, ce qui, sur un projet
+            // transmis partiellement, aurait efface les cles non recues.
+            await supabase.rpc('patch_project_data', {
+                p_id: state.currentProjectId,
+                p_patch: { comments: state.data.comments }
+            });
             
             Comments.load();
             Comments.updateBadge(Comments.currentSceneId);
