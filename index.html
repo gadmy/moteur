@@ -34,25 +34,9 @@ leur detail vit au journal (v568 a v577) et n'est plus repris ici.
 Ne restent ci-dessous que CE QUI EST OUVERT, puis les REGLES VIVANTES.
 
 --------------------------------------------------------------------------------
-OUVERT — TROIS CHANTIERS
+OUVERT — UN SEUL CHANTIER
 --------------------------------------------------------------------------------
-[ ] A. CLOISONNER VRAIMENT LES DONNEES (seul reste de l'etape 7b).
-    Les ❌ de permissions masquent les onglets dans le NAVIGATEUR ; la base
-    envoie le projet ENTIER (budget, contrats, coordonnees) a quiconque peut
-    le voir. Vraie cloison = decoupage en base + filtrage serveur. A OUVRIR
-    AVANT tout usage ou la confidentialite compte.
-    A MENER DANS LE MEME CHANTIER, JAMAIS AVANT : aligner le droit d'inviter.
-    La regle posee par Guillaume est « on n'invite que si on peut modifier la
-    fiche projet » — NE PAS ROUVRIR la question de principe. Mais
-    l'implementation ne controle PAS ce critere : elle autorise le
-    proprietaire, plus quiconque a recu la delegation explicite
-    (project_members.can_invite), laquelle est independante du droit sur la
-    fiche projet. En pratique les deux se recouvrent presque toujours, mais
-    pas par construction. Les aligner suppose de faire lire a la policy INSERT
-    un droit qui vit dans le JSON du projet (memberPermissions) et non dans
-    project_members : c'est de la securite, pas une retouche.
-
-[ ] B. STRIPE / FEATURE GATING (etape 7a) — EN PAUSE, ne pas ouvrir sans
+[ ] A. STRIPE / FEATURE GATING (etape 7a) — EN PAUSE, ne pas ouvrir sans
     demande explicite de Guillaume. Prerequis juridique : domicile de
     l'editeur dans les mentions legales (LCEN), a trancher avant le passage
     au payant.
@@ -60,6 +44,73 @@ OUVERT — TROIS CHANTIERS
 --------------------------------------------------------------------------------
 REGLES VIVANTES ET DECISIONS A NE PAS ROUVRIR
 --------------------------------------------------------------------------------
+- LE CLOISONNEMENT DES DONNEES EST EN PLACE (v578, 2 septembre). LA REGLE QUI
+  LE TIENT : LE NAVIGATEUR NE LIT PLUS JAMAIS LA COLONNE projects.data. Le
+  droit de lecture lui a ete RETIRE en base ; toute lecture passe par la
+  fonction project_data_for_me, qui retire les cles des onglets fermes. Si un
+  jour un ecran nouveau fait un select sur 'data', il ne recevra rien et on
+  sera tente de « reparer » en rendant le droit : NE JAMAIS FAIRE CELA, c'est
+  defaire tout le chantier d'une ligne. On ajoute un appel a la fonction.
+  QUATRE POINTS A NE PAS DEFAIRE :
+  1. Le droit se retire sur la TABLE puis se rend colonne par colonne. Un
+     revoke sur la seule colonne ne fait RIEN tant qu'un droit de table
+     existe — il passe sans erreur et ne ferme rien.
+  2. La carte cle -> section vit dans project_key_sections (SQL) et nulle
+     part ailleurs. Ajouter une cle au projet sans l'y declarer la rend
+     visible de tous.
+  3. Le declencheur projects_section_write_guard refuse l'ecriture d'une cle
+     sans droit, QUEL QUE SOIT le chemin. C'est lui qui empeche un poste
+     ampute d'effacer le budget en renvoyant une cle vide.
+  4. Le temps reel ne diffuse plus le contenu : la publication est restreinte
+     aux colonnes de signalement et le canal rapide n'envoie qu'un signal.
+     Remettre le patch dans le broadcast rouvrirait la fuite, le filtre
+     dependant du DESTINATAIRE et non de l'emetteur.
+  CONSEQUENCE ASSUMEE, a expliquer plutot qu'a corriger : fermer Comediens a
+  quelqu'un qui a le Planning lui donne des feuilles de service sans
+  distribution. C'est la regle de Guillaume appliquee telle quelle — une
+  fiche appartient a SON onglet. S'il doit voir la distribution, on lui ouvre
+  Comediens en lecture. C'est un reglage, pas un correctif.
+  RESTE OUVERT SUR CE SUJET, sciemment : 'history' (le journal des actions)
+  nomme les operations faites sur les onglets fermes ; il ne porte ni montant
+  ni coordonnee, mais il en dit plus que rien.
+- AUDIT DU 2 SEPTEMBRE (securite, Supabase, HTML, GitHub) — CE QUI EN RESTE :
+  * REGLE : TOUT texte saisi par un utilisateur passe par Utils.escape avant
+    d'entrer dans du HTML — y compris dans un <textarea>, un <option>, une
+    valeur d'attribut ou un onclick. L'audit a trouve 28 oublis sur 669
+    usages ; un seul suffit a executer du code chez tous les membres d'un
+    projet. Pour une URL saisie : Utils.safeUrl (href, window.open) ou
+    Utils.safeMediaUrl (src d'image). Ne jamais interpoler une URL brute.
+  * TELEPHONE DES PROFILS PUBLICS : regle appliquee EN BASE par
+    public_profiles_for_me (agent en priorite, sinon case « ne pas
+    afficher », sinon le personnel). Le telephone vit a DEUX endroits — la
+    colonne et une copie par casquette dans data.facets — la fonction
+    aligne les deux. LIMITE CONNUE : user_profiles reste lisible en direct
+    par la RLS (36 lectures en dependent). Fermer la colonne comme pour
+    projects demanderait de reprendre ces 36 lectures. L'adresse
+    (hideAddress) a la meme limite : masquee a l'ecran, envoyee en base.
+  * BIBLIOTHEQUES CHARGEES A LA DEMANDE SANS EMPREINTE D'INTEGRITE
+    (Chart.js, jsPDF, pdf-lib, html2canvas, pdf.js, JSZip, Leaflet) :
+    supabase-js en a une, les autres non. A ajouter un jour de calme —
+    attention, chaque montee de version d'une lib impose de recalculer
+    l'empreinte.
+  * og-image.png est referencee dans les balises meta et ABSENTE du depot :
+    apercus casses sur les reseaux sociaux.
+  * DEPOT GITHUB PUBLIC avec tout l'historique (683 commits depuis janvier).
+    Le code lui-meme est public par nature (un HTML servi au navigateur) ;
+    ce qui est expose en plus, c'est l'historique — dont la configuration
+    Firebase et une cle EmailJS de janvier 2026, d'avant Supabase. Le projet
+    Firebase n'existe plus (Guillaume, 2 septembre). Rendre le depot prive
+    ou retirer l'en-tete au deploiement : decision de Guillaume, en attente.
+  * 56 console.log et 25 TODO residuels : cosmetique.
+  * Pas de CSP possible tant qu'il y a ~980 onclick en ligne. Su.
+- ALIGNER LE DROIT D'INVITER — TOUJOURS PAS FAIT, et desormais possible.
+  La regle est « on n'invite que si on peut modifier la fiche projet » (NE PAS
+  ROUVRIR la question de principe) ; l'implementation autorise en fait le
+  proprietaire plus tout delegue (project_members.can_invite). Ce qui bloquait
+  — « une policy SQL ne peut pas lire les droits, ils vivent dans le JSON » —
+  n'existe plus : my_section_level sait justement repondre. Une policy INSERT
+  qui appellerait my_section_level(project_id, 'presentation') = 'write'
+  suffirait. Petit chantier, a faire un jour de calme.
 - PLANNING EST DECOUPE EN ONZE SOUS-MODULES (allegement fait en v578) :
   PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability,
   PlanningDragResize, PlanningTransport, PlanningBreakdown, PlanningDayEdit,
@@ -145,6 +196,47 @@ cette liste) :
 ================================================================================
                     MIGRATIONS SQL APPLIQUEES (hors fichier)
 ================================================================================
+2 septembre 2026 (CLOISONNEMENT REEL DES DONNEES — 8 blocs, fichier
+cloisonnement.sql conserve a part) :
+- my_section_level(uuid, text) : SECURITY DEFINER. Rend 'write' / 'read' /
+  'none' pour l'appelant sur une section. C'EST LA CLE DU CHANTIER : les
+  droits par onglet vivent dans le JSON du projet, qu'une policy ne peut pas
+  ouvrir — une fonction, si. Replis calques a l'identique sur le navigateur
+  (proprietaire = write ; membre sans ligne de droits = write si editor,
+  sinon read ; section absente d'une ligne existante = read), sans quoi tous
+  les projets existants seraient devenus vides.
+- project_key_sections() : la carte cle du JSON -> section. Une seule section
+  par cle (une fiche appartient a SON onglet), sauf quatre exceptions qui ne
+  sont pas des chemins vers une fiche mais des onglets qui n'existent pas
+  sans la cle : scenes (scenario, depouillement), episodes et seasons,
+  shots (les trois calques du storyboard).
+- project_data_for_me(uuid) : remplace le select('*'). Rend le projet prive
+  des cles fermees, plus _scope (mon niveau par section) et _withheld (la
+  LISTE des cles retirees — le navigateur ne doit pas la deviner, celle qu'il
+  oublierait serait celle qu'une sauvegarde de secours effacerait). Le
+  memberPermissions des AUTRES membres est retire pour les non-proprietaires.
+- projects_section_write_guard : declencheur BEFORE UPDATE. Refuse la
+  modification d'une cle sans droit d'ecriture, quel que soit le chemin
+  (patch, update direct, import, script). Pose en declencheur et NON dans
+  patch_project_data, justement pour couvrir les chemins qu'on oublierait.
+  Laisse passer les contextes sans jeton (edge functions, admin).
+- publication supabase_realtime restreinte a (id, title, updated_at) sur
+  projects. Postgres diffusait payload.new.data ENTIER a tous les abonnes a
+  chaque sauvegarde : filtrer l'ouverture sans fermer cette porte n'aurait
+  servi a rien.
+- projects_meta_for_me(uuid[]) et admin_project_sizes() : priorite, ordre et
+  poids sans le contenu, pour la liste des projets et le panneau admin qui
+  chargeaient tout le JSON juste pour afficher un chiffre.
+- public_profiles_for_me(text) : SECURITY DEFINER, remplace les quatre
+  select('*') de l'Univers sur user_profiles. Rend les memes lignes en JSON
+  avec le telephone soumis a la regle (agent / masque / personnel), colonne
+  ET copies dans data.facets alignees. Ma propre ligne reste intacte.
+- FERMETURE DE LA COLONNE : revoke select ON LA TABLE, puis grant colonne par
+  colonne sauf 'data'. UN REVOKE SUR LA SEULE COLONNE NE FAIT RIEN tant qu'un
+  droit de table existe — la commande passe sans erreur et la colonne reste
+  lisible. Verifie le 2 septembre : authenticated garde INSERT, REFERENCES et
+  UPDATE sur 'data', et PAS de SELECT.
+
 23 aout 2026 (chantier acceptation d'invitation) :
 - project_members : colonne status text NOT NULL DEFAULT 'accepted'
   (tout l'existant est donc considere accepte, aucun acces perdu).
@@ -418,7 +510,36 @@ DOUBLONS ET INCOHERENCES ASSUMES
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
-v578 (2 Septembre 2026) — Allègement du cœur de Planning : trois sous-modules extraits, le cœur passe de ~1600 à ~640 lignes sans qu'une seule ligne de logique change + purge de l'en-tête : les étapes 0 à 8 de l'audit du 20 août sont toutes soldées et sortent du plan, il ne reste que deux chantiers ouverts + la policy DELETE du MiniChat vérifiée en vrai
+v578 (2 Septembre 2026) — AUDIT COMPLET (sécurité, Supabase, HTML, GitHub) : 28 points d'injection de code par les champs de saisie fermés, le téléphone des profils publics soumis à une règle appliquée en base + CLOISONNEMENT RÉEL DES DONNÉES : le navigateur ne lit plus jamais le projet en base, un serveur lui envoie ce à quoi il a droit et rien d'autre — trois portes fermées, huit blocs SQL, onze écritures corrigées + allègement du cœur de Planning : trois sous-modules extraits, de ~1600 à ~640 lignes sans qu'une ligne de logique change + purge de l'en-tête : les étapes 0 à 8 de l'audit du 20 août sortent du plan, il ne reste QU'UN chantier ouvert + la policy DELETE du MiniChat vérifiée en vrai
+  - AUDIT COMPLET DEMANDÉ PAR GUILLAUME AVANT DE PASSER À LA v579, sur quatre domaines : sécurité du code, Supabase, HTML, GitHub. Verdict : un problème sérieux, deux à décider, le reste sain. Le sérieux n'était pas là où on avait regardé toute la journée.
+  - LE PROBLÈME SÉRIEUX : L'INJECTION DE CODE PAR LES CHAMPS DE SAISIE. Le fichier a une fonction `Utils.escape` qui neutralise le HTML d'un texte saisi, utilisée 669 fois — et 28 endroits où elle avait été oubliée : adresse et bio des comédiens, adresse, notes et fonction des techniciens, description et notes des ressources, email et téléphone des contacts, noms dans les barres et la liste de disponibilités, noms de groupes personnalisés, nom des plans du storyboard, calques de dessin, nom des pièces jointes de dépense, responsables de poste, sous-catégories, lien du mood board, photos de galerie des lieux, emails dans le panneau admin, catégorie de forum, email du profil existant. Ce que ça permettait : un collaborateur avec le crayon sur Comédiens écrit dans « adresse » un texte qui devient du CODE exécuté dans le navigateur de tous les autres membres, propriétaire compris — et la session Supabase, stockée dans le navigateur, est à portée de ce code. C'est l'attaque la plus documentée du web, et ce n'était pas une hypothèse : une balise dans un textarea suffit à en sortir.
+  - LES 28 SONT FERMÉS, EN DEUX PASSES ET SANS RIEN CASSER. Première passe sur les champs d'objets (`item.address`, `member.notes`…), seconde sur les variables nues à nom évocateur (`role`, `email`, `msg`…) en vérifiant à chaque fois d'où venait la valeur — beaucoup étaient déjà échappées en amont ou sortaient de la configuration, et n'ont pas été touchées : un échappement en double transforme « & » en « &amp;amp; » à l'écran. Deux cas particuliers : le lien du mood board passait une URL saisie DIRECTEMENT dans un `window.open` (une URL `javascript:` aurait suffi), il passe maintenant par `Utils.safeUrl` qui n'accepte que http(s) et mailto ; les photos de galerie des lieux passent par `Utils.safeMediaUrl` comme celles des profils. Aucun onclick n'était vulnérable : ceux qui interpolent un texte étaient tous déjà échappés.
+  - RÈGLE ÉCRITE EN TÊTE, parce qu'un 29e oubli arrivera : TOUT texte saisi passe par `Utils.escape` avant d'entrer dans du HTML, textarea, option et attributs compris ; toute URL saisie passe par `safeUrl` ou `safeMediaUrl`. Ce n'est pas une politique de sécurité de contenu (CSP) qui protégera ce fichier — impossible à poser utilement avec 980 onclick en ligne — c'est cette discipline-là, ligne par ligne.
+  - PAS DE SECRET EXPOSÉ. Le seul jeton du fichier est la clé `anon` de Supabase, décodée pour vérification : rôle anon, c'est son rôle d'être publique. Aucune clé serveur, aucune clé Brevo. Le gestionnaire de session respecte la règle « aucun await dans onAuthStateChange ». La suppression de compte, les buckets, les fonctions admin : tout ce qui est visible d'ici est cohérent avec ce que l'en-tête documente.
+  - SUPABASE : LE RLS EST ACTIF SUR TOUTES LES TABLES, vérifié par Guillaume avec une requête sur le catalogue — zéro table sans règle. Le cloisonnement du jour tient. Ce que je ne peux pas vérifier d'ici, c'est le CONTENU des policies ; ce qui est écrit en tête depuis août reste la référence.
+  - LE TÉLÉPHONE DES PROFILS PUBLICS PARTAIT CHEZ TOUT LE MONDE. L'Univers chargeait `user_profiles` avec `select('*')` : tout inscrit recevait l'intégralité de chaque profil public — téléphone, adresse, SIRET, date de naissance — affiché ou non. Guillaume a confirmé que les téléphones étaient effectivement visibles et demandé une option. Fait, EN BASE et non à l'écran : une fonction `public_profiles_for_me` remplace les quatre lectures et applique une règle — si un TÉLÉPHONE D'AGENT est renseigné, c'est lui qui sort et le personnel ne sort jamais ; sinon la case « ne pas afficher mon téléphone » décide ; sinon le personnel, comme avant. Deux champs ajoutés au formulaire de profil, à côté du téléphone. Le navigateur étiquette « Téléphone (agent) » quand c'est le cas, dans la fiche, le PDF et la fenêtre de contact.
+  - PIÈGE ATTRAPÉ EN ÉCRIVANT LA FONCTION : LE TÉLÉPHONE VIT À DEUX ENDROITS. La colonne `phone`, et une COPIE PAR CASQUETTE dans `data.facets.<k>.phone` (c'est le mécanisme des facettes, `FACET_SWAP_KEYS` côté client). Masquer la colonne seule aurait laissé la copie passer — et c'est justement la copie que lit la fenêtre « contacter le porteur ». La fonction aligne les deux. Sans cette vérification, l'option aurait eu l'air de marcher à l'écran et n'aurait rien masqué.
+  - LIMITE DITE FRANCHEMENT, ET ÉCRITE EN TÊTE : `user_profiles` reste lisible en direct par la RLS existante — 36 lectures dans le fichier en dépendent (contacts, membres de projet, profil courant…). La fonction ferme le chemin NORMAL ; un curieux qui interroge la table à la main reçoit encore le téléphone. Fermer la colonne comme on l'a fait pour `projects` demanderait de reprendre ces 36 lectures : chantier à part, pas commencé. L'adresse (`hideAddress`) a exactement la même limite depuis toujours : masquée à l'écran, envoyée en base.
+  - GITHUB : LE DÉPÔT EST PUBLIC, AVEC 683 COMMITS DEPUIS JANVIER. Deux nuances qui changent la lecture : le code lui-même est public par nature — un fichier HTML servi à chaque visiteur, « afficher la source » suffit — donc rendre le dépôt privé ne cacherait pas la version en ligne, et la licence propriétaire n'est pas contredite par la visibilité. Ce qui est réellement exposé en plus, c'est l'HISTORIQUE : les 683 versions, dont celles d'avant chaque correctif. Un balayage de tout cet historique a trouvé, en janvier 2026, la configuration complète d'un projet Firebase (clé `AIza…`, bases `public_actors` et `public_crew`) et une clé EmailJS, d'avant la migration vers Supabase. Une clé web Firebase n'est pas un secret en soi, mais un projet Firebase encore vivant l'aurait rendue exploitable. Guillaume confirme que le projet Firebase n'existe plus. Dans le fichier actuel, plus aucune référence hors journal.
+  - L'EN-TÊTE DU FICHIER EST LIVRÉ À CHAQUE VISITEUR — journal complet, notes SQL, description des policies, référence Supabase, email du compte de test, identifiant du projet démo. Ce n'est pas une faille : une architecture bien faite résiste à sa lecture, et c'est le cas depuis aujourd'hui. Mais ce n'est pas la peine de fournir le plan. Retirer ce commentaire au déploiement demande une petite étape de build, donc de changer la façon de publier. Décision de Guillaume, en attente avec celle du dépôt privé.
+  - STRUCTURE HTML : SAINE, ET LA RÉFÉRENCE DE L'EN-TÊTE EST JUSTE. En comptant correctement — HTML pur d'un côté (1248 / 1248), chaînes JavaScript de l'autre (1819 / 1819) — les `div` sont à zéro écart des deux côtés. Le « +1 » que je mesurais depuis le matin était un artefact de comptage sur le fichier entier, pas une balise perdue. Accolades CSS à zéro, aucun U+2550, aucune IIFE async (les `setTimeout(async () => …)` sont des rappels différés, pas des IIFE). `lang`, `viewport`, `robots.txt`, `sitemap.xml`, `404.html`, `CNAME` : tout est là. `og-image.png` est référencée et absente : aperçus cassés sur les réseaux sociaux, à ajouter.
+  - CE QUI RESTE À CONNAÎTRE, sans être des bugs : 4,5 Mo dont 3,6 Mo de JavaScript chargés d'un bloc — le chargement à la demande des bibliothèques a fait le gros du travail, le reste est le fichier lui-même ; les bibliothèques chargées à la demande n'ont pas d'empreinte d'intégrité (supabase-js en a une) ; 56 `console.log` et 25 `TODO` résiduels. Tout est écrit en tête, avec le rappel que chaque montée de version d'une bibliothèque impose de recalculer son empreinte.
+  - LE DERNIER POINT DE L'ÉTAPE 7 EST SOLDÉ, ET IL ÉTAIT LE PLUS GRAVE. Depuis que les permissions par onglet existent, les ❌ ne cachaient les onglets QUE dans le navigateur : `Store.loadProject` faisait un `select('*')` et le JSON entier — budget, contrats, coordonnées, cachets — arrivait dans la page de tout membre du projet. Un clic droit, « Inspecter », et tout était lisible. L'en-tête le disait depuis le 23 août sans que ce soit corrigé, avec la mention « à ouvrir AVANT tout usage où la confidentialité compte ». C'est fait.
+  - LE VERROU QUI PARAISSAIT INFRANCHISSABLE N'EN ÉTAIT PAS UN. L'argument écrit en tête était : « les droits vivent dans le JSON du projet, une policy SQL ne peut pas les lire, donc ce n'est pas une retouche mais un découpage en base ». C'est vrai d'une POLICY et faux d'une FONCTION : une fonction `SECURITY DEFINER` ouvre le JSON sans difficulté. Toute l'architecture tient sur ce constat — pas de nouvelle table, pas de migration des données existantes, pas un projet touché. Le chantier redouté depuis dix jours s'est révélé être une question mal posée.
+  - IL N'Y AVAIT PAS UNE PORTE MAIS TROIS, et n'en fermer qu'une n'aurait servi à rien. (1) L'ouverture du projet. (2) LA SYNCHRO TEMPS RÉEL : à chaque sauvegarde de n'importe qui, Postgres diffusait `payload.new.data` — le projet ENTIER — à tous les abonnés ; il aurait suffi d'attendre qu'un collègue enregistre pour recevoir ce qu'on venait de nous cacher. (3) LA LISTE DES PROJETS : l'écran d'accueil chargeait le JSON complet de chaque projet pour en afficher trois choses, la priorité, l'ordre et le poids — tout était donc déjà dans la page avant même d'ouvrir quoi que ce soit.
+  - LA RÈGLE POSÉE PAR GUILLAUME, appliquée telle quelle : une fiche appartient à SON onglet. Voir une fiche depuis un autre onglet ne donne aucun droit dessus — si l'onglet d'origine est fermé, la fiche doit être INTROUVABLE, pas seulement non cliquable. D'où une seule section par clé dans la carte SQL. QUATRE EXCEPTIONS, et elles se justifient d'une phrase : ce ne sont pas des chemins vers une fiche, ce sont des onglets qui n'existent pas sans la clé — le Scénario et le Dépouillement ne sont pas des vues sur la fiche de scène, ils SONT les scènes ; les épisodes et saisons n'organisent que des scènes ; les trois calques du storyboard sont des sous-sections du même onglet.
+  - CONSÉQUENCE ASSUMÉE, ÉCRITE EN TÊTE POUR NE PAS ÊTRE « CORRIGÉE » PLUS TARD : fermer Comédiens à quelqu'un qui a le Planning lui donne des feuilles de service sans distribution. Ce n'est pas un défaut, c'est la règle qui s'applique. S'il doit voir la distribution, on lui ouvre Comédiens en lecture — le remède est un réglage dans le tableau des accès, pas une exception dans le code. Ouvrir une brèche « parce que le planning en a besoin » aurait vidé la règle de son sens dès le premier cas particulier.
+  - LES REPLIS SONT CALQUÉS À L'IDENTIQUE SUR LE NAVIGATEUR, et c'est ce qui a évité la catastrophe. La fonction SQL ne pouvait pas se contenter de lire `memberPermissions` : beaucoup de membres n'y ont aucune ligne, et tous les projets se seraient ouverts VIDES du jour au lendemain. Elle reproduit donc les trois replis existants — propriétaire = tout ; membre sans ligne = tout en écriture s'il est éditeur, en lecture sinon ; section absente d'une ligne existante = lecture, exactement ce que fait `Permissions._normalize`. Une règle de sécurité qui casse l'existant n'est pas déployée, donc ne protège rien.
+  - LE SERVEUR FAIT DÉSORMAIS FOI SUR LE NAVIGATEUR. `canAccess` et `canEdit` interrogent d'abord `_scope`, la carte des droits renvoyée par la base, et ne retombent sur le calcul local qu'au tableau de bord, avant l'ouverture d'un projet. Les deux ne peuvent plus diverger : c'est la même fonction SQL qui décide ce qu'elle envoie et ce qu'elle déclare. Sans cela le navigateur aurait pu s'accorder un accès que le serveur venait de refuser, et afficher un onglet vide en guise d'explication.
+  - LE VRAI DANGER N'ÉTAIT PAS LA FUITE MAIS L'EFFACEMENT. Un poste qui reçoit un projet amputé garde des clés recréées vides par `Store.getEmpty` ; qu'un écran les touche, et la sauvegarde renvoie un budget vide qui écrase celui de tout le monde, sans erreur ni message. TROIS VERROUS plutôt qu'un, parce qu'une perte de données silencieuse ne se rattrape pas : les clés retirées sont ôtées du patch côté navigateur ; l'écriture complète de secours est purement interdite sur un projet amputé ; et un DÉCLENCHEUR SQL refuse toute modification d'une clé sans droit d'écriture, quel que soit le chemin. Le déclencheur est posé sur la table et non dans `patch_project_data` PRÉCISÉMENT pour couvrir les chemins qu'on aurait oubliés.
+  - ET IL Y EN AVAIT ONZE, D'OUBLIÉS. La chasse aux écritures qui poussaient `state.data` EN ENTIER a sorti : le scénario à chaque frappe, le titre, les quatre fonctions de commentaires, la priorité et l'ordre des cartes du tableau de bord (qui relisaient et réécrivaient le projet complet pour y poser un seul nombre — au passage, toute modification faite ailleurs entre la lecture et l'écriture était perdue), et le rattachement d'un profil public. Toutes converties en écritures ciblées. Aucune n'était un bug tant que chacun recevait tout ; toutes le devenaient le jour du cloisonnement.
+  - LE NAVIGATEUR NE DEVINE PAS CE QU'ON LUI A RETIRÉ, LE SERVEUR LE LUI DIT. Première version : déduire les clés manquantes en comparant avec `Store.getEmpty`. Mauvaise idée, découverte en vérifiant — HUIT clés réelles n'y figurent pas (`orgs`, `vehicles`, `moodboards`, `titlePage`, les modèles de contrat…). Le navigateur en aurait oublié, et la clé oubliée est exactement celle qu'une sauvegarde de secours efface. La fonction renvoie donc `_withheld`, la liste explicite. Ces huit clés reçoivent en plus une forme vide à l'ouverture : absentes, elles valaient « indéfini » et faisaient planter les écrans qui les parcourent.
+  - LES EXPORTS ÉTAIENT LE DERNIER PIÈGE, ET LE PLUS SOURNOIS. L'archive « Téléchargement Moteur complet (en cas de crash) » se présente comme une sauvegarde intégrale : sur un projet transmis partiellement elle aurait été amputée SANS LE DIRE, et on ne s'en serait aperçu qu'au moment de restaurer, c'est-à-dire trop tard. Elle refuse désormais, comme l'import JSON et « Vider tout », qui remplacent le projet entier. La modale d'export PDF, elle, masque les sections fermées : sans ce filtre, quelqu'un sans accès aux Dépenses aurait vu la case « Budget » et obtenu un PDF à zéro euro — un document faux, ce qui est pire qu'un document absent, puisque rien ne lui aurait dit qu'un budget existe.
+  - LE TEMPS RÉEL PERD SON RACCOURCI, ET C'EST ASSUMÉ. Le canal rapide diffusait le patch tel quel à tous les abonnés du projet : celui qui modifiait le budget l'envoyait donc aussi à ceux qui n'y ont pas accès. Impossible de tailler ce patch à l'avance — le filtre dépend du DESTINATAIRE, pas de l'émetteur. Le canal n'envoie plus qu'un signal « ça a bougé » et chaque poste recharge par la fonction, qui sait pour qui elle répond. Coût : un rechargement (temporisé à 400 ms) au lieu d'une fusion locale. La colonne `data` est sortie de la publication Postgres dans le même mouvement.
+  - LE PIÈGE POSTGRESQL QUI AURAIT TOUT ANNULÉ, ATTRAPÉ AVANT LIVRAISON. Le dernier tour de clé consiste à retirer le droit de lecture sur la colonne. Écrit naïvement — `revoke select (data) ... from authenticated` — il NE FAIT RIEN tant qu'un droit de lecture existe sur la TABLE entière : le droit de table l'emporte sur le droit de colonne, la commande passe sans la moindre erreur, et la colonne reste lisible. On aurait cru le chantier terminé sans avoir rien fermé. Il faut retirer le droit de table puis le rendre colonne par colonne sauf `data`, liste construite depuis le catalogue pour n'en oublier aucune, ni aujourd'hui ni plus tard.
+  - LA REQUÊTE DE VÉRIFICATION ÉTAIT FAUSSE AUSSI, et la fausse alerte a servi. Elle comptait les lignes de `column_privileges` sans filtrer sur le TYPE de droit : elle en renvoyait trois, parfaitement normales, puisque l'application doit continuer à ÉCRIRE dans `data`. Ce qu'il faut regarder, c'est l'absence de `SELECT`. Vérifié le 2 septembre : `authenticated` garde INSERT, REFERENCES et UPDATE sur la colonne, et n'a plus SELECT. La bonne requête, et l'explication du piège, sont écrites dans le fichier SQL.
+  - CE QUI RESTE OUVERT, DIT FRANCHEMENT : `history`, le journal des actions, nomme les opérations faites sur les onglets fermés. Il ne porte ni montant ni coordonnée, mais il en dit plus que rien. Laissé de côté sciemment plutôt que traité à moitié.
+  - ET CE QUI DEVIENT POSSIBLE : aligner le droit d'inviter sur la règle « on n'invite que si on peut modifier la fiche projet ». Ce qui bloquait — une policy ne sait pas lire les droits dans le JSON — n'existe plus, `my_section_level` sait précisément répondre à cette question. Une policy INSERT qui l'appellerait suffirait. Noté en tête comme petit chantier d'un jour de calme, pas fait aujourd'hui pour ne pas mélanger deux sujets de sécurité dans la même session.
   - LE CHANTIER « À FROID » ENFIN OUVERT. L'en-tête portait depuis le 20 août la ligne « à froid un jour, jamais en cours de chantier : alléger le cœur de Planning ». La condition était remplie pour la première fois : plus aucun chantier en cours, étape 8 terminée, aucune dette bloquante. C'est exactement le moment où ce genre de découpage se fait — au milieu d'une refonte fonctionnelle, il devient impossible de distinguer une régression de découpage d'une régression de fonctionnalité.
   - RÈGLE DE CONDUITE TENUE D'UN BOUT À L'AUTRE : AUCUNE RÉÉCRITURE. Le code est DÉPLACÉ tel quel, ligne pour ligne, dans les trois nouveaux modules. Pas une condition simplifiée, pas un nom de variable amélioré, pas un `for` transformé en `forEach`. C'est la seule façon de pouvoir affirmer qu'un déplacement de 900 lignes ne change rien : dès qu'on mélange le déménagement et le ménage, on ne sait plus laquelle des deux opérations a cassé quoi. Le ménage viendra plus tard, sur du code déjà rangé.
   - PlanningBoards — LE PLAN DE TRAVAIL (DOOD) ET LE KANBAN, 433 lignes. Les deux tiennent ensemble parce que ce sont les deux vues « tableau » de l'onglet, celles que `setMode` appelle quand on quitte le calendrier : renderWorkPlan et son menu contextuel de surcharge (openWorkplanMenu, setWorkplanOverride), son impression dédiée (printWorkPlan), et renderKanban. Elles étaient déjà contiguës dans le fichier, ce qui confirmait qu'elles formaient un bloc — le découpage n'a fait que le reconnaître.
@@ -7303,6 +7424,16 @@ body.presentation-mode .presentation-bar {
                     <div class="profile-row">
                         <input type="email" class="profile-input" id="profile-email" placeholder="Email *" readonly>                        <input type="tel" class="profile-input" id="profile-phone" placeholder="Téléphone *">
                         <input type="email" class="profile-input" id="profile-contact-email" placeholder="📧 Email de contact public (libre, affiché sur la fiche)">
+                    </div>
+                    <!-- v578 (audit) : confidentialite du telephone. Applique EN BASE par
+                         public_profiles_for_me : si un telephone d'agent est renseigne, c'est
+                         lui qui sort et le personnel ne sort jamais ; sinon la case decide. -->
+                    <div class="profile-row" style="align-items:center; gap:12px; flex-wrap:wrap;">
+                        <input type="tel" class="profile-input" id="profile-agent-phone" placeholder="📞 Téléphone de mon agent (affiché à la place du mien)" style="flex:1; min-width:260px;">
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.9rem; white-space:nowrap;">
+                            <input type="checkbox" id="profile-hide-phone">
+                            <span>Ne pas afficher mon téléphone sur mon profil public</span>
+                        </label>
                     </div>
                     <div class="profile-row">
                         <input type="text" class="profile-input" id="profile-city" placeholder="Ville / Région *" list="city-suggestions" oninput="app.Geo.suggestCities(this)">
@@ -21136,7 +21267,7 @@ initCategoriesDragDrop: () => {
             if(!isView) {
                 groupSelect = `<select class="group-select" onchange="app.Actions.changeGroup('${type}', ${idx}, this.value)">`;
                 groupSelect += `<option value="">-- Groupe --</option>`;
-                availableGroups.forEach(g => { groupSelect += `<option value="${g.id}" ${item.group_id === g.id ? 'selected' : ''}>${g.name}</option>`; });
+                availableGroups.forEach(g => { groupSelect += `<option value="${g.id}" ${item.group_id === g.id ? 'selected' : ''}>${Utils.escape(g.name)}</option>`; });
                 groupSelect += `</select>`;
             }
 
@@ -21185,8 +21316,8 @@ initCategoriesDragDrop: () => {
                 contentHtml += `<input class="actor-input" placeholder="📍 Ville / Région" list="city-suggestions" value="${Utils.escape(item.city||'')}" oninput="app.Geo.suggestCities(this)" onchange="app.Actions.updateActorMeta(${idx}, 'city', this.value)" ${isReadOnly?'disabled':''}>`;
                 contentHtml += `<input class="actor-input" placeholder="Site Web" value="${Utils.escape(item.website||'')}" onchange="app.Actions.updateActorMeta(${idx}, 'website', this.value)" ${isReadOnly?'disabled':''}>`;
                 contentHtml += `</div>`;
-                contentHtml += `<textarea class="data-desc mt-5" placeholder="Adresse / Notes..." oninput="app.Actions.updateActorMeta(${idx}, 'address', this.value)" ${isReadOnly?'disabled':''}>${item.address || ''}</textarea>`;
-                contentHtml += `<textarea class="data-desc" style="margin-top:5px; height:50px;" placeholder="Bio..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isReadOnly?'disabled':''}>${item.bio || ''}</textarea>`;
+                contentHtml += `<textarea class="data-desc mt-5" placeholder="Adresse / Notes..." oninput="app.Actions.updateActorMeta(${idx}, 'address', this.value)" ${isReadOnly?'disabled':''}>${Utils.escape(item.address || '')}</textarea>`;
+                contentHtml += `<textarea class="data-desc" style="margin-top:5px; height:50px;" placeholder="Bio..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isReadOnly?'disabled':''}>${Utils.escape(item.bio || '')}</textarea>`;
                 
                 // Section Description physique (vérifier visibilité)
                 if(UI.isSectionVisibleForProject(item, 'physical')) {
@@ -21423,7 +21554,7 @@ initCategoriesDragDrop: () => {
                     <div id="location-gallery-${idx}" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
                         ${(item.galleryPhotos || []).map((photo, pIdx) => `
                             <div style="position:relative; width:80px; height:80px;">
-                                <img src="${photo}" alt="Photo" style="width:100%; height:100%; object-fit:cover; border-radius:4px; cursor:pointer;" onclick="window.open('${photo}', '_blank')">
+                                <img src="${Utils.safeMediaUrl(photo)}" alt="Photo" style="width:100%; height:100%; object-fit:cover; border-radius:4px; cursor:pointer;" onclick="window.open('${Utils.safeMediaUrl(photo)}', '_blank')">
                                 ${!isView ? `<button onclick="app.Actions.removeLocationPhoto(${idx}, ${pIdx})" style="position:absolute; top:-5px; right:-5px; background:var(--danger); color:white; border:none; border-radius:50%; width:18px; height:18px; cursor:pointer; font-size:10px;">✕</button>` : ''}
                             </div>
                         `).join('')}
@@ -21466,13 +21597,13 @@ initCategoriesDragDrop: () => {
                     if(state.data.actors) {
                         state.data.actors.forEach(actor => {
                             const isSelected = item.actor_id && item.actor_id === actor.id ? 'selected' : '';
-                            contentHtml += `<option value="${actor.id}" ${isSelected}>${actor.name}</option>`;
+                            contentHtml += `<option value="${actor.id}" ${isSelected}>${Utils.escape(actor.name)}</option>`;
                         });
                     }
                     contentHtml += `</select>`;
                 } else if (item.actor_id) {
                     const actor = state.data.actors.find(a => a.id === item.actor_id);
-                    if(actor) contentHtml += `<div style="margin-top:5px;font-size:0.85rem;color:var(--primary)">🎭 ${actor.name}</div>`;
+                    if(actor) contentHtml += `<div style="margin-top:5px;font-size:0.85rem;color:var(--primary)">🎭 ${Utils.escape(actor.name)}</div>`;
                 }
             }
                 contentHtml += groupSelect;
@@ -21561,7 +21692,7 @@ initCategoriesDragDrop: () => {
         
         let groupOptions = '<option value="">-- Département --</option>';
         availableGroups.forEach(g => {
-            groupOptions += `<option value="${g.id}" ${member.group_id === g.id ? 'selected' : ''}>${g.name}</option>`;
+            groupOptions += `<option value="${g.id}" ${member.group_id === g.id ? 'selected' : ''}>${Utils.escape(g.name)}</option>`;
         });
         
         let currencyOptions = '';
@@ -21607,7 +21738,7 @@ initCategoriesDragDrop: () => {
                         <input type="text" value="${Utils.escape(member.name || '')}" placeholder="Nom du technicien" onclick="event.stopPropagation()" onchange="app.Crew.updateMember(${idx}, 'name', this.value)" ${isReadOnly ? 'disabled' : ''} style="font-weight:bold; font-size:1rem; border:1px solid transparent; background:transparent; color:inherit; padding:2px 4px; border-radius:4px; flex:1; min-width:0;" onfocus="this.style.border='1px solid var(--border)'; this.style.background='var(--input-bg)';" onblur="this.style.border='1px solid transparent'; this.style.background='transparent';">
                         ${isLocked ? `<span style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: bold;">🔒 Profil revendiqué</span>` : ''} ${!isView ? `<button class="save-contact-btn ${state.contacts && state.contacts.crew && state.contacts.crew.some(c => c.id === member.id) ? 'saved' : ''}" onclick="event.stopPropagation(); app.Contacts.saveCrewToContacts(${idx})" title="Sauvegarder dans contacts">${state.contacts && state.contacts.crew && state.contacts.crew.some(c => c.id === member.id) ? '⭐' : '☆'}</button>` : ''}
                     </div>
-                    <div class="crew-role">${member.role || 'Fonction non définie'}</div>
+                    <div class="crew-role">${Utils.escape(member.role || 'Fonction non définie')}</div>
                 </div>
                 ${!isView ? `<button onclick="app.Crew.deleteMember(${idx})" style="background: none; border: none; color: var(--danger); cursor: pointer; font-size: 1.2rem;">🗑️</button>` : ''}
             </div>
@@ -21641,7 +21772,7 @@ initCategoriesDragDrop: () => {
                 <input class="crew-input" placeholder="📍 Ville / Région" list="city-suggestions" value="${Utils.escape(member.city || '')}" oninput="app.Geo.suggestCities(this)" onchange="app.Crew.updateMember(${idx}, 'city', this.value)" ${isReadOnly ? 'disabled' : ''}>
             </div>
             
-            <textarea class="crew-input" style="min-height: 60px;" placeholder="Adresse..." onchange="app.Crew.updateMember(${idx}, 'address', this.value)" ${isReadOnly ? 'disabled' : ''}>${member.address || ''}</textarea>
+            <textarea class="crew-input" style="min-height: 60px;" placeholder="Adresse..." onchange="app.Crew.updateMember(${idx}, 'address', this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(member.address || '')}</textarea>
             
             ${UI.isSectionVisibleForProject(member, 'crew-gallery') ? `<div class="info-box">
                 <strong class="form-label-block">📸 Galerie Photos</strong>
@@ -21768,7 +21899,7 @@ initCategoriesDragDrop: () => {
                 </div>
             </div>` : ''}
             
-            <textarea class="crew-input" style="min-height: 60px; margin-top: 10px;" placeholder="Notes générales..." onchange="app.Crew.updateMember(${idx}, 'notes', this.value)" ${isReadOnly ? 'disabled' : ''}>${member.notes || ''}</textarea>
+            <textarea class="crew-input" style="min-height: 60px; margin-top: 10px;" placeholder="Notes générales..." onchange="app.Crew.updateMember(${idx}, 'notes', this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(member.notes || '')}</textarea>
             
             ${UI.renderAppearances('crew', member.id, '🎬 Convoqué sur', "Sur aucune scène pour l'instant")}
             ${UI.renderShootDays('crew', member.id, '📅 Convoqué·e le')}
@@ -24555,13 +24686,13 @@ initCategoriesDragDrop: () => {
                   
                   const photoHtml = existingProfile.photo 
                       ? `<img src="${Utils.safeMediaUrl(existingProfile.photo)}" alt="Photo de profil" style="width:80px;height:80px;border-radius:50%;object-fit:cover;margin-bottom:10px;">` 
-                      : `<div style="width:80px;height:80px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:2rem;color:white;margin-bottom:10px;">${(existingProfile.name || '?')[0].toUpperCase()}</div>`;
+                      : `<div style="width:80px;height:80px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:2rem;color:white;margin-bottom:10px;">${Utils.escape((existingProfile.name || '?')[0].toUpperCase())}</div>`;
                   
                   modal.innerHTML = `
                       <div style="background:var(--panel-bg);border-radius:12px;padding:25px;width:450px;max-width:90%;text-align:center;">
                           <h3 style="margin:0 0 20px;color:var(--text-main);">🔍 Profil existant trouvé !</h3>
                           
-                          <p style="color:var(--text-sec);margin-bottom:20px;">Un profil ${typeLabel} existe déjà à l'adresse <strong>${email}</strong></p>
+                          <p style="color:var(--text-sec);margin-bottom:20px;">Un profil ${typeLabel} existe déjà à l'adresse <strong>${Utils.escape(email)}</strong></p>
                           
                           <div style="background:var(--bg);border-radius:10px;padding:20px;margin-bottom:20px;">
                               ${photoHtml}
@@ -28620,7 +28751,7 @@ const MoodBoard = {
         }
         
         if(el.type === 'link') {
-            content = `<div class="moodboard-element-link" ondblclick="window.open('${el.url}', '_blank')">
+            content = `<div class="moodboard-element-link" ondblclick="window.open('${Utils.escape(Utils.safeUrl(el.url))}', '_blank')">
                 <div class="link-icon">🔗</div>
                 <div class="link-title">${Utils.escape(el.title || 'Lien')}</div>
                 <div class="link-url">${Utils.escape(el.url || '').substring(0, 40)}...</div>
@@ -30851,7 +30982,7 @@ const Storyboard = {
             </div>
             
             <div class="shot-meta-grid">
-                <input type="text" class="shot-input" placeholder="Nom du plan" value="${shot.name || ''}" 
+                <input type="text" class="shot-input" placeholder="Nom du plan" value="${Utils.escape(shot.name || '')}" 
                     onchange="app.Storyboard.updateShot('${shot.id}', 'name', this.value)" ${isView ? 'disabled' : ''}>
                 
                 <select class="shot-input" onchange="app.Storyboard.updateShot('${shot.id}', 'shotType', this.value)" ${isView ? 'disabled' : ''}>
@@ -32752,7 +32883,7 @@ const DrawingEditor = {
             item.innerHTML = `
                 <span style="cursor: grab; opacity: 0.5; padding: 0 4px;" title="Glisser">⋮⋮</span>
                 <span class="layer-visibility" onclick="app.DrawingEditor.toggleLayerVisibility(${idx})">${layer.visible ? '👁️' : '👁️‍🗨️'}</span>
-                <span class="flex-1">${layer.name}</span>
+                <span class="flex-1">${Utils.escape(layer.name)}</span>
                 ${DrawingEditor.layers.length > 1 ? `<button onclick="app.DrawingEditor.deleteLayer(${idx})" style="background: none; border: none; color: var(--danger); cursor: pointer;">🗑️</button>` : ''}
             `;
             item.onclick = (e) => {
@@ -35678,7 +35809,7 @@ container.innerHTML = filtered.map(res => {
                       ${actions}
                       <div class="compact-card-photo">${photo}</div>
                       <div class="compact-card-name">${Utils.escape(res.name)}</div>
-                      <div class="compact-card-role">${categoryLabels[res.category] || res.category}</div>
+                      <div class="compact-card-role">${Utils.escape(categoryLabels[res.category] || res.category)}</div>
                   </div>`;
           }).join('');
       },
@@ -35797,7 +35928,7 @@ container.innerHTML = filtered.map(res => {
                   </div>
                   <div>
                       <label class="label-bold">Description</label>
-                      <textarea id="res-description" rows="3" class="n8-input-10" placeholder="Description détaillée...">${resource?.description || ''}</textarea>
+                      <textarea id="res-description" rows="3" class="n8-input-10" placeholder="Description détaillée...">${Utils.escape(resource?.description || '')}</textarea>
                   </div>
                   <div>
                       <label class="label-bold">Propriétaire</label>
@@ -35826,7 +35957,7 @@ container.innerHTML = filtered.map(res => {
                   </div>
                   <div>
                       <label class="label-bold">Note</label>
-                      <textarea id="res-note" rows="2" class="n8-input-10" placeholder="Notes supplémentaires...">${resource?.note || ''}</textarea>
+                      <textarea id="res-note" rows="2" class="n8-input-10" placeholder="Notes supplémentaires...">${Utils.escape(resource?.note || '')}</textarea>
                   </div>
                   ${resource ? UI.renderAppearances('resource', resource.id, '🎬 Utilisé dans', "Utilisé dans aucune scène") : ''}
                   ${resource ? UI.renderCost('resource', resource.id) : ''}
@@ -39083,6 +39214,11 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         document.getElementById('profile-gender').value = profile.gender || '';
         document.getElementById('profile-email').value = state.currentUser?.email || '';
         document.getElementById('profile-phone').value = profile.phone || '';
+        // v578 (audit) : confidentialite du telephone
+        const agentPhoneEl = document.getElementById('profile-agent-phone');
+        if(agentPhoneEl) agentPhoneEl.value = profile.agentPhone || '';
+        const hidePhoneEl = document.getElementById('profile-hide-phone');
+        if(hidePhoneEl) hidePhoneEl.checked = profile.hidePhone === true;
         const ceEl = document.getElementById('profile-contact-email');
         if(ceEl) ceEl.value = profile.contactEmail || '';
         document.getElementById('profile-city').value = profile.city || '';
@@ -39283,6 +39419,9 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         profile.name = document.getElementById('profile-name').value.trim();
         profile.gender = document.getElementById('profile-gender').value;
         profile.phone = document.getElementById('profile-phone').value.trim();
+        // v578 (audit) : confidentialite du telephone
+        profile.agentPhone = document.getElementById('profile-agent-phone')?.value.trim() || '';
+        profile.hidePhone = document.getElementById('profile-hide-phone')?.checked || false;
         profile.contactEmail = document.getElementById('profile-contact-email')?.value.trim() || '';
         profile.city = document.getElementById('profile-city').value.trim();
         const addressInput = document.getElementById('profile-address');
@@ -39482,7 +39621,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     },
 
     // Champs qui appartiennent à la FICHE (comédien/technicien), plus au profil commun
-    FACET_SWAP_KEYS: ['name','photo','gender','phone','bio','address','city','latitude','longitude','hideAddress','hideAddressInProjects','contactEmail','dailyRate','rateCurrency','rateNegotiable','collabTypes','availabilityText','availabilityDates','unavailabilityDates','hasVehicle','vehicleType','vehiclePlate','vehicleSeats','vehicleTrunk','vehicleNotes','licenses','vehicleUsage','role','demoreel','demoreels','experience','languages','languagesWithLevels'],
+    FACET_SWAP_KEYS: ['name','photo','gender','phone','hidePhone','agentPhone','bio','address','city','latitude','longitude','hideAddress','hideAddressInProjects','contactEmail','dailyRate','rateCurrency','rateNegotiable','collabTypes','availabilityText','availabilityDates','unavailabilityDates','hasVehicle','vehicleType','vehiclePlate','vehicleSeats','vehicleTrunk','vehicleNotes','licenses','vehicleUsage','role','demoreel','demoreels','experience','languages','languagesWithLevels'],
 
     // Clés basculées par fiche : tout pour comédien/technicien, la collaboration seule pour asso/entreprise
     _facetKeysFor: (facet) => (facet === 'actor' || facet === 'crew') ? PublicProfile.FACET_SWAP_KEYS : ['collabTypes'],
@@ -39796,6 +39935,8 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                         address: extraData.address || '',
                         hideAddress: extraData.hideAddress || false,
                         hideAddressInProjects: extraData.hideAddressInProjects || false,
+                        hidePhone: extraData.hidePhone === true,
+                        agentPhone: extraData.agentPhone || '',
                         website: extraData.website || '',
                         dailyRate: extraData.dailyRate || '',
                         rateCurrency: extraData.rateCurrency || '€',
@@ -39992,6 +40133,9 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                     address: profile.address || '',
                     hideAddress: profile.hideAddress || false,
                     hideAddressInProjects: profile.hideAddressInProjects || false,
+                    // v578 (audit) : lus EN BASE par public_profiles_for_me
+                    hidePhone: profile.hidePhone === true,
+                    agentPhone: profile.agentPhone || '',
                     website: profile.website || '',
                     dailyRate: profile.dailyRate || '',
                     rateCurrency: profile.rateCurrency || '€',
@@ -41437,11 +41581,9 @@ const GlobalSearch = {
         try {
             // Rechercher dans user_profiles avec le bon type
             const profileType = isActors ? 'actor' : 'crew';
-            const { data, error } = await supabase
-                .from('user_profiles')
-                .select('*')
-                .eq('profile_type', profileType)
-                .eq('is_public', true);
+            // v578 (audit) : passe par la fonction serveur, qui applique la regle
+            // du telephone (agent en priorite, sinon selon le choix du profil).
+            const { data, error } = await supabase.rpc('public_profiles_for_me', { p_type: profileType });
             
             let results = [];
             if(!error && data) {
@@ -42020,11 +42162,9 @@ if(isActors) {
         els.contactsList.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-sec);">🔄 Recherche...</div>';
         
         try {
-            const { data, error } = await supabase
-                .from('user_profiles')
-                .select('*')
-                .eq('profile_type', profileType)
-                .eq('is_public', true);
+            // v578 (audit) : passe par la fonction serveur, qui applique la regle
+            // du telephone (agent en priorite, sinon selon le choix du profil).
+            const { data, error } = await supabase.rpc('public_profiles_for_me', { p_type: profileType });
             
             let results = [];
             if(!error && data) {
@@ -42397,8 +42537,8 @@ if(isActors) {
                     </div>
                 </div>
                 <div class="contact-card-info">
-                    ${contact.email ? `📧 ${contact.email}<br>` : ''}
-                    ${contact.phone ? `📱 ${contact.phone}<br>` : ''}
+                    ${contact.email ? `📧 ${Utils.escape(contact.email)}<br>` : ''}
+                    ${contact.phone ? `📱 ${Utils.escape(contact.phone)}<br>` : ''}
                     ${contact.website ? `🌐 ${contact.website}<br>` : ''}
                     ${contact.hasVehicle ? '🚗 Véhicule disponible' : ''}
                 </div>
@@ -47668,7 +47808,7 @@ closeModal: () => {
                         if(bar.vehicleTrunk) vehicleInfo += vehicleInfo ? ' + coffre dispo' : 'Coffre dispo';
                         vehicleIcon = `<span style="margin-left: auto; cursor: help;" title="${vehicleInfo || 'Véhicule disponible'}">🚗</span>`;
                     }
-                    availHTML += `<div class="availability-bar" style="background: ${bar.color};">${bar.name}${vehicleIcon}</div>`;
+                    availHTML += `<div class="availability-bar" style="background: ${bar.color};">${Utils.escape(bar.name)}${vehicleIcon}</div>`;
                 });
                 availHTML += '</div>';
             }
@@ -47936,7 +48076,7 @@ closeModal: () => {
                 let vehicleInfo = bar.vehicleSeats ? `${bar.vehicleSeats} places` : '';
                 if(bar.vehicleTrunk) vehicleInfo += vehicleInfo ? ' + coffre' : 'Coffre dispo';
                 html += `<div style="background:var(--panel-bg); border:1px solid var(--border); padding:8px 12px; border-radius:6px; font-size:0.85rem;">
-                    <strong>${bar.name}</strong> ${vehicleInfo ? `<span class="text-sec">• ${vehicleInfo}</span>` : ''}
+                    <strong>${Utils.escape(bar.name)}</strong> ${vehicleInfo ? `<span class="text-sec">• ${vehicleInfo}</span>` : ''}
                 </div>`;
             });
             html += '</div></div>';
@@ -48046,7 +48186,7 @@ closeModal: () => {
         let html = '';
         filtered.forEach((person, idx) => {
             if(!person.color) person.color = CONFIG.availabilityColors[dataArray.indexOf(person) % CONFIG.availabilityColors.length];
-            const role = type === 'actors' ? '' : (person.role ? ` - ${person.role}` : '');
+            const role = type === 'actors' ? '' : (person.role ? ` - ${Utils.escape(person.role)}` : '');
             html += `<div onclick="app.Planning.selectFromDropdown('${type}', '${person.id}')" 
                          style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--border); transition: background 0.15s;"
                          onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background='transparent'">
@@ -53031,7 +53171,8 @@ const Orgs = {
         const box = document.getElementById('orgs-search-results');
         if(!box) return;
         try {
-            const { data, error } = await supabase.from('user_profiles').select('*').eq('is_public', true);
+            // v578 (audit) : fonction serveur, regle du telephone appliquee en base.
+            const { data, error } = await supabase.rpc('public_profiles_for_me', { p_type: null });
             if(error) { box.innerHTML = '<div style="color:var(--text-sec); text-align:center; padding:20px;">Recherche indisponible pour le moment.</div>'; return; }
             const out = [];
             (data || []).forEach(p => {
@@ -57932,13 +58073,13 @@ const ExpensesBudget = {
         let peopleOptions = '<option value="">-- Aucun responsable --</option>';
         allPeople.forEach(p => {
             const selected = currentManager.email === p.email ? 'selected' : '';
-            peopleOptions += `<option value="${p.email}" ${selected}>${Utils.escape(p.name)} (${p.email})</option>`;
+            peopleOptions += `<option value="${Utils.escape(p.email)}" ${selected}>${Utils.escape(p.name)} (${Utils.escape(p.email)})</option>`;
         });
         
         // Sous-catégories
         let subcatHtml = '<div style="margin-top:15px; padding-top:15px; border-top:1px solid var(--border);"><label style="font-size:0.85rem; color:var(--text-sec); display:block; margin-bottom:8px;">📂 Sous-catégories</label>';
         cat.subcats.forEach(sub => {
-            subcatHtml += `<div style="font-size:0.85rem; color:var(--text-main); padding:4px 0;">• ${sub.name}</div>`;
+            subcatHtml += `<div style="font-size:0.85rem; color:var(--text-main); padding:4px 0;">• ${Utils.escape(sub.name)}</div>`;
         });
         subcatHtml += '</div>';
         
@@ -58194,7 +58335,7 @@ const ExpensesCRUD = {
             html += `<div style="position: relative; display: inline-block;">
                 ${isImage ? `<img src="${src}" alt="Pièce jointe" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border);">` : 
                 `<div style="width: 80px; height: 80px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.7rem; color: var(--text-sec); padding: 5px; text-align: center;">
-                    📄<br>${att.name.substring(0, 12)}${att.name.length > 12 ? '...' : ''}
+                    📄<br>${Utils.escape(att.name.substring(0, 12))}${att.name.length > 12 ? '...' : ''}
                 </div>`}
                 <button onclick="app.ExpensesCRUD.removeAttachment('${att.id}')" style="position: absolute; top: -5px; right: -5px; width: 20px; height: 20px; border-radius: 50%; background: var(--danger); color: white; border: none; cursor: pointer; font-size: 0.7rem; line-height: 1;">✕</button>
             </div>`;
@@ -61586,7 +61727,7 @@ const Admin = {
                         return `
                             <tr style="border-bottom: 1px solid var(--border);" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''">
                                 <td style="padding: 10px; font-size: 0.85rem;">
-                                    <a href="mailto:${u.email}" style="color: var(--primary); text-decoration: none;">${u.email || '-'}</a>
+                                    <a href="mailto:${Utils.escape(u.email)}" style="color: var(--primary); text-decoration: none;">${Utils.escape(u.email || '-')}</a>
                                 </td>
                                 <td class="p-10">
                                     <strong>${Utils.escape(u.name || '-')}</strong>
@@ -62021,7 +62162,7 @@ const AdminEmail = {
         const listHtml = Admin.emailRecipients.map(u => `
             <div style="padding: 8px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between;">
                 <span>${Utils.escape(u.name || 'Sans nom')}</span>
-                <span class="text-sec">${u.email}</span>
+                <span class="text-sec">${Utils.escape(u.email)}</span>
             </div>
         `).join('');
         
@@ -63215,7 +63356,7 @@ const UniverseProfileModal = {
             const phone = fullProfile.phone || '';
             const website = fullProfile.website || '';
             if(email) contactHtml += `<div class="profile-modal-info-item"><label>Email</label><span>${Utils.escape(email)}</span></div>`;
-            if(phone) contactHtml += `<div class="profile-modal-info-item"><label>Téléphone</label><span>${Utils.escape(phone)}</span></div>`;
+            if(phone) contactHtml += `<div class="profile-modal-info-item"><label>${fullProfile.phone_is_agent ? 'Téléphone (agent)' : 'Téléphone'}</label><span>${Utils.escape(phone)}</span></div>`;
             if(website) contactHtml += `<div class="profile-modal-info-item col-span-2"><label>Site web</label><span><a href="${Utils.safeUrl(website)}" target="_blank" rel="noopener">${Utils.escape(website)}</a></span></div>`;
         }
         contactEl.innerHTML = contactHtml || '<p class="text-sec">Pas de contact public</p>';
@@ -63516,7 +63657,7 @@ const UniverseProfileModal = {
         if(email || phone || website || demoreel) {
             addSection('CONTACT', [96, 125, 139]);
             addInfo('Email', email, { color: [43, 110, 246] });
-            addInfo('Téléphone', phone);
+            addInfo(profile.phone_is_agent ? 'Téléphone (agent)' : 'Téléphone', phone);
             addInfo('Site web', website, { color: [43, 110, 246] });
             addInfo('Bande démo', demoreel, { color: [43, 110, 246] });
             y += 4;
@@ -63693,7 +63834,7 @@ const UniverseProfileModal = {
 
         let inner = '';
         if(publicEmail) inner += row('Adresse de contact', publicEmail, 'contact-public-email', 'mailto:' + Utils.escape(publicEmail), '✉️ Écrire un email');
-        if(publicPhone) inner += row('Téléphone', publicPhone, 'contact-public-phone', 'tel:' + Utils.escape(publicPhone.replace(/\s/g, '')), '📞 Appeler');
+        if(publicPhone) inner += row(profile.phone_is_agent ? 'Téléphone (agent)' : 'Téléphone', publicPhone, 'contact-public-phone', 'tel:' + Utils.escape(publicPhone.replace(/\s/g, '')), '📞 Appeler');
         if(!inner) inner = `<p style="color: var(--text-sec); margin: 0;">${Utils.escape(profileName)} n'a pas indiqué de contact public sur cette fiche.</p>`;
 
         modal.innerHTML = `
@@ -64452,10 +64593,10 @@ Universe.setViewMode('map');
         
         try {
             // Charger tous les profils publics depuis Supabase
-            const { data: profiles, error } = await supabase
-                .from('user_profiles')
-                .select('*')
-                .eq('is_public', true);
+            // v578 (audit) : select('*') envoyait le telephone de chaque profil a tout
+            // inscrit, affiche ou non. La fonction serveur rend les memes lignes avec
+            // la regle du telephone deja appliquee (agent en priorite, ou masque).
+            const { data: profiles, error } = await supabase.rpc('public_profiles_for_me', { p_type: null });
             
             if(!error && profiles) {
                 profiles.forEach(p => {
@@ -69440,7 +69581,7 @@ const Forum = {
                     <span>👤 ${Utils.escape(t.authorName || 'Anonyme')}${Forum._badgeDot(t.authorEmail)}</span>
                     <span>💬 ${t.replyCount || 0} réponses</span>
                     <span>🕐 ${Utils.timeAgo(t.createdAt)}</span>
-                    ${q ? `<span>📂 ${(Forum.categories[t.category] && Forum.categories[t.category].name) || t.category}</span>` : ''}
+                    ${q ? `<span>📂 ${Utils.escape((Forum.categories[t.category] && Forum.categories[t.category].name) || t.category)}</span>` : ''}
                 </div>
             </div>
         `).join('');
