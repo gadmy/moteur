@@ -5136,6 +5136,20 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .web-node.is-loose { border-style: dashed; opacity: 0.75; }
   .web-empty { position: absolute; top: 58%; left: 50%; transform: translateX(-50%); text-align: center; color: var(--text-sec); font-size: 0.85rem; max-width: 380px; }
   .web-note { padding: 6px 16px; font-size: 0.75rem; color: var(--text-sec); border-top: 1px solid var(--border); background: var(--panel-bg); }
+
+  /* LECTURE D'UNE SECTION depuis la vue en fiches. Le liseré de gauche reprend
+     la couleur du chapitre, comme le bord des fiches de la toile : on garde le
+     fil de l'endroit d'où l'on vient. */
+  .cw-read-ov { position: fixed; inset: 0; z-index: var(--z-modal-top); background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .cw-read-box { background: var(--panel-bg); border: 1px solid var(--border); border-left: 6px solid var(--c, var(--primary)); border-radius: 10px; width: 100%; max-width: 720px; max-height: calc(100vh - 40px); display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .cw-read-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid var(--border); font-size: 0.8rem; color: var(--c, var(--text-sec)); font-weight: 700; }
+  .cw-read-x { background: transparent; border: none; color: var(--text-main); font-size: 1.5rem; line-height: 1; cursor: pointer; opacity: 0.7; }
+  .cw-read-body { padding: 6px 26px 22px; overflow-y: auto; }
+  .cw-read-body h3 { margin-top: 18px; border-top: none; padding-top: 0; }
+  .cw-read-foot { display: flex; gap: 8px; justify-content: space-between; padding: 12px 18px; border-top: 1px solid var(--border); }
+  .cw-read-foot button { padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-main); cursor: pointer; font-size: 0.85rem; }
+  .cw-read-foot button:disabled { opacity: 0.35; cursor: default; }
+  @media (max-width: 700px) { .cw-read-body { padding: 6px 16px 18px; } }
   .bb-threads { border: 1px solid var(--border); border-radius: 10px; padding: 6px; background: var(--panel-bg); }
   .bb-thread { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 7px; font-size: 0.85rem; cursor: pointer; transition: background 0.15s, opacity 0.15s; }
   .bb-thread:hover { background: var(--bg); }
@@ -8787,6 +8801,7 @@ body.presentation-mode .presentation-bar {
             <h1>🎓 Cours Cinéma</h1>
         </div>
         <div class="flex-row-gap10">
+            <button class="theme-btn" onclick="app.CoursesWeb.open()" title="Voir les cours comme une toile de fiches">🕸️ Vue en fiches</button>
             <button class="theme-btn" onclick="app.UI.toggleTheme()">🌓 Mode</button>
         </div>
     </div>
@@ -66204,6 +66219,315 @@ ${window.location.origin}${window.location.pathname}
     }
   };
 
+  // ============================================================
+  // MODULE COURSESWEB — les cours vus comme la toile des liaisons
+  // ------------------------------------------------------------
+  // Meme presentation que la toile du projet : on REPREND SES CLASSES
+  // CSS a l'identique (.web-modal, .web-node, .web-link...). Rien n'est
+  // duplique cote style.
+  //
+  // En revanche le PLACEMENT n'est pas repris, et c'est volontaire.
+  // La toile du projet doit demeler un reseau quelconque, d'ou son
+  // moteur a ressorts. Les cours forment un ARBRE connu d'avance et
+  // toujours le meme : Cinema -> 7 chapitres -> 9 a 18 sections. Un
+  // arbre se place par le calcul, sans simulation : c'est plus simple,
+  // plus stable, et ca ne bouge pas d'une ouverture a l'autre.
+  //
+  // On ne branche PAS non plus les cours sur Links : ce module est une
+  // couche de lecture sur les fiches reelles du projet, y glisser des
+  // chapitres de cours le salirait (meme raison qui a fait garder la
+  // famille virtuelle « projet » dans Web seul).
+  // ============================================================
+  const CoursesWeb = {
+      COLORS: {
+          racine: '#34495e', scenario: '#e74c3c', realisation: '#9b59b6',
+          image: '#2980b9', son: '#16a085', montage: '#e67e22',
+          production: '#27ae60', glossaire: '#b7950b'
+      },
+      ICONS: {
+          scenario: '📝', realisation: '🎬', image: '📷', son: '🎤',
+          montage: '✂️', production: '💼', glossaire: '📖'
+      },
+      ORDER: ['scenario', 'realisation', 'image', 'son', 'montage', 'production', 'glossaire'],
+
+      NODE_W: 160, NODE_H: 62, CENTER_W: 210, CENTER_H: 84,
+      center: null,      // null = racine « Cinema », sinon la cle du chapitre
+      nodes: [],
+      _sections: {},     // cache : { chapitre: [ {titre, html} ] }
+      _drag: null,
+      _onResize: null,
+
+      // ---- decoupage du contenu en sections ----
+      // Les six chapitres sont decoupes sur leurs titres <h3> ; le glossaire
+      // sur ses blocs .courses-term, qui sont ses entrees.
+      sections: (chap) => {
+          if(CoursesWeb._sections[chap]) return CoursesWeb._sections[chap];
+          const bac = document.createElement('div');
+          bac.innerHTML = (Courses.getCourses()[chap] || '');
+          const out = [];
+          if(chap === 'glossaire') {
+              bac.querySelectorAll('.courses-term').forEach(t => {
+                  const dt = t.querySelector('dt');
+                  if(dt) out.push({ titre: dt.textContent.trim(), html: t.outerHTML });
+              });
+          } else {
+              bac.querySelectorAll('h3').forEach(h => {
+                  let html = h.outerHTML;
+                  let n = h.nextElementSibling;
+                  while(n && n.tagName !== 'H3' && n.tagName !== 'H2') { html += n.outerHTML; n = n.nextElementSibling; }
+                  out.push({ titre: h.textContent.trim(), html: html });
+              });
+          }
+          CoursesWeb._sections[chap] = out;
+          return out;
+      },
+
+      open: () => {
+          CoursesWeb.center = null;
+          const old = document.getElementById('cw-modal');
+          if(old) old.remove();
+          const wrap = document.createElement('div');
+          wrap.id = 'cw-modal';
+          wrap.className = 'web-modal';
+          wrap.innerHTML = '<div class="web-head" id="cw-head"></div>'
+              + '<div class="web-canvas" id="cw-canvas"><svg class="web-svg" id="cw-svg"></svg></div>'
+              + '<div class="web-note" id="cw-note"></div>';
+          document.body.appendChild(wrap);
+          CoursesWeb._onResize = () => CoursesWeb.render();
+          window.addEventListener('resize', CoursesWeb._onResize);
+          CoursesWeb._key = (e) => {
+              if(e.key !== 'Escape') return;
+              if(document.getElementById('cw-read')) { CoursesWeb.closeRead(); return; }
+              if(CoursesWeb.center) { CoursesWeb.back(); return; }
+              CoursesWeb.close();
+          };
+          document.addEventListener('keydown', CoursesWeb._key, true);
+          CoursesWeb.render();
+      },
+      close: () => {
+          if(CoursesWeb._onResize) { window.removeEventListener('resize', CoursesWeb._onResize); CoursesWeb._onResize = null; }
+          if(CoursesWeb._key) { document.removeEventListener('keydown', CoursesWeb._key, true); CoursesWeb._key = null; }
+          const m = document.getElementById('cw-modal');
+          if(m) m.remove();
+          CoursesWeb.closeRead();
+      },
+      goChapter: (chap) => { CoursesWeb.center = chap; CoursesWeb.render(); },
+      back: () => { CoursesWeb.center = null; CoursesWeb.render(); },
+
+      // ---- lecture d'une section, par-dessus la toile ----
+      // Meme geste que « Ouvrir la fiche » : on lit, on ferme, on revient
+      // exactement la ou on etait.
+      read: (chap, i) => {
+          const s = CoursesWeb.sections(chap)[i];
+          if(!s) return;
+          CoursesWeb.closeRead();
+          const ov = document.createElement('div');
+          ov.id = 'cw-read';
+          ov.className = 'cw-read-ov';
+          ov.innerHTML = '<div class="cw-read-box" style="--c:' + (CoursesWeb.COLORS[chap] || '#999') + '">'
+              + '<div class="cw-read-head"><span>' + (CoursesWeb.ICONS[chap] || '') + ' ' + Utils.escape(Courses.LABELS[chap] || chap) + '</span>'
+              + '<button class="cw-read-x" aria-label="Fermer">&times;</button></div>'
+              + '<div class="cw-read-body courses-section">' + s.html + '</div>'
+              + '<div class="cw-read-foot">'
+                  + '<button id="cw-read-prev">Section précédente</button>'
+                  + '<button id="cw-read-next">Section suivante</button>'
+              + '</div>'
+          + '</div>';
+          document.body.appendChild(ov);
+          const liste = CoursesWeb.sections(chap);
+          const prev = ov.querySelector('#cw-read-prev'), next = ov.querySelector('#cw-read-next');
+          prev.disabled = (i === 0);
+          next.disabled = (i >= liste.length - 1);
+          prev.addEventListener('click', () => CoursesWeb.read(chap, i - 1));
+          next.addEventListener('click', () => CoursesWeb.read(chap, i + 1));
+          ov.addEventListener('click', (e) => {
+              if(e.target === ov || (e.target.classList && e.target.classList.contains('cw-read-x'))) CoursesWeb.closeRead();
+          });
+          // Les mots soulignes gardent leurs infobulles ici aussi.
+          try { Courses.initNotions(); } catch (e) {}
+      },
+      closeRead: () => {
+          const r = document.getElementById('cw-read');
+          if(r) r.remove();
+      },
+
+      // ---- placement : ellipse, en anneaux si la famille est nombreuse ----
+      layout: () => {
+          const canvas = document.getElementById('cw-canvas');
+          if(!canvas) return;
+          const W = canvas.clientWidth || 900, H = canvas.clientHeight || 600;
+          const centre = CoursesWeb.nodes[0];
+          if(!centre) return;
+          if(!centre.pinned) { centre.x = W / 2; centre.y = H / 2; }
+          const tour = CoursesWeb.nodes.slice(1);
+          if(!tour.length) return;
+          // Le cadre est large et peu haut : une ellipse remplit l'espace la ou
+          // un cercle laisserait les cotes vides.
+          const rxMax = Math.max(210, W / 2 - CoursesWeb.NODE_W / 2 - 26);
+          const ryMax = Math.max(140, H / 2 - CoursesWeb.NODE_H / 2 - 26);
+          // Un anneau ne peut porter qu'un nombre limite de fiches sans qu'elles
+          // se touchent : au-dela on ouvre un second anneau, plus large.
+          const parAnneau = Math.max(6, Math.floor((2 * Math.PI * ((rxMax + ryMax) / 2)) / (CoursesWeb.NODE_W + 26)));
+          const anneaux = Math.ceil(tour.length / parAnneau);
+          let pose = 0;
+          for(let a = 0; a < anneaux; a++) {
+              const n = Math.min(parAnneau, tour.length - pose);
+              const k = anneaux > 1 ? (0.62 + 0.38 * (a + 1) / anneaux) : 1;
+              const rx = rxMax * k, ry = ryMax * k;
+              for(let i = 0; i < n; i++) {
+                  // Depart en haut, et demi-pas de decalage d'un anneau a l'autre
+                  // pour que les fiches ne s'alignent pas radialement.
+                  const ang = -Math.PI / 2 + 2 * Math.PI * ((i + (a % 2) * 0.5) / n);
+                  const nd = tour[pose + i];
+                  nd.ox = rx * Math.cos(ang);
+                  nd.oy = ry * Math.sin(ang);
+                  if(!nd.pinned) { nd.x = centre.x + nd.ox; nd.y = centre.y + nd.oy; }
+              }
+              pose += n;
+          }
+      },
+
+      paint: () => {
+          const svg = document.getElementById('cw-svg');
+          const centre = CoursesWeb.nodes[0];
+          if(!centre) return;
+          CoursesWeb.nodes.forEach(n => {
+              if(!n.el) return;
+              n.el.style.left = n.x + 'px';
+              n.el.style.top = n.y + 'px';
+          });
+          if(svg) {
+              svg.innerHTML = CoursesWeb.nodes.slice(1)
+                  .map(n => `<line class="web-link" x1="${centre.x}" y1="${centre.y}" x2="${n.x}" y2="${n.y}"></line>`)
+                  .join('');
+          }
+      },
+
+      // ---- deplacement a la main, comme dans la toile ----
+      onDown: (ev, i) => {
+          const n = CoursesWeb.nodes[i];
+          if(!n) return;
+          ev.preventDefault();
+          CoursesWeb._drag = { i, dx: n.x - ev.clientX, dy: n.y - ev.clientY, bouge: false };
+          if(n.el) n.el.style.zIndex = '20';
+          document.addEventListener('mousemove', CoursesWeb.onMove);
+          document.addEventListener('mouseup', CoursesWeb.onUp);
+      },
+      onMove: (ev) => {
+          const d = CoursesWeb._drag;
+          if(!d) return;
+          const n = CoursesWeb.nodes[d.i];
+          const nx = ev.clientX + d.dx, ny = ev.clientY + d.dy;
+          if(!d.bouge && (Math.abs(nx - n.x) > 3 || Math.abs(ny - n.y) > 3)) d.bouge = true;
+          n.x = nx; n.y = ny;
+          if(n.center) {
+              // Deplacer le centre entraine toute la toile : les autres gardent
+              // leur ecart au centre.
+              CoursesWeb.nodes.slice(1).forEach(o => {
+                  if(o.pinned || o.ox === undefined) return;
+                  o.x = n.x + o.ox; o.y = n.y + o.oy;
+              });
+          } else {
+              n.pinned = true;
+          }
+          CoursesWeb.paint();
+      },
+      onUp: () => {
+          const d = CoursesWeb._drag;
+          document.removeEventListener('mousemove', CoursesWeb.onMove);
+          document.removeEventListener('mouseup', CoursesWeb.onUp);
+          CoursesWeb._drag = null;
+          if(!d) return;
+          const n = CoursesWeb.nodes[d.i];
+          if(n && n.el) n.el.style.zIndex = '';
+          if(d.bouge) return;
+          // Un clic sans deplacement reste un clic.
+          if(!n || n.center) return;
+          if(n.chapitre !== undefined && n.i === undefined) CoursesWeb.goChapter(n.chapitre);
+          else if(n.i !== undefined) CoursesWeb.read(n.chapitre, n.i);
+      },
+      reset: () => {
+          CoursesWeb.nodes.forEach(n => { n.pinned = false; });
+          CoursesWeb.layout();
+          CoursesWeb.paint();
+      },
+
+      render: () => {
+          const canvas = document.getElementById('cw-canvas');
+          if(!canvas) return;
+          const esc = Utils.escape;
+          const chap = CoursesWeb.center;
+          const racine = !chap;
+
+          const head = document.getElementById('cw-head');
+          if(head) {
+              const opts = '<option value=""' + (racine ? ' selected' : '') + '>🎬 Cinéma</option>'
+                  + CoursesWeb.ORDER.map(k =>
+                      '<option value="' + k + '"' + (k === chap ? ' selected' : '') + '>'
+                      + CoursesWeb.ICONS[k] + ' ' + esc(Courses.LABELS[k] || k) + '</option>').join('');
+              head.innerHTML = '<h3>🕸️ Cours en fiches</h3>'
+                  + '<button onclick="app.CoursesWeb.back()"' + (racine ? ' disabled' : '') + ' title="Revenir au centre">↩️ Retour</button>'
+                  + '<select onchange="app.CoursesWeb.pick(this.value)" title="Aller à un chapitre">' + opts + '</select>'
+                  + '<button onclick="app.CoursesWeb.reset()" title="Remettre les fiches à leur place calculée">🔄 Ranger</button>'
+                  + '<button onclick="app.CoursesWeb.close()" style="margin-left:auto;">✕ Fermer</button>';
+          }
+
+          // --- fabrication des fiches ---
+          const colC = racine ? CoursesWeb.COLORS.racine : (CoursesWeb.COLORS[chap] || '#999');
+          CoursesWeb.nodes = [{
+              center: true, label: racine ? 'Cinéma' : (Courses.LABELS[chap] || chap),
+              kindLabel: racine ? '🎓 Les cours' : (CoursesWeb.ICONS[chap] + ' Chapitre'),
+              col: colC, w: CoursesWeb.CENTER_W, h: CoursesWeb.CENTER_H, x: 0, y: 0, pinned: false
+          }];
+          if(racine) {
+              CoursesWeb.ORDER.forEach(k => {
+                  const n = CoursesWeb.sections(k).length;
+                  CoursesWeb.nodes.push({
+                      center: false, chapitre: k, label: Courses.LABELS[k] || k,
+                      kindLabel: CoursesWeb.ICONS[k] + ' Chapitre',
+                      rel: n + (k === 'glossaire' ? ' termes' : ' sections'),
+                      col: CoursesWeb.COLORS[k] || '#999',
+                      w: CoursesWeb.NODE_W, h: CoursesWeb.NODE_H, x: 0, y: 0, pinned: false
+                  });
+              });
+          } else {
+              CoursesWeb.sections(chap).forEach((s, i) => {
+                  CoursesWeb.nodes.push({
+                      center: false, chapitre: chap, i: i, label: s.titre,
+                      kindLabel: chap === 'glossaire' ? '📖 Terme' : '📄 Section',
+                      rel: 'lire', col: CoursesWeb.COLORS[chap] || '#999',
+                      w: CoursesWeb.NODE_W, h: CoursesWeb.NODE_H, x: 0, y: 0, pinned: false
+                  });
+              });
+          }
+          CoursesWeb.layout();
+
+          canvas.querySelectorAll('.web-node').forEach(el => el.remove());
+          const html = CoursesWeb.nodes.map((n, i) => {
+              const tete = '<div class="web-node-kind">' + n.kindLabel + '</div>'
+                  + '<div class="web-node-label">' + esc(n.label) + '</div>';
+              if(n.center) return '<div class="web-node is-center" data-i="' + i + '" style="--c:' + n.col + '" title="Déplaçable">' + tete + '</div>';
+              const t = (n.i === undefined) ? 'Clic : ouvrir ce chapitre' : 'Clic : lire cette section';
+              return '<div class="web-node" data-i="' + i + '" style="--c:' + n.col + '" title="' + t + ' — glisser : déplacer">'
+                  + tete + '<div class="web-node-rel">' + esc(n.rel || '') + '</div></div>';
+          }).join('');
+          canvas.insertAdjacentHTML('beforeend', html);
+          canvas.querySelectorAll('.web-node').forEach(el => {
+              const i = parseInt(el.dataset.i, 10);
+              if(isNaN(i) || !CoursesWeb.nodes[i]) return;
+              CoursesWeb.nodes[i].el = el;
+              el.addEventListener('mousedown', (ev) => CoursesWeb.onDown(ev, i));
+          });
+          CoursesWeb.paint();
+
+          const note = document.getElementById('cw-note');
+          if(note) note.textContent = racine
+              ? 'Les sept chapitres des cours. Clique-en un pour voir ses sections.'
+              : 'Les sections de ce chapitre. Clique-en une pour la lire — ↩️ Retour ramène au centre.';
+      },
+      pick: (v) => { CoursesWeb.center = v || null; CoursesWeb.render(); }
+  };
+
   const Tour = {
     _active: false,
     _steps: [],
@@ -77987,7 +78311,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo, DBPresence, LockManager, LockDomains, Links, Web, Diag };
+  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, CoursesWeb, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo, DBPresence, LockManager, LockDomains, Links, Web, Diag };
 })();
 </script>
 
