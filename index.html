@@ -22411,6 +22411,70 @@ initCategoriesDragDrop: () => {
   // Il n'ouvre pas les fiches PAR-DESSUS lui : le bouton de la fiche centrale
   // ferme la toile puis ouvre la fiche. La lecon du 25 aout (troisieme etage
   // d'empilement, fenetre invisible sous les deux autres) a coute assez cher.
+  // ============================================================
+  // MOTEUR DE PLACEMENT PARTAGE (GraphPhysics)
+  // ------------------------------------------------------------
+  // Extrait de Web le 3 septembre, sans changer une ligne de son
+  // comportement, pour que la toile du projet ET la vue en fiches des
+  // cours aient EXACTEMENT le meme rendu organique. Le recopier aurait
+  // garanti qu'elles divergent au premier reglage.
+  //
+  // Trois regles, dans cet ordre :
+  //   1. chaque fiche est RAPPELEE vers son ancre, exprimee en ecart
+  //      depuis le centre (deplacer le centre entraine donc toute la
+  //      toile) ;
+  //   2. les fiches qui se recouvrent se REPOUSSENT ;
+  //   3. quand il n'y a plus de place, le chevauchement est TOLERE, de
+  //      preference entre fiches d'une meme famille — la repulsion y est
+  //      volontairement plus faible.
+  // Ce n'est pas une grille calculee : c'est un equilibre qu'on laisse
+  // se faire, ce qui permet aux fiches de SUIVRE quand on en deplace une.
+  //
+  // N[0] est toujours la fiche centrale.
+  // ============================================================
+  const GraphPhysics = {
+      relax: (N, W, H, tours) => {
+          if(!N || N.length < 2) return;
+          const centre = N[0];
+          for(let t = 0; t < tours; t++) {
+              for(let i = 1; i < N.length; i++) {
+                  const n = N[i];
+                  if(n.pinned || n.ox === undefined) continue;
+                  n.x += (centre.x + n.ox - n.x) * 0.06;
+                  n.y += (centre.y + n.oy - n.y) * 0.06;
+              }
+              for(let i = 0; i < N.length; i++) {
+                  for(let j = i + 1; j < N.length; j++) {
+                      const a = N[i], b = N[j];
+                      const sx = (a.w + b.w) / 2 + 14, sy = (a.h + b.h) / 2 + 12;
+                      const dx = b.x - a.x, dy = b.y - a.y;
+                      if(Math.abs(dx) >= sx || Math.abs(dy) >= sy) continue;
+                      const meme = (a.kind === b.kind) && !a.center && !b.center;
+                      const force = meme ? 0.6 : 1;
+                      const px = sx - Math.abs(dx), py = sy - Math.abs(dy);
+                      const figeA = a.center || a.pinned, figeB = b.center || b.pinned;
+                      if(figeA && figeB) continue;
+                      // On ecarte par le cote le MOINS enfonce : deplacement le
+                      // plus court, donc mise en place la moins brutale.
+                      const partA = figeA ? 0 : (figeB ? 1 : 0.5);
+                      const partB = figeB ? 0 : (figeA ? 1 : 0.5);
+                      if(px < py) {
+                          const s = (dx >= 0 ? 1 : -1) * px * force;
+                          a.x -= s * partA; b.x += s * partB;
+                      } else {
+                          const s = (dy >= 0 ? 1 : -1) * py * force;
+                          a.y -= s * partA; b.y += s * partB;
+                      }
+                  }
+              }
+              N.forEach(n => {
+                  n.x = Math.max(n.w / 2 + 6, Math.min(W - n.w / 2 - 6, n.x));
+                  n.y = Math.max(n.h / 2 + 6, Math.min(H - n.h / 2 - 6, n.y));
+              });
+          }
+      }
+  };
+
   const Web = {
       COLORS: {
           scene: '#e74c3c', character: '#9b59b6', actor: '#e67e22', crew: '#16a085',
@@ -22653,50 +22717,9 @@ initCategoriesDragDrop: () => {
       relax: (tours) => {
           const canvas = document.getElementById('web-canvas');
           if(!canvas) return;
-          const W = canvas.clientWidth || 900, H = canvas.clientHeight || 600;
-          const N = Web.nodes;
-          if(N.length < 2) return;
-          const centre = N[0];
-          for(let t = 0; t < tours; t++) {
-              // 1. rappel vers sa place, exprimee en ecart depuis le centre :
-              // si l'on deplace la fiche centrale, tout le reste la suit.
-              for(let i = 1; i < N.length; i++) {
-                  const n = N[i];
-                  if(n.pinned || n.ox === undefined) continue;
-                  n.x += (centre.x + n.ox - n.x) * 0.06;
-                  n.y += (centre.y + n.oy - n.y) * 0.06;
-              }
-              // 2. separation des fiches qui se recouvrent
-              for(let i = 0; i < N.length; i++) {
-                  for(let j = i + 1; j < N.length; j++) {
-                      const a = N[i], b = N[j];
-                      const sx = (a.w + b.w) / 2 + 14, sy = (a.h + b.h) / 2 + 12;
-                      const dx = b.x - a.x, dy = b.y - a.y;
-                      if(Math.abs(dx) >= sx || Math.abs(dy) >= sy) continue;
-                      const meme = (a.kind === b.kind) && !a.center && !b.center;
-                      const force = meme ? 0.6 : 1;
-                      const px = sx - Math.abs(dx), py = sy - Math.abs(dy);
-                      const figeA = a.center || a.pinned, figeB = b.center || b.pinned;
-                      if(figeA && figeB) continue;
-                      // On ecarte par le cote le MOINS enfonce : deplacement le
-                      // plus court, donc mise en place la moins brutale.
-                      const partA = figeA ? 0 : (figeB ? 1 : 0.5);
-                      const partB = figeB ? 0 : (figeA ? 1 : 0.5);
-                      if(px < py) {
-                          const s = (dx >= 0 ? 1 : -1) * px * force;
-                          a.x -= s * partA; b.x += s * partB;
-                      } else {
-                          const s = (dy >= 0 ? 1 : -1) * py * force;
-                          a.y -= s * partA; b.y += s * partB;
-                      }
-                  }
-              }
-              // 3. personne ne sort du cadre
-              N.forEach(n => {
-                  n.x = Math.max(n.w / 2 + 6, Math.min(W - n.w / 2 - 6, n.x));
-                  n.y = Math.max(n.h / 2 + 6, Math.min(H - n.h / 2 - 6, n.y));
-              });
-          }
+          // Le moteur vit desormais dans GraphPhysics, partage avec la vue en
+          // fiches des cours : un seul reglage, deux toiles identiques.
+          GraphPhysics.relax(Web.nodes, canvas.clientWidth || 900, canvas.clientHeight || 600, tours);
       },
       
       paint: () => {
@@ -66351,40 +66374,60 @@ ${window.location.origin}${window.location.pathname}
           if(r) r.remove();
       },
 
-      // ---- placement : ellipse, en anneaux si la famille est nombreuse ----
+      // ---- placement : le MEME que la toile des liaisons ----
+      // Anneaux a distance FIXE du centre (210 px, puis +92 par anneau), pas
+      // une ellipse qui remplit l'ecran : c'est ce qui gardait les fiches
+      // colles a leur fiche maitresse. Puis on laisse le moteur partage
+      // detendre l'ensemble, exactement comme dans la toile du projet.
       layout: () => {
           const canvas = document.getElementById('cw-canvas');
           if(!canvas) return;
           const W = canvas.clientWidth || 900, H = canvas.clientHeight || 600;
+          const cx = W / 2, cy = H / 2;
           const centre = CoursesWeb.nodes[0];
           if(!centre) return;
-          if(!centre.pinned) { centre.x = W / 2; centre.y = H / 2; }
+          if(!centre.pinned) { centre.x = cx; centre.y = cy; }
           const tour = CoursesWeb.nodes.slice(1);
           if(!tour.length) return;
-          // Le cadre est large et peu haut : une ellipse remplit l'espace la ou
-          // un cercle laisserait les cotes vides.
-          const rxMax = Math.max(210, W / 2 - CoursesWeb.NODE_W / 2 - 26);
-          const ryMax = Math.max(140, H / 2 - CoursesWeb.NODE_H / 2 - 26);
-          // Un anneau ne peut porter qu'un nombre limite de fiches sans qu'elles
-          // se touchent : au-dela on ouvre un second anneau, plus large.
-          const parAnneau = Math.max(6, Math.floor((2 * Math.PI * ((rxMax + ryMax) / 2)) / (CoursesWeb.NODE_W + 26)));
-          const anneaux = Math.ceil(tour.length / parAnneau);
-          let pose = 0;
-          for(let a = 0; a < anneaux; a++) {
-              const n = Math.min(parAnneau, tour.length - pose);
-              const k = anneaux > 1 ? (0.62 + 0.38 * (a + 1) / anneaux) : 1;
-              const rx = rxMax * k, ry = ryMax * k;
+
+          // Bornes du cadre : on ne s'ecarte jamais au-dela.
+          const rxMax = Math.max(200, cx - CoursesWeb.NODE_W / 2 - 24);
+          const ryMax = Math.max(130, cy - CoursesWeb.NODE_H / 2 - 24);
+
+          // Anneau apres anneau, en commencant par le plus proche du centre.
+          // Le nombre de places d'un anneau se deduit de la largeur d'une fiche
+          // rapportee a son rayon moyen : un anneau ne se remplit jamais au
+          // point que deux fiches se recouvrent des le depart.
+          let pose = 0, anneau = 0;
+          while(pose < tour.length) {
+              const rx = Math.min(rxMax, 210 + anneau * 92);
+              const ry = Math.min(ryMax, 140 + anneau * 82);
+              const rMoy = (rx + ry) / 2;
+              const pas = (CoursesWeb.NODE_W + 18) / Math.max(1, rMoy);
+              const cap = Math.max(1, Math.floor((2 * Math.PI) / pas));
+              const n = Math.min(cap, tour.length - pose);
               for(let i = 0; i < n; i++) {
-                  // Depart en haut, et demi-pas de decalage d'un anneau a l'autre
-                  // pour que les fiches ne s'alignent pas radialement.
-                  const ang = -Math.PI / 2 + 2 * Math.PI * ((i + (a % 2) * 0.5) / n);
+                  // Demi-pas de decalage d'un anneau a l'autre, sinon les fiches
+                  // s'alignent radialement et le second anneau se cache derriere
+                  // le premier.
+                  const a = -Math.PI / 2 + 2 * Math.PI * ((i + (anneau % 2) * 0.5) / n);
                   const nd = tour[pose + i];
-                  nd.ox = rx * Math.cos(ang);
-                  nd.oy = ry * Math.sin(ang);
+                  // Ecart MEMORISE PAR RAPPORT AU CENTRE : deplacer la fiche
+                  // centrale entraine mecaniquement toute la toile.
+                  nd.ox = rx * Math.cos(a);
+                  nd.oy = ry * Math.sin(a);
                   if(!nd.pinned) { nd.x = centre.x + nd.ox; nd.y = centre.y + nd.oy; }
               }
               pose += n;
+              anneau++;
           }
+          CoursesWeb.relax(220);
+      },
+
+      relax: (tours) => {
+          const canvas = document.getElementById('cw-canvas');
+          if(!canvas) return;
+          GraphPhysics.relax(CoursesWeb.nodes, canvas.clientWidth || 900, canvas.clientHeight || 600, tours);
       },
 
       paint: () => {
@@ -66420,16 +66463,12 @@ ${window.location.origin}${window.location.pathname}
           const nx = ev.clientX + d.dx, ny = ev.clientY + d.dy;
           if(!d.bouge && (Math.abs(nx - n.x) > 3 || Math.abs(ny - n.y) > 3)) d.bouge = true;
           n.x = nx; n.y = ny;
-          if(n.center) {
-              // Deplacer le centre entraine toute la toile : les autres gardent
-              // leur ecart au centre.
-              CoursesWeb.nodes.slice(1).forEach(o => {
-                  if(o.pinned || o.ox === undefined) return;
-                  o.x = n.x + o.ox; o.y = n.y + o.oy;
-              });
-          } else {
-              n.pinned = true;
-          }
+          if(!n.center) n.pinned = true;
+          // Deux tours par image : assez pour que les autres suivent, pas assez
+          // pour qu'elles sautent d'un coup a leur nouvelle place. Deplacer le
+          // centre entraine toute la toile, les ancres etant posees par rapport
+          // a lui — c'est le moteur qui s'en charge, pas un calcul a part.
+          CoursesWeb.relax(2);
           CoursesWeb.paint();
       },
       onUp: () => {
@@ -66440,11 +66479,15 @@ ${window.location.origin}${window.location.pathname}
           if(!d) return;
           const n = CoursesWeb.nodes[d.i];
           if(n && n.el) n.el.style.zIndex = '';
-          if(d.bouge) return;
-          // Un clic sans deplacement reste un clic.
-          if(!n || n.center) return;
-          if(n.chapitre !== undefined && n.i === undefined) CoursesWeb.goChapter(n.chapitre);
-          else if(n.i !== undefined) CoursesWeb.read(n.chapitre, n.i);
+          if(!d.bouge) {
+              // Un clic sans deplacement reste un clic.
+              if(!n || n.center) return;
+              if(n.i === undefined) CoursesWeb.goChapter(n.chapitre);
+              else CoursesWeb.read(n.chapitre, n.i);
+              return;
+          }
+          CoursesWeb.relax(40);
+          CoursesWeb.paint();
       },
       reset: () => {
           CoursesWeb.nodes.forEach(n => { n.pinned = false; });
@@ -66483,7 +66526,7 @@ ${window.location.origin}${window.location.pathname}
               CoursesWeb.ORDER.forEach(k => {
                   const n = CoursesWeb.sections(k).length;
                   CoursesWeb.nodes.push({
-                      center: false, chapitre: k, label: Courses.LABELS[k] || k,
+                      center: false, chapitre: k, kind: k, label: Courses.LABELS[k] || k,
                       kindLabel: CoursesWeb.ICONS[k] + ' Chapitre',
                       rel: n + (k === 'glossaire' ? ' termes' : ' sections'),
                       col: CoursesWeb.COLORS[k] || '#999',
@@ -66493,7 +66536,7 @@ ${window.location.origin}${window.location.pathname}
           } else {
               CoursesWeb.sections(chap).forEach((s, i) => {
                   CoursesWeb.nodes.push({
-                      center: false, chapitre: chap, i: i, label: s.titre,
+                      center: false, chapitre: chap, kind: chap, i: i, label: s.titre,
                       kindLabel: chap === 'glossaire' ? '📖 Terme' : '📄 Section',
                       rel: 'lire', col: CoursesWeb.COLORS[chap] || '#999',
                       w: CoursesWeb.NODE_W, h: CoursesWeb.NODE_H, x: 0, y: 0, pinned: false
