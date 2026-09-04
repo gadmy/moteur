@@ -36,18 +36,12 @@ chacune, detail au journal) : une regle effacee est une regle qu'on recasse.
 --------------------------------------------------------------------------------
 OUVERT
 --------------------------------------------------------------------------------
-[ ] FICHE SCENE : pas encore passee aux briques (elle vit dans
-    CardModal.openScene, editeur different des six autres). A migrer un jour
-    de calme sur le meme moteur FicheBlocks, si Guillaume le souhaite.
 [ ] STRIPE / FEATURE GATING — EN PAUSE, ne pas ouvrir sans demande explicite.
     Prerequis juridique : domicile de l'editeur dans les mentions legales
     (LCEN), a trancher avant le passage au payant.
-[ ] ALIGNER LE DROIT D'INVITER (petit chantier d'un jour de calme) : une
-    policy INSERT appelant my_section_level(project_id,'presentation')='write'
-    suffirait desormais. La regle de principe (« on n'invite que si on peut
-    modifier la fiche projet ») est TRANCHEE, ne pas la rouvrir.
-[ ] MINI-CALENDRIER « Disponibilites » d'une fiche : replie puis rouvert,
-    peut demander un depliage pour se rendre — a traiter a la prochaine passe.
+[ ] DROIT D'INVITER : SQL a executer (fichier droit_inviter.sql, 4 sept.) —
+    le code applicatif est deja aligne (v582). Tant que le SQL n'est pas
+    passe, la base accepte encore l'ancien chemin can_invite.
 
 --------------------------------------------------------------------------------
 REGLES VIVANTES (compactes — detail au journal, version indiquee)
@@ -80,7 +74,10 @@ ARCHITECTURE
 - Socle Links : LECTURE SEULE, il DELEGUE aux lectures existantes et ne
   filtre AUCUN droit — les gardes de permission restent dans les blocs.
   (v575/v577)
-- Fiches = BRIQUES (v581) : tout contenu passe par FicheUI.block +
+- Fiches = BRIQUES (v581 ; la scene rejoint le gabarit en v582 — SEPT
+  familles, sixieme point d'ouverture CardModal.openScene ; au depliage
+  d'une brique, toggleBlock redessine un mini-calendrier reste vide) :
+  tout contenu passe par FicheUI.block +
   FicheBlocks.render, balance() APRES affichage (mesure le DOM). Ids de
   briques STABLES par famille (cles de repli et de disposition). Disposition
   manuelle PRIME sur l'equilibrage. Glisser-deposer souris seulement.
@@ -110,6 +107,11 @@ DECISIONS CLOSES (ne pas rouvrir)
 - Numerotation des jours : le numero suit la DATE, seuls les jours 'tournage'
   sont numerotes. (v576)
 - Convocation equipe = ECHO de crewCall, un seul champ de saisie. (v566)
+- Droit d'inviter = droit d'ECRIRE la section 'presentation' (fiche projet),
+  teste au clic (Permissions.canEdit) et en base (policy INSERT via
+  my_section_level). La case « Peut inviter » est retiree, la colonne
+  can_invite reste dormante et epinglee false. NE PAS reintroduire de
+  drapeau parallele. (v582)
 PIEGES DE MESURE (pour tout audit)
 - References de comptage a ZERO : balises div, balises details, accolades
   CSS (commentaires exclus). Faux positif div depuis v579 : un litteral
@@ -139,6 +141,8 @@ Le detail complet vit au journal des versions et dans les fichiers SQL :
 - Acceptation d'invitation + delegation can_invite (23 aout) : entree v571.
 - Policy DELETE minichat (1er sept., verifiee le 2) : entrees v577/v578.
 - Regle du telephone des profils publics (public_profiles_for_me) : v578.
+- Droit d'inviter aligne sur la fiche projet (4 sept.) : fichier
+  droit_inviter.sql, recit a l'entree v582.
 
 (Le JOURNAL DU CHANTIER FEUILLE DE SERVICE, v562-v567, est retire de
 l'en-tete : tout son contenu — regle des sources noir/orange, transports,
@@ -17592,7 +17596,7 @@ const LockManager = {
               // I5g: récupérer TOUTES les memberships (peut y en avoir plusieurs pour le même email)
               const { data: memberships } = await supabase
                   .from('project_members')
-                  .select('role, profile_id, can_invite')
+                  .select('role, profile_id')
                   .eq('project_id', id)
                   .eq('email', myEmail)
                   .eq('status', 'accepted'); // v570 : une invitation en attente n'ouvre rien
@@ -17643,11 +17647,12 @@ const LockManager = {
               if (!role && project.owner_email === myEmail) role = 'owner';
               if (!role) throw new Error("Accès refusé.");
               state.currentRole = role;
-              // v570 : droit d'inviter — le proprietaire l'a toujours, un membre
-              // seulement s'il a recu la delegation (colonne can_invite, verifiee
-              // aussi cote base par la policy INSERT : la case n'est pas decorative).
-              state.currentCanInvite = (role === 'owner')
-                  || !!(memberships || []).some(m => m.can_invite === true);
+              // v582 : le droit d'inviter n'est plus un drapeau delegue
+              // (can_invite) mais LA REGLE « on n'invite que si on peut
+              // modifier la fiche projet ». Il se teste en direct au clic
+              // (Permissions.canEdit('presentation'), adosse a _scope) et en
+              // base par la policy INSERT (my_section_level). Plus de
+              // snapshot currentCanInvite a maintenir.
               
               // v578 (cloisonnement) : le contenu du projet est demande au serveur,
               // qui retire les cles des onglets fermes AVANT de repondre. La reponse
@@ -23806,7 +23811,7 @@ initCategoriesDragDrop: () => {
   
  const Actions = {
       // ===================== SCÈNES =====================
-      openShareModal: () => { if(state.currentRole !== 'owner' && !state.currentCanInvite) return Utils.toast("Vous n'avez pas l'autorisation d'inviter sur ce projet.", "warning"); els.shareModal.style.display = 'flex'; },
+      openShareModal: () => { if(!Permissions.canEdit('presentation')) return Utils.toast("Vous n'avez pas l'autorisation d'inviter sur ce projet (il faut pouvoir modifier la fiche projet).", "warning"); els.shareModal.style.display = 'flex'; },
       
       // V62: NOUVELLE GESTION DES VERSIONS
       // [Phase D] Fonctions snapshot (openVersionModal, createManualSnapshot, createAutoSnapshot,
@@ -40662,36 +40667,12 @@ const Permissions = {
         return '<span id="perm-derived-' + emailKey + '" title="Rôle déduit des cases de cette ligne : au moins une ✏️ donne Éditeur.">' + lab + '</span>';
     },
 
-    // v570 — Colonne « Peut inviter ». Le droit vit dans project_members.can_invite,
-    // PAS dans state.data : la policy INSERT de la base le lit, donc la case agit
-    // reellement au lieu d'etre decorative. Bascule immediate en base (pas de
-    // passage par le bouton Sauvegarder, qui n'ecrit que le JSON du projet).
-    _inviteCell: (member, options) => {
-        const em = (member.email || '').toLowerCase();
-        if(!em || !options.accessEmails || !options.accessEmails.has(em)) {
-            return '<span style="color:var(--text-sec); font-size:0.75rem;" title="Cette personne n\'a pas encore accès au projet">—</span>';
-        }
-        if(options.ownerEmails && options.ownerEmails.has(em)) {
-            return '<span title="Le propriétaire peut toujours inviter">✅</span>';
-        }
-        if(options.pendingEmails && options.pendingEmails.has(em)) {
-            return '<span style="color:var(--text-sec); font-size:0.75rem;" title="Invitation pas encore acceptée">—</span>';
-        }
-        const checked = options.inviteEmails && options.inviteEmails.has(em) ? 'checked' : '';
-        return `<input type="checkbox" ${checked} onchange="app.Permissions.toggleInvite('${Utils.escape(member.email)}', this.checked)" style="width:18px; height:18px; cursor:pointer;" title="Autoriser à inviter d'autres membres">`;
-    },
-
-    toggleInvite: async (email, allowed) => {
-        if(state.currentRole !== 'owner') { Utils.toast('Seul le propriétaire peut déléguer le droit d\'inviter.', 'error'); Permissions.renderTables(); return; }
-        const { error } = await supabase
-            .from('project_members')
-            .update({ can_invite: !!allowed })
-            .eq('project_id', state.currentProjectId)
-            .eq('email', (email || '').toLowerCase());
-        if(error) { console.error(error); Utils.toast('Erreur : droit d\'inviter non enregistré.', 'error'); Permissions.renderTables(); return; }
-        if(typeof History !== 'undefined' && History.log) History.log('SHARE', (allowed ? 'Droit d\'inviter accordé à ' : 'Droit d\'inviter retiré à ') + email);
-        Utils.toast(allowed ? email + ' peut maintenant inviter.' : email + ' ne peut plus inviter.', 'success');
-    },
+    // v582 — La colonne « Peut inviter » a ete RETIREE (decision de
+    // Guillaume, option A) : le droit d'inviter se deduit desormais du
+    // crayon sur la colonne Fiche projet (section 'presentation'), teste en
+    // direct au clic et en base par la policy INSERT (my_section_level).
+    // La colonne project_members.can_invite reste en base, dormante et
+    // epinglee a false par la policy, mais plus rien ne la lit.
 
     revokeAccess: async (email) => {
         if(state.currentRole !== 'owner') { Utils.toast('Seul le propriétaire peut révoquer un accès.', 'error'); return; }
@@ -40784,7 +40765,7 @@ const Permissions = {
         try {
             const { data } = await supabase
                 .from('project_members')
-                .select('role, can_invite')
+                .select('role')
                 .eq('project_id', state.currentProjectId)
                 .eq('email', state.currentUser.email.toLowerCase())
                 .eq('status', 'accepted');
@@ -40795,7 +40776,8 @@ const Permissions = {
                     state.currentRole = best.role;
                     Utils.toast('Vos droits sur ce projet viennent de changer.', 'info', 5000);
                 }
-                state.currentCanInvite = (best.role === 'owner') || data.some(m => m.can_invite === true);
+                // v582 : plus de drapeau can_invite a relire, le droit
+                // d'inviter suit la fiche projet (voir openShareModal).
             }
         } catch(e) { console.warn('[Permissions] refreshLive:', e && e.message); }
         Permissions._liveBusy = false;
@@ -41067,17 +41049,14 @@ const Permissions = {
     renderTables: async () => {
         let _members = [];
         try {
-            const { data } = await supabase.from('project_members').select('id, email, profile_id, role, status, can_invite').eq('project_id', state.currentProjectId);
+            const { data } = await supabase.from('project_members').select('id, email, profile_id, role, status').eq('project_id', state.currentProjectId);
             _members = data || [];
         } catch(e) { console.error('renderTables members:', e); }
         const _accessEmails = new Set(_members.map(m => (m.email || '').toLowerCase()).filter(Boolean));
-        // v570 : qui a recu le droit d'inviter (colonne project_members.can_invite),
-        // et qui est proprietaire (droit implicite, non revocable).
-        const _inviteEmails = new Set(_members.filter(m => m.can_invite === true).map(m => (m.email || '').toLowerCase()));
         const _ownerEmails = new Set(_members.filter(m => m.role === 'owner').map(m => (m.email || '').toLowerCase()));
         const _pendingEmails = new Set(_members.filter(m => m.status === 'pending').map(m => (m.email || '').toLowerCase()));
-        const _opts = { revoke: true, accessEmails: _accessEmails, invite: true,
-                        inviteEmails: _inviteEmails, ownerEmails: _ownerEmails, pendingEmails: _pendingEmails };
+        const _opts = { revoke: true, accessEmails: _accessEmails,
+                        ownerEmails: _ownerEmails, pendingEmails: _pendingEmails };
 
         // Table des comédiens
         const actorsDiv = document.getElementById('perm-actors-table');
@@ -41123,7 +41102,7 @@ const Permissions = {
                             </span>
                         </th>`;
                     }).join('')}
-                    ${options.invite ? '<th style="height:140px; vertical-align:bottom; min-width:96px;" title="Autoriser cette personne à inviter d\'autres membres">Peut inviter</th>' : ''}
+
                     ${options.revoke ? '<th style="height:140px; vertical-align:bottom;">Action</th>' : ''}
                 </tr>
             </thead>
@@ -41173,7 +41152,7 @@ const Permissions = {
                         </select>
                     </td>
                 `).join('')}
-                ${options.invite ? `<td style="text-align:center; vertical-align:middle;">${Permissions._inviteCell(member, options)}</td>` : ''}
+
                 ${options.revoke ? `<td style="text-align:center; vertical-align:middle;">${ (member.email && options.accessEmails && options.accessEmails.has((member.email || '').toLowerCase()) && (member.email || '').toLowerCase() !== (state.currentUser?.email || '').toLowerCase()) ? `<button onclick="app.Permissions.revokeAccess('${Utils.escape(member.email)}')" style="padding:4px 10px; background:var(--danger,#dc2626); color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:0.8rem;">Révoquer</button>` : '' }</td>` : ''}
             </tr>`;
         });
@@ -41186,7 +41165,7 @@ const Permissions = {
             <span style="margin-right:15px;">👁️ Lecture seule</span>
             <span style="margin-right:15px;">✏️ Modification</span>
             <span style="margin-right:15px;">Le rôle se déduit de la ligne : au moins une ✏️ = Éditeur, sinon Lecture seule.</span>
-            ${options.invite ? '<span>☑ Peut inviter : autorise cette personne à faire entrer d\'autres membres (jamais en tant que propriétaire, et sans pouvoir déléguer à son tour).</span>' : ''}
+
         </div>`;
         
         return html;
@@ -71650,6 +71629,17 @@ const FicheUI = {
         if(!b) return;
         b.classList.toggle('is-collapsed');
         FicheUI.setCollapsed(b.dataset.ficheKind, b.dataset.blockId, b.classList.contains('is-collapsed'));
+        // v582 : le mini-calendrier des disponibilites se rend dans son
+        // conteneur a l'ouverture de la fiche ; si la brique etait repliee a
+        // ce moment-la, le rendu peut s'etre perdu. Au depliage, on redessine
+        // si le conteneur est reste vide. Meme garde viewer qu'a l'ouverture.
+        if(!b.classList.contains('is-collapsed') && state.currentRole !== 'viewer') {
+            const cal = b.querySelector('[id^="actor-calendar-"], [id^="crew-calendar-"]');
+            if(cal && !cal.firstChild) {
+                const m = cal.id.match(/^(actor|crew)-calendar-(\d+)$/);
+                if(m) { try { UI.renderAvailabilityCalendar(cal.id, m[1], parseInt(m[2], 10)); } catch(e) {} }
+            }
+        }
     },
     // Une brique = carre gris repliable. opts.pin='right' epingle la brique
     // en haut de la colonne de droite (utilise pour « Dans le projet »).
@@ -71950,77 +71940,105 @@ const CardModal = {
         const decor = PlanningFDS.decor(sc);
         const names = (state.data.locations || []).map(l => l.name).filter(Boolean);
         if(decor && !names.includes(decor)) names.unshift(decor);
-        if(titleEl) titleEl.textContent = '🎬 Scène : ' + (sc.title || 'Sans titre');
+        // v581/v582 : la barre de la fenetre ne repete que la famille, le nom
+        // vit dans l'en-tete du gabarit universel (FicheUI.headHtml).
+        if(titleEl) titleEl.textContent = '🎬 Scène';
         // Le titre d'une scene n'est pas un texte libre : c'est un triptyque
         // effet / decor / moment, ecrit « INT. CUISINE - JOUR » par convention.
         // Il n'etait editable que par la bande de saisie du sequencier ; depuis
         // le 26 aout cette bande n'existe plus et la fiche porte les trois
         // morceaux. Ils s'ecrivent au fil de l'eau comme le reste.
+        // v582 : la fiche scene rejoint le gabarit en BRIQUES de v581 (en-tete
+        // commun + carres gris repliables, equilibres apres affichage). Le nom
+        // d'en-tete n'est PAS editable ici : le titre est COMPOSE du triptyque,
+        // un champ libre ouvrirait une divergence avec la convention.
         const tp = Utils.sceneTitleParts(sc.title);
-        if(body) body.innerHTML = `
-            <!-- Grille et non flex : trois colonnes de largeurs fixes alignent
-                 les etiquettes ET les champs sur une meme ligne de base, ce que
-                 le flex ne garantissait pas des qu'une etiquette passait sur
-                 deux lignes. -->
-            <div style="display:grid; grid-template-columns:110px 1fr 130px; gap:8px; align-items:end; margin-bottom:10px;">
+        const scid = Utils.escape(String(sc.id));
+        const delBtn = dis ? '' : `<button onclick="app.Actions.deleteScene('${scid}')" style="color:var(--danger);border:none;background:none;cursor:pointer" title="Supprimer la scène">🗑️</button>`;
+        const blocks = [];
+
+        // Brique « Dans le projet » — epinglee en haut a droite, comme sur les
+        // six autres familles : tournee le, plans, cout.
+        // Plans de la scene, dans leur ordre de storyboard. Chaque pastille
+        // ouvre la fiche du plan : c'est la seule facon d'y acceder sans
+        // passer par l'onglet Storyboard et sa grille.
+        const shots = (state.data.shots || []).filter(s => s && s.sceneId === sc.id)
+            .sort((a, b) => (a.order || 0) - (b.order || 0));
+        let plansHtml = '';
+        if(shots.length) {
+            const tags = shots.map((s, i) => {
+                const lbl = 'Plan ' + (i + 1) + (s.name ? ' — ' + String(s.name).slice(0, 30) : '');
+                return `<span class="appearance-tag is-clickable" onclick="app.UI.openFiche('shot','${Utils.escape(String(s.id))}')" title="${Utils.escape(s.shotType || '')}">${Utils.escape(lbl)}</span>`;
+            }).join(' ');
+            plansHtml = `<div class="appearances-section"><span class="appearances-label">🎬 Plans (${shots.length}) :</span> ${tags}</div>`;
+        }
+        let projHtml = UI.renderShootDays('scene', sc.id, '📅 Tournée le') + plansHtml + UI.renderCost('scene', sc.id);
+        if(!projHtml) projHtml = '<span class="text-sec-xs">Pas encore planifiée ni découpée en plans</span>';
+        blocks.push(FicheUI.block('scene', 'projet', '🎬 Dans le projet', projHtml, { pin: 'right' }));
+
+        // Brique « Titre & reperes » — le triptyque (colonnes resserrees pour
+        // la demi-largeur d'une brique), la duree et le chrono.
+        const idHtml = `
+            <div style="display:grid; grid-template-columns:80px 1fr 105px; gap:8px; align-items:end; margin-bottom:10px;">
                 <div>
                     <label class="form-label-block">Effet</label>
-                    <input class="actor-input" id="fsc-pre" list="fsc-pre-list" placeholder="INT" value="${Utils.escape(tp.pre)}" onchange="app.CardModal.setSceneTitlePart('${Utils.escape(String(sc.id))}','pre',this.value)" ${dis}>
+                    <input class="actor-input" id="fsc-pre" list="fsc-pre-list" placeholder="INT" value="${Utils.escape(tp.pre)}" onchange="app.CardModal.setSceneTitlePart('${scid}','pre',this.value)" ${dis}>
                     <datalist id="fsc-pre-list"><option value="INT"></option><option value="EXT"></option><option value="INT./EXT."></option></datalist>
                 </div>
                 <div class="autocomplete-wrapper" style="position:relative; margin-bottom:0;">
                     <label class="form-label-block">Décor (titre)</label>
                     <div style="display:flex; gap:6px; align-items:center;">
-                        <input class="actor-input" id="fsc-loc" placeholder="LIEU" style="flex:1; min-width:0;" value="${Utils.escape(tp.loc)}" onchange="app.CardModal.setSceneTitlePart('${Utils.escape(String(sc.id))}','loc',this.value)" ${dis}>
-                        <button type="button" class="btn btn--primary btn--sm" title="Enregistrer ce lieu comme nouveau décor et le lier à la scène" onclick="app.FicheLinks.createDecorFromScene('${Utils.escape(String(sc.id))}')" ${dis}>➕ Décor</button>
+                        <input class="actor-input" id="fsc-loc" placeholder="LIEU" style="flex:1; min-width:0;" value="${Utils.escape(tp.loc)}" onchange="app.CardModal.setSceneTitlePart('${scid}','loc',this.value)" ${dis}>
+                        <button type="button" class="btn btn--primary btn--sm" title="Enregistrer ce lieu comme nouveau décor et le lier à la scène" onclick="app.FicheLinks.createDecorFromScene('${scid}')" ${dis}>➕ Décor</button>
                     </div>
                     <div id="fsc-loc-ac" class="autocomplete-list ac-fiche"></div>
                 </div>
                 <div>
                     <label class="form-label-block">Moment</label>
-                    <input class="actor-input" id="fsc-suff" list="fsc-suff-list" placeholder="JOUR" value="${Utils.escape(tp.suff)}" onchange="app.CardModal.setSceneTitlePart('${Utils.escape(String(sc.id))}','suff',this.value)" ${dis}>
+                    <input class="actor-input" id="fsc-suff" list="fsc-suff-list" placeholder="JOUR" value="${Utils.escape(tp.suff)}" onchange="app.CardModal.setSceneTitlePart('${scid}','suff',this.value)" ${dis}>
                     <datalist id="fsc-suff-list"><option value="JOUR"></option><option value="NUIT"></option><option value="AUBE"></option><option value="CRÉPUSCULE"></option><option value="MATIN"></option><option value="SOIR"></option></datalist>
                 </div>
             </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:end; margin-bottom:10px;">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:end;">
                 <div>
                     <label class="form-label-block">⏱️ Durée estimée (min)</label>
-                    <input class="actor-input" placeholder="Ex: 2.5" value="${Utils.escape(sc.time || '')}" onchange="app.CardModal.setSceneField('${Utils.escape(String(sc.id))}', 'time', this.value)" ${dis}>
+                    <input class="actor-input" placeholder="Ex: 2.5" value="${Utils.escape(sc.time || '')}" onchange="app.CardModal.setSceneField('${scid}', 'time', this.value)" ${dis}>
                 </div>
                 <div>
                     <label class="form-label-block">📅 CHRONO — jour de récit</label>
-                    <input class="actor-input" placeholder="Ex: J1, J+2, Nuit 3" value="${Utils.escape(sc.chrono || '')}" onchange="app.CardModal.setSceneField('${Utils.escape(String(sc.id))}', 'chrono', this.value)" ${dis}>
+                    <input class="actor-input" placeholder="Ex: J1, J+2, Nuit 3" value="${Utils.escape(sc.chrono || '')}" onchange="app.CardModal.setSceneField('${scid}', 'chrono', this.value)" ${dis}>
                 </div>
-            </div>
+            </div>`;
+        blocks.push(FicheUI.block('scene', 'identite', '🎞️ Titre & repères', idHtml));
+
+        // Brique « Decor & personnages » — le lien explicite vers une fiche
+        // decor (surcharge du titre) et les personnages presents.
+        const liensHtml = `
             <label class="form-label-block">🏠 Décor</label>
-            <select class="actor-input" id="fsc-decor" onchange="app.CardModal.setSceneField('${Utils.escape(String(sc.id))}', 'location', this.value)" ${dis} style="margin-bottom:10px;">
+            <select class="actor-input" id="fsc-decor" onchange="app.CardModal.setSceneField('${scid}', 'location', this.value)" ${dis} style="margin-bottom:10px;">
                 <option value="">-- déduit du titre --</option>
                 ${names.map(n => `<option value="${Utils.escape(n)}" ${decor === n ? 'selected' : ''}>${Utils.escape(n)}</option>`).join('')}
             </select>
             <label class="form-label-block">🎭 Personnages présents</label>
-            <div class="autocomplete-wrapper" style="position:relative; margin-bottom:10px;">
-                <input class="actor-input" id="fsc-perso" placeholder="Séparés par des points-virgules (ex: ALIX BERGER; CLARA)" value="${Utils.escape(sc.perso || '')}" onchange="app.CardModal.setSceneField('${Utils.escape(String(sc.id))}', 'perso', this.value)" ${dis}>
+            <div class="autocomplete-wrapper" style="position:relative;">
+                <input class="actor-input" id="fsc-perso" placeholder="Séparés par des points-virgules (ex: ALIX BERGER; CLARA)" value="${Utils.escape(sc.perso || '')}" onchange="app.CardModal.setSceneField('${scid}', 'perso', this.value)" ${dis}>
                 <div id="fsc-perso-ac" class="autocomplete-list ac-fiche"></div>
-            </div>
-            <label class="form-label-block">📝 Résumé</label>
-            <textarea class="data-desc" style="min-height:90px;" placeholder="Ce qui se passe dans la scène..." onchange="app.CardModal.setSceneField('${Utils.escape(String(sc.id))}', 'resume', this.value)" ${dis}>${Utils.escape(sc.resume || '')}</textarea>
-            ${(() => {
-                // Plans de la scene, dans leur ordre de storyboard. Chaque
-                // pastille ouvre la fiche du plan : c'est la seule facon d'y
-                // acceder sans passer par l'onglet Storyboard et sa grille.
-                const shots = (state.data.shots || []).filter(s => s && s.sceneId === sc.id)
-                    .sort((a, b) => (a.order || 0) - (b.order || 0));
-                if(!shots.length) return '';
-                const tags = shots.map((s, i) => {
-                    const lbl = 'Plan ' + (i + 1) + (s.name ? ' — ' + String(s.name).slice(0, 30) : '');
-                    return `<span class="appearance-tag is-clickable" onclick="app.UI.openFiche('shot','${Utils.escape(String(s.id))}')" title="${Utils.escape(s.shotType || '')}">${Utils.escape(lbl)}</span>`;
-                }).join(' ');
-                return `<div class="appearances-section"><span class="appearances-label">🎬 Plans (${shots.length}) :</span> ${tags}</div>`;
-            })()}
-            ${UI.renderCost('scene', sc.id)}
-        `;
+            </div>`;
+        blocks.push(FicheUI.block('scene', 'liens', '🔗 Décor & personnages', liensHtml));
+
+        // Brique « Resume ».
+        const resumeHtml = `<textarea class="data-desc" style="min-height:90px; width:100%;" placeholder="Ce qui se passe dans la scène..." onchange="app.CardModal.setSceneField('${scid}', 'resume', this.value)" ${dis}>${Utils.escape(sc.resume || '')}</textarea>`;
+        blocks.push(FicheUI.block('scene', 'resume', '📝 Résumé', resumeHtml));
+
+        if(body) body.innerHTML = FicheUI.headHtml({
+            name: sc.title || 'Sans titre', id: sc.id, kindLabel: 'Scène', photo: '',
+            badgesHtml: '', delBtnHtml: delBtn
+        }) + FicheBlocks.render(blocks);
         CardModal.applyRights('scene');
         if(modal) modal.classList.add('visible');
+        // v581 : les briques sont equilibrees par hauteur une fois visibles
+        // (mesure reelle du DOM), meme mecanique que les six autres familles.
+        requestAnimationFrame(() => { try { FicheBlocks.balance(body); } catch(e) {} });
         // AUTOCOMPLETION RECABLEE (26 aout). Elle vivait sur les champs de la
         // bande de saisie du sequencier, qui n'existe plus. Les champs de la
         // fiche etant reconstruits a chaque ouverture, l'ecouteur doit etre
@@ -72050,8 +72068,12 @@ const CardModal = {
         sc.lastModified = Date.now();
         if(state.currentUser && state.currentUser.email) sc.lastModifiedBy = state.currentUser.email;
         Store.save();
-        const titleEl = document.getElementById('card-edit-modal-title');
-        if(titleEl) titleEl.textContent = '🎬 Scène : ' + titre;
+        // v582 : le titre compose vit dans l'en-tete du gabarit (fid-name),
+        // la barre de la fenetre ne porte que la famille. On ne re-rend pas
+        // la fiche entiere : l'utilisateur est en train de remplir le
+        // triptyque, un re-rendu lui volerait le focus.
+        const nameEl = document.querySelector('#card-edit-modal-body .fid-name');
+        if(nameEl && nameEl.tagName !== 'INPUT') nameEl.textContent = titre;
         try { UI.renderBoard(); } catch(e) { console.error('setSceneTitlePart/renderBoard', e); }
     },
     setSceneField: (id, field, value) => {
