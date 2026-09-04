@@ -4394,6 +4394,17 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .fid-block .fid-field:last-child { margin-bottom: 0; }
   .fid-block .appearances-section { border-top: none; padding-top: 0; margin: 0; }
   @media (max-width: 700px) { .fid-blocks { grid-template-columns: 1fr; } }
+  /* Glisser-deposer des briques (v581) */
+  .fid-block-head { position: relative; }
+  .fid-block-grip { cursor: grab; color: var(--text-sec); opacity: 0.55; font-size: 0.95rem; flex: 0 0 auto; padding-right: 2px; }
+  .fid-block-grip:active { cursor: grabbing; }
+  .fid-block.is-dragging { opacity: 0.4; }
+  .fid-bcol.is-drop-target { outline: 2px dashed var(--primary); outline-offset: 3px; border-radius: 10px; }
+  .fid-block.drop-before { box-shadow: 0 -3px 0 0 var(--primary); }
+  .fid-block.drop-after { box-shadow: 0 3px 0 0 var(--primary); }
+  .fid-blocks-reset { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
+  .fid-blocks-reset button { background: none; border: none; color: var(--text-sec); font-size: 0.78rem; cursor: pointer; padding: 2px 6px; }
+  .fid-blocks-reset button:hover { color: var(--primary); text-decoration: underline; }
   .data-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
   .data-desc { height: 80px; font-size: 0.9rem; resize: none; }
   .group-select { font-size: 0.8rem; padding: 4px; margin-top: 5px; border-radius: 4px; }
@@ -72049,9 +72060,9 @@ const FicheUI = {
     block: (kind, id, title, innerHtml, opts) => {
         opts = opts || {};
         const collapsed = FicheUI.isCollapsed(kind, id);
-        return `<div class="fid-block${collapsed ? ' is-collapsed' : ''}" data-fiche-kind="${Utils.escape(kind)}" data-block-id="${Utils.escape(id)}"${opts.pin ? ` data-pin="${Utils.escape(opts.pin)}"` : ''}>
+        return `<div class="fid-block${collapsed ? ' is-collapsed' : ''}" data-fiche-kind="${Utils.escape(kind)}" data-block-id="${Utils.escape(id)}"${opts.pin ? ` data-pin="${Utils.escape(opts.pin)}"` : ''} draggable="false">
             <div class="fid-block-head" onclick="app.FicheUI.toggleBlock(this)">
-                <span class="fid-block-title">${title}</span>
+                <span class="fid-block-title"><span class="fid-block-grip" title="Déplacer" draggable="true" onclick="event.stopPropagation()">⠿</span>${title}</span>
                 <span class="fid-block-chevron">▾</span>
             </div>
             <div class="fid-block-body">${innerHtml}</div>
@@ -72067,33 +72078,146 @@ const FicheUI = {
 // scenes). Le glisser-deposer manuel et « appliquer a toutes les fiches »
 // viendront se brancher ici.
 const FicheBlocks = {
-    // blocks : tableau de morceaux HTML deja produits par FicheUI.block.
-    render: (blocksHtmlArray) => {
-        // Depart : tout dans la premiere colonne ; balance() repartit ensuite.
-        return `<div class="fid-blocks"><div class="fid-bcol">${blocksHtmlArray.join('')}</div><div class="fid-bcol"></div></div>`;
+    // ---- Disposition manuelle memorisee (par famille, sur l'appareil) ----
+    // Des que l'utilisateur deplace une brique, on enregistre la disposition
+    // { col0:[ids...], col1:[ids...] } ; tant qu'il n'y touche pas, c'est
+    // l'equilibrage automatique par hauteur qui decide.
+    _orderKey: 'moteur_fidorder',
+    _orderState: null,
+    _loadOrders: () => {
+        if(FicheBlocks._orderState) return FicheBlocks._orderState;
+        try { FicheBlocks._orderState = JSON.parse(localStorage.getItem(FicheBlocks._orderKey) || '{}') || {}; }
+        catch(e) { FicheBlocks._orderState = {}; }
+        return FicheBlocks._orderState;
     },
-    // Repartition par hauteur. Appele apres que la fiche est visible.
+    getOrder: (kind) => FicheBlocks._loadOrders()[kind] || null,
+    setOrder: (kind, layout) => {
+        const s = FicheBlocks._loadOrders();
+        if(layout) s[kind] = layout; else delete s[kind];
+        try { localStorage.setItem(FicheBlocks._orderKey, JSON.stringify(s)); } catch(e) {}
+    },
+
+    _kindOf: (wrap) => {
+        const b = wrap.querySelector('.fid-block');
+        return b ? b.dataset.ficheKind : '';
+    },
+
+    render: (blocksHtmlArray) => {
+        return `<div class="fid-blocks"><div class="fid-bcol">${blocksHtmlArray.join('')}</div><div class="fid-bcol"></div><div class="fid-blocks-reset"><button onclick="app.FicheBlocks.reset(this)" title="Revenir à la disposition automatique">↺ Disposition automatique</button></div></div>`;
+    },
+
+    // Appele apres affichage : applique la disposition manuelle si elle existe,
+    // sinon equilibre par hauteur. Puis branche le glisser-deposer.
     balance: (rootEl) => {
         if(!rootEl) return;
         const wrap = rootEl.querySelector('.fid-blocks');
         if(!wrap) return;
         const cols = wrap.querySelectorAll('.fid-bcol');
         if(cols.length < 2) return;
-        // Recuperer toutes les briques dans leur ordre courant.
+        const kind = FicheBlocks._kindOf(wrap);
         const blocks = Array.from(wrap.querySelectorAll('.fid-block'));
-        // Mono-colonne (ecran etroit) : tout dans la premiere, la seconde est
-        // masquee par la grille CSS ; on ne force pas de repartition.
+        const byId = {};
+        blocks.forEach(b => { byId[b.dataset.blockId] = b; });
         const twoCols = window.matchMedia('(min-width: 701px)').matches;
         cols[0].innerHTML = ''; cols[1].innerHTML = '';
-        if(!twoCols) { blocks.forEach(b => cols[0].appendChild(b)); return; }
-        // Brique epinglee a droite : en tete de la colonne 1.
-        const pinned = blocks.filter(b => b.dataset.pin === 'right');
-        const rest = blocks.filter(b => b.dataset.pin !== 'right');
-        pinned.forEach(b => cols[1].appendChild(b));
-        // Greedy : chaque brique va dans la colonne la plus courte a l'instant.
-        rest.forEach(b => {
-            const target = cols[0].offsetHeight <= cols[1].offsetHeight ? cols[0] : cols[1];
-            target.appendChild(b);
+        if(!twoCols) {
+            blocks.forEach(b => cols[0].appendChild(b));
+        } else {
+            const saved = FicheBlocks.getOrder(kind);
+            if(saved && (saved.col0 || saved.col1)) {
+                // Disposition manuelle : on respecte l'ordre enregistre, puis
+                // on place a la fin les briques nouvelles (non encore rangees).
+                const placed = {};
+                (saved.col0 || []).forEach(id => { if(byId[id]) { cols[0].appendChild(byId[id]); placed[id] = 1; } });
+                (saved.col1 || []).forEach(id => { if(byId[id]) { cols[1].appendChild(byId[id]); placed[id] = 1; } });
+                blocks.filter(b => !placed[b.dataset.blockId]).forEach(b => {
+                    const t = cols[0].offsetHeight <= cols[1].offsetHeight ? cols[0] : cols[1];
+                    t.appendChild(b);
+                });
+            } else {
+                // Equilibrage automatique par hauteur. Brique epinglee a droite.
+                const pinned = blocks.filter(b => b.dataset.pin === 'right');
+                const rest = blocks.filter(b => b.dataset.pin !== 'right');
+                pinned.forEach(b => cols[1].appendChild(b));
+                rest.forEach(b => {
+                    const t = cols[0].offsetHeight <= cols[1].offsetHeight ? cols[0] : cols[1];
+                    t.appendChild(b);
+                });
+            }
+        }
+        FicheBlocks._wire(wrap);
+    },
+
+    // Enregistre la disposition courante des deux colonnes pour la famille.
+    _save: (wrap) => {
+        const kind = FicheBlocks._kindOf(wrap);
+        if(!kind) return;
+        const cols = wrap.querySelectorAll('.fid-bcol');
+        const idsOf = (col) => Array.from(col.querySelectorAll('.fid-block')).map(b => b.dataset.blockId);
+        FicheBlocks.setOrder(kind, { col0: idsOf(cols[0]), col1: idsOf(cols[1]) });
+    },
+
+    reset: (btn) => {
+        const wrap = btn.closest('.fid-blocks');
+        if(!wrap) return;
+        const kind = FicheBlocks._kindOf(wrap);
+        FicheBlocks.setOrder(kind, null);
+        FicheBlocks.balance(wrap.parentElement);
+    },
+
+    // Glisser-deposer : la poignee ⠿ demarre le glisse ; on peut deposer sur
+    // une autre brique (avant/apres) ou dans une colonne vide.
+    _drag: null,
+    _wire: (wrap) => {
+        if(wrap._fidWired) return;
+        wrap._fidWired = true;
+        const cols = Array.from(wrap.querySelectorAll('.fid-bcol'));
+
+        wrap.addEventListener('dragstart', (e) => {
+            const grip = e.target.closest('.fid-block-grip');
+            if(!grip) { e.preventDefault(); return; }
+            const block = grip.closest('.fid-block');
+            FicheBlocks._drag = block;
+            block.classList.add('is-dragging');
+            try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', block.dataset.blockId || ''); } catch(err) {}
+        });
+        wrap.addEventListener('dragend', () => {
+            if(FicheBlocks._drag) FicheBlocks._drag.classList.remove('is-dragging');
+            FicheBlocks._drag = null;
+            wrap.querySelectorAll('.drop-before,.drop-after').forEach(b => b.classList.remove('drop-before', 'drop-after'));
+            cols.forEach(c => c.classList.remove('is-drop-target'));
+        });
+        wrap.addEventListener('dragover', (e) => {
+            if(!FicheBlocks._drag) return;
+            e.preventDefault();
+            try { e.dataTransfer.dropEffect = 'move'; } catch(err) {}
+            wrap.querySelectorAll('.drop-before,.drop-after').forEach(b => b.classList.remove('drop-before', 'drop-after'));
+            cols.forEach(c => c.classList.remove('is-drop-target'));
+            const overBlock = e.target.closest('.fid-block');
+            if(overBlock && overBlock !== FicheBlocks._drag) {
+                const r = overBlock.getBoundingClientRect();
+                overBlock.classList.add(e.clientY < r.top + r.height / 2 ? 'drop-before' : 'drop-after');
+            } else {
+                const col = e.target.closest('.fid-bcol');
+                if(col) col.classList.add('is-drop-target');
+            }
+        });
+        wrap.addEventListener('drop', (e) => {
+            if(!FicheBlocks._drag) return;
+            e.preventDefault();
+            const dragged = FicheBlocks._drag;
+            const overBlock = e.target.closest('.fid-block');
+            if(overBlock && overBlock !== dragged) {
+                const r = overBlock.getBoundingClientRect();
+                if(e.clientY < r.top + r.height / 2) overBlock.parentElement.insertBefore(dragged, overBlock);
+                else overBlock.parentElement.insertBefore(dragged, overBlock.nextSibling);
+            } else {
+                const col = e.target.closest('.fid-bcol');
+                if(col) col.appendChild(dragged);
+            }
+            wrap.querySelectorAll('.drop-before,.drop-after').forEach(b => b.classList.remove('drop-before', 'drop-after'));
+            cols.forEach(c => c.classList.remove('is-drop-target'));
+            FicheBlocks._save(wrap);
         });
     }
 };
@@ -78916,7 +79040,7 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, CoursesWeb, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo, DBPresence, LockManager, LockDomains, Links, Web, FicheLinks, Diag };
+  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, CoursesWeb, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo, DBPresence, LockManager, LockDomains, Links, Web, FicheLinks, Diag, FicheUI, FicheBlocks };
 })();
 </script>
 
