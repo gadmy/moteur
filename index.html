@@ -47,6 +47,42 @@ regeneres ; migration idempotente au chargement ; renommage des personnages
 et des decors depuis leur fiche, propage partout (sequencier, scenario,
 titres, depouillement, FDS). La racine du chantier 2 est fermee au passage
 (supprimer une fiche la retire des scenes). A TESTER par Guillaume.
+SUITE DE SESSION v580 (apres premiers tests, tous bons) : CORRECTIF du clic
+sur une suggestion d'autocompletion — il faisait perdre le focus au champ et
+'change' partait avec le TEXTE PARTIEL (fiches « A », « Al », « Ali » creees
+en tapant « Alix ») ; mousedown neutralise dans setupAutocomplete, meme
+parade que ScriptEditorAC, tous les champs a suggestions proteges d'un coup.
+Les autres creations automatiques (ressources du depouillement) passent par
+des gestes valides, elles n'etaient pas exposees. PUIS CHANTIER 3 FAIT :
+aucun decor ne nait plus tout seul (resolveDecor/syncLocations ne font plus
+que RELIER) ; bouton « ➕ Décor » a cote du champ lieu (fiche scene +
+modale BeatBoard) ; le selecteur 🏠 se rafraichit en place, sans fermer la
+fiche. L'import de scenario continue de creer ses decors : c'est son role.
+PUIS CHANTIER 4 FAIT : groupe automatique « 🚫 Sans scène » sur les quatre
+onglets (virtuel, calcule au rendu), garde sur les deux chemins de rangement,
+case d'exemption « 📌 Classement manuel » sur les fiches. Les QUATRE
+chantiers du 4 septembre sont donc fermes ; chantiers 3 et 4 a tester
+ensemble par Guillaume.
+DEUX CORRECTIONS DEMANDEES AVANT TESTS (meme session) :
+(a) LES RESSOURCES ONT LE MEME SYSTEME DE GROUPES que les autres onglets —
+groupes de type 'resource' (bouton « ➕ Nouveau Groupe » dans la barre de
+l'onglet), sections par groupe + Non classé + « Sans scène », glisser-
+deposer (GroupDnD etendu a resources), selecteur de groupe dans la fiche
+d'edition (via Actions.changeGroup : droits + garde Sans scène compris).
+Resources.save fusionne par etalement : group_id et keepGroup survivent.
+(b) AUDIT « TOUT PAR IDENTIFIANT » : trois lecteurs poses dans FicheLinks
+(sceneHasChar, charsOfScene, locOfScene — id d'abord, nom en repli pour les
+donnees jamais migrees) et QUATORZE sites convertis : filtres et exports PDF
+personnages/comediens (charScenes x3, charsInScope x2, scopes serie x2),
+ajout auto des comediens au jour de tournage, calcul des comediens requis,
+addActorToCallSheet, lieu auto du jour (locOfScene remplace le decoupage du
+titre), seqsForCharacter (AFAR), isCharacterUsed, orphelins a la suppression
+d'une scene, heritage perso -> depouillement (bdItem porte l'id de la
+fiche), statistiques d'apparitions par genre. RESTENT PAR NOM, a dessein :
+les RESOLUTIONS de texte saisi vers une fiche (syncCharacters, linkFor,
+autocompletion, controles de doublon a la creation) — c'est leur role, un
+texte n'a pas d'identifiant ; et l'analyse de l'import de scenario, qui
+construit un projet neuf migre au premier chargement.
 
 QUATRE NOUVEAUX CHANTIERS notes le 4 septembre (voir ci-dessous), dont un gros :
 le lien scene <-> fiche par NUMERO et non par nom. Prochaine conversation : v580.
@@ -90,21 +126,33 @@ A traiter dans une conversation dediee : le 1 est un chantier structurel.
     A TESTER par Guillaume avant de cocher : supprimer un perso present dans
     des scenes, verifier sequencier + suggestions (lignes ~34829 / ~34841).
 
-[ ] 3. UN LIEU DE SCENE NE DOIT PLUS CREER UN DECOR AUTOMATIQUEMENT.
-    Aujourd'hui, saisir un lieu dans une scene (scenario, beatboard ou
-    sequencier) cree une fiche decor toute seule. Or un meme decor peut servir
-    a plusieurs lieux de scene. VOULU : un bouton A COTE du champ lieu pour
-    valider explicitement « ce lieu devient un nouveau decor ». Et des qu'il
-    est enregistre comme decor, il doit apparaitre IMMEDIATEMENT dans le champ
-    decor de la fiche en cours, SANS fermer/rouvrir.
+[x] 3. UN LIEU DE SCENE NE CREE PLUS DE DECOR AUTOMATIQUEMENT — FAIT EN v580.
+    resolveDecor et syncLocations ne font plus que RELIER aux fiches
+    existantes (un meme decor peut servir plusieurs lieux de scene) ; la
+    creation est un geste explicite : bouton « ➕ Décor » a cote du champ
+    lieu (fiche scene ET modale BeatBoard), FicheLinks.createDecor* (jamais
+    de doublon, relie au passage les scenes sans lien du meme nom). Des
+    l'enregistrement, le decor apparait dans le selecteur 🏠 de la fiche EN
+    COURS, sans fermer/rouvrir (refreshDecorSelect). L'import de scenario
+    continue de creer ses decors (c'est le but d'un import), bdNormalizeData
+    leur pose un id au chargement.
 
-[ ] 4. GROUPE AUTOMATIQUE « SANS SCENE ».
-    Toute fiche personnage / ressource / decor / comedien qui n'est PLUS (ou
-    pas) dans une scene doit basculer automatiquement dans un groupe « sans
-    scene » de son onglet, pour etre retrouvee et supprimee facilement.
-    REGLE demandee : une fiche, meme reelle et voulue, ne peut pas etre rangee
-    dans un autre groupe tant qu'elle n'apparait dans aucune scene — sauf a
-    cocher un petit toggle de confirmation qui l'exempte du classement auto.
+[x] 4. GROUPE AUTOMATIQUE « SANS SCENE » — FAIT EN v580.
+    Sur les quatre onglets vises (Personnages, Comediens, Decors, Ressources),
+    toute fiche qui n'apparait dans aucune scene bascule au rendu dans un
+    groupe automatique « 🚫 Sans scène » en fin d'onglet. GROUPE VIRTUEL :
+    calcule a l'affichage via UI.scenesForFiche, aucun enregistrement de
+    groupe cree, pas une cible de glisser-deposer. La regle demandee est
+    appliquee aux DEUX chemins de rangement (selecteur de groupe ET
+    glisser-deposer) : une fiche sans scene ne se range pas ailleurs, sauf a
+    cocher « 📌 Classement manuel » sur sa fiche (item.keepGroup) — la case
+    n'apparait que quand elle a un sens (fiche sans scene, ou deja exemptee
+    pour pouvoir decocher). Ressources : pas de groupes dans cet onglet, la
+    section « Sans scène » s'ajoute en fin de grille et la case vit dans la
+    fiche d'edition. Au passage, scenesForFiche compte desormais les liens
+    par identifiant portes par la scene (persoIds, locationId, et l'heritage
+    comedien via le personnage) meme sans depouillement — ce qui ameliore
+    aussi « Apparait dans » des fiches.
 
 
 --------------------------------------------------------------------------------
@@ -10235,6 +10283,7 @@ body.presentation-mode .presentation-bar {
           <h1 class="print-only-title">RESSOURCES</h1>
           <div class="data-toolbar" style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; align-items:center;">
               <button onclick="app.Resources.add()" class="btn-tool">➕ Nouvelle Ressource</button>
+              <button onclick="app.Actions.addGroup('resource')" class="btn-tool">➕ Nouveau Groupe</button>
               <button onclick="app.Resources.openExportModal()" class="btn-tool" style="background:var(--primary); color:#fff;">📄 Export PDF</button>
               <div style="display:flex; gap:5px; margin-left:auto;">
                   <button class="res-filter-btn active" data-filter="all" onclick="app.Resources.filter('all')">Tous</button>
@@ -12315,13 +12364,14 @@ crewRoles: {
           else if(coll === 'locations') UI.renderDataTab('locations', els.locContainer);
           else if(coll === 'crew') UI.renderCrewTab();
           else if(coll === 'orgs') Orgs.render();
+          else if(coll === 'resources') Resources.render();
       },
 
       move: (coll, idx, groupId) => {
           // Ceinture et bretelles : le glisser est deja refuse au depart sur un
           // onglet en lecture seule, mais l'ecriture se verifie ici aussi —
           // griser n'est qu'un affichage tant que l'enregistrement ne controle rien.
-          const KIND = { characters: 'character', actors: 'actor', locations: 'location', crew: 'crew', orgs: 'org' };
+          const KIND = { characters: 'character', actors: 'actor', locations: 'location', crew: 'crew', orgs: 'org', resources: 'resource' };
           if(typeof Permissions !== 'undefined' && Permissions.canEditFiche && KIND[coll]
              && !Permissions.canEditFiche(KIND[coll])) {
               Utils.toast("Vous n'avez pas les droits de modification sur cette section.", 'error');
@@ -12331,6 +12381,13 @@ crewRoles: {
           const item = arr && arr[idx];
           if(!item) return;
           if((item.group_id || '') === (groupId || '')) return;
+          // Chantier 4 : le glisser suit la meme regle que le selecteur — une
+          // fiche sans scene ne se range pas ailleurs sans l'exemption.
+          if(groupId && FicheLinks.isSansScene(coll, item)) {
+              Utils.toast('Cette fiche n\'apparaît dans aucune scène : elle reste dans « Sans scène ». Cochez « 📌 Classement manuel » sur sa fiche pour la ranger ailleurs.', 'warning');
+              GroupDnD.rerender(coll);
+              return;
+          }
           item.group_id = groupId || '';
           Store.save();
           GroupDnD.rerender(coll);
@@ -13650,6 +13707,15 @@ crewRoles: {
                   const div = document.createElement("div"); div.className = "autocomplete-item"; 
                   div.innerHTML = "<strong>" + Utils.escape(matchName.substring(0, currentTerm.length)) + "</strong>" + Utils.escape(matchName.substring(currentTerm.length)); 
                   div.innerHTML += "<input type='hidden' value='" + Utils.escape(matchName) + "'>"; 
+                  // v580 : cliquer une suggestion faisait d'abord PERDRE LE
+                  // FOCUS au champ — le navigateur emettait alors 'change'
+                  // avec le TEXTE PARTIEL (« Ali » pendant qu'on visait
+                  // « ALIX »), et tout ce qui ecoute change travaillait sur ce
+                  // fragment (creation de fiches personnage A, Al, Ali...).
+                  // Meme parade que ScriptEditorAC : neutraliser le mousedown,
+                  // le focus reste au champ, change ne part qu'a la vraie
+                  // validation (point-virgule choisi, Entree, sortie du champ).
+                  div.addEventListener("mousedown", function(e) { e.preventDefault(); });
                   div.addEventListener("click", function(e) { 
                       const chosen = this.getElementsByTagName("input")[0].value;
                       if(multi) {
@@ -18659,13 +18725,7 @@ openBoardPrintEpisodeChooser: () => {
         const actors = state.data.actors || [];
         const isSeries = state.currentProjectType === 'series';
         // Filtrer personnages : garder ceux qui apparaissent dans au moins une scène du scope OU sans filtrage si film
-        const charsInScope = isSeries ? allChars.filter(ch => {
-            return scenesScope.some(s => {
-                if(!s.perso) return false;
-                const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
-                return names.includes(ch.name.toUpperCase());
-            });
-        }) : allChars;
+        const charsInScope = isSeries ? allChars.filter(ch => scenesScope.some(s => FicheLinks.sceneHasChar(s, ch))) : allChars;
         if(charsInScope.length === 0) { Utils.toast('Aucun personnage à imprimer', 'warning'); return; }
         // Calcul des scènes par personnage (dans le scope)
         const allScenes = state.data.scenes || [];
@@ -18679,11 +18739,8 @@ openBoardPrintEpisodeChooser: () => {
             }
             return '#' + (allScenes.indexOf(s) + 1);
         };
-        const charScenes = (ch) => scenesScope.filter(s => {
-            if(!s.perso) return false;
-            const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
-            return names.includes(ch.name.toUpperCase());
-        });
+        // v580 : test par identifiant (sceneHasChar garde le nom en repli).
+        const charScenes = (ch) => scenesScope.filter(s => FicheLinks.sceneHasChar(s, ch));
         // Grouper par groupe
         const grouped = {};
         charsInScope.forEach(ch => {
@@ -18868,11 +18925,7 @@ openBoardPrintEpisodeChooser: () => {
             filteredActors = allActors.filter(a => {
                 const ch = linkedChar(a);
                 if(!ch) return false; // Q7 : non liés exclus en mode filtré
-                return scenesScope.some(s => {
-                    if(!s.perso) return false;
-                    const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
-                    return names.includes(ch.name.toUpperCase());
-                });
+                return scenesScope.some(s => FicheLinks.sceneHasChar(s, ch));
             });
         } else {
             filteredActors = allActors;
@@ -21482,9 +21535,16 @@ initCategoriesDragDrop: () => {
         
         {
             GroupDnD.init();
+            // Chantier 4 (v580) : les fiches qui n'apparaissent dans AUCUNE
+            // scene basculent dans le groupe automatique « Sans scène » —
+            // sauf exemption cochee sur la fiche (keepGroup). Groupe VIRTUEL :
+            // calcule au rendu, aucun enregistrement de groupe cree, pas une
+            // cible de glisser-deposer.
+            const sansScene = new Set();
+            if(FicheLinks.KIND4[type]) arr.forEach(item => { if(FicheLinks.isSansScene(type, item)) sansScene.add(item); });
             // Vue compacte : grille de petites cartes
             relevantGroups.forEach(grp => {
-                const itemsInGroup = arr.filter(item => item.group_id === grp.id);
+                const itemsInGroup = arr.filter(item => item.group_id === grp.id && !sansScene.has(item));
                 if(itemsInGroup.length > 0 || !isView) {
                     const section = document.createElement('div'); section.className = 'group-section' + (itemsInGroup.length ? '' : ' dnd-empty-target');
                     section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}${GroupDnD.delBtnHtml(type, grp.id, isView)}</div><div class="compact-cards-grid" data-dnd-coll="${type}" data-dnd-group="${grp.id}"></div>`;
@@ -21493,12 +21553,19 @@ initCategoriesDragDrop: () => {
                     container.appendChild(section);
                 }
             });
-            const noGroup = arr.filter(item => !item.group_id || !relevantGroups.find(g => g.id === item.group_id));
+            const noGroup = arr.filter(item => (!item.group_id || !relevantGroups.find(g => g.id === item.group_id)) && !sansScene.has(item));
             if(noGroup.length > 0) {
                 const section = document.createElement('div'); section.className = 'group-section';
                 section.innerHTML = `<div class="group-header text-sec">Non classé</div><div class="compact-cards-grid" data-dnd-coll="${type}" data-dnd-group=""></div>`;
                 const grid = section.querySelector('.compact-cards-grid');
                 CardModal.renderCompactCards(noGroup, type, grid);
+                container.appendChild(section);
+            }
+            if(sansScene.size > 0) {
+                const list = arr.filter(item => sansScene.has(item));
+                const section = document.createElement('div'); section.className = 'group-section';
+                section.innerHTML = `<div class="group-header text-sec" title="Fiches n'apparaissant dans aucune scène. Cochez « Classement manuel » sur la fiche pour les ranger ailleurs.">🚫 Sans scène (${list.length})</div><div class="compact-cards-grid"></div>`;
+                CardModal.renderCompactCards(list, type, section.querySelector('.compact-cards-grid'));
                 container.appendChild(section);
             }
         }
@@ -21767,6 +21834,7 @@ initCategoriesDragDrop: () => {
                 contentHtml += UI.renderShootDays('actor', item.id, '📅 Convoqué·e le');
                 contentHtml += UI.renderLent('actor', item.id);
                 contentHtml += UI.renderCost('actor', item.id);
+                contentHtml += FicheLinks.pinToggleHtml('actors', item, isView);
                 
                 } else if(type === 'locations') {
                 // === DÉCORS : Fiche enrichie ===
@@ -21832,6 +21900,7 @@ initCategoriesDragDrop: () => {
                 contentHtml += UI.renderCost('location', item.id);
                 
                 // Sélecteur de groupe pour les décors
+                contentHtml += FicheLinks.pinToggleHtml('locations', item, isView);
                 contentHtml += groupSelect;
             } else {
                 // PERSONNAGES (characters)
@@ -21872,6 +21941,7 @@ initCategoriesDragDrop: () => {
                     if(actor) contentHtml += `<div style="margin-top:5px;font-size:0.85rem;color:var(--primary)">🎭 ${Utils.escape(actor.name)}</div>`;
                 }
             }
+                if(type === 'characters') contentHtml += FicheLinks.pinToggleHtml('characters', item, isView);
                 contentHtml += groupSelect;
             }
             div.innerHTML = contentHtml; 
@@ -24034,14 +24104,16 @@ initCategoriesDragDrop: () => {
               return wantNames.includes(Utils.bdText(it).trim().toLowerCase());
           });
           return all.filter(s => {
+              // v580 : les liens par identifiant portes par la scene comptent
+              // toujours, qu'elle soit depouillee ou non.
+              if(kind === 'character' && Array.isArray(s.persoIds) && s.persoIds.includes(id)) return true;
+              if(kind === 'location' && s.locationId === id) return true;
+              if(kind === 'actor' && charIds.length && Array.isArray(s.persoIds) && s.persoIds.some(x => charIds.includes(x))) return true;
               if(!s.breakdown) {
                   // Repli pour une scene jamais depouillee : le champ perso du
                   // sequencier reste la seule trace des personnages.
-                  if(kind === 'character') {
-                      // v580 : l'identifiant fait foi, le nom reste en repli
-                      // pour une scene jamais migree.
-                      if(Array.isArray(s.persoIds) && s.persoIds.includes(id)) return true;
-                      if(s.perso) return s.perso.split(/[,;]/).map(n => n.trim().toLowerCase()).includes(nm);
+                  if(kind === 'character' && s.perso) {
+                      return s.perso.split(/[,;]/).map(n => n.trim().toLowerCase()).includes(nm);
                   }
                   return false;
               }
@@ -24052,8 +24124,8 @@ initCategoriesDragDrop: () => {
                   if(hitsIn(s.breakdown['PERSONNAGES'], charIds, charNames)) return true;
               }
               if(kind === 'character') {
-                  // v580 : identifiant d'abord, nom en repli.
-                  if(Array.isArray(s.persoIds) && s.persoIds.includes(id)) return true;
+                  // Le lien par identifiant est deja teste en tete du filtre ;
+                  // ne reste que le repli par nom.
                   if(s.perso && s.perso.split(/[,;]/).map(n => n.trim().toLowerCase()).includes(nm)) return true;
               }
               return false;
@@ -24574,8 +24646,9 @@ initCategoriesDragDrop: () => {
               }
               
               // Vérifier si des personnages sont devenus orphelins
-              if(sceneToDelete.perso) {
-                  const charNames = sceneToDelete.perso.split(/[,;]|\bet\b/i).map(n => n.trim().toUpperCase()).filter(n => n.length);
+              // v580 : les personnages de la scene sont lus par identifiant.
+              {
+                  const charNames = FicheLinks.charsOfScene(sceneToDelete).map(c => c.name);
                   const orphanChars = charNames.filter(name => !Actions.isCharacterUsed(name));
                   if(orphanChars.length > 0) {
                       setTimeout(() => Actions.askDeleteOrphanCharacters(orphanChars), 500); // Délai pour laisser la première modale se fermer
@@ -24698,7 +24771,11 @@ initCategoriesDragDrop: () => {
       
       // ===================== SYNCHRONISATION PERSONNAGES & LIEUX =====================
       syncCharacters: () => { const found = new Set(); state.data.scenes.forEach(s => { if(!s.perso) return; s.perso.split(/[,;]|\bet\b/i).map(n=>n.trim()).filter(n=>n.length).forEach(n=>found.add(n)); }); found.forEach(name => { if(!state.data.characters.find(c => c.name.toLowerCase() === name.toLowerCase())) state.data.characters.push({ id: 'char_' + Utils.generateUniqueId(), name: name, bio: "", group_id: "", gender: "" }); }); },
-      syncLocations: () => { const found = new Set(); state.data.scenes.forEach(s => { const parts = s.title.match(/^[^\.]+\.\s*(.+?)\s*-/); if(parts && parts[1]) found.add(parts[1].trim().toUpperCase()); }); found.forEach(locName => { if(!state.data.locations.find(l => l.name === locName)) state.data.locations.push({ id: 'loc_' + Utils.generateUniqueId(), name: locName, desc: "", group_id: "" }); }); },
+      // Chantier 3 (v580) : syncLocations CREAIT une fiche decor pour chaque
+      // lieu de titre — c'est fini, un decor ne nait que par le bouton
+      // « ➕ Décor ». La fonction ne fait plus que RELIER les scenes encore
+      // sans lien aux fiches existantes (idempotent, a l'ouverture de l'onglet).
+      syncLocations: () => { (state.data.scenes || []).forEach(s => { if(s && (s.locationId === undefined || s.locationId === null)) FicheLinks.resolveDecor(s); }); },
       
       // Vérifie si un lieu est utilisé dans d'autres scènes (exclut la scène passée en paramètre)
       isLocationUsed: (locationName, excludeSceneId = null) => {
@@ -24712,9 +24789,13 @@ initCategoriesDragDrop: () => {
       
       // Vérifie si un personnage est utilisé dans d'autres scènes (exclut la scène passée en paramètre)
       isCharacterUsed: (characterName, excludeSceneId = null) => {
-          const charUpper = characterName.toUpperCase();
+          // v580 : resolution nom -> fiche UNE fois, puis test par identifiant
+          // sur chaque scene (sceneHasChar garde le nom en repli).
+          const fiche = FicheLinks.findChar(characterName);
+          const charUpper = String(characterName || '').toUpperCase();
           return state.data.scenes.some(s => {
               if(excludeSceneId && (s.id === excludeSceneId || String(s.id) === String(excludeSceneId))) return false;
+              if(fiche) return FicheLinks.sceneHasChar(s, fiche);
               if(!s.perso) return false;
               const chars = s.perso.split(/[,;]|\bet\b/i).map(n => n.trim().toUpperCase());
               return chars.includes(charUpper);
@@ -24900,7 +24981,7 @@ initCategoriesDragDrop: () => {
           } 
       },
       addGroup: (type) => { 
-        const typeLabel = type === 'perso' ? 'personnages' : (type === 'actor' ? 'comédiens' : (type === 'org' ? 'structures' : (type === 'crew' ? 'techniciens' : 'lieux')));
+        const typeLabel = type === 'perso' ? 'personnages' : (type === 'actor' ? 'comédiens' : (type === 'org' ? 'structures' : (type === 'crew' ? 'techniciens' : (type === 'resource' ? 'ressources' : 'lieux'))));
         
         const modal = document.createElement('div');
         modal.id = 'add-group-modal';
@@ -24964,9 +25045,19 @@ initCategoriesDragDrop: () => {
         else if(type==='actor') UI.renderDataTab('actors', els.actorContainer); 
         else if(type==='org') Orgs.render(); 
         else if(type==='crew') UI.renderCrewTab(); 
+        else if(type==='resource') Resources.render(); 
         else UI.renderDataTab('locations', els.locContainer);
     },
-      changeGroup: (type, idx, gid) => { const k = { characters:'character', actors:'actor', locations:'location', crew:'crew', orgs:'org' }[type]; if(k && !Permissions.canEditFiche(k)) return; if(!state.data[type] || !state.data[type][idx]) return; state.data[type][idx].group_id = gid; Store.save(); if(type==='characters') UI.renderDataTab(type, els.charContainer); else if(type==='actors') UI.renderDataTab(type, els.actorContainer); else if(type==='orgs') Orgs.render(); else if(type==='crew') UI.renderCrewTab(); else UI.renderDataTab(type, els.locContainer); },
+      changeGroup: (type, idx, gid) => { const k = { characters:'character', actors:'actor', locations:'location', crew:'crew', orgs:'org', resources:'resource' }[type]; if(k && !Permissions.canEditFiche(k)) return; if(!state.data[type] || !state.data[type][idx]) return;
+          // Chantier 4 : une fiche sans scene reste dans « Sans scène » tant
+          // que l'exemption n'est pas cochee sur sa fiche. Le re-rendu remet
+          // le selecteur en place.
+          if(gid && FicheLinks.isSansScene(type, state.data[type][idx])) {
+              Utils.toast('Cette fiche n\'apparaît dans aucune scène : elle reste dans « Sans scène ». Cochez « 📌 Classement manuel » sur sa fiche pour la ranger ailleurs.', 'warning');
+              try { GroupDnD.rerender(type); } catch(e) {}
+              return;
+          }
+          state.data[type][idx].group_id = gid; Store.save(); if(type==='characters') UI.renderDataTab(type, els.charContainer); else if(type==='actors') UI.renderDataTab(type, els.actorContainer); else if(type==='orgs') Orgs.render(); else if(type==='crew') UI.renderCrewTab(); else if(type==='resources') Resources.render(); else UI.renderDataTab(type, els.locContainer); },
       // Vérifie si un profil public existe pour cet email et propose de le lier
       // ===================== LIAISON PROFILS PUBLICS =====================
       checkAndLinkPublicProfile: async (email, type, idx) => {
@@ -26638,7 +26729,8 @@ initCategoriesDragDrop: () => {
           if(!scene.breakdown) scene.breakdown = {};
           const locMatch = scene.title.match(/^(?:INT\.|EXT\.|I\/E)\s*([^\-]+)/i);
           if(locMatch && locMatch[1]) { const loc = locMatch[1].trim().toUpperCase(); if(!scene.breakdown["DECORS-LIEUX"]) scene.breakdown["DECORS-LIEUX"] = []; if(!scene.breakdown["DECORS-LIEUX"].some(it => Utils.bdSameText(it, loc))) scene.breakdown["DECORS-LIEUX"].push(Utils.bdItem(loc, "DECORS-LIEUX", Breakdown.linkFor(loc, "DECORS-LIEUX"))); }
-          if(scene.perso) { const names = scene.perso.split(/[,;]|\bet\b/i).map(n => n.trim()).filter(n => n.length > 0); if(!scene.breakdown["PERSONNAGES"]) scene.breakdown["PERSONNAGES"] = []; names.forEach(n => { if(!scene.breakdown["PERSONNAGES"].some(it => Utils.bdSameText(it, n))) scene.breakdown["PERSONNAGES"].push(Utils.bdItem(n, "PERSONNAGES", Breakdown.linkFor(n, "PERSONNAGES"))); }); }
+          // v580 : le depouillement herite des personnages PAR IDENTIFIANT.
+          { const persos = FicheLinks.charsOfScene(scene); if(persos.length) { if(!scene.breakdown["PERSONNAGES"]) scene.breakdown["PERSONNAGES"] = []; persos.forEach(ch => { if(!scene.breakdown["PERSONNAGES"].some(it => Utils.bdId(it) === ch.id || Utils.bdSameText(it, ch.name))) scene.breakdown["PERSONNAGES"].push(Utils.bdItem(ch.name, "PERSONNAGES", ch.id)); }); } }
       },
       renderLeft: (scene) => {
           const isFinal = scene.isFinal === true;
@@ -36111,9 +36203,22 @@ const DrawingEditor = {
           
           if(emptyState) emptyState.style.display = 'none';
           
-container.innerHTML = filtered.map(res => {
+          // v580 (demande de Guillaume) : MEME SYSTEME DE GROUPES que les
+          // autres onglets — sections par groupe (type 'resource'), Non
+          // classé, puis le groupe automatique « Sans scène » du chantier 4.
+          // Le conteneur perd sa classe grille : ce sont les sections qui
+          // portent chacune la leur, comme dans renderDataTab.
+          container.className = '';
+          const isView = state.currentRole === 'viewer' || (typeof Permissions !== 'undefined' && Permissions.canEdit && !Permissions.canEdit('resources'));
+          GroupDnD.init();
+          const relevantGroups = (state.data.groups || []).filter(g => g.type === 'resource');
+          const sans = new Set();
+          filtered.forEach(r => { if(FicheLinks.isSansScene('resources', r)) sans.add(r); });
+          const cardHtml = (res) => {
+              const idx = (state.data.resources || []).indexOf(res);
               const categoryLabels = { accessoire: '🎭 Accessoire', costume: '👔 Costume', vehicule: '🚗 Véhicule' };
               const photo = res.photo ? `<img src="${res.photo}" alt="${Utils.escape(res.name)}">` : '📦';
+              const dnd = isView ? '' : ` draggable="true" data-dnd-coll="resources" data-dnd-idx="${idx}"`;
               const actions = state.currentRole === 'viewer' ? '' : `
                   <div class="compact-card-actions">
                       <button class="edit-btn" onclick="event.stopPropagation(); app.Resources.edit('${res.id}')" title="Modifier">✏️</button>
@@ -36121,13 +36226,29 @@ container.innerHTML = filtered.map(res => {
                       <button class="delete-btn" onclick="event.stopPropagation(); app.Resources.delete('${res.id}')" title="Supprimer">🗑️</button>
                   </div>`;
               return `
-                  <div class="compact-card" data-category="${res.category}" onclick="app.Resources.edit('${res.id}')">
+                  <div class="compact-card" data-category="${res.category}"${dnd} onclick="app.Resources.edit('${res.id}')">
                       ${actions}
                       <div class="compact-card-photo">${photo}</div>
                       <div class="compact-card-name">${Utils.escape(res.name)}</div>
                       <div class="compact-card-role">${Utils.escape(categoryLabels[res.category] || res.category)}</div>
                   </div>`;
-          }).join('');
+          };
+          let html = '';
+          relevantGroups.forEach(grp => {
+              const inGroup = filtered.filter(r => r.group_id === grp.id && !sans.has(r));
+              if(inGroup.length > 0 || !isView) {
+                  html += `<div class="group-section${inGroup.length ? '' : ' dnd-empty-target'}"><div class="group-header">${Utils.escape(grp.name)}${GroupDnD.delBtnHtml('resources', grp.id, isView)}</div><div class="compact-cards-grid" data-dnd-coll="resources" data-dnd-group="${grp.id}">${inGroup.map(cardHtml).join('')}</div></div>`;
+              }
+          });
+          const noGroup = filtered.filter(r => (!r.group_id || !relevantGroups.find(g => g.id === r.group_id)) && !sans.has(r));
+          if(noGroup.length > 0 || relevantGroups.length === 0) {
+              html += `<div class="group-section"><div class="group-header text-sec">Non classé</div><div class="compact-cards-grid" data-dnd-coll="resources" data-dnd-group="">${noGroup.map(cardHtml).join('')}</div></div>`;
+          }
+          if(sans.size > 0) {
+              const list = filtered.filter(r => sans.has(r));
+              html += `<div class="group-section"><div class="group-header text-sec" title="Ressources n'apparaissant dans aucune scène. Cochez « Classement manuel » dans leur fiche pour les ranger ailleurs.">🚫 Sans scène (${list.length})</div><div class="compact-cards-grid">${list.map(cardHtml).join('')}</div></div>`;
+          }
+          container.innerHTML = html;
       },
       
       filter: (category) => {
@@ -36245,6 +36366,16 @@ container.innerHTML = filtered.map(res => {
                   <div>
                       <label class="label-bold">Description</label>
                       <textarea id="res-description" rows="3" class="n8-input-10" placeholder="Description détaillée...">${Utils.escape(resource?.description || '')}</textarea>
+                      ${resource && resource.id ? (() => {
+                          // v580 : meme selecteur de groupe que les autres fiches.
+                          // L'ecriture passe par Actions.changeGroup (droits +
+                          // garde « Sans scène » du chantier 4 compris).
+                          const rIdx = (state.data.resources || []).indexOf(resource);
+                          let opts = '<option value="">-- Groupe --</option>';
+                          (state.data.groups || []).filter(g => g.type === 'resource').forEach(g => { opts += `<option value="${g.id}" ${resource.group_id === g.id ? 'selected' : ''}>${Utils.escape(g.name)}</option>`; });
+                          return `<select class="group-select" style="margin-top:8px;" onchange="app.Actions.changeGroup('resources', ${rIdx}, this.value)">${opts}</select>`;
+                      })() : ''}
+                      ${resource && resource.id ? FicheLinks.pinToggleHtml('resources', resource, state.currentRole === 'viewer') : ''}
                   </div>
                   <div>
                       <label class="label-bold">Propriétaire</label>
@@ -43770,12 +43901,16 @@ doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
             // Séquences du jour où apparaît un personnage donné
             const seqsForCharacter = (charName) => {
                 if(!charName) return '';
+                // v580 : nom -> fiche une fois, puis test PAR IDENTIFIANT
+                // (sceneHasChar garde le nom en repli).
+                const fiche = FicheLinks.findChar(charName);
                 const needle = String(charName).toUpperCase();
                 return scenes.map(ref => {
                     const sc = allScenes.find(s => s.id === ref.sceneId);
                     if(!sc) return null;
-                    return String(sc.perso || '').toUpperCase().includes(needle)
-                        ? sceneLabel(sc).replace(/^#/, '') : null;
+                    const hit = fiche ? FicheLinks.sceneHasChar(sc, fiche)
+                        : String(sc.perso || '').toUpperCase().includes(needle);
+                    return hit ? sceneLabel(sc).replace(/^#/, '') : null;
                 }).filter(Boolean).join('  ');
             };
             // Un tableau de distribution AFAR pour une famille de groupes de comédiens
@@ -46834,11 +46969,10 @@ addSceneToDay: (sceneIdArg) => {
         Planning.tempShootDay.scenes.push({ sceneId: sceneId, startTime: '' });
         
         // Auto-add actors from this scene
-        if(scene.perso) {
-            const characterNames = scene.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
-            
-            characterNames.forEach(charName => {
-                const character = state.data.characters.find(c => c.name.toUpperCase() === charName);
+        // v580 : la scene connait ses personnages PAR IDENTIFIANT ;
+        // charsOfScene garde le nom en repli pour les donnees anciennes.
+        {
+            FicheLinks.charsOfScene(scene).forEach(character => {
                 if(character && character.actor_id) {
                     // Check if already in callsheet
                     const alreadyAdded = Planning.tempShootDay.callSheet.some(c => c.personId === character.actor_id && c.type === 'actor');
@@ -46862,11 +46996,10 @@ addSceneToDay: (sceneIdArg) => {
         
         // Auto-remplir le lieu depuis la scène (première scène ajoutée uniquement)
         if(Planning.tempShootDay.scenes.length === 1) {
-            // Extraire le lieu du titre de la scène (format: "INT. LIEU - JOUR")
-            const locMatch = scene.title.match(/^(?:INT\.|EXT\.|I\/E)\s*([^\-]+)/i);
-            if(locMatch && locMatch[1]) {
-                const locName = locMatch[1].trim().toUpperCase();
-                const loc = state.data.locations.find(l => l.name.toUpperCase() === locName);
+            // v580 : le lien decor de la scene (identifiant) fait foi ;
+            // locOfScene ne decoupe le titre qu'en repli.
+            {
+                const loc = FicheLinks.locOfScene(scene);
                 
                 if(loc) {
                     // Meme regle que pickLocation : on pose le lien et le nom
@@ -46914,12 +47047,12 @@ addSceneToDay: (sceneIdArg) => {
             const scene = state.data.scenes.find(s => s.id === sceneRef.sceneId || String(s.id) === String(sceneRef.sceneId));
             if(!scene) return;
             
-            // Acteurs via perso
+            // Acteurs via perso — v580 : par identifiants (charsOfScene garde
+            // le nom en repli). Reste le cas historique du nom de COMEDIEN
+            // ecrit en direct dans le champ perso.
+            FicheLinks.charsOfScene(scene).forEach(ch => { if(ch && ch.actor_id) neededActorIds.add(ch.actor_id); });
             if(scene.perso) {
-                const characterNames = scene.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
-                characterNames.forEach(charName => {
-                    const character = state.data.characters?.find(c => c.name.toUpperCase() === charName);
-                    if(character && character.actor_id) neededActorIds.add(character.actor_id);
+                scene.perso.split(/[,;]/).map(n => n.trim().toUpperCase()).forEach(charName => {
                     const actor = state.data.actors?.find(a => a.name.toUpperCase() === charName);
                     if(actor) neededActorIds.add(actor.id);
                 });
@@ -47105,16 +47238,10 @@ addSceneToDay: (sceneIdArg) => {
             
             // 1. Chercher via le champ "perso" de la scène
             if(scene.perso) {
-                const characterNames = scene.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
-                
-                characterNames.forEach(charName => {
-                    // Chercher par personnage lié
-                    const character = state.data.characters?.find(c => c.name.toUpperCase() === charName);
-                    if(character && character.actor_id) {
-                        addActorToCallSheet(character.actor_id);
-                    }
-                    
-                    // Chercher aussi par nom d'acteur directement
+                // v580 : personnages par identifiant (charsOfScene garde le
+                // nom en repli) ; reste le nom de comedien ecrit en direct.
+                FicheLinks.charsOfScene(scene).forEach(ch => { if(ch && ch.actor_id) addActorToCallSheet(ch.actor_id); });
+                scene.perso.split(/[,;]/).map(n => n.trim().toUpperCase()).forEach(charName => {
                     const actor = state.data.actors?.find(a => a.name.toUpperCase() === charName);
                     if(actor) {
                         addActorToCallSheet(actor.id);
@@ -49922,10 +50049,10 @@ const Stats = {
           
           // 5. Apparitions en scène par genre
           const appearCounts = newCounts();
+          // v580 : apparitions comptees par identifiant de fiche.
           scenes.forEach(s => {
-              if(!s.perso) return;
-              s.perso.split(/[,;]/).map(n => n.trim().toUpperCase()).filter(n => n.length).forEach(n => {
-                  appearCounts[genderByName[n] || 'Non renseigné']++;
+              FicheLinks.charsOfScene(s).forEach(ch => {
+                  appearCounts[genderByName[String(ch.name || '').trim().toUpperCase()] || 'Non renseigné']++;
               });
           });
           Stats._paritePie('chart-parite-scenes', 'pariteScenes', appearCounts);
@@ -71772,20 +71899,161 @@ const FicheLinks = {
 
     // DECOR : pose s.locationId depuis le decor effectif de la scene
     // (surcharge explicite s.location, sinon titre — c'est PlanningFDS.decor
-    // qui arbitre, comme partout). opts.create : cree la fiche absente, meme
-    // comportement que syncLocations aujourd'hui (reserve a la migration).
-    // Le mot LIEU du titre par defaut n'est pas un decor : jamais de fiche.
-    resolveDecor: (scene, opts) => {
+    // qui arbitre, comme partout). CHANTIER 3 (v580) : cette resolution NE
+    // CREE PLUS JAMAIS de fiche — un meme decor peut servir plusieurs lieux
+    // de scene, la creation est un geste explicite (bouton « ➕ Décor »).
+    // Le mot LIEU du titre par defaut n'est pas un decor : jamais de lien.
+    resolveDecor: (scene) => {
         if(!scene) return;
         const name = String(PlanningFDS.decor(scene) || '').trim();
         if(!name || name.toUpperCase() === 'LIEU') { scene.locationId = null; return; }
-        let l = FicheLinks.findLoc(name);
-        if(!l && opts && opts.create) {
-            if(!Array.isArray(state.data.locations)) state.data.locations = [];
-            l = { id: 'loc_' + Utils.generateUniqueId(), name: name.toUpperCase(), desc: "", group_id: "" };
-            state.data.locations.push(l);
-        }
+        const l = FicheLinks.findLoc(name);
         scene.locationId = l ? l.id : null;
+    },
+
+    // CREATION EXPLICITE d'un decor (chantier 3). Retourne la fiche (ou
+    // l'existante si le nom est deja pris — jamais de doublon). Relie au
+    // passage les scenes encore sans lien dont le decor porte ce nom.
+    createDecor: (name) => {
+        const t = String(name || '').trim();
+        if(!t || t.toUpperCase() === 'LIEU') return null;
+        const existed = FicheLinks.findLoc(t);
+        if(existed) return existed;
+        if(!Array.isArray(state.data.locations)) state.data.locations = [];
+        const l = { id: 'loc_' + Utils.generateUniqueId(), name: t.toUpperCase(), desc: "", group_id: "" };
+        state.data.locations.push(l);
+        History.log('ADD', `Ajout décor : ${l.name}`, { target: { kind: 'location', id: l.id, label: l.name }, link: { kind: 'location', id: l.id } });
+        (state.data.scenes || []).forEach(s => {
+            if(s && (s.locationId === undefined || s.locationId === null)) FicheLinks.resolveDecor(s);
+        });
+        return l;
+    },
+
+    // Bouton « ➕ Décor » de la fiche scene : le lieu du champ en cours de
+    // saisie prime sur le titre enregistre (c'est lui que l'utilisateur
+    // vient de taper) ; le titre est committe si besoin par le meme geste
+    // que la validation du champ, et le selecteur 🏠 se rafraichit SANS
+    // fermer la fiche (demande explicite).
+    createDecorFromScene: (sceneId) => {
+        if(typeof Permissions !== 'undefined' && Permissions.canEditFiche && !Permissions.canEditFiche('location')) return;
+        const sc = (state.data.scenes || []).find(x => x && String(x.id) === String(sceneId));
+        if(!sc) return;
+        const inp = document.getElementById('fsc-loc');
+        const tp = Utils.sceneTitleParts(sc.title);
+        const name = String((inp && inp.value) || tp.loc || '').trim();
+        if(!name || name.toUpperCase() === 'LIEU') { Utils.toast('Entrez d\'abord un lieu.', 'warning'); return; }
+        const existed = FicheLinks.findLoc(name);
+        const l = existed || FicheLinks.createDecor(name);
+        if(!l) return;
+        if(inp && String(inp.value || '').trim() && String(inp.value).trim().toUpperCase() !== String(tp.loc || '').toUpperCase()) {
+            // Le champ porte un lieu pas encore valide : on le committe, et
+            // setSceneTitlePart resout le lien en trouvant la fiche neuve.
+            CardModal.setSceneTitlePart(String(sc.id), 'loc', inp.value);
+        } else {
+            sc.locationId = l.id;
+            Store.save();
+        }
+        FicheLinks.refreshDecorSelect(sc);
+        try { GroupDnD.rerender('locations'); } catch(e) {}
+        Utils.toast(existed ? `Décor « ${l.name} » existait déjà : lié à la scène.` : `Décor « ${l.name} » créé et lié à la scène.`, 'success');
+    },
+
+    // Bouton « ➕ Décor » de la modale BeatBoard : la scene n'existe pas
+    // encore, on ne cree que la fiche — le lien se posera a l'ajout de la
+    // scene (resolveDecor de la fabrique la trouvera).
+    createDecorFromBeatBoard: () => {
+        if(typeof Permissions !== 'undefined' && Permissions.canEditFiche && !Permissions.canEditFiche('location')) return;
+        const inp = document.getElementById('bb-inpLoc');
+        const name = inp ? String(inp.value || '').trim() : '';
+        if(!name) { Utils.toast('Entrez d\'abord un lieu.', 'warning'); return; }
+        const existed = FicheLinks.findLoc(name);
+        const l = existed || FicheLinks.createDecor(name);
+        if(!l) return;
+        Store.save();
+        Utils.toast(existed ? `Décor « ${l.name} » existe déjà.` : `Décor « ${l.name} » créé.`, 'success');
+    },
+
+    // Reconstruit le selecteur 🏠 Décor de la fiche scene en place — memes
+    // options et meme selection que le rendu d'origine de la fiche.
+    refreshDecorSelect: (sc) => {
+        const sel = document.getElementById('fsc-decor');
+        if(!sel || !sc) return;
+        const decor = PlanningFDS.decor(sc);
+        const names = (state.data.locations || []).map(l => l.name).filter(Boolean);
+        if(decor && !names.includes(decor)) names.unshift(decor);
+        sel.innerHTML = '<option value="">-- déduit du titre --</option>' + names.map(n => `<option value="${Utils.escape(n)}" ${decor === n ? 'selected' : ''}>${Utils.escape(n)}</option>`).join('');
+    },
+
+    // ===== LECTURES PAR IDENTIFIANT (audit v580 : « tout par id ») =====
+    // La scene connait ses fiches par identifiant ; le nom ne sert plus que
+    // de repli pour une donnee jamais migree. Ces trois lecteurs remplacent
+    // les comparaisons de noms dispersees dans le fichier.
+    sceneHasChar: (scene, ch) => {
+        if(!scene || !ch) return false;
+        if(ch.id && Array.isArray(scene.persoIds) && scene.persoIds.includes(ch.id)) return true;
+        const nm = String(ch.name || '').trim().toLowerCase();
+        if(!nm || !scene.perso) return false;
+        return scene.perso.split(/[,;]|\bet\b/i).map(n => n.trim().toLowerCase()).includes(nm);
+    },
+    charsOfScene: (scene) => {
+        if(!scene) return [];
+        const out = [];
+        if(Array.isArray(scene.persoIds)) {
+            scene.persoIds.forEach(cid => { const c = (state.data.characters || []).find(x => x && x.id === cid); if(c && !out.includes(c)) out.push(c); });
+        }
+        // Repli : noms du champ perso que les ids ne couvrent pas (donnee ancienne).
+        FicheLinks.splitNames(scene.perso).forEach(n => { const c = FicheLinks.findChar(n); if(c && !out.includes(c)) out.push(c); });
+        return out;
+    },
+    locOfScene: (scene) => {
+        if(!scene) return null;
+        if(scene.locationId) {
+            const l = (state.data.locations || []).find(x => x && x.id === scene.locationId);
+            if(l) return l;
+        }
+        return FicheLinks.findLoc(PlanningFDS.decor(scene));
+    },
+
+    // ===== CHANTIER 4 : GROUPE AUTOMATIQUE « SANS SCENE » =====
+    // Une fiche (personnage, comedien, decor, ressource) qui n'apparait dans
+    // aucune scene bascule dans un groupe automatique de son onglet, pour
+    // etre retrouvee et supprimee facilement. Elle ne peut pas etre rangee
+    // ailleurs tant qu'elle est sans scene — sauf a cocher l'exemption
+    // « Classement manuel » (item.keepGroup) sur sa fiche.
+    inAnyScene: (kind, id) => {
+        if(!kind || !id) return true; // dans le doute, ne jamais sequestrer.
+        try { return (UI.scenesForFiche(kind, id) || []).length > 0; }
+        catch(e) { return true; }
+    },
+
+    // La collection -> la famille de fiche, pour les quatre onglets vises.
+    KIND4: { characters: 'character', actors: 'actor', locations: 'location', resources: 'resource' },
+
+    // Vrai si la fiche doit etre sequestree dans « Sans scène ».
+    isSansScene: (coll, item) => {
+        const kind = FicheLinks.KIND4[coll];
+        if(!kind || !item || !item.id || item.keepGroup) return false;
+        return !FicheLinks.inAnyScene(kind, item.id);
+    },
+
+    setKeepGroup: (coll, id, val) => {
+        const kind = FicheLinks.KIND4[coll];
+        if(kind && typeof Permissions !== 'undefined' && Permissions.canEditFiche && !Permissions.canEditFiche(kind)) return;
+        const it = (state.data[coll] || []).find(x => x && x.id === id);
+        if(!it) return;
+        if(val) it.keepGroup = true; else delete it.keepGroup;
+        Store.save();
+        if(coll === 'resources') { try { Resources.render(); } catch(e) {} }
+        else { try { GroupDnD.rerender(coll); } catch(e) {} }
+    },
+
+    // Case « Classement manuel », affichee sur la fiche quand elle est sans
+    // scene (ou deja exemptee, pour pouvoir decocher).
+    pinToggleHtml: (coll, item, isView) => {
+        const kind = FicheLinks.KIND4[coll];
+        if(!kind || !item || !item.id || isView) return '';
+        if(!item.keepGroup && FicheLinks.inAnyScene(kind, item.id)) return '';
+        return `<label style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:0.8rem; color:var(--text-sec); cursor:pointer;" onclick="event.stopPropagation()"><input type="checkbox" ${item.keepGroup ? 'checked' : ''} onchange="app.FicheLinks.setKeepGroup('${coll}', '${Utils.escape(String(item.id))}', this.checked)"> 📌 Classement manuel (ne pas ranger dans « Sans scène »)</label>`;
     },
 
     // MIGRATION, idempotente, appelee au chargement du projet juste apres
@@ -71799,7 +72067,10 @@ const FicheLinks = {
                 if(!s) return;
                 let touched = false;
                 if(!Array.isArray(s.persoIds)) { FicheLinks.syncIdsFromText(s); touched = true; }
-                if(s.locationId === undefined) { FicheLinks.resolveDecor(s, { create: true }); touched = true; }
+                // Chantier 3 : la migration LIE aux fiches existantes, elle
+                // n'en cree plus (les projets anciens ont deja leurs decors,
+                // crees par syncLocations a chaque ouverture de l'onglet).
+                if(s.locationId === undefined) { FicheLinks.resolveDecor(s); touched = true; }
                 if(touched) n++;
             });
         } catch(e) { console.warn('FicheLinks.migrate:', e); }
@@ -72040,7 +72311,10 @@ const CardModal = {
                 </div>
                 <div class="autocomplete-wrapper" style="position:relative; margin-bottom:0;">
                     <label class="form-label-block">Décor (titre)</label>
-                    <input class="actor-input" id="fsc-loc" placeholder="LIEU" value="${Utils.escape(tp.loc)}" onchange="app.CardModal.setSceneTitlePart('${Utils.escape(String(sc.id))}','loc',this.value)" ${dis}>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <input class="actor-input" id="fsc-loc" placeholder="LIEU" style="flex:1; min-width:0;" value="${Utils.escape(tp.loc)}" onchange="app.CardModal.setSceneTitlePart('${Utils.escape(String(sc.id))}','loc',this.value)" ${dis}>
+                        <button type="button" class="btn btn--primary btn--sm" title="Enregistrer ce lieu comme nouveau décor et le lier à la scène" onclick="app.FicheLinks.createDecorFromScene('${Utils.escape(String(sc.id))}')" ${dis}>➕ Décor</button>
+                    </div>
                     <div id="fsc-loc-ac" class="autocomplete-list ac-fiche"></div>
                 </div>
                 <div>
@@ -72060,7 +72334,7 @@ const CardModal = {
                 </div>
             </div>
             <label class="form-label-block">🏠 Décor</label>
-            <select class="actor-input" onchange="app.CardModal.setSceneField('${Utils.escape(String(sc.id))}', 'location', this.value)" ${dis} style="margin-bottom:10px;">
+            <select class="actor-input" id="fsc-decor" onchange="app.CardModal.setSceneField('${Utils.escape(String(sc.id))}', 'location', this.value)" ${dis} style="margin-bottom:10px;">
                 <option value="">-- déduit du titre --</option>
                 ${names.map(n => `<option value="${Utils.escape(n)}" ${decor === n ? 'selected' : ''}>${Utils.escape(n)}</option>`).join('')}
             </select>
@@ -74433,13 +74707,7 @@ const FichesPDF = {
         }
         
         // Filtrer personnages : si série + saisons choisies, ne garder que ceux qui apparaissent
-        const charsInScope = isSeries ? allChars.filter(ch => {
-            return scenesScope.some(s => {
-                if(!s.perso) return false;
-                const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
-                return names.includes(ch.name.toUpperCase());
-            });
-        }) : allChars;
+        const charsInScope = isSeries ? allChars.filter(ch => scenesScope.some(s => FicheLinks.sceneHasChar(s, ch))) : allChars;
         
         if(charsInScope.length === 0) {
             Utils.toast('Aucun personnage à exporter dans cette sélection', 'warning');
@@ -74457,11 +74725,8 @@ const FichesPDF = {
             }
             return '#' + (allScenes.indexOf(s) + 1);
         };
-        const charScenes = (ch) => scenesScope.filter(s => {
-            if(!s.perso) return false;
-            const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
-            return names.includes(ch.name.toUpperCase());
-        });
+        // v580 : test par identifiant (sceneHasChar garde le nom en repli).
+        const charScenes = (ch) => scenesScope.filter(s => FicheLinks.sceneHasChar(s, ch));
         
         // Précharger toutes les photos en parallèle (depuis les acteurs liés)
         Utils.toast('Préparation des photos...', 'info');
@@ -74822,11 +75087,7 @@ const FichesPDF = {
         const actorsInScope = isSeries ? allActors.filter(a => {
             const linked = allChars.find(c => c.actor_id === a.id);
             if(!linked) return true; // Comédiens sans rôle assigné : on les garde
-            return scenesScope.some(s => {
-                if(!s.perso) return false;
-                const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
-                return names.includes(linked.name.toUpperCase());
-            });
+            return scenesScope.some(s => FicheLinks.sceneHasChar(s, linked));
         }) : allActors;
         
         if(actorsInScope.length === 0) {
@@ -74842,11 +75103,8 @@ const FichesPDF = {
             return found ? found.label : val;
         };
         const getLinkedChar = (a) => allChars.find(c => c.actor_id === a.id) || null;
-        const charScenes = (ch) => scenesScope.filter(s => {
-            if(!s.perso) return false;
-            const names = s.perso.split(/[,;]/).map(n => n.trim().toUpperCase());
-            return names.includes(ch.name.toUpperCase());
-        });
+        // v580 : test par identifiant (sceneHasChar garde le nom en repli).
+        const charScenes = (ch) => scenesScope.filter(s => FicheLinks.sceneHasChar(s, ch));
         const collabLabel = (c) => ({ pro: 'Pro', 'semi-pro': 'Semi-pro', benevole: 'Bénévole' }[c] || '');
         
         // Précharger toutes les photos en parallèle
@@ -77337,6 +77595,7 @@ const Weather = {
                       <input id="bb-inpPre" placeholder="INT" value="INT" style="width:60px; padding:10px; border:1px solid var(--border); border-radius:6px; background:var(--input-bg); color:var(--text-main);">
                       <span style="display:flex; align-items:center;">.</span>
                       <input id="bb-inpLoc" placeholder="LIEU" style="flex:1; padding:10px; border:1px solid var(--border); border-radius:6px; background:var(--input-bg); color:var(--text-main);">
+                      <button type="button" class="btn btn--primary btn--sm" title="Enregistrer ce lieu comme nouveau décor" onclick="app.FicheLinks.createDecorFromBeatBoard()">➕ Décor</button>
                       <span style="display:flex; align-items:center;">-</span>
                       <input id="bb-inpSuff" placeholder="JOUR" value="JOUR" style="width:80px; padding:10px; border:1px solid var(--border); border-radius:6px; background:var(--input-bg); color:var(--text-main);">
                   </div>
