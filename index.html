@@ -4379,6 +4379,21 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
     .fid-cols { grid-template-columns: 1fr; }
     .fid-col + .fid-col { border-left: none; border-top: 1px solid var(--border); }
   }
+  /* --- BRIQUES REPLIABLES (v581) : chaque partie d'une fiche est un carre
+     gris a en-tete cliquable (replie/deplie), reparti par le moteur
+     d'equilibrage FicheBlocks. --- */
+  .fid-blocks { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; padding: 16px; }
+  .fid-blocks .fid-bcol { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+  .fid-block { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .fid-block-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 13px; cursor: pointer; user-select: none; }
+  .fid-block-title { font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .fid-block-chevron { color: var(--text-sec); font-size: 0.7rem; transition: transform 0.15s; flex: 0 0 auto; }
+  .fid-block.is-collapsed .fid-block-chevron { transform: rotate(-90deg); }
+  .fid-block-body { padding: 0 13px 13px; }
+  .fid-block.is-collapsed .fid-block-body { display: none; }
+  .fid-block .fid-field:last-child { margin-bottom: 0; }
+  .fid-block .appearances-section { border-top: none; padding-top: 0; margin: 0; }
+  @media (max-width: 700px) { .fid-blocks { grid-template-columns: 1fr; } }
   .data-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
   .data-desc { height: 80px; font-size: 0.9rem; resize: none; }
   .group-select { font-size: 0.8rem; padding: 4px; margin-top: 5px; border-radius: 4px; }
@@ -21562,17 +21577,10 @@ initCategoriesDragDrop: () => {
 
             let contentHtml = '';
             if (type === 'actors') {
-                // COMEDIEN — gabarit fiche d'identite universelle (v581).
-                // Fiche riche : colonne gauche en petites sections titrees
-                // (Identite, Contact, puis les blocs existants Physique,
-                // Galerie, Bande demo, Cachet, Disponibilites, Vehicule —
-                // memes donnees, memes branchements). Un profil revendique
-                // (publicProfileId) reste verrouille : isReadOnly.
+                // COMEDIEN — briques repliables equilibrees (v581).
                 const isLocked = !!item.publicProfileId;
                 const isReadOnly = isView || isLocked;
                 div.classList.add('fid-card');
-
-                // Trouver le personnage que cet acteur joue
                 const linkedCharacter = state.data.characters.find(c => c.actor_id === item.id);
                 const isInContacts = state.contacts && state.contacts.actors && state.contacts.actors.some(c => c.id === item.id);
                 const starBtn = !isView ? `<button class="save-contact-btn ${isInContacts ? 'saved' : ''}" onclick="event.stopPropagation(); app.Contacts.saveActorToContacts(${idx})" title="${isInContacts ? 'Déjà dans vos contacts' : 'Sauvegarder dans contacts'}">${isInContacts ? '⭐' : '☆'}</button>` : '';
@@ -21583,241 +21591,143 @@ initCategoriesDragDrop: () => {
                     onchangeAttr: isReadOnly ? '' : `onchange="app.Actions.updateActorMeta(${idx}, 'name', this.value)"`,
                     badgesHtml: lockedBadge + starBtn, delBtnHtml: delBtn
                 });
-                contentHtml += `<div class="fid-cols"><div class="fid-col">`;
-                contentHtml += FicheUI.secTitle('Identité');
-                contentHtml += FicheUI.field('Sexe', `<select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'gender', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                    ${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(item.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                </select>`);
+                const blocks = [];
+
+                // Brique « Dans le projet » — epinglee en haut a droite.
+                let projHtml = UI.renderAppearances('actor', item.id, '🎬 Joue dans', 'Ne joue dans aucune scène');
+                let roleHtml;
+                if(linkedCharacter) roleHtml = `<div style="color:var(--primary);">🎭 <strong>${Utils.escape(linkedCharacter.name)}</strong></div>`;
+                else roleHtml = `<div style="color:var(--text-sec); font-style:italic;">Aucun personnage lié — le lien se fait depuis la fiche personnage</div>`;
+                projHtml += FicheUI.field('Interprète', roleHtml);
+                projHtml += UI.renderShootDays('actor', item.id, '📅 Convoqué·e le');
+                projHtml += UI.renderLent('actor', item.id);
+                projHtml += UI.renderCost('actor', item.id);
+                blocks.push(FicheUI.block('actor', 'projet', '🎬 Dans le projet', projHtml, { pin: 'right' }));
+
+                // Brique « Identité » : sexe + photo.
+                let idHtml = FicheUI.field('Sexe', `<select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'gender', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(item.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>`);
                 if(!isReadOnly) {
                     const photoBtnLabel = item.photo ? '🖼️ Changer la photo' : '📤 Importer une photo';
-                    contentHtml += `<div class="fid-field"><div class="flex-gap10" style="align-items:center;">
+                    idHtml += `<div class="fid-field"><div class="flex-gap10" style="align-items:center;">
                         <input type="file" id="actor-photo-input-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.uploadActorPhoto(${idx}, this)">
                         <button onclick="document.getElementById('actor-photo-input-${idx}').click()" class="btn btn--primary btn--sm" style="flex:0 0 auto;">${photoBtnLabel}</button>
                         ${item.photo ? `<button onclick="app.Actions.updateActorMeta(${idx}, 'photo', '')" class="btn-icon-sm" title="Supprimer la photo" style="background:var(--danger); color:white; border:none; border-radius:6px; padding:6px 10px; cursor:pointer;">✕</button>` : ''}
                     </div></div>`;
                 }
+                idHtml += FicheLinks.pinToggleHtml('actors', item, isView);
+                blocks.push(FicheUI.block('actor', 'identite', '🪪 Identité', idHtml));
 
-                // Section Contact — champs etiquette au-dessus + valeur
-                // (fini les champs muets au placeholder), memes branchements.
-                contentHtml += `<div style="margin-bottom:12px; padding:12px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
-                    <strong class="form-label-block">📇 Contact</strong>`;
-                contentHtml += FicheUI.field('Email', `<input class="actor-input" value="${Utils.escape(item.email||'')}" onchange="app.Actions.updateActorMeta(${idx}, 'email', this.value)" ${isReadOnly?'disabled':''}>`);
-                contentHtml += FicheUI.field('Téléphone', `<input class="actor-input" value="${Utils.escape(item.phone||'')}" onchange="app.Actions.updateActorMeta(${idx}, 'phone', this.value)" ${isReadOnly?'disabled':''}>`);
-                contentHtml += FicheUI.field('Ville / Région', `<input class="actor-input" list="city-suggestions" value="${Utils.escape(item.city||'')}" oninput="app.Geo.suggestCities(this)" onchange="app.Actions.updateActorMeta(${idx}, 'city', this.value)" ${isReadOnly?'disabled':''}>`);
-                contentHtml += FicheUI.field('Site web', `<input class="actor-input" value="${Utils.escape(item.website||'')}" onchange="app.Actions.updateActorMeta(${idx}, 'website', this.value)" ${isReadOnly?'disabled':''}>`);
-                contentHtml += FicheUI.field('Adresse / notes', `<textarea class="data-desc" style="min-height:50px;" oninput="app.Actions.updateActorMeta(${idx}, 'address', this.value)" ${isReadOnly?'disabled':''}>${Utils.escape(item.address || '')}</textarea>`);
-                contentHtml += `</div>`;
+                // Brique « Contact ».
+                let contactHtml = FicheUI.field('Email', `<input class="actor-input" value="${Utils.escape(item.email||'')}" onchange="app.Actions.updateActorMeta(${idx}, 'email', this.value)" ${isReadOnly?'disabled':''}>`);
+                contactHtml += FicheUI.field('Téléphone', `<input class="actor-input" value="${Utils.escape(item.phone||'')}" onchange="app.Actions.updateActorMeta(${idx}, 'phone', this.value)" ${isReadOnly?'disabled':''}>`);
+                contactHtml += FicheUI.field('Ville / Région', `<input class="actor-input" list="city-suggestions" value="${Utils.escape(item.city||'')}" oninput="app.Geo.suggestCities(this)" onchange="app.Actions.updateActorMeta(${idx}, 'city', this.value)" ${isReadOnly?'disabled':''}>`);
+                contactHtml += FicheUI.field('Site web', `<input class="actor-input" value="${Utils.escape(item.website||'')}" onchange="app.Actions.updateActorMeta(${idx}, 'website', this.value)" ${isReadOnly?'disabled':''}>`);
+                contactHtml += FicheUI.field('Adresse / notes', `<textarea class="data-desc" style="width:100%; min-height:50px;" oninput="app.Actions.updateActorMeta(${idx}, 'address', this.value)" ${isReadOnly?'disabled':''}>${Utils.escape(item.address || '')}</textarea>`);
+                blocks.push(FicheUI.block('actor', 'contact', '📇 Contact', contactHtml));
 
-                // Section Description physique (vérifier visibilité)
+                // Brique « Description physique ».
                 if(UI.isSectionVisibleForProject(item, 'physical')) {
-                contentHtml += `<div class="actor-physical-section info-box">
-                    <strong class="form-label-block">📏 Description physique</strong>
-                    <div class="actor-input-row mb-8">
+                    let phHtml = `<div class="actor-input-row mb-8">
                         <input class="actor-input" type="number" placeholder="Taille (cm)" value="${Utils.escape(item.height || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'height', this.value)" ${isReadOnly ? 'disabled' : ''}>
                         <input class="actor-input" type="number" placeholder="Poids (kg)" value="${Utils.escape(item.weight || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'weight', this.value)" ${isReadOnly ? 'disabled' : ''}>
                         <input class="actor-input" type="number" placeholder="Âge" value="${Utils.escape(item.age || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'age', this.value)" ${isReadOnly ? 'disabled' : ''}>
                     </div>
                     <div class="actor-input-row mb-8">
-                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'eyeColor', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                            ${ProfileRenderer.selectOptions.eyeColor.map(o => '<option value="'+o.value+'" '+(item.eyeColor === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                        </select>
-                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'hairColor', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                            ${ProfileRenderer.selectOptions.hairColor.map(o => '<option value="'+o.value+'" '+(item.hairColor === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                        </select>
-                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'hairLength', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                            ${ProfileRenderer.selectOptions.hairLength.map(o => '<option value="'+o.value+'" '+(item.hairLength === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                        </select>
+                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'eyeColor', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.eyeColor.map(o => '<option value="'+o.value+'" '+(item.eyeColor === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
+                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'hairColor', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.hairColor.map(o => '<option value="'+o.value+'" '+(item.hairColor === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
+                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'hairLength', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.hairLength.map(o => '<option value="'+o.value+'" '+(item.hairLength === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
                     </div>
                     <div class="actor-input-row mb-8">
-                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'corpulence', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                            ${ProfileRenderer.selectOptions.corpulence.map(o => '<option value="'+o.value+'" '+(item.corpulence === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                        </select>
-                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'ethnicity', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                            ${ProfileRenderer.selectOptions.ethnicity.map(o => '<option value="'+o.value+'" '+(item.ethnicity === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                        </select>
+                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'corpulence', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.corpulence.map(o => '<option value="'+o.value+'" '+(item.corpulence === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
+                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'ethnicity', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.ethnicity.map(o => '<option value="'+o.value+'" '+(item.ethnicity === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
                     </div>
                     <div class="actor-input-row">
                         <input class="actor-input" placeholder="Sports pratiqués (équitation, natation...)" value="${Utils.escape(item.sports || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'sports', this.value)" ${isReadOnly ? 'disabled' : ''}>
                         <input class="actor-input" placeholder="Langues parlées (français, anglais...)" value="${Utils.escape(item.languages || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'languages', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                    </div>
-                </div>`;
+                    </div>`;
+                    blocks.push(FicheUI.block('actor', 'physique', '📏 Description physique', phHtml));
                 }
-                
-                // Section Galerie Photos (vérifier visibilité)
+
+                // Brique « Galerie ».
                 if(UI.isSectionVisibleForProject(item, 'gallery')) {
-                const galleryPhotos = item.galleryPhotos || [];
-                const galleryHTML = galleryPhotos.map((url, i) => `
-                    <div style="position:relative; width:80px; height:80px;">
-                        <img src="${url}" alt="Photo de la galerie" style="width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--border);">
-                        ${!isReadOnly ? `<button onclick="app.Actions.removeActorGalleryPhoto(${idx}, ${i})" class="n8-avatar-3">✕</button>` : ''}
-                    </div>
-                `).join('');
-                
-                contentHtml += `<div class="info-box">
-                    <strong class="form-label-block">📸 Galerie Photos</strong>
-                    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
-                        ${galleryHTML || '<span style="color:var(--text-sec); font-size:0.85rem;">Aucune photo</span>'}
-                    </div>
-                    ${!isReadOnly ? `<div class="flex-gap10" style="align-items:center;">
-                        <input type="file" id="actor-gallery-input-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.addActorGalleryPhoto(${idx})">
-                        <button onclick="document.getElementById('actor-gallery-input-${idx}').click()" class="btn btn--primary btn--sm" ${galleryPhotos.length >= 3 ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>📤 Ajouter une photo${galleryPhotos.length > 0 ? ` (${galleryPhotos.length}/3)` : ''}</button>
-                    </div>` : ''}
-                </div>`;
+                    const galleryPhotos = item.galleryPhotos || [];
+                    const galleryHTML = galleryPhotos.map((url, i2) => `<div style="position:relative; width:80px; height:80px;"><img src="${Utils.safeMediaUrl(url)}" alt="Photo de la galerie" style="width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--border);">${!isReadOnly ? `<button onclick="app.Actions.removeActorGalleryPhoto(${idx}, ${i2})" class="n8-avatar-3">✕</button>` : ''}</div>`).join('');
+                    let galHtml = `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px;">${galleryHTML || '<span style="color:var(--text-sec); font-size:0.85rem;">Aucune photo</span>'}</div>
+                        ${!isReadOnly ? `<div class="flex-gap10" style="align-items:center;"><input type="file" id="actor-gallery-input-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.addActorGalleryPhoto(${idx})"><button onclick="document.getElementById('actor-gallery-input-${idx}').click()" class="btn btn--primary btn--sm" ${galleryPhotos.length >= 3 ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>📤 Ajouter une photo${galleryPhotos.length > 0 ? ` (${galleryPhotos.length}/3)` : ''}</button></div>` : ''}`;
+                    blocks.push(FicheUI.block('actor', 'galerie', '📸 Galerie photos', galHtml));
                 }
-                
-                // Section Bande Démo (vérifier visibilité)
+
+                // Brique « Bande démo ».
                 if(UI.isSectionVisibleForProject(item, 'demoreel')) {
-                contentHtml += `<div class="info-box">
-                    <strong class="form-label-block">🎬 Bande Démo</strong>
-                    <input class="actor-input" type="url" placeholder="URL YouTube ou Vimeo (https://...)" value="${Utils.escape(item.demoreel || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'demoreel', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                    ${item.demoreel ? `<div class="mt-10"><iframe src="${ProfileRenderer.getEmbedUrl(item.demoreel)}" width="100%" height="200" frameborder="0" allowfullscreen class="br-8"></iframe></div>` : ''}
-                </div>`;
+                    let demoHtml = `<input class="actor-input" type="url" placeholder="URL YouTube ou Vimeo (https://...)" value="${Utils.escape(item.demoreel || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'demoreel', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        ${item.demoreel ? `<div class="mt-10"><iframe src="${ProfileRenderer.getEmbedUrl(item.demoreel)}" width="100%" height="200" frameborder="0" allowfullscreen class="br-8"></iframe></div>` : ''}`;
+                    blocks.push(FicheUI.block('actor', 'demoreel', '🎬 Bande démo', demoHtml));
                 }
-                
-                // Bascule vers la colonne droite (equilibrage, 4 septembre) :
-                // Cachet, Disponibilites et Vehicule relevent de la
-                // collaboration sur LE projet, ils vivent a droite — sous les
-                // scenes, qui restent toujours EN HAUT a droite.
-                contentHtml += FicheLinks.pinToggleHtml('actors', item, isView);
-                contentHtml += `</div><div class="fid-col">`;
-                contentHtml += FicheUI.secTitle('Dans le projet');
-                // Le comedien herite des scenes du personnage qu'il interprete (7d).
-                contentHtml += UI.renderAppearances('actor', item.id, '🎬 Joue dans', 'Ne joue dans aucune scène');
-                let roleHtml;
-                if(linkedCharacter) roleHtml = `<div style="color:var(--primary);">🎭 <strong>${Utils.escape(linkedCharacter.name)}</strong></div>`;
-                else roleHtml = `<div style="color:var(--text-sec); font-style:italic;">Aucun personnage lié — le lien se fait depuis la fiche personnage</div>`;
-                contentHtml += FicheUI.field('Interprète', roleHtml);
-                contentHtml += UI.renderShootDays('actor', item.id, '📅 Convoqué·e le');
-                contentHtml += UI.renderLent('actor', item.id);
-                contentHtml += UI.renderCost('actor', item.id);
 
-                // Section Tarif pour les acteurs (vérifier visibilité)
+                // Brique « Cachet » + statut professionnel. Les lignes de tarif
+                // passent en flex-wrap pour tenir dans une colonne etroite.
                 if(UI.isSectionVisibleForProject(item, 'tarif')) {
-                const actorCurrencyOptions = (CONFIG.currencies || ['€', '$', '£', 'CHF']).map(c => `<option value="${c}" ${item.rateCurrency === c ? 'selected' : ''}>${c}</option>`).join('');
-                const actorRateTypeOptions = (CONFIG.rateTypes || ['Jour', 'Semaine', 'Forfait', 'Heure']).map(t => `<option value="${t}" ${item.rateType === t ? 'selected' : ''}>${t}</option>`).join('');
-                
-                const actorPayEst = Pay.estimates(item);
-                contentHtml += `<div class="actor-input-row mt-10">
-                    <input type="number" class="actor-input" placeholder="${actorPayEst.gross}" title="Salaire brut (ce que la personne annonce)" value="${Utils.escape(item.salaryGross || item.dailyRate || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'salaryGross', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                    <input type="number" class="actor-input" placeholder="${actorPayEst.net}" title="Salaire net (ce que la personne recevra) — le placeholder est une estimation depuis le brut" value="${Utils.escape(item.salaryNet || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'salaryNet', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                    <input type="number" class="actor-input" placeholder="${actorPayEst.budget}" title="Budget HT (coût total pour la production, frais de paye compris) — le placeholder est une estimation depuis le brut" value="${Utils.escape(item.salaryBudget || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'salaryBudget', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                </div>
-                <div class="actor-input-row" style="margin-top:6px; align-items:center;">
-                    <span class="text-sec" style="font-size:0.72rem; flex:1; min-width:0;">Brut · Net · Budget HT</span>
-                    <select class="actor-input" style="width:auto;" onchange="app.Actions.updateActorMeta(${idx}, 'rateCurrency', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                        ${actorCurrencyOptions}
-                    </select>
-                    <select class="actor-input" style="width:auto;" onchange="app.Actions.updateActorMeta(${idx}, 'rateType', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                        ${actorRateTypeOptions}
-                    </select>
-                    <label style="display:flex; align-items:center; gap:5px; cursor:pointer; white-space:nowrap;">
-                        <input type="checkbox" ${item.rateNegotiable ? 'checked' : ''} onchange="app.Actions.updateActorMeta(${idx}, 'rateNegotiable', this.checked)" ${isReadOnly ? 'disabled' : ''}>
-                        <span class="fs-085">🤝 Négociable</span>
-                    </label>
-                </div>`;
-                
-                // Section Statut professionnel
-                contentHtml += `<div style="margin-top:10px; padding:10px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
-                    <strong class="fs-09">📋 Statut professionnel</strong>
-                    <div class="actor-input-row mt-8">
-                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'professionalStatus', this.value); app.UI.renderDataTab('actors', els.actorContainer);" ${isReadOnly ? 'disabled' : ''}>
-                            ${ProfileRenderer.selectOptions.professionalStatus.map(o => '<option value="'+o.value+'" '+(item.professionalStatus === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                        </select>
+                    const actorCurrencyOptions = (CONFIG.currencies || ['€', '$', '£', 'CHF']).map(cx => `<option value="${cx}" ${item.rateCurrency === cx ? 'selected' : ''}>${cx}</option>`).join('');
+                    const actorRateTypeOptions = (CONFIG.rateTypes || ['Jour', 'Semaine', 'Forfait', 'Heure']).map(t => `<option value="${t}" ${item.rateType === t ? 'selected' : ''}>${t}</option>`).join('');
+                    const actorPayEst = Pay.estimates(item);
+                    let payHtml = `<div style="display:flex; flex-wrap:wrap; gap:6px;">
+                        <input type="number" class="actor-input" style="flex:1 1 90px; min-width:80px;" placeholder="${actorPayEst.gross}" title="Salaire brut (ce que la personne annonce)" value="${Utils.escape(item.salaryGross || item.dailyRate || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'salaryGross', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        <input type="number" class="actor-input" style="flex:1 1 90px; min-width:80px;" placeholder="${actorPayEst.net}" title="Salaire net (ce que la personne recevra) — estimation depuis le brut" value="${Utils.escape(item.salaryNet || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'salaryNet', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        <input type="number" class="actor-input" style="flex:1 1 90px; min-width:80px;" placeholder="${actorPayEst.budget}" title="Budget HT (coût total production) — estimation depuis le brut" value="${Utils.escape(item.salaryBudget || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'salaryBudget', this.value)" ${isReadOnly ? 'disabled' : ''}>
                     </div>
-                    ${item.professionalStatus === 'intermittent' ? `
-                    <div class="actor-input-row mt-8">
-                        <input class="actor-input" placeholder="N° Sécurité Sociale" value="${Utils.escape(item.numSecu || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'numSecu', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                        <input class="actor-input" placeholder="N° Congés Spectacles" value="${Utils.escape(item.numCongesSpectacles || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'numCongesSpectacles', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                    </div>` : ''}
-                    ${item.professionalStatus === 'micro-entrepreneur' ? `
-                    <div class="actor-input-row mt-8">
-                        <input class="actor-input" placeholder="N° SIRET" value="${Utils.escape(item.siret || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'siret', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                    </div>` : ''}
-                    
-                    <strong style="font-size: 0.9rem; display:block; margin-top:15px;">🤝 Type de collaboration</strong>
-                    <div class="collab-type-selector">
-                        <div class="collab-type-btn pro ${item.collabType === 'pro' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Actions.updateActorMeta(${idx}, 'collabType', 'pro'); app.UIData.renderDataTab('actors', els.actorContainer);` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
-                            🎬 Pro
-                        </div>
-                        <div class="collab-type-btn semi-pro ${item.collabType === 'semi-pro' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Actions.updateActorMeta(${idx}, 'collabType', 'semi-pro'); app.UIData.renderDataTab('actors', els.actorContainer);` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
-                            ⚡ Semi-pro
-                        </div>
-                        <div class="collab-type-btn benevole ${item.collabType === 'benevole' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Actions.updateActorMeta(${idx}, 'collabType', 'benevole'); app.UIData.renderDataTab('actors', els.actorContainer);` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>
-                            ❤️ Bénévole
-                        </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; align-items:center;">
+                        <span class="text-sec" style="font-size:0.72rem; flex:1 1 100%;">Brut · Net · Budget HT</span>
+                        <select class="actor-input" style="flex:0 0 auto; width:auto;" onchange="app.Actions.updateActorMeta(${idx}, 'rateCurrency', this.value)" ${isReadOnly ? 'disabled' : ''}>${actorCurrencyOptions}</select>
+                        <select class="actor-input" style="flex:0 0 auto; width:auto;" onchange="app.Actions.updateActorMeta(${idx}, 'rateType', this.value)" ${isReadOnly ? 'disabled' : ''}>${actorRateTypeOptions}</select>
+                        <label style="display:flex; align-items:center; gap:5px; cursor:pointer; white-space:nowrap;"><input type="checkbox" ${item.rateNegotiable ? 'checked' : ''} onchange="app.Actions.updateActorMeta(${idx}, 'rateNegotiable', this.checked)" ${isReadOnly ? 'disabled' : ''}><span class="fs-085">🤝 Négociable</span></label>
                     </div>
-                    <p class="text-sec-xs-mt8">
-                        ${item.collabType === 'pro' ? '💼 Contrat classique, horaires et tarifs standards' : 
-                          item.collabType === 'semi-pro' ? '🤝 Flexible sur les conditions mais rémunéré·e' : 
-                          item.collabType === 'benevole' ? '🎁 Pas de rémunération, défraiement repas + transport' : 
-                          'Sélectionnez votre type de collaboration préféré'}
-                    </p>
-                </div>`;
+                    <div style="margin-top:10px; padding:10px; background:var(--panel-bg); border-radius:8px; border:1px solid var(--border);">
+                        <strong class="fs-09">📋 Statut professionnel</strong>
+                        <div class="actor-input-row mt-8"><select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'professionalStatus', this.value); app.UI.renderDataTab('actors', els.actorContainer);" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.professionalStatus.map(o => '<option value="'+o.value+'" '+(item.professionalStatus === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select></div>
+                        ${item.professionalStatus === 'intermittent' ? `<div class="actor-input-row mt-8"><input class="actor-input" placeholder="N° Sécurité Sociale" value="${Utils.escape(item.numSecu || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'numSecu', this.value)" ${isReadOnly ? 'disabled' : ''}><input class="actor-input" placeholder="N° Congés Spectacles" value="${Utils.escape(item.numCongesSpectacles || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'numCongesSpectacles', this.value)" ${isReadOnly ? 'disabled' : ''}></div>` : ''}
+                        ${item.professionalStatus === 'micro-entrepreneur' ? `<div class="actor-input-row mt-8"><input class="actor-input" placeholder="N° SIRET" value="${Utils.escape(item.siret || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'siret', this.value)" ${isReadOnly ? 'disabled' : ''}></div>` : ''}
+                        <strong style="font-size:0.9rem; display:block; margin-top:15px;">🤝 Type de collaboration</strong>
+                        <div class="collab-type-selector">
+                            <div class="collab-type-btn pro ${item.collabType === 'pro' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Actions.updateActorMeta(${idx}, 'collabType', 'pro'); app.UIData.renderDataTab('actors', els.actorContainer);` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>🎬 Pro</div>
+                            <div class="collab-type-btn semi-pro ${item.collabType === 'semi-pro' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Actions.updateActorMeta(${idx}, 'collabType', 'semi-pro'); app.UIData.renderDataTab('actors', els.actorContainer);` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>⚡ Semi-pro</div>
+                            <div class="collab-type-btn benevole ${item.collabType === 'benevole' ? 'selected' : ''}" onclick="${!isReadOnly ? `app.Actions.updateActorMeta(${idx}, 'collabType', 'benevole'); app.UIData.renderDataTab('actors', els.actorContainer);` : ''}" ${isReadOnly ? 'style="pointer-events:none;opacity:0.6;"' : ''}>❤️ Bénévole</div>
+                        </div>
+                        <p class="text-sec-xs-mt8">${item.collabType === 'pro' ? '💼 Contrat classique, horaires et tarifs standards' : item.collabType === 'semi-pro' ? '🤝 Flexible sur les conditions mais rémunéré·e' : item.collabType === 'benevole' ? '🎁 Pas de rémunération, défraiement repas + transport' : 'Sélectionnez votre type de collaboration préféré'}</p>
+                    </div>`;
+                    blocks.push(FicheUI.block('actor', 'cachet', '💶 Cachet & statut', payHtml));
                 }
-                
-                // Section Disponibilités pour les acteurs (vérifier visibilité)
-                if(UI.isSectionVisibleForProject(item, 'calendar')) {
-                const actorAvailDates = item.availabilityDates || [];
-                const actorAvailDatesHTML = actorAvailDates.map((d, i) => `<span style="display:inline-flex; align-items:center; background:#E8F5E9; border:1px solid #4CAF50; color:#2E7D32; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✓ ${d.from} → ${d.to} ${!isReadOnly ? `<span onclick="app.Actions.removeActorAvailability(${idx}, ${i})" class="delete-link">✖</span>` : ''}</span>`).join('');
-                
-                // Indisponibilités
-                const actorUnavailDates = item.unavailabilityDates || [];
-                const actorUnavailDatesHTML = actorUnavailDates.map((d, i) => `<span style="display:inline-flex; align-items:center; background:#FFEBEE; border:1px solid #f44336; color:#C62828; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✗ ${d.from} → ${d.to} ${d.reason ? '(' + Utils.escape(d.reason) + ')' : ''} ${!isReadOnly ? `<span onclick="app.Actions.removeActorUnavailability(${idx}, ${i})" class="delete-link">✖</span>` : ''}</span>`).join('');
-                
-                contentHtml += `<div class="crew-availability-section mt-10">
-                    <strong class="fs-09">📅 Disponibilités & Indisponibilités</strong>
-                    <textarea class="actor-input" style="min-height: 50px; margin-top: 5px; width:100%;" placeholder="Situation / Notes de disponibilité..." onchange="app.Actions.updateActorMeta(${idx}, 'availabilityText', this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(item.availabilityText || '')}</textarea>
-                    <div id="actor-calendar-${idx}"></div>
-                    <div class="mt-10">
-                        <div class="form-label">🟢 Disponible :</div>
-                        ${actorAvailDatesHTML || '<span class="text-sec-xs">Aucune période renseignée</span>'}
-                    </div>
-                    <div class="mt-10">
-                        <div class="form-label">🔴 Indisponible :</div>
-                        ${actorUnavailDatesHTML || '<span class="text-sec-xs">Aucune période renseignée</span>'}
-                        </div>
-                </div>`;
-                }
-                
-                // Section Véhicule (vérifier visibilité)
-                if(UI.isSectionVisibleForProject(item, 'vehicle')) {
-                contentHtml += `<div class="crew-vehicle-section mt-10">
-                    <div class="form-label">Permis de conduire</div>
-                    <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:10px;">
-                        ${[['moto','Moto (A)'],['vl','VL (B)'],['pl','PL (C)'],['spl','SPL (CE)'],['tc','TC (D)']].map(([k,lbl]) => `<label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" ${(item.licenses||[]).includes(k) ? 'checked' : ''} onchange="app.Actions.toggleActorLicense(${idx}, '${k}', this.checked)" ${isReadOnly ? 'disabled' : ''}> ${lbl}</label>`).join('')}
-                    </div>
-                    <label class="crew-vehicle-toggle">
-                        <input type="checkbox" ${item.hasVehicle ? 'checked' : ''} onchange="app.Actions.toggleActorVehicle(${idx}, this.checked)" ${isReadOnly ? 'disabled' : ''}>
-                        <strong>🚗 Possède un véhicule</strong>
-                    </label>
-                    <div class="crew-vehicle-details ${item.hasVehicle ? 'visible' : ''}" id="actor-vehicle-${idx}">
-                        <div class="actor-input-row mt-8">
-                            <select class="actor-input" style="grid-column:1 / -1;" onchange="app.Actions.updateActorMeta(${idx}, 'vehicleUsage', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                                ${[['','-- Utilisation sur un tournage --'],['free','À dispo gratuitement'],['compensation','Contre dédommagement'],['paid','En étant payé'],['private','Non visible par la prod']].map(([v,lbl]) => `<option value="${v}" ${(item.vehicleUsage||'')===v ? 'selected' : ''}>${lbl}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="actor-input-row mt-8">
-                            <input class="actor-input" placeholder="Type de véhicule" value="${Utils.escape(item.vehicleType || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'vehicleType', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                            <input class="actor-input" placeholder="Immatriculation" value="${Utils.escape(item.vehiclePlate || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'vehiclePlate', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                        </div>
-                        <div class="actor-input-row mt-8">
-                            <input class="actor-input" type="number" min="1" max="9" placeholder="Nb places dispo" value="${Utils.escape(item.vehicleSeats || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'vehicleSeats', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                                <input type="checkbox" ${item.vehicleTrunk ? 'checked' : ''} onchange="app.Actions.updateActorMeta(${idx}, 'vehicleTrunk', this.checked)" ${isReadOnly ? 'disabled' : ''}>
-                                <span>🧳 Coffre disponible</span>
-                            </label>
-                        </div>
-                        <textarea class="data-desc" style="margin-top:8px; height:40px;" placeholder="Notes véhicule..." oninput="app.Actions.updateActorMeta(${idx}, 'vehicleNotes', this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(item.vehicleNotes || '')}</textarea>
-                    </div>
-                </div>`;
-                }
-                
-                // Contrats : generation deplacee dans Admin > Contrats (v526.3)
-                contentHtml += `</div></div>`;
 
-                // Pied pleine largeur : bio
-                contentHtml += `<div class="fid-foot">` + FicheUI.field('Bio / Notes', `<textarea class="data-desc" placeholder="Parcours, expériences, remarques..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(item.bio || '')}</textarea>`) + `</div>`;
-                
+                // Brique « Disponibilités » (souvent repliee au quotidien).
+                if(UI.isSectionVisibleForProject(item, 'calendar')) {
+                    const actorAvailDates = item.availabilityDates || [];
+                    const actorAvailDatesHTML = actorAvailDates.map((d, i2) => `<span style="display:inline-flex; align-items:center; background:#E8F5E9; border:1px solid #4CAF50; color:#2E7D32; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✓ ${d.from} → ${d.to} ${!isReadOnly ? `<span onclick="app.Actions.removeActorAvailability(${idx}, ${i2})" class="delete-link">✖</span>` : ''}</span>`).join('');
+                    const actorUnavailDates = item.unavailabilityDates || [];
+                    const actorUnavailDatesHTML = actorUnavailDates.map((d, i2) => `<span style="display:inline-flex; align-items:center; background:#FFEBEE; border:1px solid #f44336; color:#C62828; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✗ ${d.from} → ${d.to} ${d.reason ? '(' + Utils.escape(d.reason) + ')' : ''} ${!isReadOnly ? `<span onclick="app.Actions.removeActorUnavailability(${idx}, ${i2})" class="delete-link">✖</span>` : ''}</span>`).join('');
+                    let availHtml = `<textarea class="actor-input" style="min-height:50px; width:100%;" placeholder="Situation / Notes de disponibilité..." onchange="app.Actions.updateActorMeta(${idx}, 'availabilityText', this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(item.availabilityText || '')}</textarea>
+                        <div id="actor-calendar-${idx}"></div>
+                        <div class="mt-10"><div class="form-label">🟢 Disponible :</div>${actorAvailDatesHTML || '<span class="text-sec-xs">Aucune période renseignée</span>'}</div>
+                        <div class="mt-10"><div class="form-label">🔴 Indisponible :</div>${actorUnavailDatesHTML || '<span class="text-sec-xs">Aucune période renseignée</span>'}</div>`;
+                    blocks.push(FicheUI.block('actor', 'dispos', '📅 Disponibilités', availHtml));
+                }
+
+                // Brique « Véhicule ».
+                if(UI.isSectionVisibleForProject(item, 'vehicle')) {
+                    let vehHtml = `<div class="form-label">Permis de conduire</div>
+                        <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:10px;">${[['moto','Moto (A)'],['vl','VL (B)'],['pl','PL (C)'],['spl','SPL (CE)'],['tc','TC (D)']].map(([k,lbl]) => `<label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" ${(item.licenses||[]).includes(k) ? 'checked' : ''} onchange="app.Actions.toggleActorLicense(${idx}, '${k}', this.checked)" ${isReadOnly ? 'disabled' : ''}> ${lbl}</label>`).join('')}</div>
+                        <label class="crew-vehicle-toggle"><input type="checkbox" ${item.hasVehicle ? 'checked' : ''} onchange="app.Actions.toggleActorVehicle(${idx}, this.checked)" ${isReadOnly ? 'disabled' : ''}><strong>🚗 Possède un véhicule</strong></label>
+                        <div class="crew-vehicle-details ${item.hasVehicle ? 'visible' : ''}" id="actor-vehicle-${idx}">
+                            <div class="actor-input-row mt-8"><select class="actor-input" style="grid-column:1 / -1;" onchange="app.Actions.updateActorMeta(${idx}, 'vehicleUsage', this.value)" ${isReadOnly ? 'disabled' : ''}>${[['','-- Utilisation sur un tournage --'],['free','À dispo gratuitement'],['compensation','Contre dédommagement'],['paid','En étant payé'],['private','Non visible par la prod']].map(([v,lbl]) => `<option value="${v}" ${(item.vehicleUsage||'')===v ? 'selected' : ''}>${lbl}</option>`).join('')}</select></div>
+                            <div class="actor-input-row mt-8"><input class="actor-input" placeholder="Type de véhicule" value="${Utils.escape(item.vehicleType || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'vehicleType', this.value)" ${isReadOnly ? 'disabled' : ''}><input class="actor-input" placeholder="Immatriculation" value="${Utils.escape(item.vehiclePlate || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'vehiclePlate', this.value)" ${isReadOnly ? 'disabled' : ''}></div>
+                            <div class="actor-input-row mt-8"><input class="actor-input" type="number" min="1" max="9" placeholder="Nb places dispo" value="${Utils.escape(item.vehicleSeats || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'vehicleSeats', this.value)" ${isReadOnly ? 'disabled' : ''}><label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" ${item.vehicleTrunk ? 'checked' : ''} onchange="app.Actions.updateActorMeta(${idx}, 'vehicleTrunk', this.checked)" ${isReadOnly ? 'disabled' : ''}><span>🧳 Coffre disponible</span></label></div>
+                            <textarea class="data-desc" style="margin-top:8px; min-height:40px; width:100%;" placeholder="Notes véhicule..." oninput="app.Actions.updateActorMeta(${idx}, 'vehicleNotes', this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(item.vehicleNotes || '')}</textarea>
+                        </div>`;
+                    blocks.push(FicheUI.block('actor', 'vehicule', '🚗 Véhicule', vehHtml));
+                }
+
+                // Brique « Bio ».
+                blocks.push(FicheUI.block('actor', 'bio', '📝 Bio / Notes', `<textarea class="data-desc" style="width:100%; min-height:90px;" placeholder="Parcours, expériences, remarques..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(item.bio || '')}</textarea>`));
+
+                contentHtml += FicheBlocks.render(blocks);
                 } else if(type === 'locations') {
                 // DECORS — gabarit fiche d'identite universelle (v581).
                 // Fiche riche : la colonne gauche garde ses petites sections
@@ -21905,11 +21815,7 @@ initCategoriesDragDrop: () => {
                 // Pied pleine largeur : description
                 contentHtml += `<div class="fid-foot">` + FicheUI.field('Description', `<textarea class="data-desc" placeholder="Description du décor..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isView?'disabled':''}>${Utils.escape(item.desc || '')}</textarea>`) + `</div>`;
             } else {
-                // PERSONNAGES (characters) — gabarit fiche d'identite
-                // universelle (v581). Memes donnees, memes branchements
-                // (renameCharacter, updateCharacterMeta, linkActor,
-                // updateDataItem, pinToggle, changeGroup) : seule la
-                // presentation change.
+                // PERSONNAGES (characters) — briques repliables equilibrees (v581).
                 div.classList.add('fid-card');
                 const eid = Utils.escape(String(item.id));
                 const linkedActor = item.actor_id ? (state.data.actors || []).find(a => a.id === item.actor_id) : null;
@@ -21921,48 +21827,36 @@ initCategoriesDragDrop: () => {
                     badgesHtml: castBadge, delBtnHtml: delBtn
                 });
 
-                // Colonne gauche : IDENTITE
-                const genderSelect = `<select class="actor-input" onchange="app.Actions.updateCharacterMeta(${idx}, 'gender', this.value)" ${isView ? 'disabled' : ''}>
-                    ${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(item.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}
-                </select>`;
-                let groupField = '';
-                if(groupSelect) groupField = FicheUI.field('Groupe', groupSelect);
-                else if(item.group_id) {
-                    const g = (availableGroups || []).find(x => x.id === item.group_id);
-                    if(g) groupField = FicheUI.field('Groupe', `<div>${Utils.escape(g.name)}</div>`);
-                }
-                contentHtml += `<div class="fid-cols"><div class="fid-col">`;
-                contentHtml += FicheUI.secTitle('Identité');
-                contentHtml += FicheUI.field('Sexe', genderSelect);
-                // « Âge dans le récit » (maquette v581) : l'age du PERSONNAGE
-                // dans l'histoire — cle storyAge, distincte de l'age reel du
-                // comedien (item.age sur la fiche comedien). Champ libre :
-                // « 34 ans », « adolescent », « la soixantaine »...
-                contentHtml += FicheUI.field('Âge dans le récit', `<input class="actor-input" placeholder="ex : 34 ans, adolescent..." value="${Utils.escape(item.storyAge || '')}" onchange="app.Actions.updateCharacterMeta(${idx}, 'storyAge', this.value)" ${isView ? 'disabled' : ''}>`);
-                contentHtml += groupField;
-                contentHtml += FicheLinks.pinToggleHtml('characters', item, isView);
-                contentHtml += `</div><div class="fid-col">`;
-
-                // Colonne droite : DANS LE PROJET
-                contentHtml += FicheUI.secTitle('Dans le projet');
-                contentHtml += UI.renderAppearances('character', item.id, '📍 Apparaît dans', "N'apparaît dans aucune scène");
+                const blocks = [];
+                // Brique « Dans le projet » — epinglee en haut a droite.
+                let projHtml = UI.renderAppearances('character', item.id, '📍 Apparaît dans', "N'apparaît dans aucune scène");
                 let actorControl = '';
                 if(!isView) {
                     actorControl = `<select class="actor-input" onchange="app.Actions.linkActor(${idx}, this.value)">`;
                     actorControl += `<option value="">— Lier comédien·ne —</option>`;
-                    (state.data.actors || []).forEach(actor => {
-                        actorControl += `<option value="${actor.id}" ${item.actor_id === actor.id ? 'selected' : ''}>${Utils.escape(actor.name)}</option>`;
-                    });
+                    (state.data.actors || []).forEach(actor => { actorControl += `<option value="${actor.id}" ${item.actor_id === actor.id ? 'selected' : ''}>${Utils.escape(actor.name)}</option>`; });
                     actorControl += `</select>`;
                 } else if(linkedActor) {
                     actorControl = `<div style="color:var(--primary);">🎭 ${Utils.escape(linkedActor.name)}</div>`;
                 }
-                contentHtml += FicheUI.field('Interprété par', actorControl);
-                contentHtml += UI.renderCost('character', item.id);
-                contentHtml += `</div></div>`;
+                projHtml += FicheUI.field('Interprété par', actorControl);
+                projHtml += UI.renderCost('character', item.id);
+                blocks.push(FicheUI.block('character', 'projet', '🎬 Dans le projet', projHtml, { pin: 'right' }));
 
-                // Pied pleine largeur : notes / bio
-                contentHtml += `<div class="fid-foot">` + FicheUI.field('Notes', `<textarea class="data-desc" placeholder="Bio, intentions, remarques de mise en scène..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isView ? 'disabled' : ''}>${Utils.escape(item.bio || '')}</textarea>`) + `</div>`;
+                // Brique « Identité ».
+                const genderSelect = `<select class="actor-input" onchange="app.Actions.updateCharacterMeta(${idx}, 'gender', this.value)" ${isView ? 'disabled' : ''}>
+                    ${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(item.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>`;
+                let idHtml = FicheUI.field('Sexe', genderSelect);
+                idHtml += FicheUI.field('Âge dans le récit', `<input class="actor-input" placeholder="ex : 34 ans, adolescent..." value="${Utils.escape(item.storyAge || '')}" onchange="app.Actions.updateCharacterMeta(${idx}, 'storyAge', this.value)" ${isView ? 'disabled' : ''}>`);
+                if(groupSelect) idHtml += FicheUI.field('Groupe', groupSelect);
+                else if(item.group_id) { const g = (relevantGroups || []).find(x => x.id === item.group_id); if(g) idHtml += FicheUI.field('Groupe', `<div>${Utils.escape(g.name)}</div>`); }
+                idHtml += FicheLinks.pinToggleHtml('characters', item, isView);
+                blocks.push(FicheUI.block('character', 'identite', '🪪 Identité', idHtml));
+
+                // Brique « Notes ».
+                blocks.push(FicheUI.block('character', 'notes', '📝 Notes', FicheUI.field('Bio, intentions, remarques de mise en scène', `<textarea class="data-desc" style="width:100%; min-height:90px;" placeholder="Bio, intentions, remarques de mise en scène..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isView ? 'disabled' : ''}>${Utils.escape(item.bio || '')}</textarea>`)));
+
+                contentHtml += FicheBlocks.render(blocks);
             }
             div.innerHTML = contentHtml; 
             container.appendChild(div); 
@@ -72142,7 +72036,83 @@ const FicheUI = {
 
     secTitle: (txt) => `<div class="fid-sec-title">${Utils.escape(txt)}</div>`,
 
-    badge: (txt, ok) => `<span class="fid-badge${ok ? ' fid-badge--ok' : ''}">${Utils.escape(txt)}</span>`
+    badge: (txt, ok) => `<span class="fid-badge${ok ? ' fid-badge--ok' : ''}">${Utils.escape(txt)}</span>`,
+
+    // ---- BRIQUES REPLIABLES (v581) ------------------------------------
+    // Etat replie memorise par appareil, cle « famille.brique ». On ne
+    // stocke QUE les briques repliees (par defaut tout est deplie).
+    _collapseKey: 'moteur_fidcollapse',
+    _collapseState: null,
+    _loadCollapse: () => {
+        if(FicheUI._collapseState) return FicheUI._collapseState;
+        try { FicheUI._collapseState = JSON.parse(localStorage.getItem(FicheUI._collapseKey) || '{}') || {}; }
+        catch(e) { FicheUI._collapseState = {}; }
+        return FicheUI._collapseState;
+    },
+    isCollapsed: (kind, id) => !!FicheUI._loadCollapse()[kind + '.' + id],
+    setCollapsed: (kind, id, val) => {
+        const s = FicheUI._loadCollapse();
+        if(val) s[kind + '.' + id] = 1; else delete s[kind + '.' + id];
+        try { localStorage.setItem(FicheUI._collapseKey, JSON.stringify(s)); } catch(e) {}
+    },
+    toggleBlock: (headEl) => {
+        const b = headEl.closest('.fid-block');
+        if(!b) return;
+        b.classList.toggle('is-collapsed');
+        FicheUI.setCollapsed(b.dataset.ficheKind, b.dataset.blockId, b.classList.contains('is-collapsed'));
+    },
+    // Une brique = carre gris repliable. opts.pin='right' epingle la brique
+    // en haut de la colonne de droite (utilise pour « Dans le projet »).
+    block: (kind, id, title, innerHtml, opts) => {
+        opts = opts || {};
+        const collapsed = FicheUI.isCollapsed(kind, id);
+        return `<div class="fid-block${collapsed ? ' is-collapsed' : ''}" data-fiche-kind="${Utils.escape(kind)}" data-block-id="${Utils.escape(id)}"${opts.pin ? ` data-pin="${Utils.escape(opts.pin)}"` : ''}>
+            <div class="fid-block-head" onclick="app.FicheUI.toggleBlock(this)">
+                <span class="fid-block-title">${title}</span>
+                <span class="fid-block-chevron">▾</span>
+            </div>
+            <div class="fid-block-body">${innerHtml}</div>
+        </div>`;
+    }
+};
+
+// FICHE — MOTEUR D'EQUILIBRAGE DES BRIQUES (v581).
+// Chaque fiche fournit une liste de briques (FicheUI.block). render() les
+// pose dans un conteneur a deux colonnes ; balance() les repartit APRES
+// affichage pour egaliser les hauteurs (mesure reelle du DOM). La brique
+// marquee data-pin="right" reste en tete de la colonne de droite (les
+// scenes). Le glisser-deposer manuel et « appliquer a toutes les fiches »
+// viendront se brancher ici.
+const FicheBlocks = {
+    // blocks : tableau de morceaux HTML deja produits par FicheUI.block.
+    render: (blocksHtmlArray) => {
+        // Depart : tout dans la premiere colonne ; balance() repartit ensuite.
+        return `<div class="fid-blocks"><div class="fid-bcol">${blocksHtmlArray.join('')}</div><div class="fid-bcol"></div></div>`;
+    },
+    // Repartition par hauteur. Appele apres que la fiche est visible.
+    balance: (rootEl) => {
+        if(!rootEl) return;
+        const wrap = rootEl.querySelector('.fid-blocks');
+        if(!wrap) return;
+        const cols = wrap.querySelectorAll('.fid-bcol');
+        if(cols.length < 2) return;
+        // Recuperer toutes les briques dans leur ordre courant.
+        const blocks = Array.from(wrap.querySelectorAll('.fid-block'));
+        // Mono-colonne (ecran etroit) : tout dans la premiere, la seconde est
+        // masquee par la grille CSS ; on ne force pas de repartition.
+        const twoCols = window.matchMedia('(min-width: 701px)').matches;
+        cols[0].innerHTML = ''; cols[1].innerHTML = '';
+        if(!twoCols) { blocks.forEach(b => cols[0].appendChild(b)); return; }
+        // Brique epinglee a droite : en tete de la colonne 1.
+        const pinned = blocks.filter(b => b.dataset.pin === 'right');
+        const rest = blocks.filter(b => b.dataset.pin !== 'right');
+        pinned.forEach(b => cols[1].appendChild(b));
+        // Greedy : chaque brique va dans la colonne la plus courte a l'instant.
+        rest.forEach(b => {
+            const target = cols[0].offsetHeight <= cols[1].offsetHeight ? cols[0] : cols[1];
+            target.appendChild(b);
+        });
+    }
 };
 
 const CardModal = {
@@ -72214,6 +72184,9 @@ const CardModal = {
         
         CardModal.applyRights({ characters: 'character', actors: 'actor', locations: 'location' }[type]);
         modal.classList.add('visible');
+        // v581 : les fiches en briques (fid-blocks) sont equilibrees par
+        // hauteur une fois visibles (mesure reelle du DOM).
+        requestAnimationFrame(() => { try { FicheBlocks.balance(body); } catch(e) {} });
         
         // Initialiser les calendriers si nécessaire
         if(type === 'actors') {
