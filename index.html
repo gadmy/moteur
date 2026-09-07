@@ -15040,6 +15040,31 @@ showDashboard: async () => {
             state.userProfile.accountType = data.profile_type || 'producer';
         } else {
             state.userProfile = { accountType: 'producer' };
+            // Filet : compte auth sans fiche user_profiles. L'insert du formulaire
+            // d'inscription part en session anonyme (confirmation d'email oblige)
+            // et la RLS le refuse en silence : on crée la fiche ici, connecté.
+            // Les comptes admin restent volontairement sans fiche.
+            if(!CONFIG.adminEmails.includes(state.currentUser.email.toLowerCase())) {
+                try {
+                    const nowIso = new Date().toISOString();
+                    const { data: created, error: insErr } = await supabase.from('user_profiles').insert({
+                        email: state.currentUser.email.toLowerCase(),
+                        name: '',
+                        terms_accepted: false,
+                        profile_type: 'producer',
+                        created_at: nowIso,
+                        is_public: false
+                    }).select().maybeSingle();
+                    if(!insErr && created) {
+                        state.userProfile = created;
+                        state.userProfile.accountType = created.profile_type || 'producer';
+                    } else if(insErr) {
+                        console.warn('[Profil] création de la fiche manquante refusée:', insErr);
+                    }
+                } catch(e) {
+                    console.warn('[Profil] création de la fiche manquante échouée:', e);
+                }
+            }
         }
     } catch(e) {
         state.userProfile = { accountType: 'producer' };
