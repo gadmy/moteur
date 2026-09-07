@@ -6896,14 +6896,9 @@ body.presentation-mode .presentation-bar {
             <div id="admin-tab-config" class="admin-tab-content d-none-panel">
                 <h3 style="margin: 0 0 20px 0;">⚙️ Configuration pré-alpha</h3>
                 <div style="display: flex; flex-direction: column; gap: 20px;">
-                    <!-- Limite utilisateurs -->
-                    <div class="flex-row-center">
-                        <label style="min-width: 200px; font-weight: bold;">Limite d'utilisateurs :</label>
-                        <input type="number" id="config-max-users" value="150" style="padding: 10px; border: 1px solid var(--border); border-radius: 6px; width: 100px;">
-                        <button onclick="app.Admin.updateMaxUsers()" style="padding: 10px 15px; background: var(--success); color: white; border: none; border-radius: 6px; cursor: pointer;">Appliquer</button>
-                    </div>
+                    <!-- Compteur d'inscrits (limite d'utilisateurs retirée : inscriptions ouvertes) -->
                     <div style="padding: 15px; background: var(--bg); border-radius: 8px; color: var(--text-sec); font-size: 0.9rem;">
-                        💡 La limite actuelle est de <strong id="config-current-limit">150</strong> utilisateurs. Il y a actuellement <strong id="config-current-users">-</strong> inscrits.
+                        💡 Il y a actuellement <strong id="config-current-users">-</strong> inscrits. Inscriptions ouvertes, sans limite.
                     </div>
                     
                     <!-- Message pré-alpha -->
@@ -6985,6 +6980,14 @@ body.presentation-mode .presentation-bar {
                         <div style="background: var(--bg); border-radius: 8px; padding: 15px;">
                             <label class="label-bold-block-10">Filtres rapides :</label>
                             <div style="display: flex; flex-direction: column; gap: 6px;">
+                                <label class="flex-row-click">
+                                    <input type="checkbox" id="filter-all-users" onchange="app.Admin.updateEmailFilter()" class="icon-sm">
+                                    <span class="nowrap"><strong>📣 Tous les utilisateurs</strong></span>
+                                </label>
+                                <label class="flex-row-click">
+                                    <input type="checkbox" id="filter-test-only" onchange="app.Admin.updateEmailFilter()" class="icon-sm">
+                                    <span class="nowrap">🧪 Test (envoi uniquement à ga.dmy@ikmail.com)</span>
+                                </label>
                                 <label class="flex-row-click">
                                     <input type="checkbox" id="filter-incomplete-profile" onchange="app.Admin.updateEmailFilter()" class="icon-sm">
                                     <span class="nowrap">👤 Profil incomplet (&lt;50%)</span>
@@ -61228,7 +61231,7 @@ const Admin = {
             Admin.statsData.actors = new Array(actorCount);
             
             // Charger les projets avec dates
-            const { data: projects, error: projStatsErr } = await supabase.from('projects').select('created_at');
+            const { data: projects, error: projStatsErr } = await supabase.from('projects').select('created_at').is('deleted_at', null);
             if(projStatsErr) console.error('Erreur stats projets:', projStatsErr);
             Admin.statsData.projects = projects?.map(p => p.created_at) || [];
             
@@ -61254,8 +61257,6 @@ const Admin = {
             // Config
             const { data: authCount } = await supabase.rpc('get_auth_users_count');
             document.getElementById('config-current-users').textContent = authCount || 0;
-            document.getElementById('config-max-users').value = CONFIG.preAlpha.maxUsers || 150;
-            document.getElementById('config-current-limit').textContent = CONFIG.preAlpha.maxUsers || 150;
             
             // Dessiner le graphique
             Admin.updateStatsChart();
@@ -61776,10 +61777,12 @@ const Admin = {
             // v578 (cloisonnement) : on chargeait le JSON de TOUS les projets de la
             // plateforme pour n'en afficher que le poids. La fonction serveur rend
             // le poids sans le contenu.
-            const { data: projects } = await supabase.rpc('admin_project_sizes');
+            const { data: rawProjects } = await supabase.rpc('admin_project_sizes');
+            // Corbeille : si la fonction serveur renvoie deleted_at, on écarte les projets supprimés
+            const projects = (rawProjects || []).filter(p => !p.deleted_at);
             
             // Associer les projets aux utilisateurs
-            Admin.allProjects = projects || [];
+            Admin.allProjects = projects;
             Admin.allUsers = (users || []).map(u => {
                 const userProjects = projects?.filter(p => p.owner_email === u.email) || [];
                 return { ...u, projects: userProjects };
@@ -62149,17 +62152,6 @@ const Admin = {
         Utils.toast('Prévisualisation appliquée (non sauvegardée)', 'info');
     },
     
-    updateMaxUsers: () => {
-        const newLimit = parseInt(document.getElementById('config-max-users').value);
-        if(isNaN(newLimit) || newLimit < 1) {
-            Utils.toast('Valeur invalide', 'error');
-            return;
-        }
-        CONFIG.preAlpha.maxUsers = newLimit;
-        document.getElementById('config-current-limit').textContent = newLimit;
-        Utils.toast('Limite mise à jour : ' + newLimit + ' utilisateurs', 'success');
-    },
-    
     // ===== EMAILING =====
     emailRecipients: [],
     
@@ -62177,6 +62169,8 @@ const AdminEmail = {
         }
         
         const filters = {
+            testOnly: document.getElementById('filter-test-only')?.checked,
+            allUsers: document.getElementById('filter-all-users')?.checked,
             incompleteProfile: document.getElementById('filter-incomplete-profile')?.checked,
             noPublicProfile: document.getElementById('filter-no-public-profile')?.checked,
             noProject: document.getElementById('filter-no-project')?.checked,
@@ -62197,7 +62191,7 @@ const AdminEmail = {
         let userProjects = {};
         if(filters.noProject || filters.inactiveProject) {
             try {
-                const { data: projects } = await supabase.from('projects').select('owner_email, updated_at');
+                const { data: projects } = await supabase.from('projects').select('owner_email, updated_at').is('deleted_at', null);
                 projects?.forEach(p => {
                     if(!userProjects[p.owner_email]) userProjects[p.owner_email] = [];
                     userProjects[p.owner_email].push(p);
@@ -62206,25 +62200,26 @@ const AdminEmail = {
         }
         
         Admin.emailRecipients = Admin.allUsers.filter(user => {
-            const data = user.profile_data || {};
+            // 🧪 Mode test : uniquement le compte de test, ignore tout le reste
+            if(filters.testOnly) {
+                return (user.email || '').toLowerCase() === 'ga.dmy@ikmail.com';
+            }
+            // 📣 Tous les utilisateurs : ignore les autres filtres (comptes internes exclus)
+            if(filters.allUsers) {
+                return !CONFIG.internalEmails.includes((user.email || '').toLowerCase());
+            }
+            // Vraies casquettes (facettes) — l'ancien champ profile_data n'existe pas sur user_profiles
+            const pdata = user.data || {};
+            const facets = PublicProfile._normalizeFacets(pdata.facets || user.facets, user);
             const email = user.email?.toLowerCase();
             const createdAt = new Date(user.created_at);
             const updatedAt = new Date(user.updated_at || user.created_at);
             
-            // Calculer le % de complétion du profil
-            let profileCompletion = 0;
-            let hasPublicProfile = false;
-            let profileTypes = [];
-            
-            ['actor', 'crew', 'association', 'enterprise'].forEach(type => {
-                if(data[type]) {
-                    profileTypes.push(type);
-                    if(data[type].isPublic) hasPublicProfile = true;
-                    // Calculer complétion basique
-                    const fields = Object.values(data[type]).filter(v => v && v !== '' && v !== false);
-                    profileCompletion = Math.max(profileCompletion, Math.min(100, fields.length * 10));
-                }
-            });
+            // Complétion du profil : champs remplis du JSON de profil
+            const filledFields = Object.values(pdata).filter(v => v && v !== '' && v !== false);
+            const profileCompletion = Math.min(100, filledFields.length * 10);
+            // Public si au moins une casquette activée ET visible
+            const hasPublicProfile = PublicProfile.FACET_KEYS.some(k => facets[k].enabled && facets[k].visible !== false);
             
             // Appliquer les filtres
             let matches = true;
@@ -62244,10 +62239,10 @@ const AdminEmail = {
             const typeFiltersActive = filters.typeActor || filters.typeCrew || filters.typeAssociation || filters.typeEnterprise;
             if(typeFiltersActive) {
                 let typeMatch = false;
-                if(filters.typeActor && data.actor) typeMatch = true;
-                if(filters.typeCrew && data.crew) typeMatch = true;
-                if(filters.typeAssociation && data.association) typeMatch = true;
-                if(filters.typeEnterprise && data.enterprise) typeMatch = true;
+                if(filters.typeActor && facets.actor.enabled) typeMatch = true;
+                if(filters.typeCrew && facets.crew.enabled) typeMatch = true;
+                if(filters.typeAssociation && facets.asso.enabled) typeMatch = true;
+                if(filters.typeEnterprise && facets.ent.enabled) typeMatch = true;
                 if(!typeMatch) matches = false;
             }
             
