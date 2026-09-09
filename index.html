@@ -79232,8 +79232,8 @@ const Weather = {
       _renderReader: () => {
           const r = ScriptReader._root();
           const esc = ScriptReader._esc;
-          const left = ScriptReader._scenes.map(s => `<div class="rd-scene"><div class="rd-scene-h">${s.number}. ${esc(s.title)}</div><div class="rd-scene-body">${s.content || ''}</div></div>`).join('') || '<p>(Scénario vide)</p>';
-          const perScene = ScriptReader._scenes.map(s => `<div class="rd-sc-block"><div class="rd-sc-title">${s.number}. ${esc(s.title)}</div><textarea rows="3" class="rd-sc-input" data-scene="${esc(s.id)}" data-allow-emojis="true" placeholder="Votre remarque sur cette scène…">${esc(ScriptReader._mine.scenes[s.id] || '')}</textarea></div>`).join('');
+          const left = ScriptReader._scenes.map(s => `<div class="rd-scene" id="rdL-${esc(s.id)}"><div class="rd-scene-h" style="cursor:pointer;" title="Voir les commentaires de cette scène" onclick="app.ScriptReader._toComment('${esc(s.id)}')">${s.number}. ${esc(s.title)}</div><div class="rd-scene-body">${s.content || ''}</div></div>`).join('') || '<p>(Scénario vide)</p>';
+          const perScene = ScriptReader._scenes.map(s => `<div class="rd-sc-block" id="rdR-${esc(s.id)}"><div class="rd-sc-title" style="cursor:pointer;" title="Aller à cette scène dans le scénario" onclick="app.ScriptReader._toScene('${esc(s.id)}')">${s.number}. ${esc(s.title)}</div><textarea rows="3" class="rd-sc-input" data-scene="${esc(s.id)}" data-allow-emojis="true" placeholder="Votre remarque sur cette scène…">${esc(ScriptReader._mine.scenes[s.id] || '')}</textarea></div>`).join('');
           r.innerHTML = `<div class="rd-top"><span class="rd-logo">🎬 Moteur</span><span class="rd-sub">${esc(ScriptReader._title)} — relecture</span></div>
               <div class="rd-body">
                   <div class="rd-left"><div class="rd-page">${left}</div></div>
@@ -79281,6 +79281,23 @@ const Weather = {
           const el = document.getElementById('rd-send-msg');
           if(el) { el.style.color = isErr ? '#c0392b' : '#16a34a'; el.textContent = txt; }
       },
+
+      // Clic sur une scene (gauche) -> onglet Par scene + amene son champ en vue.
+      _toComment: (id) => {
+          const r = ScriptReader._root();
+          r.querySelectorAll('.rd-tab').forEach(x => x.classList.remove('active'));
+          r.querySelectorAll('.rd-pane').forEach(x => x.classList.remove('active'));
+          const tab = r.querySelector('.rd-tab[data-pane="scene"]'); if(tab) tab.classList.add('active');
+          const pane = r.querySelector('#rd-pane-scene'); if(pane) pane.classList.add('active');
+          const block = document.getElementById('rdR-' + id);
+          if(block) { block.scrollIntoView({ behavior: 'smooth', block: 'center' }); const ta = block.querySelector('textarea'); if(ta) ta.focus(); }
+      },
+
+      // Clic sur un champ de scene (droite) -> defile le scenario jusqu'a la scene.
+      _toScene: (id) => {
+          const el = document.getElementById('rdL-' + id);
+          if(el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      },
   };
 
   // ==================== MODULE SCRIPTREVIEW (reception des commentaires invites, cote site) ====================
@@ -79297,6 +79314,7 @@ const Weather = {
       open: async (sceneId) => {
           const panel = document.getElementById('comments-panel');
           if(!panel) return;
+          ScriptReview._ensureDelegation();
           ScriptReview._tab = sceneId ? 'scene' : 'global';
           panel.classList.add('open');
           ScriptReview._renderShell();
@@ -79364,7 +79382,7 @@ const Weather = {
               const groups = scenes.map((s, i) => {
                   const cs = byScene.filter(c => c.scene_id === s.id);
                   if(cs.length === 0) return '';
-                  return `<div style="margin-bottom:16px;"><div style="font-weight:700;font-size:0.85rem;margin-bottom:6px;">${i + 1}. ${ScriptReview._esc(s.title || '')}</div>${cs.map(ScriptReview._card).join('')}</div>`;
+                  return `<div id="sr-grp-${ScriptReview._esc(s.id)}" style="margin-bottom:16px;"><div style="font-weight:700;font-size:0.85rem;margin-bottom:6px;">${i + 1}. ${ScriptReview._esc(s.title || '')}</div>${cs.map(ScriptReview._card).join('')}</div>`;
               }).filter(Boolean).join('');
               body.innerHTML = groups || '<div style="color:var(--text-sec);text-align:center;padding:20px;font-size:0.85rem;">Aucune remarque sur les scènes.</div>';
           }
@@ -79374,10 +79392,12 @@ const Weather = {
           const who = ((c.author_first || '') + ' ' + (c.author_last || '')).trim() || c.author_email;
           const d = c.updated_at ? new Date(c.updated_at).toLocaleDateString('fr-FR') : '';
           const on = c.validated;
-          return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;${on ? 'opacity:0.7;background:rgba(22,163,74,0.08);' : ''}">
+          const clickable = c.scope === 'scene' && c.scene_id;
+          const clickAttr = clickable ? ` onclick="app.ScriptReview._scrollScript('${ScriptReview._esc(c.scene_id)}')" title="Voir cette scène dans le scénario"` : '';
+          return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;${clickable ? 'cursor:pointer;' : ''}${on ? 'opacity:0.7;background:rgba(22,163,74,0.08);' : ''}"${clickAttr}>
               <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
                   <div style="font-size:0.78rem;color:var(--text-sec);"><strong style="color:var(--text-main);">${ScriptReview._esc(who)}</strong> · ${d}</div>
-                  <label style="display:flex;align-items:center;gap:4px;font-size:0.72rem;cursor:pointer;white-space:nowrap;"><input type="checkbox" ${on ? 'checked' : ''} onchange="app.ScriptReview._validate('${ScriptReview._esc(c.id)}', this.checked)"> validé</label>
+                  <label style="display:flex;align-items:center;gap:4px;font-size:0.72rem;cursor:pointer;white-space:nowrap;" onclick="event.stopPropagation()"><input type="checkbox" ${on ? 'checked' : ''} onchange="app.ScriptReview._validate('${ScriptReview._esc(c.id)}', this.checked)"> validé</label>
               </div>
               <div style="font-size:0.88rem;white-space:pre-wrap;word-break:break-word;">${ScriptReview._esc(c.body)}</div>
           </div>`;
@@ -79427,6 +79447,38 @@ const Weather = {
           st.id = 'sr-blink-css';
           st.textContent = '.sr-blink{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:0.95rem;pointer-events:none;animation:sr-blink-kf 1.6s ease-in-out infinite;filter:drop-shadow(0 0 2px rgba(0,0,0,0.45));}@keyframes sr-blink-kf{0%,100%{opacity:1;}50%{opacity:0.2;}}';
           document.head.appendChild(st);
+      },
+
+      // Clic sur une carte de commentaire -> defile le scenario jusqu'a la scene.
+      _scrollScript: (sceneId) => {
+          if(!sceneId) return;
+          const el = document.getElementById('editor-' + sceneId);
+          if(el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      },
+
+      // Clic sur l'en-tete d'une scene (scenario) quand le panneau est ouvert ->
+      // onglet Par scene + defile jusqu'aux commentaires de cette scene.
+      _alignToScene: (sceneId) => {
+          ScriptReview._tab = 'scene';
+          ScriptReview._render();
+          const grp = document.getElementById('sr-grp-' + sceneId);
+          if(grp) grp.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      },
+
+      // Delegation : un seul ecouteur global. Un clic sur la colonne info d'une
+      // scene (uniquement si le panneau commentaires est ouvert) aligne le panneau.
+      _ensureDelegation: () => {
+          if(ScriptReview._delegated) return;
+          ScriptReview._delegated = true;
+          document.addEventListener('click', (e) => {
+              const panel = document.getElementById('comments-panel');
+              if(!panel || !panel.classList.contains('open')) return;
+              const col = e.target.closest && e.target.closest('.script-info-col');
+              if(!col || !col.parentElement) return;
+              const box = col.parentElement.querySelector('.script-editor-box[id^="editor-"]');
+              if(!box) return;
+              ScriptReview._alignToScene(box.id.slice('editor-'.length));
+          });
       },
   };
 
