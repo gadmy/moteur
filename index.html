@@ -6760,7 +6760,8 @@ body.presentation-mode .presentation-bar {
         <button class="hub-nav-btn"><span class="moteur-icon cat-social"><span class="emoji">🌐</span><svg><use href="#ico-globe"/></svg></span> Communauté ▾</button>
         <div class="dropdown-menu dropdown-abs">
           <div onclick="app.Universe.openFromMenu()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:6px 6px 0 0;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-social"><span class="emoji">🗺️</span><svg><use href="#ico-globe"/></svg></span> Univers</div>
-          <div onclick="app.Forum.open()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:0 0 6px 6px;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-social"><span class="emoji">💬</span><svg><use href="#ico-message"/></svg></span> Forum</div>
+          <!-- Forum suspendu (v585) : retirer d-none et Forum.suspended pour le rouvrir -->
+          <div class="d-none" onclick="app.Forum.open()" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:8px; border-radius:0 0 6px 6px;" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background=''"><span class="moteur-icon cat-social"><span class="emoji">💬</span><svg><use href="#ico-message"/></svg></span> Forum</div>
         </div>
       </div>
       <div class="nav-dropdown pos-relative" onclick="app.UI.toggleNavDropdown(this)">
@@ -14968,6 +14969,11 @@ crewRoles: {
           }
 		  
 		  
+          // LOT 3 — lecteur de scenario partage (invite non inscrit) : si l'URL est
+          // /scenario/<jeton>, on n'affiche QUE le scenario et on stoppe tout le flux
+          // d'authentification (pas de landing, pas de dashboard, pas de session).
+          if(ScriptReader.boot()) return;
+
           // Écouter les changements d'authentification Supabase
           supabase.auth.onAuthStateChange(async (event, session) => { 
               if (session && session.user) { 
@@ -23333,6 +23339,10 @@ initCategoriesDragDrop: () => {
     // Garde : onglet dont le contenu n'existe pas/plus (ex. memorise par NavMemory puis demoli) -> sortie silencieuse
     if(!document.getElementById('tab-' + tabName)) { console.warn('[UI] switchTab: onglet inconnu, ignore ->', tabName); return; }
     
+    // LOT 4 : bulle « commentaires invites non vus » sur l'onglet Scenario.
+    // Arriver sur le scenario eteint la bulle (marque vu) ; sinon on la reevalue.
+    try { if(tabName === 'script') ScriptReview.markSeen(); else ScriptReview.refreshBadge(); } catch(e) {}
+    
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active')); 
     document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active')); 
     document.getElementById('tab-' + tabName).classList.add('active'); 
@@ -23580,7 +23590,7 @@ initCategoriesDragDrop: () => {
               // le resume coupe a trois lignes.
               el.title = s.resume || '';
               const actions = isView ? '' : `<div class="compact-card-actions">
-                    <button class="merge-btn" onclick="event.stopPropagation(); app.Comments.open('${s.id}')" title="Commentaires">💬</button>
+                    <button class="merge-btn" onclick="event.stopPropagation(); app.ScriptReview.open('${s.id}')" title="Commentaires">💬</button>
                     <button class="edit-btn" onclick="event.stopPropagation(); app.Actions.${isFinal ? 'unfinalizeScene' : 'finalizeScene'}('${s.id}')" title="${isFinal ? 'Repasser en brouillon' : 'Finaliser'}">${isFinal ? '📝' : '✅'}</button>
                     <button class="delete-btn" onclick="event.stopPropagation(); app.Actions.deleteScene('${s.id}')" title="Supprimer">🗑️</button>
                 </div>`; 
@@ -23594,7 +23604,7 @@ initCategoriesDragDrop: () => {
                   <div class="seq-card-badges">
                       <span class="scene-status-badge ${isFinal ? 'final' : 'draft'}">${isFinal ? '✅ Finale' : '📝 Brouillon'}</span>
                       <span class="scene-status-badge ${status}" onclick="event.stopPropagation(); app.UI.toggleSceneStatus('${s.id}', event)">${SCENE_STATUS_LABELS[status]}</span>
-                      <span class="comment-badge d-none" data-scene="${s.id}" onclick="event.stopPropagation(); app.Comments.open('${s.id}')" title="Commentaires">0</span>
+                      <span class="comment-badge d-none" data-scene="${s.id}" onclick="event.stopPropagation(); app.ScriptReview.open('${s.id}')" title="Commentaires">0</span>
                   </div>`; 
               if(!isView) el.addEventListener('click', () => UI.openFiche('scene', s.id));
               else el.style.cursor = 'default';
@@ -23965,7 +23975,7 @@ initCategoriesDragDrop: () => {
               const sidebarBtns = `
                   <div class="script-sidebar-btns">
                       <button onclick="event.stopPropagation(); app.StoryboardPreview.open('${scene.id}')">📷 Storyboard (${shotCount})</button>
-                      <button onclick="event.stopPropagation(); app.Comments.open('${scene.id}')">💬 Commentaires <span class="comment-badge d-none" data-scene="${scene.id}">0</span></button>
+                      <button onclick="event.stopPropagation(); app.ScriptReview.open('${scene.id}')">💬 Commentaires <span class="comment-badge d-none" data-scene="${scene.id}">0</span></button>
                       <hr class="hr-subtle">
                       <button onclick="event.stopPropagation(); app.SceneVersions.save('${scene.id}')">📸 Sauvegarder version</button>
                       <button onclick="event.stopPropagation(); app.SceneVersions.openModal('${scene.id}')">📜 Historique${versionCount > 0 ? ' (' + versionCount + ')' : ''}</button>
@@ -34875,7 +34885,7 @@ const DrawingEditor = {
                       <hr class="hr-subtle">
                       <!-- MILIEU : actions importantes -->
                       <button onclick="app.StoryboardPreview.open('${scene.id}')">📷 Storyboard (${shotCount})</button>
-                      <button onclick="app.Comments.open('${scene.id}')">💬 Commentaires</button>
+                      <button onclick="app.ScriptReview.open('${scene.id}')">💬 Commentaires</button>
                       <hr class="hr-subtle">
                       <button onclick="app.SceneVersions.save('${scene.id}')">📸 Sauvegarder version</button>
                       <button onclick="app.SceneVersions.openModal('${scene.id}')">📜 Historique${versionCount > 0 ? ' (' + versionCount + ')' : ''}</button>
@@ -51414,9 +51424,12 @@ const MoteurArchive = {
             <div style="text-align:left;font-size:0.78rem;color:var(--text-sec);margin-bottom:14px;font-style:italic;">
                 💡 Police Courier Prime téléchargée au 1ᵉʳ usage (~320 Ko, mis en cache ensuite)
             </div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <button class="confirm-modal-btn cancel" id="scen-opt-cancel" style="margin:0;">Annuler</button>
-                <button class="confirm-modal-btn confirm" id="scen-opt-ok" style="margin:0;">📄 Générer le PDF</button>
+            <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;">
+                <button type="button" class="confirm-modal-btn" id="scen-opt-share" style="margin:0;">🔗 Partager le scénario</button>
+                <div style="display:flex;gap:8px;">
+                    <button class="confirm-modal-btn cancel" id="scen-opt-cancel" style="margin:0;">Annuler</button>
+                    <button class="confirm-modal-btn confirm" id="scen-opt-ok" style="margin:0;">📄 Générer le PDF</button>
+                </div>
             </div>
         </div>`;
         document.body.appendChild(overlay);
@@ -51432,6 +51445,8 @@ const MoteurArchive = {
         
         overlay.querySelector('#scen-opt-cancel').onclick = () => overlay.remove();
         overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+        const _shareBtn = overlay.querySelector('#scen-opt-share');
+        if(_shareBtn) _shareBtn.onclick = () => { overlay.remove(); setTimeout(() => ScriptShare.openShareModal(episodeIds), 100); };
         overlay.querySelector('#scen-opt-ok').onclick = async () => {
             const sceneNumbers = overlay.querySelector('#scen-opt-numbers').dataset.active === '1';
             const includeCover = overlay.querySelector('#scen-opt-cover').dataset.active === '1';
@@ -66832,8 +66847,8 @@ ${window.location.origin}${window.location.pathname}
       forum: {
         titre: 'Forum',
         desc: "L'endroit pour poser une question, signaler un manque, ou parler du metier.",
-        available: function () { return !state.currentProjectId; },
-        unavailable: "Cette visite se lance depuis l'accueil (ferme le projet pour y revenir).",
+        available: function () { return !Forum.suspended && !state.currentProjectId; },
+        unavailable: "Le forum est temporairement suspendu.",
         steps: [
           {
             title: 'Le forum',
@@ -70954,7 +70969,14 @@ const Forum = {
     },
     
     // ===================== NAVIGATION & CHARGEMENT =====================
+    // Forum temporairement suspendu : passer à false pour le rouvrir.
+    suspended: true,
     open: () => {
+        if(Forum.suspended) {
+            Utils.toast('Le forum est temporairement suspendu.', 'info');
+            UI.showDashboard();
+            return;
+        }
         UI.hideAllViews();
         document.getElementById('forum-view').classList.add('active');
         Forum.loadThreads();
@@ -78988,7 +79010,427 @@ const Weather = {
       }
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, CoursesWeb, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo, DBPresence, LockManager, LockDomains, Links, Web, FicheLinks, Diag, FicheUI, FicheBlocks };
+  // ==================== MODULE SCRIPTSHARE (partage scenario externe) ====================
+  const ScriptShare = {
+      _esc: (s) => Utils.escape(String(s == null ? '' : s)),
+
+      // Fenetre : perimetre (tout / scenes choisies) + nom + generation + liste des liens
+      openShareModal: (episodeIds) => {
+          const pid = state.currentProjectId;
+          if(!pid) { Utils.toast('Aucun projet ouvert', 'warning'); return; }
+          let scenes = (state.data.scenes || []);
+          if(episodeIds && episodeIds.length) scenes = scenes.filter(s => episodeIds.includes(s.episodeId));
+          const rows = scenes.map((s, i) =>
+              `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()"><td style="width:24px;padding:4px 8px;vertical-align:middle;"><input type="checkbox" class="sshare-scene" value="${ScriptShare._esc(s.id)}" style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td><td style="padding:4px 8px;font-size:0.85rem;line-height:1.3;">${i+1}. ${ScriptShare._esc(s.title || 'Sans titre')}</td></tr>`
+          ).join('');
+          const overlay = document.createElement('div');
+          overlay.className = 'confirm-modal-overlay';
+          overlay.id = 'sshare-overlay';
+          overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:560px;padding:20px;">
+              <div style="font-size:1.05rem;font-weight:bold;margin-bottom:14px;">🔗 Partager le scénario</div>
+              <div style="text-align:left;font-size:0.82rem;color:var(--text-sec);margin-bottom:12px;">Envoie une version lecture seule du scénario à une personne extérieure (non inscrite). Elle pourra le lire et déposer des commentaires, qui te reviendront sur le site.</div>
+              <input type="text" id="sshare-label" placeholder="Nom du partage (ex : Relecture Marc) — facultatif" style="width:100%;padding:8px 10px;margin-bottom:12px;border:1px solid var(--border);border-radius:6px;font-size:0.85rem;box-sizing:border-box;">
+              <div style="display:flex;gap:6px;margin-bottom:10px;">
+                  <button type="button" class="fmt-btn active" id="sshare-all" data-active="1" style="flex:1;padding:8px;font-size:0.82rem;">Tout le scénario</button>
+                  <button type="button" class="fmt-btn" id="sshare-pick" data-active="0" style="flex:1;padding:8px;font-size:0.82rem;">Choisir des scènes</button>
+              </div>
+              <div id="sshare-scenes" style="display:none;max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:12px;"><table style="width:100%;border-collapse:collapse;">${rows}</table></div>
+              <button type="button" id="sshare-create" class="confirm-modal-btn confirm" style="width:100%;margin:0 0 12px 0;">Générer le lien</button>
+              <div id="sshare-result" style="display:none;margin-bottom:14px;">
+                  <div style="display:flex;gap:6px;">
+                      <input type="text" id="sshare-url" readonly style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:0.8rem;background:var(--bg);box-sizing:border-box;">
+                      <button type="button" id="sshare-copy" class="confirm-modal-btn" style="margin:0;white-space:nowrap;">Copier</button>
+                  </div>
+              </div>
+              <div style="text-align:left;font-size:0.82rem;font-weight:600;color:var(--text-sec);margin-bottom:6px;">Liens existants</div>
+              <div id="sshare-list" style="max-height:160px;overflow-y:auto;font-size:0.82rem;">Chargement…</div>
+              <div style="display:flex;justify-content:flex-end;margin-top:14px;">
+                  <button class="confirm-modal-btn cancel" id="sshare-close" style="margin:0;">Fermer</button>
+              </div>
+          </div>`;
+          document.body.appendChild(overlay);
+
+          const q = (sel) => overlay.querySelector(sel);
+          q('#sshare-all').onclick = () => { q('#sshare-all').classList.add('active'); q('#sshare-all').dataset.active = '1'; q('#sshare-pick').classList.remove('active'); q('#sshare-pick').dataset.active = '0'; q('#sshare-scenes').style.display = 'none'; };
+          q('#sshare-pick').onclick = () => { q('#sshare-pick').classList.add('active'); q('#sshare-pick').dataset.active = '1'; q('#sshare-all').classList.remove('active'); q('#sshare-all').dataset.active = '0'; q('#sshare-scenes').style.display = 'block'; };
+          q('#sshare-close').onclick = () => overlay.remove();
+          overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+          q('#sshare-create').onclick = () => ScriptShare._create(pid, overlay);
+          q('#sshare-copy').onclick = () => ScriptShare._copy(q('#sshare-url').value);
+          ScriptShare._refresh(pid, overlay);
+      },
+
+      _create: async (pid, overlay) => {
+          const label = overlay.querySelector('#sshare-label').value.trim();
+          const pick = overlay.querySelector('#sshare-pick').dataset.active === '1';
+          let sceneIds = null;
+          if(pick) {
+              sceneIds = Array.from(overlay.querySelectorAll('.sshare-scene:checked')).map(cb => cb.value);
+              if(sceneIds.length === 0) { Utils.toast('Sélectionne au moins une scène', 'warning'); return; }
+          }
+          const btn = overlay.querySelector('#sshare-create');
+          btn.disabled = true; btn.textContent = 'Génération…';
+          try {
+              const { data, error } = await supabase.functions.invoke('script-share', { body: { action: 'create', projectId: pid, label: label || null, sceneIds } });
+              if(error || !data || !data.token) throw (error || new Error('token'));
+              const url = window.location.origin + '/scenario/' + data.token;
+              overlay.querySelector('#sshare-url').value = url;
+              overlay.querySelector('#sshare-result').style.display = 'block';
+              ScriptShare._copy(url);
+              ScriptShare._refresh(pid, overlay);
+          } catch(e) {
+              console.error('[ScriptShare] create:', e);
+              Utils.toast('Impossible de générer le lien', 'error');
+          } finally {
+              btn.disabled = false; btn.textContent = 'Générer le lien';
+          }
+      },
+
+      _refresh: async (pid, overlay) => {
+          const listEl = overlay.querySelector('#sshare-list');
+          try {
+              const { data } = await supabase.functions.invoke('script-share', { body: { action: 'shares', projectId: pid } });
+              const shares = (data && data.shares) || [];
+              if(shares.length === 0) { listEl.innerHTML = '<div style="color:var(--text-sec);padding:6px 0;">Aucun lien pour l\'instant.</div>'; return; }
+              listEl.innerHTML = shares.map(sh => {
+                  const scope = sh.scene_ids ? (sh.scene_ids.length + ' scène' + (sh.scene_ids.length > 1 ? 's' : '')) : 'Tout le scénario';
+                  const name = ScriptShare._esc(sh.label || scope);
+                  const off = sh.revoked;
+                  const url = window.location.origin + '/scenario/' + sh.token;
+                  return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);${off ? 'opacity:0.5;' : ''}">
+                      <div style="flex:1;min-width:0;"><div style="font-weight:600;">${name}</div><div style="color:var(--text-sec);font-size:0.75rem;">${scope}${off ? ' — révoqué' : ''}</div></div>
+                      <button type="button" class="confirm-modal-btn" style="margin:0;padding:4px 8px;font-size:0.75rem;" onclick="app.ScriptShare._copy('${url}')">Copier</button>
+                      <button type="button" class="confirm-modal-btn ${off ? 'confirm' : 'cancel'}" style="margin:0;padding:4px 8px;font-size:0.75rem;" onclick="app.ScriptShare._toggle('${ScriptShare._esc(sh.id)}', ${off ? 'false' : 'true'})">${off ? 'Réactiver' : 'Révoquer'}</button>
+                  </div>`;
+              }).join('');
+          } catch(e) {
+              console.error('[ScriptShare] shares:', e);
+              listEl.innerHTML = '<div style="color:var(--danger);padding:6px 0;">Erreur de chargement.</div>';
+          }
+      },
+
+      _toggle: async (shareId, revoked) => {
+          try {
+              await supabase.functions.invoke('script-share', { body: { action: 'revoke', shareId, revoked } });
+              const ov = document.getElementById('sshare-overlay');
+              if(ov && state.currentProjectId) ScriptShare._refresh(state.currentProjectId, ov);
+          } catch(e) { console.error('[ScriptShare] revoke:', e); Utils.toast('Erreur', 'error'); }
+      },
+
+      _copy: (url) => {
+          try { navigator.clipboard.writeText(url); Utils.toast('Lien copié', 'success'); }
+          catch(e) { Utils.toast('Copie impossible', 'warning'); }
+      },
+  };
+
+  // ==================== MODULE SCRIPTREADER (vue lecteur invite, publique) ====================
+  // Vue plein ecran autonome (style neutre, independant du theme du site) affichee
+  // quand l'URL est /scenario/<jeton>. Court-circuite le flux d'auth : l'invite ne
+  // voit QUE le scenario. Colonne gauche = texte en lecture ; colonne droite = deux
+  // onglets (Global / Par scene). Tout passe par l'Edge Function script-share.
+  const ScriptReader = {
+      _token: null, _first: '', _last: '', _email: '', _scenes: [], _title: '', _mine: { project: '', scenes: {} },
+
+      // Detecte /scenario/<jeton> ; si oui, monte le lecteur et renvoie true.
+      boot: () => {
+          const m = (window.location.pathname || '').match(/^\/scenario\/([A-Za-z0-9]+)\/?$/);
+          if(!m) return false;
+          ScriptReader._token = m[1];
+          try { document.title = 'Scénario partagé — Moteur'; } catch(_) {}
+          ScriptReader._injectCss();
+          ScriptReader._renderGate();
+          return true;
+      },
+
+      _esc: (s) => { const d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; },
+
+      _root: () => {
+          let r = document.getElementById('reader-view');
+          if(!r) { r = document.createElement('div'); r.id = 'reader-view'; document.body.appendChild(r); }
+          return r;
+      },
+
+      _injectCss: () => {
+          if(document.getElementById('reader-css')) return;
+          const st = document.createElement('style');
+          st.id = 'reader-css';
+          st.textContent = [
+              '#reader-view{position:fixed;inset:0;z-index:99999;background:#f4f4f5;color:#1a1a1a;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden;}',
+              '#reader-view *{box-sizing:border-box;}',
+              '.rd-top{flex:0 0 auto;background:#fff;border-bottom:1px solid #ddd;padding:10px 18px;display:flex;align-items:center;gap:12px;}',
+              '.rd-top .rd-logo{font-weight:800;font-size:1.05rem;}',
+              '.rd-top .rd-sub{color:#666;font-size:0.85rem;}',
+              '.rd-body{flex:1 1 auto;display:flex;min-height:0;}',
+              '.rd-left{flex:1 1 60%;overflow-y:auto;padding:24px;}',
+              '.rd-right{flex:1 1 40%;max-width:460px;border-left:1px solid #ddd;background:#fff;display:flex;flex-direction:column;min-height:0;}',
+              ".rd-page{max-width:720px;margin:0 auto;background:#fff;border:1px solid #e2e2e2;border-radius:6px;padding:36px 48px;font-family:'Courier New',monospace;font-size:15px;line-height:1.5;}",
+              '.rd-scene{margin-bottom:34px;}',
+              '.rd-scene-h{font-weight:700;text-transform:uppercase;margin-bottom:10px;border-bottom:1px solid #eee;padding-bottom:4px;}',
+              '.rd-tabs{display:flex;border-bottom:1px solid #ddd;flex:0 0 auto;}',
+              '.rd-tab{flex:1;padding:12px;text-align:center;cursor:pointer;font-weight:600;font-size:0.88rem;color:#666;border-bottom:2px solid transparent;}',
+              '.rd-tab.active{color:#111;border-bottom-color:#2563eb;}',
+              '.rd-pane{flex:1 1 auto;overflow-y:auto;padding:16px;display:none;}',
+              '.rd-pane.active{display:block;}',
+              '.rd-pane textarea{width:100%;border:1px solid #ccc;border-radius:6px;padding:10px;font-size:0.9rem;font-family:inherit;resize:vertical;}',
+              '.rd-sc-block{margin-bottom:16px;}',
+              '.rd-sc-title{font-size:0.82rem;font-weight:700;margin-bottom:4px;color:#333;}',
+              '.rd-foot{flex:0 0 auto;border-top:1px solid #ddd;padding:12px 16px;background:#fafafa;}',
+              '.rd-btn{background:#2563eb;color:#fff;border:none;border-radius:6px;padding:11px 18px;font-size:0.92rem;font-weight:600;cursor:pointer;width:100%;}',
+              '.rd-btn:disabled{opacity:0.6;cursor:default;}',
+              '.rd-gate{max-width:420px;margin:8vh auto;background:#fff;border:1px solid #e2e2e2;border-radius:10px;padding:28px;}',
+              '.rd-gate h2{margin:0 0 8px;font-size:1.15rem;}',
+              '.rd-gate p{color:#555;font-size:0.9rem;margin:0 0 18px;}',
+              '.rd-gate input{width:100%;padding:10px 12px;margin-bottom:10px;border:1px solid #ccc;border-radius:6px;font-size:0.92rem;}',
+              '@media(max-width:820px){.rd-body{flex-direction:column;}.rd-right{max-width:none;border-left:none;border-top:1px solid #ddd;}}'
+          ].join('');
+          document.head.appendChild(st);
+      },
+
+      // Ecran de presentation (prenom / nom / e-mail).
+      _renderGate: () => {
+          const r = ScriptReader._root();
+          r.innerHTML = `<div class="rd-top"><span class="rd-logo">🎬 Moteur</span><span class="rd-sub">Relecture de scénario</span></div>
+              <div style="flex:1;overflow-y:auto;">
+                  <div class="rd-gate">
+                      <h2>Vous avez été invité à relire un scénario</h2>
+                      <p>Présentez-vous pour accéder au texte et laisser vos commentaires à l'auteur.</p>
+                      <input type="text" id="rd-first" placeholder="Prénom" data-allow-emojis="true">
+                      <input type="text" id="rd-last" placeholder="Nom" data-allow-emojis="true">
+                      <input type="email" id="rd-email" placeholder="Adresse e-mail" data-allow-emojis="true">
+                      <button class="rd-btn" id="rd-enter">Accéder au scénario</button>
+                      <div id="rd-gate-err" style="color:#c0392b;font-size:0.82rem;margin-top:8px;"></div>
+                  </div>
+              </div>`;
+          r.querySelector('#rd-enter').onclick = ScriptReader._enter;
+      },
+
+      _enter: async () => {
+          const r = ScriptReader._root();
+          const first = r.querySelector('#rd-first').value.trim();
+          const last = r.querySelector('#rd-last').value.trim();
+          const email = r.querySelector('#rd-email').value.trim().toLowerCase();
+          const err = r.querySelector('#rd-gate-err');
+          if(!first || !last) { err.textContent = "Merci d'indiquer votre prénom et votre nom."; return; }
+          if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { err.textContent = 'Adresse e-mail invalide.'; return; }
+          ScriptReader._first = first; ScriptReader._last = last; ScriptReader._email = email;
+          const btn = r.querySelector('#rd-enter'); btn.disabled = true; btn.textContent = 'Chargement…';
+          try {
+              const { data, error } = await supabase.functions.invoke('script-share', { body: { action: 'read', token: ScriptReader._token, email } });
+              if(error || !data || !data.scenes) throw (error || new Error('read'));
+              ScriptReader._scenes = data.scenes;
+              ScriptReader._title = data.project_title || '';
+              ScriptReader._mine = { project: '', scenes: {} };
+              (data.mine || []).forEach(c => { if(c.scope === 'project') ScriptReader._mine.project = c.body || ''; else ScriptReader._mine.scenes[c.scene_id] = c.body || ''; });
+              ScriptReader._renderReader();
+          } catch(e) {
+              console.error('[ScriptReader] read:', e);
+              err.textContent = 'Ce lien est invalide, expiré ou révoqué.';
+              btn.disabled = false; btn.textContent = 'Accéder au scénario';
+          }
+      },
+
+      _renderReader: () => {
+          const r = ScriptReader._root();
+          const esc = ScriptReader._esc;
+          const left = ScriptReader._scenes.map(s => `<div class="rd-scene"><div class="rd-scene-h">${s.number}. ${esc(s.title)}</div><div class="rd-scene-body">${s.content || ''}</div></div>`).join('') || '<p>(Scénario vide)</p>';
+          const perScene = ScriptReader._scenes.map(s => `<div class="rd-sc-block"><div class="rd-sc-title">${s.number}. ${esc(s.title)}</div><textarea rows="3" class="rd-sc-input" data-scene="${esc(s.id)}" data-allow-emojis="true" placeholder="Votre remarque sur cette scène…">${esc(ScriptReader._mine.scenes[s.id] || '')}</textarea></div>`).join('');
+          r.innerHTML = `<div class="rd-top"><span class="rd-logo">🎬 Moteur</span><span class="rd-sub">${esc(ScriptReader._title)} — relecture</span></div>
+              <div class="rd-body">
+                  <div class="rd-left"><div class="rd-page">${left}</div></div>
+                  <div class="rd-right">
+                      <div class="rd-tabs"><div class="rd-tab active" data-pane="global">Global</div><div class="rd-tab" data-pane="scene">Par scène</div></div>
+                      <div class="rd-pane active" id="rd-pane-global"><textarea rows="12" id="rd-global" data-allow-emojis="true" placeholder="Vos remarques générales sur le projet…">${esc(ScriptReader._mine.project || '')}</textarea></div>
+                      <div class="rd-pane" id="rd-pane-scene">${perScene}</div>
+                      <div class="rd-foot"><button class="rd-btn" id="rd-send">Envoyer les commentaires</button><div id="rd-send-msg" style="text-align:center;font-size:0.82rem;margin-top:8px;"></div></div>
+                  </div>
+              </div>`;
+          r.querySelectorAll('.rd-tab').forEach(t => t.onclick = () => {
+              r.querySelectorAll('.rd-tab').forEach(x => x.classList.remove('active'));
+              r.querySelectorAll('.rd-pane').forEach(x => x.classList.remove('active'));
+              t.classList.add('active');
+              const pane = r.querySelector('#rd-pane-' + t.dataset.pane);
+              if(pane) pane.classList.add('active');
+          });
+          r.querySelector('#rd-send').onclick = ScriptReader._submit;
+      },
+
+      _submit: async () => {
+          const r = ScriptReader._root();
+          const comments = [];
+          const g = r.querySelector('#rd-global').value.trim();
+          if(g) comments.push({ scope: 'project', sceneId: '', body: g });
+          r.querySelectorAll('.rd-sc-input').forEach(ta => {
+              const v = ta.value.trim();
+              if(v) comments.push({ scope: 'scene', sceneId: ta.dataset.scene, body: v });
+          });
+          if(comments.length === 0) { ScriptReader._msg("Écrivez au moins une remarque avant d'envoyer.", true); return; }
+          const btn = r.querySelector('#rd-send'); btn.disabled = true; btn.textContent = 'Envoi…';
+          try {
+              const { data, error } = await supabase.functions.invoke('script-share', { body: { action: 'submit', token: ScriptReader._token, first: ScriptReader._first, last: ScriptReader._last, email: ScriptReader._email, comments } });
+              if(error || !data || !data.ok) throw (error || new Error('submit'));
+              ScriptReader._msg('Merci ! Vos commentaires ont été envoyés à l\'auteur.', false);
+          } catch(e) {
+              console.error('[ScriptReader] submit:', e);
+              ScriptReader._msg('Envoi impossible. Réessayez dans un instant.', true);
+          } finally {
+              btn.disabled = false; btn.textContent = 'Envoyer les commentaires';
+          }
+      },
+
+      _msg: (txt, isErr) => {
+          const el = document.getElementById('rd-send-msg');
+          if(el) { el.style.color = isErr ? '#c0392b' : '#16a34a'; el.textContent = txt; }
+      },
+  };
+
+  // ==================== MODULE SCRIPTREVIEW (reception des commentaires invites, cote site) ====================
+  // Reutilise le panneau lateral #comments-panel comme "2e colonne". Meme presentation
+  // que chez l'invite : deux onglets Global / Par scene. Ajoute un selecteur d'auteur
+  // (plusieurs invites possibles) et un toggle "valide" par commentaire. Lecture via
+  // l'Edge Function script-share (action 'list' / 'validate').
+  const ScriptReview = {
+      _comments: [],
+      _author: 'all',
+      _tab: 'global',
+      _esc: (s) => Utils.escape(String(s == null ? '' : s)),
+
+      open: async (sceneId) => {
+          const panel = document.getElementById('comments-panel');
+          if(!panel) return;
+          ScriptReview._tab = sceneId ? 'scene' : 'global';
+          panel.classList.add('open');
+          ScriptReview._renderShell();
+          await ScriptReview._load();
+      },
+
+      close: () => { const p = document.getElementById('comments-panel'); if(p) p.classList.remove('open'); },
+
+      _load: async () => {
+          const pid = state.currentProjectId;
+          if(!pid) { ScriptReview._comments = []; ScriptReview._render(); return; }
+          try {
+              const { data } = await supabase.functions.invoke('script-share', { body: { action: 'list', projectId: pid } });
+              ScriptReview._comments = (data && data.comments) || [];
+          } catch(e) { console.error('[ScriptReview] list:', e); ScriptReview._comments = []; }
+          ScriptReview._render();
+      },
+
+      _authors: () => {
+          const map = {};
+          ScriptReview._comments.forEach(c => { map[c.author_email] = ((c.author_first || '') + ' ' + (c.author_last || '')).trim() || c.author_email; });
+          return map;
+      },
+
+      _renderShell: () => {
+          const panel = document.getElementById('comments-panel');
+          panel.innerHTML = `<div class="comments-header">
+                  <h3>💬 Commentaires</h3>
+                  <button class="comments-close" onclick="app.ScriptReview.close()">✕</button>
+              </div>
+              <div style="padding:10px 14px;border-bottom:1px solid var(--border);">
+                  <select id="sr-author" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--panel-bg);color:var(--text-main);font-size:0.85rem;"></select>
+              </div>
+              <div class="sr-tabs" style="display:flex;border-bottom:1px solid var(--border);">
+                  <div class="sr-tab" data-tab="global" style="flex:1;text-align:center;padding:10px;cursor:pointer;font-weight:600;font-size:0.85rem;">Global</div>
+                  <div class="sr-tab" data-tab="scene" style="flex:1;text-align:center;padding:10px;cursor:pointer;font-weight:600;font-size:0.85rem;">Par scène</div>
+              </div>
+              <div class="comments-body" id="sr-body" style="flex:1;overflow-y:auto;padding:12px;"></div>`;
+          panel.querySelectorAll('.sr-tab').forEach(t => t.onclick = () => { ScriptReview._tab = t.dataset.tab; ScriptReview._render(); });
+          panel.querySelector('#sr-author').onchange = (e) => { ScriptReview._author = e.target.value; ScriptReview._render(); };
+      },
+
+      _render: () => {
+          const body = document.getElementById('sr-body');
+          if(!body) return;
+          const sel = document.getElementById('sr-author');
+          if(sel) {
+              const authors = ScriptReview._authors();
+              sel.innerHTML = '<option value="all">Tous les auteurs</option>' + Object.keys(authors).map(em => `<option value="${ScriptReview._esc(em)}">${ScriptReview._esc(authors[em])}</option>`).join('');
+              sel.value = ScriptReview._author;
+          }
+          document.querySelectorAll('.sr-tab').forEach(t => {
+              const on = t.dataset.tab === ScriptReview._tab;
+              t.style.borderBottom = on ? '2px solid var(--primary)' : '2px solid transparent';
+              t.style.color = on ? 'var(--text-main)' : 'var(--text-sec)';
+          });
+          let list = ScriptReview._comments;
+          if(ScriptReview._author !== 'all') list = list.filter(c => c.author_email === ScriptReview._author);
+          if(ScriptReview._tab === 'global') {
+              const g = list.filter(c => c.scope === 'project');
+              body.innerHTML = g.length ? g.map(ScriptReview._card).join('') : '<div style="color:var(--text-sec);text-align:center;padding:20px;font-size:0.85rem;">Aucune remarque générale.</div>';
+          } else {
+              const byScene = list.filter(c => c.scope === 'scene');
+              const scenes = state.data.scenes || [];
+              const groups = scenes.map((s, i) => {
+                  const cs = byScene.filter(c => c.scene_id === s.id);
+                  if(cs.length === 0) return '';
+                  return `<div style="margin-bottom:16px;"><div style="font-weight:700;font-size:0.85rem;margin-bottom:6px;">${i + 1}. ${ScriptReview._esc(s.title || '')}</div>${cs.map(ScriptReview._card).join('')}</div>`;
+              }).filter(Boolean).join('');
+              body.innerHTML = groups || '<div style="color:var(--text-sec);text-align:center;padding:20px;font-size:0.85rem;">Aucune remarque sur les scènes.</div>';
+          }
+      },
+
+      _card: (c) => {
+          const who = ((c.author_first || '') + ' ' + (c.author_last || '')).trim() || c.author_email;
+          const d = c.updated_at ? new Date(c.updated_at).toLocaleDateString('fr-FR') : '';
+          const on = c.validated;
+          return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;${on ? 'opacity:0.7;background:rgba(22,163,74,0.08);' : ''}">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+                  <div style="font-size:0.78rem;color:var(--text-sec);"><strong style="color:var(--text-main);">${ScriptReview._esc(who)}</strong> · ${d}</div>
+                  <label style="display:flex;align-items:center;gap:4px;font-size:0.72rem;cursor:pointer;white-space:nowrap;"><input type="checkbox" ${on ? 'checked' : ''} onchange="app.ScriptReview._validate('${ScriptReview._esc(c.id)}', this.checked)"> validé</label>
+              </div>
+              <div style="font-size:0.88rem;white-space:pre-wrap;word-break:break-word;">${ScriptReview._esc(c.body)}</div>
+          </div>`;
+      },
+
+      _validate: async (id, val) => {
+          try {
+              await supabase.functions.invoke('script-share', { body: { action: 'validate', commentId: id, validated: val } });
+              const c = ScriptReview._comments.find(x => x.id === id);
+              if(c) c.validated = val;
+              ScriptReview._render();
+          } catch(e) { console.error('[ScriptReview] validate:', e); Utils.toast('Erreur', 'error'); }
+      },
+
+      // --- Bulle clignotante sur l'onglet Scenario (commentaires invites non vus) ---
+      refreshBadge: async () => {
+          const pid = state.currentProjectId;
+          if(!pid) return;
+          try {
+              const { data } = await supabase.functions.invoke('script-share', { body: { action: 'list', projectId: pid } });
+              const unseen = ((data && data.comments) || []).some(c => !c.seen);
+              ScriptReview._setBadge(unseen);
+          } catch(e) { /* silencieux : le badge est secondaire */ }
+      },
+
+      markSeen: async () => {
+          ScriptReview._setBadge(false);
+          const pid = state.currentProjectId;
+          if(!pid) return;
+          try { await supabase.functions.invoke('script-share', { body: { action: 'seen', projectId: pid } }); } catch(e) { /* silencieux */ }
+      },
+
+      _setBadge: (on) => {
+          ScriptReview._injectBadgeCss();
+          const tab = document.querySelector('.tab-btn[data-tab="script"]');
+          if(!tab) return;
+          let b = tab.querySelector('.sr-blink');
+          if(on) {
+              if(getComputedStyle(tab).position === 'static') tab.style.position = 'relative';
+              if(!b) { b = document.createElement('span'); b.className = 'sr-blink'; b.textContent = '💬'; tab.appendChild(b); }
+          } else if(b) { b.remove(); }
+      },
+
+      _injectBadgeCss: () => {
+          if(document.getElementById('sr-blink-css')) return;
+          const st = document.createElement('style');
+          st.id = 'sr-blink-css';
+          st.textContent = '.sr-blink{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:0.95rem;pointer-events:none;animation:sr-blink-kf 1.6s ease-in-out infinite;filter:drop-shadow(0 0 2px rgba(0,0,0,0.45));}@keyframes sr-blink-kf{0%,100%{opacity:1;}50%{opacity:0.2;}}';
+          document.head.appendChild(st);
+      },
+  };
+
+  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, CoursesWeb, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo, DBPresence, LockManager, LockDomains, Links, Web, FicheLinks, Diag, FicheUI, FicheBlocks, ScriptShare, ScriptReader, ScriptReview };
 })();
 </script>
 
