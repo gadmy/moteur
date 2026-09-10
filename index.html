@@ -23363,6 +23363,8 @@ initCategoriesDragDrop: () => {
     // Garde : onglet dont le contenu n'existe pas/plus (ex. memorise par NavMemory puis demoli) -> sortie silencieuse
     if(!document.getElementById('tab-' + tabName)) { console.warn('[UI] switchTab: onglet inconnu, ignore ->', tabName); return; }
     
+    // Changer d'onglet ferme le panneau de commentaires (il appartient a l'onglet quitte).
+    try { ScriptReview.close(); } catch(e) {}
     // LOT 4 : bulle « commentaires invites non vus » sur l'onglet Scenario.
     // Arriver sur le scenario eteint la bulle (marque vu) ; sinon on la reevalue.
     try { if(tabName === 'script') ScriptReview.markSeen('scenario'); else if(tabName === 'synopsis') ScriptReview.markSeen('synopsis'); else if(tabName === 'board') ScriptReview.markSeen('sequencier'); else if(tabName === 'storyboard') ScriptReview.markSeen('storyboard'); else if(tabName === 'moodboard') ScriptReview.markSeen('moodboard'); else ScriptReview.refreshBadge(); } catch(e) {}
@@ -55032,12 +55034,26 @@ const Notifications = {
                 <div class="notif-item ${unreadClass}" onclick="app.Notifications.handleClick('${n.id}', '${n.type}', '${n.projectId || ''}')">
                     <span class="notif-icon">${icon}</span>
                     <div class="notif-content">
-                        <div class="notif-text">${Utils.escape(n.message)}</div>
+                        <div class="notif-text">${Utils.escape(Notifications._displayText(n))}</div>
                         <div class="notif-time">${timeAgo}</div>
                     </div>
                 </div>
             `;
         }).join('');
+    },
+
+    // Texte lisible d'une notification. Les commentaires invites (script_comments)
+    // sont stockes en JSON par l'Edge Function ; on le traduit en une phrase.
+    _displayText: (n) => {
+        if(n.type === 'script_comments') {
+            try {
+                const d = JSON.parse(n.message);
+                const who = (d.from || d.email || 'Un relecteur');
+                const c = d.count || 0;
+                return who + ' a déposé ' + c + ' commentaire' + (c > 1 ? 's' : '') + ' sur un partage.';
+            } catch(e) { return 'Nouveaux commentaires sur un partage.'; }
+        }
+        return n.message || '';
     },
     
     // Obtenir l'icône selon le type
@@ -55045,6 +55061,7 @@ const Notifications = {
         const icons = {
             'invite': '📨',
             'message': '💬',
+            'script_comments': '💬',
             'modification': '✏️',
             'share': '👥'
         };
@@ -55071,6 +55088,11 @@ const Notifications = {
         if(type === 'invite' && projectId) {
             Notifications.closePanel();
             Store.loadProject(projectId);
+        }
+        if(type === 'script_comments') {
+            const it = Notifications.items.find(n => String(n.id) === String(notifId));
+            const pid = (it && it.link) ? it.link : projectId;
+            if(pid) { Notifications.closePanel(); Store.loadProject(pid); }
         }
     },
     
