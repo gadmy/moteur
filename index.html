@@ -79383,6 +79383,7 @@ const Weather = {
               let shares = (data && data.shares) || [];
               // Ne montrer que les liens du meme type que la fenetre ouverte.
               shares = shares.filter(sh => (sh.kind || 'scenario') === kind);
+              ScriptShare._shares = shares;
               if(shares.length === 0) { listEl.innerHTML = '<div style="color:var(--text-sec);padding:6px 0;">Aucun lien pour l\'instant.</div>'; return; }
               listEl.innerHTML = shares.map(sh => {
                   const scope = sh.scene_ids ? (sh.scene_ids.length + ' ' + cfg.pickOne + (sh.scene_ids.length > 1 ? 's' : '')) : cfg.all;
@@ -79391,6 +79392,7 @@ const Weather = {
                   const url = window.location.origin + '/scenario/' + sh.token;
                   return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);${off ? 'opacity:0.5;' : ''}">
                       <div style="flex:1;min-width:0;"><div style="font-weight:600;">${name}</div><div style="color:var(--text-sec);font-size:0.75rem;">${scope}${off ? ' — révoqué' : ''}</div></div>
+                      ${((kind === 'storyboard' || kind === 'moodboard') && !off) ? `<button type="button" class="confirm-modal-btn" style="margin:0;padding:4px 8px;font-size:0.75rem;" onclick="app.ScriptShare._update('${ScriptShare._esc(sh.id)}')" title="Refabriquer les images avec le contenu actuel (le lien ne change pas, les commentaires restent)">Mettre à jour</button>` : ''}
                       <button type="button" class="confirm-modal-btn" style="margin:0;padding:4px 8px;font-size:0.75rem;" onclick="app.ScriptShare._copy('${url}')">Copier</button>
                       <button type="button" class="confirm-modal-btn ${off ? 'confirm' : 'cancel'}" style="margin:0;padding:4px 8px;font-size:0.75rem;" onclick="app.ScriptShare._toggle('${ScriptShare._esc(sh.id)}', ${off ? 'false' : 'true'})">${off ? 'Réactiver' : 'Révoquer'}</button>
                   </div>`;
@@ -79399,6 +79401,24 @@ const Weather = {
               console.error('[ScriptShare] shares:', e);
               listEl.innerHTML = '<div style="color:var(--danger);padding:6px 0;">Erreur de chargement.</div>';
           }
+      },
+
+      _update: async (shareId) => {
+          const sh = (ScriptShare._shares || []).find(s => String(s.id) === String(shareId));
+          if(!sh) { Utils.toast('Lien introuvable', 'warning'); return; }
+          const kind = sh.kind;
+          if(kind !== 'storyboard' && kind !== 'moodboard') return;
+          const ids = (sh.scene_ids && sh.scene_ids.length) ? sh.scene_ids : ScriptShare._elements(kind).map(el => el.id);
+          if(!ids || !ids.length) { Utils.toast('Rien à mettre à jour', 'warning'); return; }
+          Utils.toast('Préparation des images…', 'info');
+          let payload;
+          try { payload = { scenes: await ScriptShare._bake(kind, ids) }; }
+          catch(e) { console.error('[ScriptShare] bake(update):', e); Utils.toast('Impossible de préparer les images', 'error'); return; }
+          try {
+              const { data, error } = await supabase.functions.invoke('script-share', { body: { action: 'update', shareId, payload } });
+              if(error || !data || !data.ok) throw (error || new Error('update'));
+              Utils.toast('Images mises à jour', 'success');
+          } catch(e) { console.error('[ScriptShare] update:', e); Utils.toast('Mise à jour impossible', 'error'); }
       },
 
       _toggle: async (shareId, revoked) => {
