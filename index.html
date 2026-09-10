@@ -31878,22 +31878,22 @@ const StoryboardExport = {
     _resolveBlobUrl: async (storedUrl) => {
         try {
             const path = Utils._projPathFrom(storedUrl);
-            if(!path) return null;
+            if(!path) { try { console.log('[SB2] no-path url=' + String(storedUrl).slice(0, 60)); } catch(e) {} return null; }
             const { data, error } = await supabase.storage.from('projects').download(path);
-            if(error || !data) return null;
+            if(error) { try { console.log('[SB2] download ERROR path=' + path + ' -> ' + (error.message || error)); } catch(e) {} return null; }
+            if(!data) { try { console.log('[SB2] download EMPTY path=' + path); } catch(e) {} return null; }
             return URL.createObjectURL(data);
-        } catch(e) { return null; }
+        } catch(e) { try { console.log('[SB2] resolve EXC ' + e); } catch(_) {} return null; }
     },
 
-    // Charge une image de print via blob (repli sur l'URL signee si le download
-    // echoue) puis appelle draw(). Si une capture PDF est en cours, la promesse
-    // est trackee pour que exportPDF attende le dessin reel.
     _loadPrintImg: (img, storedUrl, draw) => {
+        const tag = String(storedUrl == null ? '' : storedUrl).slice(0, 45);
         const p = StoryboardExport._resolveBlobUrl(storedUrl).then(objUrl => new Promise(res => {
-            img.onload = () => { try { draw(); } catch(e) {} if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
-            img.onerror = () => { if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
+            try { console.log('[SB2] load blob=' + (objUrl ? 'ok' : 'null') + ' ' + tag); } catch(e) {}
+            img.onload = () => { try { console.log('[SB2] onload ' + img.naturalWidth + 'x' + img.naturalHeight + ' ' + tag); } catch(e) {} try { draw(); } catch(e) {} if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
+            img.onerror = () => { try { console.log('[SB2] ONERROR ' + tag); } catch(e) {} if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
             img.src = objUrl || StoryboardExport._printSrc(storedUrl);
-            setTimeout(res, 8000);
+            setTimeout(() => { try { console.log('[SB2] TIMEOUT ' + tag); } catch(e) {} res(); }, 8000);
         }));
         if(StoryboardExport._printCapturing) StoryboardExport._printImgPromises.push(p);
         return p;
@@ -32008,6 +32008,7 @@ const StoryboardExport = {
         
         // 1) Calque ORIGINAL en premier (image uploadée OU drawing original)
         if(shot.imageType === 'upload' && shot.imageUrl) {
+            try { console.log('[SB2] shot UPLOAD ' + shot.id); } catch(e) {}
             // Charger l'image avec crossOrigin et la dessiner dans le canvas
             const img = new Image();
             StoryboardExport._loadPrintImg(img, shot.imageUrl, () => {
@@ -32023,6 +32024,7 @@ const StoryboardExport = {
             });
             hasContent = true;
         } else if(shot.imageType === 'drawing' && shot.drawingData) {
+            try { console.log('[SB2] shot DRAWING layers=' + ((shot.drawingData && shot.drawingData.layers) ? shot.drawingData.layers.length : '?') + ' ' + shot.id); } catch(e) {}
             // Rendu du dessin (renderDrawingData gère ses async via crossOrigin)
             DrawingEditor.renderDrawingData(composedCtx, shot.drawingData);
             // Objets vectoriels de la zone Original par-dessus
@@ -32035,6 +32037,8 @@ const StoryboardExport = {
             // Puis le calque technique par-dessus
             setTimeout(() => Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer), 250);
             hasContent = true;
+        } else {
+            try { console.log('[SB2] shot NO-IMAGE ' + shot.id + ' type=' + shot.imageType + ' hasDrawings=' + !!shot.drawings); } catch(e) {}
         }
         
 if(hasContent) {
