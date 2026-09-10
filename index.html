@@ -9890,10 +9890,9 @@ body.presentation-mode .presentation-bar {
         <button class="sb-toggle-btn active" onclick="app.Storyboard.switchView('edit')">📝 Édition</button>
         <button class="sb-toggle-btn" onclick="app.Storyboard.switchView('preview')">👁️ Mini Aperçu</button>
         <button class="sb-toggle-btn" onclick="app.Storyboard.openFullscreen()">🖨️ Aperçu Plein Écran</button>
-        <button class="sb-toggle-btn" onclick="app.Storyboard.exportPDF()">📄 Générer PDF</button>
         
         <div class="sb-print-config" style="margin-left: auto;">
-            <button class="sb-config-btn" onclick="app.Storyboard.toggleConfig()">⚙️ Configuration Print</button>
+            <button class="sb-config-btn" onclick="app.Storyboard.toggleConfig()">📄 Export PDF</button>
             <div class="sb-config-panel" id="sbConfigPanel">
                 <h4 style="margin: 0 0 15px 0; border-bottom: 1px solid var(--border); padding-bottom: 10px;">Mise en page d'impression</h4>
                 <div class="sb-config-item">
@@ -9928,7 +9927,8 @@ body.presentation-mode .presentation-bar {
                     <label for="cfg-techlayer-actors"><strong>🎭 Actors</strong><br><span style="font-size:0.8rem; color:var(--text-sec);">Positions/déplacements acteurs par dessus</span></label>
                 </div>
                 
-                <button onclick="app.Storyboard.applyConfig()" style="width: 100%; margin-top: 12px; padding: 8px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Appliquer</button>
+                <button onclick="app.Storyboard.applyConfig()" style="width: 100%; margin-top: 12px; padding: 8px; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-weight: bold;">Aperçu</button>
+                <button onclick="app.Storyboard.exportWithConfig()" style="width: 100%; margin-top: 8px; padding: 8px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">📄 Générer le PDF</button>
             </div>
         </div>
     </div>
@@ -30402,14 +30402,13 @@ const MoodBoardExport = {
             return;
         }
         
+        if(!opts.returnBlob) Utils.toast('Génération du PDF MoodBoard...', 'info');
+        
+        await LazyLib.load('pdfexport'); const { jsPDF } = window.jspdf;
         if(typeof html2canvas === 'undefined') {
             Utils.toast('html2canvas non chargé', 'error');
             return;
         }
-        
-        if(!opts.returnBlob) Utils.toast('Génération du PDF MoodBoard...', 'info');
-        
-        await LazyLib.load('pdfexport'); const { jsPDF } = window.jspdf;
         const projectTitle = state.data.title || 'Projet';
         const cleanT = (t) => (typeof PdfTheme !== 'undefined' && PdfTheme.cleanText) ? PdfTheme.cleanText(t || '') : (t || '');
         
@@ -31747,13 +31746,14 @@ const Storyboard = {
         panel.classList.toggle('open');
     },
     
-    applyConfig: () => {
-        const layout = document.querySelector('input[name="cfg-layout"]:checked').value;
+    // Lit les reglages du panneau de config en un objet printConfig.
+    _collectConfig: () => {
+        const layoutEl = document.querySelector('input[name="cfg-layout"]:checked');
+        const layout = layoutEl ? layoutEl.value : 'standard';
         const fullText = (layout === 'standard' || layout === 'large');
-        // [Phase C.2.6] Lire le calque technique sélectionné
         const techLayerRadio = document.querySelector('input[name="cfg-techlayer"]:checked');
         const techLayer = techLayerRadio ? techLayerRadio.value : 'none';
-        Storyboard.printConfig = {
+        return {
             layout: layout,
             shotNumber: true,
             shotType: true,
@@ -31765,10 +31765,22 @@ const Storyboard = {
             sceneTitle: true,
             techLayer: techLayer
         };
-        
+    },
+
+    applyConfig: () => {
+        Storyboard.printConfig = Storyboard._collectConfig();
         document.getElementById('sbConfigPanel').classList.remove('open');
         Storyboard.renderPrintPreview('sbPrintPreview');
         Utils.toast('Configuration appliquée !', 'success');
+    },
+
+    // [Association config + generation] : applique la config du panneau PUIS
+    // lance l'export, en un seul geste (comme les autres onglets d'export).
+    exportWithConfig: () => {
+        Storyboard.printConfig = Storyboard._collectConfig();
+        const panel = document.getElementById('sbConfigPanel');
+        if(panel) panel.classList.remove('open');
+        Storyboard.exportPDF();
     },
     
     openFullscreen: () => {
