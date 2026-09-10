@@ -31869,6 +31869,35 @@ const StoryboardExport = {
         if(!StoryboardExport._printCapturing) return u;
         return u + (u.includes('?') ? '&' : '?') + 'cb=' + Date.now();
     },
+
+    // [Fix images PDF] Telecharge les octets de l'image via le client Supabase
+    // (deja autorise cote CORS) et renvoie une URL blob locale (same-origin).
+    // Contourne le probleme : une image de bucket prive chargee par son URL avec
+    // crossOrigin='anonymous' ECHOUE si la reponse n'a pas d'en-tete CORS -> canvas
+    // vide. Passer par un blob local rend le dessin fiable quel que soit le CORS.
+    _resolveBlobUrl: async (storedUrl) => {
+        try {
+            const path = Utils._projPathFrom(storedUrl);
+            if(!path) return null;
+            const { data, error } = await supabase.storage.from('projects').download(path);
+            if(error || !data) return null;
+            return URL.createObjectURL(data);
+        } catch(e) { return null; }
+    },
+
+    // Charge une image de print via blob (repli sur l'URL signee si le download
+    // echoue) puis appelle draw(). Si une capture PDF est en cours, la promesse
+    // est trackee pour que exportPDF attende le dessin reel.
+    _loadPrintImg: (img, storedUrl, draw) => {
+        const p = StoryboardExport._resolveBlobUrl(storedUrl).then(objUrl => new Promise(res => {
+            img.onload = () => { try { draw(); } catch(e) {} if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
+            img.onerror = () => { if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
+            img.src = objUrl || StoryboardExport._printSrc(storedUrl);
+            setTimeout(res, 8000);
+        }));
+        if(StoryboardExport._printCapturing) StoryboardExport._printImgPromises.push(p);
+        return p;
+    },
     
     renderPrintPreview: (containerId) => {
         const container = document.getElementById(containerId);
@@ -31944,9 +31973,7 @@ const StoryboardExport = {
         // 3 cas : image uploadée, drawingData (calques de dessin), objects (objets vectoriels)
         if(techZone.imageType === 'upload' && techZone.imageUrl) {
             const layerImg = new Image();
-            layerImg.crossOrigin = 'anonymous'; // [2b] toujours pose (path brut depuis D6)
-            StoryboardExport._awaitPrintImg(layerImg, () => { ctx.drawImage(layerImg, 0, 0, ctx.canvas.width, ctx.canvas.height); });
-            layerImg.src = StoryboardExport._printSrc(techZone.imageUrl);
+            StoryboardExport._loadPrintImg(layerImg, techZone.imageUrl, () => { ctx.drawImage(layerImg, 0, 0, ctx.canvas.width, ctx.canvas.height); });
         } else if(techZone.drawingData) {
             // Dessine les calques DrawingEditor du zone tech par dessus (renderDrawingData fait drawImage async)
             DrawingEditor.renderDrawingData(ctx, techZone.drawingData);
@@ -31983,8 +32010,7 @@ const StoryboardExport = {
         if(shot.imageType === 'upload' && shot.imageUrl) {
             // Charger l'image avec crossOrigin et la dessiner dans le canvas
             const img = new Image();
-            img.crossOrigin = 'anonymous'; // [2b] toujours pose : path brut depuis D6, URL resolue via signedUrlFor
-            StoryboardExport._awaitPrintImg(img, () => {
+            StoryboardExport._loadPrintImg(img, shot.imageUrl, () => {
                 // Garder l'aspect ratio : dessiner centré dans le canvas
                 const ratio = Math.min(composedCanvas.width / img.naturalWidth, composedCanvas.height / img.naturalHeight);
                 const w = img.naturalWidth * ratio;
@@ -31995,7 +32021,6 @@ const StoryboardExport = {
                 // Puis dessiner le calque technique par-dessus (après le load)
                 Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer);
             });
-            img.src = StoryboardExport._printSrc(shot.imageUrl);
             hasContent = true;
         } else if(shot.imageType === 'drawing' && shot.drawingData) {
             // Rendu du dessin (renderDrawingData gère ses async via crossOrigin)
@@ -34193,11 +34218,7 @@ const DrawingEditor = {
             if(!layerData.visible) return;
             
             const img = new Image();
-            // [Phase C.2.6 fix CRITIQUE] crossOrigin obligatoire sur les calques HTTP Storage
-            // sinon le canvas est tainted et toDataURL() échoue lors de l'export PDF storyboard
-            img.crossOrigin = 'anonymous'; // [2b] images de print toujours servies via Storage (cross-origin)
-            StoryboardExport._awaitPrintImg(img, () => { ctx.drawImage(img, 0, 0); });
-            img.src = StoryboardExport._printSrc(layerData.imageData);
+            StoryboardExport._loadPrintImg(img, layerData.imageData, () => { ctx.drawImage(img, 0, 0); });
         });
     }
 };
