@@ -9431,6 +9431,7 @@ body.presentation-mode .presentation-bar {
               <span class="synopsis-nav-count" id="synopsis-count-long">0 caractère</span>
             </button>
             <button onclick="app.Synopsis.openSynopsisPdfModal()" style="margin-top: 16px; width: 100%; background: var(--primary); color: #fff; padding: 10px 14px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;" title="Export PDF (page de garde + champs au choix)">📄 Export PDF</button>
+            <button onclick="app.ScriptShare.openShareModal('synopsis')" style="margin-top: 8px; width: 100%; background: var(--panel-bg); color: var(--text-main); padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;" title="Partager le synopsis en lecture seule à un relecteur externe">🔗 Partager</button>
           </aside>
           
           <!-- Zone principale -->
@@ -51458,7 +51459,7 @@ const MoteurArchive = {
         overlay.querySelector('#scen-opt-cancel').onclick = () => overlay.remove();
         overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
         const _shareBtn = overlay.querySelector('#scen-opt-share');
-        if(_shareBtn) _shareBtn.onclick = () => { overlay.remove(); setTimeout(() => ScriptShare.openShareModal(episodeIds), 100); };
+        if(_shareBtn) _shareBtn.onclick = () => { overlay.remove(); setTimeout(() => ScriptShare.openShareModal('scenario', episodeIds), 100); };
         overlay.querySelector('#scen-opt-ok').onclick = async () => {
             const sceneNumbers = overlay.querySelector('#scen-opt-numbers').dataset.active === '1';
             const includeCover = overlay.querySelector('#scen-opt-cover').dataset.active === '1';
@@ -79026,25 +79027,47 @@ const Weather = {
   const ScriptShare = {
       _esc: (s) => Utils.escape(String(s == null ? '' : s)),
 
-      // Fenetre : perimetre (tout / scenes choisies) + nom + generation + liste des liens
-      openShareModal: (episodeIds) => {
-          const pid = state.currentProjectId;
-          if(!pid) { Utils.toast('Aucun projet ouvert', 'warning'); return; }
+      // Ce qui peut etre partage. 'scenario' reste le defaut (retrocompat v585).
+      _kinds: {
+          scenario: { title: 'Partager le scénario', word: 'scénario', all: 'Tout le scénario', pick: 'Choisir des scènes', pickOne: 'scène' },
+          synopsis: { title: 'Partager le synopsis',  word: 'synopsis',  all: 'Tout le synopsis',  pick: 'Choisir des sections', pickOne: 'section' },
+      },
+
+      // Liste des elements selectionnables selon le kind : [{id, label}].
+      _elements: (kind, episodeIds) => {
+          if(kind === 'synopsis') {
+              return [
+                  { id: 'idea',  label: 'Synopsis' },
+                  { id: 'short', label: 'Résumé court' },
+                  { id: 'long',  label: 'Résumé long' },
+              ];
+          }
           let scenes = (state.data.scenes || []);
           if(episodeIds && episodeIds.length) scenes = scenes.filter(s => episodeIds.includes(s.episodeId));
-          const rows = scenes.map((s, i) =>
-              `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()"><td style="width:24px;padding:4px 8px;vertical-align:middle;"><input type="checkbox" class="sshare-scene" value="${ScriptShare._esc(s.id)}" style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td><td style="padding:4px 8px;font-size:0.85rem;line-height:1.3;">${i+1}. ${ScriptShare._esc(s.title || 'Sans titre')}</td></tr>`
+          return scenes.map((s, i) => ({ id: s.id, label: (i + 1) + '. ' + (s.title || 'Sans titre') }));
+      },
+
+      // Fenetre : perimetre (tout / elements choisis) + nom + generation + liste des liens
+      openShareModal: (kind, episodeIds) => {
+          const pid = state.currentProjectId;
+          if(!pid) { Utils.toast('Aucun projet ouvert', 'warning'); return; }
+          kind = (kind && ScriptShare._kinds[kind]) ? kind : 'scenario';
+          const cfg = ScriptShare._kinds[kind];
+          const elements = ScriptShare._elements(kind, episodeIds);
+          const rows = elements.map(el =>
+              `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()"><td style="width:24px;padding:4px 8px;vertical-align:middle;"><input type="checkbox" class="sshare-scene" value="${ScriptShare._esc(el.id)}" style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td><td style="padding:4px 8px;font-size:0.85rem;line-height:1.3;">${ScriptShare._esc(el.label)}</td></tr>`
           ).join('');
           const overlay = document.createElement('div');
           overlay.className = 'confirm-modal-overlay';
           overlay.id = 'sshare-overlay';
+          overlay.dataset.kind = kind;
           overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:560px;padding:20px;">
-              <div style="font-size:1.05rem;font-weight:bold;margin-bottom:14px;">🔗 Partager le scénario</div>
-              <div style="text-align:left;font-size:0.82rem;color:var(--text-sec);margin-bottom:12px;">Envoie une version lecture seule du scénario à une personne extérieure (non inscrite). Elle pourra le lire et déposer des commentaires, qui te reviendront sur le site.</div>
+              <div style="font-size:1.05rem;font-weight:bold;margin-bottom:14px;">🔗 ${ScriptShare._esc(cfg.title)}</div>
+              <div style="text-align:left;font-size:0.82rem;color:var(--text-sec);margin-bottom:12px;">Envoie une version lecture seule du ${ScriptShare._esc(cfg.word)} à une personne extérieure (non inscrite). Elle pourra le lire et déposer des commentaires, qui te reviendront sur le site.</div>
               <input type="text" id="sshare-label" placeholder="Nom du partage (ex : Relecture Marc) — facultatif" style="width:100%;padding:8px 10px;margin-bottom:12px;border:1px solid var(--border);border-radius:6px;font-size:0.85rem;box-sizing:border-box;">
               <div style="display:flex;gap:6px;margin-bottom:10px;">
-                  <button type="button" class="fmt-btn active" id="sshare-all" data-active="1" style="flex:1;padding:8px;font-size:0.82rem;">Tout le scénario</button>
-                  <button type="button" class="fmt-btn" id="sshare-pick" data-active="0" style="flex:1;padding:8px;font-size:0.82rem;">Choisir des scènes</button>
+                  <button type="button" class="fmt-btn active" id="sshare-all" data-active="1" style="flex:1;padding:8px;font-size:0.82rem;">${ScriptShare._esc(cfg.all)}</button>
+                  <button type="button" class="fmt-btn" id="sshare-pick" data-active="0" style="flex:1;padding:8px;font-size:0.82rem;">${ScriptShare._esc(cfg.pick)}</button>
               </div>
               <div id="sshare-scenes" style="display:none;max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:12px;"><table style="width:100%;border-collapse:collapse;">${rows}</table></div>
               <button type="button" id="sshare-create" class="confirm-modal-btn confirm" style="width:100%;margin:0 0 12px 0;">Générer le lien</button>
@@ -79073,17 +79096,19 @@ const Weather = {
       },
 
       _create: async (pid, overlay) => {
+          const kind = overlay.dataset.kind || 'scenario';
+          const cfg = ScriptShare._kinds[kind] || ScriptShare._kinds.scenario;
           const label = overlay.querySelector('#sshare-label').value.trim();
           const pick = overlay.querySelector('#sshare-pick').dataset.active === '1';
           let sceneIds = null;
           if(pick) {
               sceneIds = Array.from(overlay.querySelectorAll('.sshare-scene:checked')).map(cb => cb.value);
-              if(sceneIds.length === 0) { Utils.toast('Sélectionne au moins une scène', 'warning'); return; }
+              if(sceneIds.length === 0) { Utils.toast('Sélectionne au moins une ' + cfg.pickOne, 'warning'); return; }
           }
           const btn = overlay.querySelector('#sshare-create');
           btn.disabled = true; btn.textContent = 'Génération…';
           try {
-              const { data, error } = await supabase.functions.invoke('script-share', { body: { action: 'create', projectId: pid, label: label || null, sceneIds } });
+              const { data, error } = await supabase.functions.invoke('script-share', { body: { action: 'create', projectId: pid, kind, label: label || null, sceneIds } });
               if(error || !data || !data.token) throw (error || new Error('token'));
               const url = window.location.origin + '/scenario/' + data.token;
               overlay.querySelector('#sshare-url').value = url;
@@ -79099,13 +79124,17 @@ const Weather = {
       },
 
       _refresh: async (pid, overlay) => {
+          const kind = overlay.dataset.kind || 'scenario';
+          const cfg = ScriptShare._kinds[kind] || ScriptShare._kinds.scenario;
           const listEl = overlay.querySelector('#sshare-list');
           try {
               const { data } = await supabase.functions.invoke('script-share', { body: { action: 'shares', projectId: pid } });
-              const shares = (data && data.shares) || [];
+              let shares = (data && data.shares) || [];
+              // Ne montrer que les liens du meme type que la fenetre ouverte.
+              shares = shares.filter(sh => (sh.kind || 'scenario') === kind);
               if(shares.length === 0) { listEl.innerHTML = '<div style="color:var(--text-sec);padding:6px 0;">Aucun lien pour l\'instant.</div>'; return; }
               listEl.innerHTML = shares.map(sh => {
-                  const scope = sh.scene_ids ? (sh.scene_ids.length + ' scène' + (sh.scene_ids.length > 1 ? 's' : '')) : 'Tout le scénario';
+                  const scope = sh.scene_ids ? (sh.scene_ids.length + ' ' + cfg.pickOne + (sh.scene_ids.length > 1 ? 's' : '')) : cfg.all;
                   const name = ScriptShare._esc(sh.label || scope);
                   const off = sh.revoked;
                   const url = window.location.origin + '/scenario/' + sh.token;
@@ -79141,14 +79170,21 @@ const Weather = {
   // voit QUE le scenario. Colonne gauche = texte en lecture ; colonne droite = deux
   // onglets (Global / Par scene). Tout passe par l'Edge Function script-share.
   const ScriptReader = {
-      _token: null, _first: '', _last: '', _email: '', _scenes: [], _title: '', _mine: { project: '', scenes: {} },
+      _token: null, _first: '', _last: '', _email: '', _scenes: [], _title: '', _kind: 'scenario', _mine: { project: '', scenes: {} },
+
+      // Libelles adaptes au type de partage. 'scenario' reste le defaut.
+      _labels: {
+          scenario: { per: 'Par scène',   one: 'scène',   hint: 'Votre remarque sur cette scène…' },
+          synopsis: { per: 'Par section', one: 'section', hint: 'Votre remarque sur cette section…' },
+      },
+      _lab: () => ScriptReader._labels[ScriptReader._kind] || ScriptReader._labels.scenario,
 
       // Detecte /scenario/<jeton> ; si oui, monte le lecteur et renvoie true.
       boot: () => {
           const m = (window.location.pathname || '').match(/^\/scenario\/([A-Za-z0-9]+)\/?$/);
           if(!m) return false;
           ScriptReader._token = m[1];
-          try { document.title = 'Scénario partagé — Moteur'; } catch(_) {}
+          try { document.title = 'Relecture — Moteur'; } catch(_) {}
           ScriptReader._injectCss();
           ScriptReader._renderGate();
           return true;
@@ -79201,15 +79237,15 @@ const Weather = {
       // Ecran de presentation (prenom / nom / e-mail).
       _renderGate: () => {
           const r = ScriptReader._root();
-          r.innerHTML = `<div class="rd-top"><span class="rd-logo">🎬 Moteur</span><span class="rd-sub">Relecture de scénario</span></div>
+          r.innerHTML = `<div class="rd-top"><span class="rd-logo">🎬 Moteur</span><span class="rd-sub">Relecture</span></div>
               <div style="flex:1;overflow-y:auto;">
                   <div class="rd-gate">
-                      <h2>Vous avez été invité à relire un scénario</h2>
+                      <h2>Vous avez été invité à relire un document</h2>
                       <p>Présentez-vous pour accéder au texte et laisser vos commentaires à l'auteur.</p>
                       <input type="text" id="rd-first" placeholder="Prénom" data-allow-emojis="true">
                       <input type="text" id="rd-last" placeholder="Nom" data-allow-emojis="true">
                       <input type="email" id="rd-email" placeholder="Adresse e-mail" data-allow-emojis="true">
-                      <button class="rd-btn" id="rd-enter">Accéder au scénario</button>
+                      <button class="rd-btn" id="rd-enter">Accéder</button>
                       <div id="rd-gate-err" style="color:#c0392b;font-size:0.82rem;margin-top:8px;"></div>
                   </div>
               </div>`;
@@ -79230,6 +79266,7 @@ const Weather = {
               const { data, error } = await supabase.functions.invoke('script-share', { body: { action: 'read', token: ScriptReader._token, email } });
               if(error || !data || !data.scenes) throw (error || new Error('read'));
               ScriptReader._scenes = data.scenes;
+              ScriptReader._kind = (data.kind && ScriptReader._labels[data.kind]) ? data.kind : 'scenario';
               ScriptReader._title = data.project_title || '';
               ScriptReader._mine = { project: '', scenes: {} };
               (data.mine || []).forEach(c => { if(c.scope === 'project') ScriptReader._mine.project = c.body || ''; else ScriptReader._mine.scenes[c.scene_id] = c.body || ''; });
@@ -79237,20 +79274,21 @@ const Weather = {
           } catch(e) {
               console.error('[ScriptReader] read:', e);
               err.textContent = 'Ce lien est invalide, expiré ou révoqué.';
-              btn.disabled = false; btn.textContent = 'Accéder au scénario';
+              btn.disabled = false; btn.textContent = 'Accéder';
           }
       },
 
       _renderReader: () => {
           const r = ScriptReader._root();
           const esc = ScriptReader._esc;
-          const left = ScriptReader._scenes.map(s => `<div class="rd-scene" id="rdL-${esc(s.id)}"><div class="rd-scene-h" style="cursor:pointer;" title="Voir les commentaires de cette scène" onclick="app.ScriptReader._toComment('${esc(s.id)}')">${s.number}. ${esc(s.title)}</div><div class="rd-scene-body">${s.content || ''}</div></div>`).join('') || '<p>(Scénario vide)</p>';
-          const perScene = ScriptReader._scenes.map(s => `<div class="rd-sc-block" id="rdR-${esc(s.id)}"><div class="rd-sc-title" style="cursor:pointer;" title="Aller à cette scène dans le scénario" onclick="app.ScriptReader._toScene('${esc(s.id)}')">${s.number}. ${esc(s.title)}</div><textarea rows="3" class="rd-sc-input" data-scene="${esc(s.id)}" data-allow-emojis="true" placeholder="Votre remarque sur cette scène…">${esc(ScriptReader._mine.scenes[s.id] || '')}</textarea></div>`).join('');
+          const lab = ScriptReader._lab();
+          const left = ScriptReader._scenes.map(s => `<div class="rd-scene" id="rdL-${esc(s.id)}"><div class="rd-scene-h" style="cursor:pointer;" title="Voir les commentaires" onclick="app.ScriptReader._toComment('${esc(s.id)}')">${s.number}. ${esc(s.title)}</div><div class="rd-scene-body">${s.content || ''}</div></div>`).join('') || '<p>(Document vide)</p>';
+          const perScene = ScriptReader._scenes.map(s => `<div class="rd-sc-block" id="rdR-${esc(s.id)}"><div class="rd-sc-title" style="cursor:pointer;" title="Aller à cet endroit du document" onclick="app.ScriptReader._toScene('${esc(s.id)}')">${s.number}. ${esc(s.title)}</div><textarea rows="3" class="rd-sc-input" data-scene="${esc(s.id)}" data-allow-emojis="true" placeholder="${esc(lab.hint)}">${esc(ScriptReader._mine.scenes[s.id] || '')}</textarea></div>`).join('');
           r.innerHTML = `<div class="rd-top"><span class="rd-logo">🎬 Moteur</span><span class="rd-sub">${esc(ScriptReader._title)} — relecture</span></div>
               <div class="rd-body">
                   <div class="rd-left"><div class="rd-page">${left}</div></div>
                   <div class="rd-right">
-                      <div class="rd-tabs"><div class="rd-tab active" data-pane="global">Global</div><div class="rd-tab" data-pane="scene">Par scène</div></div>
+                      <div class="rd-tabs"><div class="rd-tab active" data-pane="global">Global</div><div class="rd-tab" data-pane="scene">${esc(lab.per)}</div></div>
                       <div class="rd-pane active" id="rd-pane-global"><textarea rows="12" id="rd-global" data-allow-emojis="true" placeholder="Vos remarques générales sur le projet…">${esc(ScriptReader._mine.project || '')}</textarea></div>
                       <div class="rd-pane" id="rd-pane-scene">${perScene}</div>
                       <div class="rd-foot"><button class="rd-btn" id="rd-send">Envoyer les commentaires</button><div id="rd-send-msg" style="text-align:center;font-size:0.82rem;margin-top:8px;"></div></div>
@@ -79386,13 +79424,13 @@ const Weather = {
           let list = ScriptReview._comments;
           if(ScriptReview._author !== 'all') list = list.filter(c => c.author_email === ScriptReview._author);
           if(ScriptReview._tab === 'global') {
-              const g = list.filter(c => c.scope === 'project');
+              const g = list.filter(c => c.scope === 'project').sort((a, b) => (a.validated ? 1 : 0) - (b.validated ? 1 : 0));
               body.innerHTML = g.length ? g.map(ScriptReview._card).join('') : '<div style="color:var(--text-sec);text-align:center;padding:20px;font-size:0.85rem;">Aucune remarque générale.</div>';
           } else {
               const byScene = list.filter(c => c.scope === 'scene');
               const scenes = state.data.scenes || [];
               const groups = scenes.map((s, i) => {
-                  const cs = byScene.filter(c => c.scene_id === s.id);
+                  const cs = byScene.filter(c => c.scene_id === s.id).sort((a, b) => (a.validated ? 1 : 0) - (b.validated ? 1 : 0));
                   if(cs.length === 0) return '';
                   return `<div id="sr-grp-${ScriptReview._esc(s.id)}" style="margin-bottom:16px;"><div style="font-weight:700;font-size:0.85rem;margin-bottom:6px;">${i + 1}. ${ScriptReview._esc(s.title || '')}</div>${cs.map(ScriptReview._card).join('')}</div>`;
               }).filter(Boolean).join('');
@@ -79552,6 +79590,10 @@ const Weather = {
                           <div style="display:flex;gap:10px;align-items:flex-start;"><span style="flex:0 0 24px;height:24px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.8rem;">4</span><div><strong>Le scénario</strong> — enfin l'écriture, dialogues compris.</div></div>
                       </div>
                       <div style="color:var(--text-sec);margin-top:10px;">Les trois premières étapes se remplissent dans l'onglet <strong>Synopsis</strong>, la dernière dans l'onglet <strong>Scénario</strong>. C'est une bonne façon d'être sûr·e que l'idée est bonne avant d'y passer des heures.</div>
+                  </div>
+                  <div style="margin-top:16px;">
+                      <div style="font-weight:700;margin-bottom:4px;">🔗 Fais-toi relire</div>
+                      <div style="color:var(--text-sec);">Une fois ton scénario écrit, tu peux le <strong>partager en lecture seule</strong> à une personne extérieure, même sans compte Moteur : elle le lit et te laisse des retours, qui te reviennent directement dans l'app. Le partage se lance depuis les <strong>options d'export du scénario</strong>.</div>
                   </div>
               </div>
               <div style="padding:12px 24px 18px;border-top:1px solid var(--border);">
