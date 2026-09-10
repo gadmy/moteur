@@ -9567,6 +9567,8 @@ body.presentation-mode .presentation-bar {
                      dans le bloc « Type de vue » partage : place la, il restait
                      affiche en Beat Board, qui ne s'exporte pas. -->
                 <button id="btn-sequencer-pdf" onclick="app.BeatBoard.exportSequencerPDF()" style="width: 100%; padding: 8px; margin-bottom: 15px; background: var(--primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">📄 Export PDF du séquencier</button>
+                <button onclick="app.ScriptShare.openShareModal('sequencier')" style="width: 100%; padding: 8px; margin-bottom: 8px; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem;" title="Partager le séquencier en lecture seule à un relecteur externe">🔗 Partager</button>
+                <button onclick="app.ScriptReview.open(null, 'sequencier')" style="width: 100%; padding: 8px; margin-bottom: 15px; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem;" title="Voir les retours des relecteurs sur le séquencier">💬 Commentaires</button>
                 <h4 class="heading-border">Affichage</h4>
                 <!-- « Normal / Compact » retire le 26 aout : le sequencier
                      n'affiche plus des bandes pleine largeur mais une grille de
@@ -23355,7 +23357,7 @@ initCategoriesDragDrop: () => {
     
     // LOT 4 : bulle « commentaires invites non vus » sur l'onglet Scenario.
     // Arriver sur le scenario eteint la bulle (marque vu) ; sinon on la reevalue.
-    try { if(tabName === 'script') ScriptReview.markSeen('scenario'); else if(tabName === 'synopsis') ScriptReview.markSeen('synopsis'); else ScriptReview.refreshBadge(); } catch(e) {}
+    try { if(tabName === 'script') ScriptReview.markSeen('scenario'); else if(tabName === 'synopsis') ScriptReview.markSeen('synopsis'); else if(tabName === 'board') ScriptReview.markSeen('sequencier'); else ScriptReview.refreshBadge(); } catch(e) {}
     
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active')); 
     document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active')); 
@@ -79030,8 +79032,9 @@ const Weather = {
 
       // Ce qui peut etre partage. 'scenario' reste le defaut (retrocompat v585).
       _kinds: {
-          scenario: { title: 'Partager le scénario', word: 'scénario', all: 'Tout le scénario', pick: 'Choisir des scènes', pickOne: 'scène' },
-          synopsis: { title: 'Partager le synopsis',  word: 'synopsis',  all: 'Tout le synopsis',  pick: 'Choisir des sections', pickOne: 'section' },
+          scenario:   { title: 'Partager le scénario',   word: 'scénario',   all: 'Tout le scénario',   pick: 'Choisir des scènes',   pickOne: 'scène' },
+          synopsis:   { title: 'Partager le synopsis',    word: 'synopsis',   all: 'Tout le synopsis',   pick: 'Choisir des sections', pickOne: 'section' },
+          sequencier: { title: 'Partager le séquencier',  word: 'séquencier', all: 'Tout le séquencier', pick: 'Choisir des scènes',   pickOne: 'scène' },
       },
 
       // Liste des elements selectionnables selon le kind : [{id, label}].
@@ -79175,8 +79178,9 @@ const Weather = {
 
       // Libelles adaptes au type de partage. 'scenario' reste le defaut.
       _labels: {
-          scenario: { per: 'Par scène',   one: 'scène',   hint: 'Votre remarque sur cette scène…' },
-          synopsis: { per: 'Par section', one: 'section', hint: 'Votre remarque sur cette section…' },
+          scenario:   { per: 'Par scène',   one: 'scène',   hint: 'Votre remarque sur cette scène…' },
+          synopsis:   { per: 'Par section', one: 'section', hint: 'Votre remarque sur cette section…' },
+          sequencier: { per: 'Par scène',   one: 'scène',   hint: 'Votre remarque sur cette scène…' },
       },
       _lab: () => ScriptReader._labels[ScriptReader._kind] || ScriptReader._labels.scenario,
 
@@ -79364,8 +79368,8 @@ const Weather = {
       _esc: (s) => Utils.escape(String(s == null ? '' : s)),
 
       // A quel onglet s'accroche la bulle, et le libelle de l'onglet "par element".
-      _kindTab: { scenario: 'script', synopsis: 'synopsis' },
-      _kindPer: { scenario: 'Par scène', synopsis: 'Par section' },
+      _kindTab: { scenario: 'script', synopsis: 'synopsis', sequencier: 'board' },
+      _kindPer: { scenario: 'Par scène', synopsis: 'Par section', sequencier: 'Par scène' },
 
       // Elements groupables selon le kind : [{id, label}].
       _elements: (kind) => {
@@ -79470,11 +79474,14 @@ const Weather = {
                   const secMap = { idea: 'synopsis', short: 'short', long: 'long' };
                   const sec = secMap[c.scene_id] || 'synopsis';
                   clickAttr = ` onclick="app.Synopsis.switchSection('${sec}')" title="Aller à cette section"`;
-              } else {
+              } else if(ScriptReview._kind === 'scenario') {
                   clickAttr = ` onclick="app.ScriptReview._scrollScript('${ScriptReview._esc(c.scene_id)}')" title="Voir cette scène dans le scénario"`;
               }
+              // sequencier : la scene est deja nommee par l'en-tete du groupe,
+              // et il n'y a pas de colonne script a faire defiler ici -> pas de clic.
           }
-          return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;${clickable ? 'cursor:pointer;' : ''}${on ? 'opacity:0.7;background:rgba(22,163,74,0.08);' : ''}"${clickAttr}>
+          const hasClick = !!clickAttr;
+          return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;${hasClick ? 'cursor:pointer;' : ''}${on ? 'opacity:0.7;background:rgba(22,163,74,0.08);' : ''}"${clickAttr}>
               <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
                   <div style="font-size:0.78rem;color:var(--text-sec);"><strong style="color:var(--text-main);">${ScriptReview._esc(who)}</strong> · ${d}</div>
                   <label style="display:flex;align-items:center;gap:4px;font-size:0.72rem;cursor:pointer;white-space:nowrap;" onclick="event.stopPropagation()"><input type="checkbox" ${on ? 'checked' : ''} onchange="app.ScriptReview._validate('${ScriptReview._esc(c.id)}', this.checked)"> validé</label>
