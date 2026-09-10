@@ -31851,6 +31851,31 @@ const StoryboardExport = {
     _printCapturing: false,
     _printImgPromises: [],
     _exportSceneIds: null, // null = toutes ; sinon liste d'ids de scenes a exporter
+    _diag: [], // collecte de diagnostic (affichee dans une modale copiable en fin d'export)
+    _dlog: (m) => {
+        try { if(StoryboardExport._diag.length < 80) StoryboardExport._diag.push(m); } catch(e) {}
+        try { console.log('[SB2] ' + m); } catch(e) {}
+    },
+    _showDiag: () => {
+        const text = (StoryboardExport._diag || []).join('\n') || '(vide)';
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:560px;padding:18px;text-align:left;">
+            <div style="font-weight:bold;margin-bottom:8px;">Diagnostic export storyboard</div>
+            <div style="font-size:0.8rem;color:var(--text-sec);margin-bottom:8px;">Copie ce texte et colle-le dans la conversation.</div>
+            <textarea readonly style="width:100%;height:220px;font-family:monospace;font-size:0.72rem;border:1px solid var(--border);border-radius:6px;padding:8px;box-sizing:border-box;"></textarea>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+                <button class="confirm-modal-btn" id="sbdiag-copy" style="margin:0;">Copier</button>
+                <button class="confirm-modal-btn confirm" id="sbdiag-close" style="margin:0;">Fermer</button>
+            </div>
+        </div>`;
+        const ta = overlay.querySelector('textarea');
+        ta.value = text;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#sbdiag-copy').onclick = () => { try { ta.select(); navigator.clipboard.writeText(text); Utils.toast('Copié', 'success'); } catch(e) { try { ta.select(); } catch(_) {} } };
+        overlay.querySelector('#sbdiag-close').onclick = () => overlay.remove();
+        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+    },
     // [2b] Enregistre une image de print : si une capture PDF est en cours, sa promesse
     // (resolue au load OU error, filet 8s) est trackee pour que exportPDF attende le dessin reel.
     _awaitPrintImg: (img, draw) => {
@@ -31878,22 +31903,22 @@ const StoryboardExport = {
     _resolveBlobUrl: async (storedUrl) => {
         try {
             const path = Utils._projPathFrom(storedUrl);
-            if(!path) { try { console.log('[SB2] no-path url=' + String(storedUrl).slice(0, 60)); } catch(e) {} return null; }
+            if(!path) { StoryboardExport._dlog('no-path url=' + String(storedUrl).slice(0, 60)); return null; }
             const { data, error } = await supabase.storage.from('projects').download(path);
-            if(error) { try { console.log('[SB2] download ERROR path=' + path + ' -> ' + (error.message || error)); } catch(e) {} return null; }
-            if(!data) { try { console.log('[SB2] download EMPTY path=' + path); } catch(e) {} return null; }
+            if(error) { StoryboardExport._dlog('download ERROR path=' + path + ' -> ' + (error.message || error)); return null; }
+            if(!data) { StoryboardExport._dlog('download EMPTY path=' + path); return null; }
             return URL.createObjectURL(data);
-        } catch(e) { try { console.log('[SB2] resolve EXC ' + e); } catch(_) {} return null; }
+        } catch(e) { StoryboardExport._dlog('resolve EXC ' + e); return null; }
     },
 
     _loadPrintImg: (img, storedUrl, draw) => {
         const tag = String(storedUrl == null ? '' : storedUrl).slice(0, 45);
         const p = StoryboardExport._resolveBlobUrl(storedUrl).then(objUrl => new Promise(res => {
-            try { console.log('[SB2] load blob=' + (objUrl ? 'ok' : 'null') + ' ' + tag); } catch(e) {}
-            img.onload = () => { try { console.log('[SB2] onload ' + img.naturalWidth + 'x' + img.naturalHeight + ' ' + tag); } catch(e) {} try { draw(); } catch(e) {} if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
-            img.onerror = () => { try { console.log('[SB2] ONERROR ' + tag); } catch(e) {} if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
+            StoryboardExport._dlog('load blob=' + (objUrl ? 'ok' : 'null') + ' ' + tag);
+            img.onload = () => { StoryboardExport._dlog('onload ' + img.naturalWidth + 'x' + img.naturalHeight + ' ' + tag); try { draw(); } catch(e) {} if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
+            img.onerror = () => { StoryboardExport._dlog('ONERROR ' + tag); if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
             img.src = objUrl || StoryboardExport._printSrc(storedUrl);
-            setTimeout(() => { try { console.log('[SB2] TIMEOUT ' + tag); } catch(e) {} res(); }, 8000);
+            setTimeout(() => { StoryboardExport._dlog('TIMEOUT ' + tag); res(); }, 8000);
         }));
         if(StoryboardExport._printCapturing) StoryboardExport._printImgPromises.push(p);
         return p;
@@ -32008,7 +32033,7 @@ const StoryboardExport = {
         
         // 1) Calque ORIGINAL en premier (image uploadée OU drawing original)
         if(shot.imageType === 'upload' && shot.imageUrl) {
-            try { console.log('[SB2] shot UPLOAD ' + shot.id); } catch(e) {}
+            StoryboardExport._dlog('shot UPLOAD ' + shot.id);
             // Charger l'image avec crossOrigin et la dessiner dans le canvas
             const img = new Image();
             StoryboardExport._loadPrintImg(img, shot.imageUrl, () => {
@@ -32024,7 +32049,7 @@ const StoryboardExport = {
             });
             hasContent = true;
         } else if(shot.imageType === 'drawing' && shot.drawingData) {
-            try { console.log('[SB2] shot DRAWING layers=' + ((shot.drawingData && shot.drawingData.layers) ? shot.drawingData.layers.length : '?') + ' ' + shot.id); } catch(e) {}
+            StoryboardExport._dlog('shot DRAWING layers=' + ((shot.drawingData && shot.drawingData.layers) ? shot.drawingData.layers.length : '?') + ' ' + shot.id);
             // Rendu du dessin (renderDrawingData gère ses async via crossOrigin)
             DrawingEditor.renderDrawingData(composedCtx, shot.drawingData);
             // Objets vectoriels de la zone Original par-dessus
@@ -32038,7 +32063,7 @@ const StoryboardExport = {
             setTimeout(() => Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer), 250);
             hasContent = true;
         } else {
-            try { console.log('[SB2] shot NO-IMAGE ' + shot.id + ' type=' + shot.imageType + ' hasDrawings=' + !!shot.drawings); } catch(e) {}
+            StoryboardExport._dlog('shot NO-IMAGE ' + shot.id + ' type=' + shot.imageType + ' hasDrawings=' + !!shot.drawings);
         }
         
 if(hasContent) {
@@ -32157,6 +32182,7 @@ if(hasContent) {
         }
         StoryboardExport._printCapturing = true;
         StoryboardExport._printImgPromises = [];
+        StoryboardExport._diag = [];
         StoryboardExport._exportSceneIds = (opts.sceneIds && opts.sceneIds.length) ? opts.sceneIds : null;
         try {
             Storyboard.renderPrintPreview('storyboardOffscreenPreview');
@@ -32202,19 +32228,18 @@ if(hasContent) {
         // [SB DIAG] TEMPORAIRE — etat reel des canvas avant rasterisation
         try {
             const _cvs = offscreen.querySelectorAll('canvas');
-            console.log('[SB DIAG] pages=' + pages.length + ' canvas=' + _cvs.length);
-            _cvs.forEach((cv, idx) => {
-                let pixels = 'n/a', read = 'ok';
+            let _painted = 0, _empty = 0, _tainted = 0;
+            _cvs.forEach((cv) => {
                 try {
                     const w = Math.min(cv.width, 40), h = Math.min(cv.height, 40);
                     const d = cv.getContext('2d').getImageData(0, 0, w, h).data;
-                    pixels = d.some(v => v !== 0) ? 'PAINTED' : 'EMPTY';
-                } catch(e) { read = 'TAINTED/' + e.name; }
-                let td = 'ok';
-                try { cv.toDataURL(); } catch(e) { td = 'THROW/' + e.name; }
-                console.log('[SB DIAG] canvas#' + idx + ' ' + cv.width + 'x' + cv.height + ' pixels=' + pixels + ' read=' + read + ' toDataURL=' + td);
+                    if(d.some(v => v !== 0)) _painted++; else _empty++;
+                } catch(e) { _tainted++; }
             });
-        } catch(e) { console.warn('[SB DIAG] fail', e); }
+            StoryboardExport._dlog('CANVAS total=' + _cvs.length + ' painted=' + _painted + ' empty=' + _empty + ' tainted=' + _tainted);
+        } catch(e) { StoryboardExport._dlog('CANVAS fail ' + e); }
+        // Encadre copiable : tout le diagnostic d'un coup (plus besoin de fouiller la console).
+        try { StoryboardExport._showDiag(); } catch(e) {}
         const A4 = { w: 210, h: 297 };
         let doc = null;
         
