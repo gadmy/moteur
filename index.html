@@ -9432,6 +9432,7 @@ body.presentation-mode .presentation-bar {
             </button>
             <button onclick="app.Synopsis.openSynopsisPdfModal()" style="margin-top: 16px; width: 100%; background: var(--primary); color: #fff; padding: 10px 14px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;" title="Export PDF (page de garde + champs au choix)">📄 Export PDF</button>
             <button onclick="app.ScriptShare.openShareModal('synopsis')" style="margin-top: 8px; width: 100%; background: var(--panel-bg); color: var(--text-main); padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;" title="Partager le synopsis en lecture seule à un relecteur externe">🔗 Partager</button>
+            <button onclick="app.ScriptReview.open(null, 'synopsis')" style="margin-top: 8px; width: 100%; background: var(--panel-bg); color: var(--text-main); padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;" title="Voir les retours des relecteurs sur le synopsis">💬 Commentaires</button>
           </aside>
           
           <!-- Zone principale -->
@@ -23354,7 +23355,7 @@ initCategoriesDragDrop: () => {
     
     // LOT 4 : bulle « commentaires invites non vus » sur l'onglet Scenario.
     // Arriver sur le scenario eteint la bulle (marque vu) ; sinon on la reevalue.
-    try { if(tabName === 'script') ScriptReview.markSeen(); else ScriptReview.refreshBadge(); } catch(e) {}
+    try { if(tabName === 'script') ScriptReview.markSeen('scenario'); else if(tabName === 'synopsis') ScriptReview.markSeen('synopsis'); else ScriptReview.refreshBadge(); } catch(e) {}
     
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active')); 
     document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active')); 
@@ -79359,13 +79360,31 @@ const Weather = {
       _comments: [],
       _author: 'all',
       _tab: 'global',
+      _kind: 'scenario',
       _esc: (s) => Utils.escape(String(s == null ? '' : s)),
 
-      open: async (sceneId) => {
+      // A quel onglet s'accroche la bulle, et le libelle de l'onglet "par element".
+      _kindTab: { scenario: 'script', synopsis: 'synopsis' },
+      _kindPer: { scenario: 'Par scène', synopsis: 'Par section' },
+
+      // Elements groupables selon le kind : [{id, label}].
+      _elements: (kind) => {
+          if(kind === 'synopsis') {
+              return [
+                  { id: 'idea',  label: 'Synopsis' },
+                  { id: 'short', label: 'Résumé court' },
+                  { id: 'long',  label: 'Résumé long' },
+              ];
+          }
+          return (state.data.scenes || []).map((s, i) => ({ id: s.id, label: (i + 1) + '. ' + (s.title || '') }));
+      },
+
+      open: async (elementId, kind) => {
           const panel = document.getElementById('comments-panel');
           if(!panel) return;
+          ScriptReview._kind = (kind && ScriptReview._kindTab[kind]) ? kind : 'scenario';
           ScriptReview._ensureDelegation();
-          ScriptReview._tab = sceneId ? 'scene' : 'global';
+          ScriptReview._tab = elementId ? 'scene' : 'global';
           panel.classList.add('open');
           ScriptReview._renderShell();
           await ScriptReview._load();
@@ -79400,7 +79419,7 @@ const Weather = {
               </div>
               <div class="sr-tabs" style="display:flex;border-bottom:1px solid var(--border);">
                   <div class="sr-tab" data-tab="global" style="flex:1;text-align:center;padding:10px;cursor:pointer;font-weight:600;font-size:0.85rem;">Global</div>
-                  <div class="sr-tab" data-tab="scene" style="flex:1;text-align:center;padding:10px;cursor:pointer;font-weight:600;font-size:0.85rem;">Par scène</div>
+                  <div class="sr-tab" data-tab="scene" style="flex:1;text-align:center;padding:10px;cursor:pointer;font-weight:600;font-size:0.85rem;">${ScriptReview._esc(ScriptReview._kindPer[ScriptReview._kind] || 'Par scène')}</div>
               </div>
               <div class="comments-body" id="sr-body" style="flex:1;overflow-y:auto;padding:12px;"></div>`;
           panel.querySelectorAll('.sr-tab').forEach(t => t.onclick = () => { ScriptReview._tab = t.dataset.tab; ScriptReview._render(); });
@@ -79421,20 +79440,22 @@ const Weather = {
               t.style.borderBottom = on ? '2px solid var(--primary)' : '2px solid transparent';
               t.style.color = on ? 'var(--text-main)' : 'var(--text-sec)';
           });
-          let list = ScriptReview._comments;
+          // Ne montrer que les commentaires du type de partage courant.
+          let list = ScriptReview._comments.filter(c => (c.kind || 'scenario') === ScriptReview._kind);
           if(ScriptReview._author !== 'all') list = list.filter(c => c.author_email === ScriptReview._author);
           if(ScriptReview._tab === 'global') {
               const g = list.filter(c => c.scope === 'project').sort((a, b) => (a.validated ? 1 : 0) - (b.validated ? 1 : 0));
               body.innerHTML = g.length ? g.map(ScriptReview._card).join('') : '<div style="color:var(--text-sec);text-align:center;padding:20px;font-size:0.85rem;">Aucune remarque générale.</div>';
           } else {
-              const byScene = list.filter(c => c.scope === 'scene');
-              const scenes = state.data.scenes || [];
-              const groups = scenes.map((s, i) => {
-                  const cs = byScene.filter(c => c.scene_id === s.id).sort((a, b) => (a.validated ? 1 : 0) - (b.validated ? 1 : 0));
+              const byElem = list.filter(c => c.scope === 'scene');
+              const els = ScriptReview._elements(ScriptReview._kind);
+              const groups = els.map(el => {
+                  const cs = byElem.filter(c => c.scene_id === el.id).sort((a, b) => (a.validated ? 1 : 0) - (b.validated ? 1 : 0));
                   if(cs.length === 0) return '';
-                  return `<div id="sr-grp-${ScriptReview._esc(s.id)}" style="margin-bottom:16px;"><div style="font-weight:700;font-size:0.85rem;margin-bottom:6px;">${i + 1}. ${ScriptReview._esc(s.title || '')}</div>${cs.map(ScriptReview._card).join('')}</div>`;
+                  return `<div id="sr-grp-${ScriptReview._esc(el.id)}" style="margin-bottom:16px;"><div style="font-weight:700;font-size:0.85rem;margin-bottom:6px;">${ScriptReview._esc(el.label)}</div>${cs.map(ScriptReview._card).join('')}</div>`;
               }).filter(Boolean).join('');
-              body.innerHTML = groups || '<div style="color:var(--text-sec);text-align:center;padding:20px;font-size:0.85rem;">Aucune remarque sur les scènes.</div>';
+              const empty = ScriptReview._kind === 'synopsis' ? 'Aucune remarque sur les sections.' : 'Aucune remarque sur les scènes.';
+              body.innerHTML = groups || '<div style="color:var(--text-sec);text-align:center;padding:20px;font-size:0.85rem;">' + empty + '</div>';
           }
       },
 
@@ -79443,7 +79464,16 @@ const Weather = {
           const d = c.updated_at ? new Date(c.updated_at).toLocaleDateString('fr-FR') : '';
           const on = c.validated;
           const clickable = c.scope === 'scene' && c.scene_id;
-          const clickAttr = clickable ? ` onclick="app.ScriptReview._scrollScript('${ScriptReview._esc(c.scene_id)}')" title="Voir cette scène dans le scénario"` : '';
+          let clickAttr = '';
+          if(clickable) {
+              if(ScriptReview._kind === 'synopsis') {
+                  const secMap = { idea: 'synopsis', short: 'short', long: 'long' };
+                  const sec = secMap[c.scene_id] || 'synopsis';
+                  clickAttr = ` onclick="app.Synopsis.switchSection('${sec}')" title="Aller à cette section"`;
+              } else {
+                  clickAttr = ` onclick="app.ScriptReview._scrollScript('${ScriptReview._esc(c.scene_id)}')" title="Voir cette scène dans le scénario"`;
+              }
+          }
           return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;${clickable ? 'cursor:pointer;' : ''}${on ? 'opacity:0.7;background:rgba(22,163,74,0.08);' : ''}"${clickAttr}>
               <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
                   <div style="font-size:0.78rem;color:var(--text-sec);"><strong style="color:var(--text-main);">${ScriptReview._esc(who)}</strong> · ${d}</div>
@@ -79462,27 +79492,32 @@ const Weather = {
           } catch(e) { console.error('[ScriptReview] validate:', e); Utils.toast('Erreur', 'error'); }
       },
 
-      // --- Bulle clignotante sur l'onglet Scenario (commentaires invites non vus) ---
+      // --- Bulles clignotantes (commentaires invites non vus), une par onglet ---
       refreshBadge: async () => {
           const pid = state.currentProjectId;
           if(!pid) return;
           try {
               const { data } = await supabase.functions.invoke('script-share', { body: { action: 'list', projectId: pid } });
-              const unseen = ((data && data.comments) || []).some(c => !c.seen);
-              ScriptReview._setBadge(unseen);
+              const comments = (data && data.comments) || [];
+              Object.keys(ScriptReview._kindTab).forEach(kind => {
+                  const unseen = comments.some(c => !c.seen && (c.kind || 'scenario') === kind);
+                  ScriptReview._setBadge(kind, unseen);
+              });
           } catch(e) { /* silencieux : le badge est secondaire */ }
       },
 
-      markSeen: async () => {
-          ScriptReview._setBadge(false);
+      markSeen: async (kind) => {
+          const k = (kind && ScriptReview._kindTab[kind]) ? kind : 'scenario';
+          ScriptReview._setBadge(k, false);
           const pid = state.currentProjectId;
           if(!pid) return;
-          try { await supabase.functions.invoke('script-share', { body: { action: 'seen', projectId: pid } }); } catch(e) { /* silencieux */ }
+          try { await supabase.functions.invoke('script-share', { body: { action: 'seen', projectId: pid, kind: k } }); } catch(e) { /* silencieux */ }
       },
 
-      _setBadge: (on) => {
+      _setBadge: (kind, on) => {
           ScriptReview._injectBadgeCss();
-          const tab = document.querySelector('.tab-btn[data-tab="script"]');
+          const tabName = ScriptReview._kindTab[kind] || 'script';
+          const tab = document.querySelector('.tab-btn[data-tab="' + tabName + '"]');
           if(!tab) return;
           let b = tab.querySelector('.sr-blink');
           if(on) {
