@@ -39,20 +39,16 @@ OUVERT
 [ ] STRIPE / FEATURE GATING — EN PAUSE, ne pas ouvrir sans demande explicite.
     Prerequis juridique : domicile de l'editeur dans les mentions legales
     (LCEN), a trancher avant le passage au payant.
-[ ] PAGE PUBLIQUE — 14 captures d'ecran encore a fournir par Guillaume
-    (liste dans le journal v584) : presentation.png, synopsis.png, titre.png,
-    scenario.png, storyboard.png, depouillement.png, comediens.png,
-    decors.png, ressources.png, equipe.png, structures.png, contrats.png,
-    depenses.png, rapport.png. A deposer dans /images/landing/, aucun code
-    a toucher. Le carrousel affichera un cadre vide tant qu'un fichier
-    manque — sans casser la page.
 
-Rien d'autre d'ouvert cote code au 7 septembre : les 4 points de la liste
-du 4 septembre sont fermes depuis v583, le SQL droit_inviter.sql est
-confirme execute, et la session du 7 septembre (fiche scene, page publique)
-est fermee en v584 — detail au journal ci-dessous. Prochaine session =
-retours de tests de Guillaume (carrousel en conditions reelles, captures
-manquantes deposees ou non).
+Rien d'ouvert cote code au 9 septembre. Captures de la page publique
+deposees (OUVERT precedent ferme). Partage de scenario a un relecteur
+externe livre en v585 sur cinq lots (detail au journal) : socle base +
+Edge Function deployes cote Supabase, vue auteur, vue lecteur publique,
+reception cote site, alignement croise. Deux points laisses en dette
+volontaire (au journal v585) : pas de saisie interne de commentaires dans
+le nouveau systeme (reception invites seule) ; bulle de l'onglet Scenario
+sans temps reel (reevaluee au changement d'onglet / chargement). A rouvrir
+sur demande. Prochaine session = retours de tests en conditions reelles.
 
 --------------------------------------------------------------------------------
 REGLES VIVANTES (compactes — detail au journal, version indiquee)
@@ -161,6 +157,10 @@ Le detail complet vit au journal des versions et dans les fichiers SQL :
 - Regle du telephone des profils publics (public_profiles_for_me) : v578.
 - Droit d'inviter aligne sur la fiche projet (4 sept.) : fichier
   droit_inviter.sql, recit a l'entree v582.
+- Partage de scenario (9 sept., v585) : fichier partage_scenario.sql (deux
+  tables verrouillees script_shares / script_comments, RLS + droits retires
+  a anon/authenticated, AUCUNE policy) + Edge Function script-share (seule
+  porte, service_role). Recit a l'entree v585.
 
 (Le JOURNAL DU CHANTIER FEUILLE DE SERVICE, v562-v567, est retire de
 l'en-tete : tout son contenu — regle des sources noir/orange, transports,
@@ -171,6 +171,12 @@ est raconte aux entrees v562 a v567 de l'historique ci-dessous.)
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v585 (9 Septembre 2026) — PARTAGE DE SCÉNARIO À UN RELECTEUR EXTERNE (non inscrit) : un auteur envoie un lien vers son scénario en lecture seule, l'invité lit et commente (portée projet ou scène), et ses remarques remontent côté site. Livré sur cinq lots, dont deux hors fichier déployés côté Supabase.
+  - SOCLE BASE + EDGE FUNCTION (hors fichier, fichiers conservés à part). Deux tables VERROUILLÉES À DOUBLE TOUR : script_shares (liens : jeton, projet, scènes autorisées, révocation, expiration) et script_comments (nom/prénom/email de l'invité, portée projet/scène, texte, validé, vu). RLS activée SANS aucune policy + droits RÉVOQUÉS à anon et authenticated : personne n'y accède en direct, ni l'invité ni l'auteur connecté. Toute lecture/écriture passe par l'Edge Function script-share (seule à contourner la RLS, clé service_role), alignée sur la doctrine de cloisonnement v578. Actions publiques read/submit (invité, aucun compte) ; actions auteur create/shares/revoke/list/seen/validate (vérif d'appartenance via project_members). À l'envoi : notification cloche obligatoire + e-mail best-effort via super-action. CORRECTIF CORS EN COURS DE ROUTE : le préflight refusait l'en-tête x-application-name ajouté par le client Supabase — ajouté à Access-Control-Allow-Headers (avec x-supabase-api-version).
+  - CÔTÉ AUTEUR (module ScriptShare). Bouton « Partager le scénario » ajouté au pied de la fenêtre d'options du PDF scénario (_openScenarioOptionsModal). Fenêtre : nom de partage facultatif, périmètre « Tout le scénario » ou « Choisir des scènes » (liste à cocher), génération d'un lien copié automatiquement, et liste des liens existants avec révoquer/réactiver. Libellé « Partager le scénario » plutôt que « PDF » (ce n'est pas un fichier qui part mais une lecture en ligne).
+  - VUE LECTEUR PUBLIQUE (module ScriptReader). L'URL /scenario/<jeton> est interceptée AU DÉMARRAGE, avant tout le flux d'authentification (pas de landing, pas de dashboard, pas de session) : l'invité ne voit QUE le scénario. Page plein écran autonome, STYLE NEUTRE volontairement différent du site. Écran de présentation (prénom, nom, e-mail), puis deux colonnes — scénario en lecture à gauche, à droite deux onglets Global / Par scène (un champ par scène) + bouton « Envoyer les commentaires ». Au retour avec le même e-mail, les remarques déjà envoyées sont pré-remplies. Le fichier 404.html de GitHub Pages restaure déjà ce chemin comme les autres deep links.
+  - RÉCEPTION CÔTÉ SITE (module ScriptReview) — REMPLACE l'ancien système de commentaires. Le panneau latéral #comments-panel est réutilisé comme « 2e colonne », son contenu réécrit : sélecteur d'auteur (plusieurs invités possibles), onglets Global / Par scène, toggle « validé » par commentaire. Les quatre boutons app.Comments.open ont été rebranchés sur app.ScriptReview.open ; l'ancien module Comments (fils/réponses/résolution dans state.data.comments) est DÉBRANCHÉ mais laissé en place, ses anciens commentaires assumés perdus. Bulle 💬 clignotant doucement au centre de l'onglet Scénario tant qu'il reste des commentaires non vus, éteinte au premier clic sur l'onglet (hook dans UI.switchTab : markSeen sur 'script', refreshBadge sinon). Bulle en pointer-events:none pour ne pas bloquer le clic de l'onglet. Correctif : le panneau restait ouvert au retour au hub — fermé dans UI.hideAllViews, passage obligé de toute bascule d'écran.
+  - ALIGNEMENT CROISÉ par clic entre les deux colonnes, dans le lecteur ET côté site, en Vue Scènes ET Vue Script continue. Clic sur une carte de commentaire -> le scénario défile jusqu'à la scène ; clic sur l'en-tête d'une scène -> la colonne commentaires bascule sur « Par scène » et défile jusqu'à ses commentaires. Côté site par DÉLÉGATION (un seul écouteur global, actif seulement quand le panneau est ouvert), déclencheur = colonne info .script-info-col (Vue Scènes) ou .script-continuous-heading (Vue Script, le titre restant réservé à son édition inline qui stoppe la propagation). LEÇON (deux essais ratés avant la vraie cause) : les deux vues du scénario COEXISTENT dans le DOM, l'inactive seulement cachée. Détecter la vue active par la classe d-none est FAUX — cette classe reste posée en permanence sur #scriptContinuousContainer, l'affichage se faisant par style.display inline (d-none n'a pas de !important). La bonne mesure est offsetParent (null = caché) : on cible l'élément RÉELLEMENT visible, agnostique à la mécanique de masquage.
 v584 (7 Septembre 2026) — SUITE DE SESSION APRÈS TESTS DE GUILLAUME : bouton ➕ Décor de la fiche scène qui écrasait le champ Lieu + agrandissement au focus des trois champs resserrés du triptyque + page publique retravaillée (grille de fonctionnalités élargie à 14 cartes, Moodboard retiré, captures d'écran passées en carrousel avec légende et description, une carte par onglet).
   - FICHE SCÈNE, LE BOUTON ➕ DÉCOR ÉCRASAIT LE CHAMP LIEU (retour de test de Guillaume, capture à l'appui). La grille resserrée du triptyque (Effet/Décor/Moment, v582) ne laissait pas la place à un bouton texte à côté du champ ; passé en icône seule (➕), puis déplacé une seconde fois sur la ligne du label (petit rond bleu de 15px) après un deuxième retour — l'input récupère alors toute la largeur de sa colonne, plus rien ne le comprime.
   - AGRANDISSEMENT AU FOCUS, PUIS CORRECTIF DE FOND. Demande de Guillaume : « pour se protéger de tout problème », qu'un champ trop étroit puisse s'agrandir pendant la saisie sans perdre de texte. Trois règles CSS ciblées (#fsc-pre/#fsc-loc/#fsc-suff:focus) avec min-width et position:relative. Effet de bord découvert au test suivant : la colonne centrale étant en 1fr, elle tirait TOUTE LA GRILLE (donc la brique entière) avec elle au focus, ce qui faisait buter le champ contre la brique voisine au lieu de flotter par-dessus. Colonne repassée en minmax(0,1fr) : elle ne peut plus forcer la grille à grandir, le champ flotte réellement au-dessus du reste (fond opaque + bordure ajoutés pour que ce soit visible).
@@ -6671,7 +6677,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv584</p>
+      <p>vv585</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -8749,6 +8755,7 @@ body.presentation-mode .presentation-bar {
           <div id="dropdown-fichier" class="menu-dropdown">
             <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); document.getElementById('fileInput').click()"><span class="moteur-icon cat-system"><span class="emoji">📂</span><svg><use href="#ico-folder"/></svg></span> Ouvrir un projet</div>
             <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.Tour.openPanel()"><span class="moteur-icon cat-help"><span class="emoji">🧭</span><svg><use href="#ico-help"/></svg></span> Visite guidee</div>
+            <div class="menu-dropdown-item" onclick="app.UI.closeAllDropdowns(); app.ProjectWelcome.show()"><span class="moteur-icon cat-help"><span class="emoji">👋</span><svg><use href="#ico-help"/></svg></span> Message d'accueil</div>
             <div class="menu-dropdown-separator"></div>
             <div class="menu-dropdown-item danger" onclick="app.UI.closeAllDropdowns(); app.Store.clearCurrent()"><span class="moteur-icon cat-admin"><span class="emoji">🗑️</span><svg><use href="#ico-trash"/></svg></span> Reset projet</div>
           </div>
@@ -13645,7 +13652,8 @@ crewRoles: {
           'fmp_tabs_position', 'fmp_board_mode', 'fmp_script_view_mode',
           'moteur_icon_style',
           'moteur_script_prefs', 'moteur_scriptAC_enabled',
-          'moteur_scriptBd_enabled', 'moteur_contract_templates', 'moteur_project_folders', 'moteur_tour_done'
+          'moteur_scriptBd_enabled', 'moteur_contract_templates', 'moteur_project_folders', 'moteur_tour_done',
+          'moteur_project_welcome_done'
       ],
       _pushTimer: null,
 
@@ -18083,6 +18091,9 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               LoadingScreen.hide();
               // I5f: rafraîchir le sélecteur (on est maintenant dans un projet, filtrage profils)
               setTimeout(() => { try { ActiveProfile.renderAllSelectors(); } catch(e){} }, 100);
+              // Message d'accueil, une seule fois (drapeau global). Differe pour laisser
+              // l'editeur s'afficher d'abord.
+              setTimeout(() => { try { ProjectWelcome.maybeShow(); } catch(e){} }, 700);
           } catch(e) { LoadingScreen.hide(); Utils.toast("Erreur: " + e.message, "error"); console.error(e); UI.showDashboard(); }
       },
       // ========== TEMPS RÉEL & CHARGEMENT (B.1.4 → StoreRealtime) ==========
@@ -79497,7 +79508,77 @@ const Weather = {
       },
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, CoursesWeb, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo, DBPresence, LockManager, LockDomains, Links, Web, FicheLinks, Diag, FicheUI, FicheBlocks, ScriptShare, ScriptReader, ScriptReview };
+  // ==================== MODULE PROJECTWELCOME (message d'accueil) ====================
+  // Affiche une fois (drapeau global synchronise, comme la visite guidee) un message
+  // d'accueil a la premiere ouverture d'un projet : ou trouver l'aide, comment masquer
+  // les onglets inutiles, et la methode d'ecriture (idee -> resume court -> resume long
+  // -> scenario). Reouvrable depuis le menu Fichier. Aucun contenu dynamique : rien a
+  // echapper. La route publique /scenario/<jeton> court-circuite loadProject en amont,
+  // ce message n'y apparait donc jamais.
+  const ProjectWelcome = {
+      KEY: 'moteur_project_welcome_done',
+
+      maybeShow: () => {
+          try { if(localStorage.getItem(ProjectWelcome.KEY) === '1') return; } catch(e) {}
+          ProjectWelcome.show();
+      },
+
+      show: () => {
+          if(document.getElementById('pwelcome-overlay')) return;
+          const overlay = document.createElement('div');
+          overlay.className = 'confirm-modal-overlay';
+          overlay.id = 'pwelcome-overlay';
+          overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:600px;padding:0;text-align:left;overflow:hidden;">
+              <div style="padding:22px 24px 16px;background:linear-gradient(135deg,var(--primary),#8b5cf6);color:#fff;">
+                  <div style="font-size:1.25rem;font-weight:800;margin-bottom:6px;">🎬 Bienvenue dans ton projet !</div>
+                  <div style="font-size:0.9rem;opacity:0.95;">Bonne chance — et surtout, bon courage ! Voici trois choses utiles avant de te lancer.</div>
+              </div>
+              <div style="padding:18px 24px;max-height:56vh;overflow-y:auto;font-size:0.9rem;line-height:1.5;">
+                  <div style="margin-bottom:16px;">
+                      <div style="font-weight:700;margin-bottom:4px;">🧭 Où trouver de l'aide</div>
+                      <div style="color:var(--text-sec);">Chaque onglet a sa petite visite guidée. Ouvre le menu <strong>Fichier ▾</strong> puis <strong>« Visite guidée »</strong> : tu peux lancer la visite de l'onglet où tu te trouves, ou choisir un chapitre dans la liste.</div>
+                  </div>
+                  <div style="margin-bottom:16px;">
+                      <div style="font-weight:700;margin-bottom:4px;">🎯 Garde seulement ce qui te sert</div>
+                      <div style="color:var(--text-sec);">Moteur fait beaucoup de choses, de l'écriture jusqu'au tournage. Selon ton profil, tout ne te sera pas utile — et ce n'est pas grave. Tu peux <strong>masquer un onglet</strong> avec la petite croix <strong>×</strong> sur son titre, pour ne garder sous les yeux que l'essentiel et rester concentré·e. Un bouton dans la barre des catégories permet de <strong>tout réafficher</strong> quand tu veux.</div>
+                  </div>
+                  <div style="margin-bottom:6px;">
+                      <div style="font-weight:700;margin-bottom:6px;">✍️ La bonne méthode pour écrire</div>
+                      <div style="color:var(--text-sec);margin-bottom:10px;">Avant d'écrire tout le scénario, mieux vaut valider ton idée par étapes. À chaque marche, on vérifie que l'histoire tient debout avant de passer à la suivante :</div>
+                      <div style="display:flex;flex-direction:column;gap:8px;">
+                          <div style="display:flex;gap:10px;align-items:flex-start;"><span style="flex:0 0 24px;height:24px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.8rem;">1</span><div><strong>L'idée</strong> — une ou deux phrases, le point de départ.</div></div>
+                          <div style="display:flex;gap:10px;align-items:flex-start;"><span style="flex:0 0 24px;height:24px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.8rem;">2</span><div><strong>Le résumé court</strong> — quelques lignes qui racontent l'histoire en entier.</div></div>
+                          <div style="display:flex;gap:10px;align-items:flex-start;"><span style="flex:0 0 24px;height:24px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.8rem;">3</span><div><strong>Le résumé long</strong> — le déroulé complet, scène après scène.</div></div>
+                          <div style="display:flex;gap:10px;align-items:flex-start;"><span style="flex:0 0 24px;height:24px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.8rem;">4</span><div><strong>Le scénario</strong> — enfin l'écriture, dialogues compris.</div></div>
+                      </div>
+                      <div style="color:var(--text-sec);margin-top:10px;">Les trois premières étapes se remplissent dans l'onglet <strong>Synopsis</strong>, la dernière dans l'onglet <strong>Scénario</strong>. C'est une bonne façon d'être sûr·e que l'idée est bonne avant d'y passer des heures.</div>
+                  </div>
+              </div>
+              <div style="padding:12px 24px 18px;border-top:1px solid var(--border);">
+                  <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:var(--text-sec);cursor:pointer;margin-bottom:12px;">
+                      <input type="checkbox" id="pwelcome-dismiss" checked style="margin:0;cursor:pointer;">
+                      Ne plus afficher ce message
+                  </label>
+                  <button type="button" id="pwelcome-ok" class="confirm-modal-btn confirm" style="width:100%;margin:0;">C'est parti !</button>
+              </div>
+          </div>`;
+          document.body.appendChild(overlay);
+          const close = () => {
+              try {
+                  const dismiss = overlay.querySelector('#pwelcome-dismiss');
+                  const on = !!(dismiss && dismiss.checked);
+                  if(typeof PreferencesSync !== 'undefined') PreferencesSync.save(ProjectWelcome.KEY, on ? '1' : '0');
+                  else localStorage.setItem(ProjectWelcome.KEY, on ? '1' : '0');
+              } catch(e) {}
+              overlay.remove();
+          };
+          const okBtn = overlay.querySelector('#pwelcome-ok');
+          if(okBtn) okBtn.onclick = close;
+          overlay.onclick = (e) => { if(e.target === overlay) close(); };
+      },
+  };
+
+  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, CoursesWeb, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo, DBPresence, LockManager, LockDomains, Links, Web, FicheLinks, Diag, FicheUI, FicheBlocks, ScriptShare, ScriptReader, ScriptReview, ProjectWelcome };
 })();
 </script>
 
