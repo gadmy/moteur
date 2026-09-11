@@ -4141,6 +4141,10 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .board-sat-photo, .board-sat-noteb { cursor: move; user-select: none; }
   .board-sat-photo img { pointer-events: none; -webkit-user-drag: none; }
   .compact-card-actions .casting-btn { background: #e67e22; color: #fff; }
+  .board-sat-rubber { position: absolute; border: 1px dashed var(--primary); background: rgba(43,110,246,0.12); pointer-events: none; z-index: 9999; }
+  .board-sat-node.is-sel { outline: 3px solid var(--primary); outline-offset: 2px; }
+  .web-node.is-sel { outline: 3px solid var(--primary); outline-offset: 2px; }
+  .web-rubber { position: absolute; border: 1px dashed var(--primary); background: rgba(43,110,246,0.12); pointer-events: none; z-index: 30; }
   .data-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
   .data-desc { height: 80px; font-size: 0.9rem; resize: none; }
   .group-select { font-size: 0.8rem; padding: 4px; margin-top: 5px; border-radius: 4px; }
@@ -22457,6 +22461,8 @@ initCategoriesDragDrop: () => {
               + '<div class="web-canvas" id="web-canvas"><svg class="web-svg" id="web-svg"></svg></div>'
               + '<div class="web-note">Un seul niveau : la fiche au centre et ses voisins directs. Clique un voisin pour le mettre au centre.</div>';
           document.body.appendChild(wrap);
+          const _wc = document.getElementById('web-canvas');
+          if(_wc) _wc.addEventListener('mousedown', Web.onCanvasDown);
           // Le trace depend de la taille du cadre : il faut le refaire quand la
           // fenetre change, sinon les fiches restent la ou elles etaient.
           Web._onResize = () => Web.render();
@@ -22633,10 +22639,69 @@ initCategoriesDragDrop: () => {
       // (elle ne repart plus vers son ancre) ; les autres se reorganisent en
       // continu, en gardant leurs regroupements. Deplacer le centre entraine
       // toute la toile, les ancres etant posees par rapport a lui.
+      _sel: null,
+      _clearSel: () => {
+          Web._sel = null;
+          const c = document.getElementById('web-canvas');
+          if(c) c.querySelectorAll('.web-node.is-sel').forEach(el => el.classList.remove('is-sel'));
+      },
+      onCanvasDown: (e) => {
+          if(e.target.closest('.web-node')) return;   // clic sur une fiche : gere par onDown
+          const canvas = document.getElementById('web-canvas');
+          if(!canvas) return;
+          e.preventDefault();
+          Web._clearSel();
+          const rect = canvas.getBoundingClientRect();
+          const x0 = e.clientX - rect.left, y0 = e.clientY - rect.top;
+          const box = document.createElement('div');
+          box.className = 'web-rubber';
+          canvas.appendChild(box);
+          const move = (ev) => {
+              const x1 = ev.clientX - rect.left, y1 = ev.clientY - rect.top;
+              box.style.left = Math.min(x0, x1) + 'px'; box.style.top = Math.min(y0, y1) + 'px';
+              box.style.width = Math.abs(x1 - x0) + 'px'; box.style.height = Math.abs(y1 - y0) + 'px';
+          };
+          const up = (ev) => {
+              const x1 = ev.clientX - rect.left, y1 = ev.clientY - rect.top;
+              const l = Math.min(x0, x1), r = Math.max(x0, x1), t = Math.min(y0, y1), b = Math.max(y0, y1);
+              box.remove();
+              document.removeEventListener('mousemove', move);
+              document.removeEventListener('mouseup', up);
+              const sel = new Set();
+              Web.nodes.forEach((n, i) => { if(i > 0 && !n.center && n.x >= l && n.x <= r && n.y >= t && n.y <= b) sel.add(i); });
+              if(sel.size) {
+                  Web._sel = sel;
+                  sel.forEach(i => { if(Web.nodes[i] && Web.nodes[i].el) Web.nodes[i].el.classList.add('is-sel'); });
+              }
+          };
+          document.addEventListener('mousemove', move);
+          document.addEventListener('mouseup', up);
+      },
+      onDownGroup: (ev) => {
+          const sel = Web._sel;
+          if(!sel) return;
+          let lastX = ev.clientX, lastY = ev.clientY;
+          sel.forEach(i => { if(Web.nodes[i]) Web.nodes[i].pinned = true; });
+          const move = (e2) => {
+              const dx = e2.clientX - lastX, dy = e2.clientY - lastY;
+              lastX = e2.clientX; lastY = e2.clientY;
+              sel.forEach(i => { if(Web.nodes[i]) { Web.nodes[i].x += dx; Web.nodes[i].y += dy; } });
+              Web.relax(2); Web.paint();
+          };
+          const up = () => {
+              document.removeEventListener('mousemove', move);
+              document.removeEventListener('mouseup', up);
+              Web.relax(40); Web.paint();
+          };
+          document.addEventListener('mousemove', move);
+          document.addEventListener('mouseup', up);
+      },
       onDown: (ev, i) => {
           const n = Web.nodes[i];
           if(!n) return;
           ev.preventDefault();
+          if(!n.center && Web._sel && Web._sel.size > 1 && Web._sel.has(i)) { Web.onDownGroup(ev); return; }
+          Web._clearSel();
           Web._drag = { i, dx: n.x - ev.clientX, dy: n.y - ev.clientY, bouge: false };
           if(n.el) n.el.style.zIndex = '20';
           document.addEventListener('mousemove', Web.onMove);
@@ -22687,6 +22752,7 @@ initCategoriesDragDrop: () => {
           const canvas = document.getElementById('web-canvas');
           const svg = document.getElementById('web-svg');
           if(!canvas || !svg || !Web.center) return;
+          Web._sel = null;
           const esc = Utils.escape;
           const c = Web.center;
           
@@ -72560,38 +72626,141 @@ const Board = {
     _satCtx: null,
     _onSatResize: null,
     _satNodes: null,
-    _satMouseDown: (e) => {
-        const node = e.target.closest('.board-sat-node');
-        if(!node || node.classList.contains('board-sat-centre')) return;
-        const i = parseInt(node.dataset.si, 10);
-        const nd = (Board._satNodes || [])[i];
-        if(!nd) return;
+    _satZ: 10,
+    _satSel: null,
+    _satClearSel: () => {
+        Board._satSel = null;
+        const c = document.getElementById('board-sat-canvas');
+        if(c) c.querySelectorAll('.board-sat-node.is-sel').forEach(el => el.classList.remove('is-sel'));
+    },
+    _satStartRubber: (e, canvas) => {
         e.preventDefault();
-        const canvas = document.getElementById('board-sat-canvas');
-        const startX = e.clientX, startY = e.clientY, ox = nd.x, oy = nd.y;
+        Board._satClearSel();
+        const rect = canvas.getBoundingClientRect();
+        const x0 = e.clientX - rect.left, y0 = e.clientY - rect.top;
+        const box = document.createElement('div');
+        box.className = 'board-sat-rubber';
+        canvas.appendChild(box);
         const move = (ev) => {
-            nd.x = ox + (ev.clientX - startX);
-            nd.y = oy + (ev.clientY - startY);
-            node.style.left = (nd.x - nd.w / 2) + 'px';
-            node.style.top = (nd.y - nd.h / 2) + 'px';
-            const line = canvas && canvas.querySelector('.board-sat-line[data-si="' + i + '"]');
-            if(line) { line.setAttribute('x2', nd.x); line.setAttribute('y2', nd.y); }
+            const x1 = ev.clientX - rect.left, y1 = ev.clientY - rect.top;
+            box.style.left = Math.min(x0, x1) + 'px'; box.style.top = Math.min(y0, y1) + 'px';
+            box.style.width = Math.abs(x1 - x0) + 'px'; box.style.height = Math.abs(y1 - y0) + 'px';
         };
-        const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+        const up = (ev) => {
+            const x1 = ev.clientX - rect.left, y1 = ev.clientY - rect.top;
+            const l = Math.min(x0, x1), r = Math.max(x0, x1), t = Math.min(y0, y1), b = Math.max(y0, y1);
+            box.remove();
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', up);
+            const nodes = Board._satNodes || [];
+            const sel = new Set();
+            for(let i = 1; i < nodes.length; i++) {
+                const n = nodes[i];
+                if(n.x >= l && n.x <= r && n.y >= t && n.y <= b) sel.add(i);
+            }
+            if(sel.size) {
+                Board._satSel = sel;
+                canvas.querySelectorAll('.board-sat-node').forEach(el => {
+                    if(!el.classList.contains('board-sat-centre') && sel.has(parseInt(el.dataset.si, 10))) el.classList.add('is-sel');
+                });
+            }
+        };
         document.addEventListener('mousemove', move);
         document.addEventListener('mouseup', up);
     },
-    _satDblClick: (e) => {
-        const node = e.target.closest('.board-sat-node');
-        if(!node || node.classList.contains('board-sat-centre')) return;
-        const i = parseInt(node.dataset.si, 10);
-        const nd = (Board._satNodes || [])[i];
+    _satDragGroup: (e, canvas, nodes) => {
+        e.preventDefault();
+        const sel = Board._satSel;
+        let lastX = e.clientX, lastY = e.clientY;
+        const W = canvas.clientWidth || 900, H = canvas.clientHeight || 600;
+        sel.forEach(i => { if(nodes[i]) nodes[i].pinned = true; });
+        const move = (ev) => {
+            const dx = ev.clientX - lastX, dy = ev.clientY - lastY;
+            lastX = ev.clientX; lastY = ev.clientY;
+            sel.forEach(i => { if(nodes[i]) { nodes[i].x += dx; nodes[i].y += dy; } });
+            GraphPhysics.relax(nodes, W, H, 3);
+            Board._satPaint();
+        };
+        const up = () => {
+            sel.forEach(i => { if(nodes[i]) nodes[i].pinned = false; });
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', up);
+        };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+    },
+    _satPaint: () => {
+        const canvas = document.getElementById('board-sat-canvas');
+        const nodes = Board._satNodes;
+        if(!canvas || !nodes || !nodes.length) return;
+        canvas.querySelectorAll('.board-sat-node').forEach(el => {
+            const n = el.classList.contains('board-sat-centre') ? nodes[0] : nodes[parseInt(el.dataset.si, 10)];
+            if(!n) return;
+            el.style.left = (n.x - n.w / 2) + 'px';
+            el.style.top = (n.y - n.h / 2) + 'px';
+            el.style.width = n.w + 'px';
+            el.style.height = n.h + 'px';
+        });
+        const svg = document.getElementById('board-sat-svg');
+        if(svg) {
+            const cx = nodes[0].x, cy = nodes[0].y;
+            svg.querySelectorAll('.board-sat-line').forEach(line => {
+                const n = nodes[parseInt(line.dataset.si, 10)];
+                if(n) { line.setAttribute('x1', cx); line.setAttribute('y1', cy); line.setAttribute('x2', n.x); line.setAttribute('y2', n.y); }
+            });
+        }
+    },
+    _satMouseDown: (e) => {
+        const canvas = document.getElementById('board-sat-canvas');
+        const nodes = Board._satNodes || [];
+        if(!canvas || !nodes.length) return;
+        const el = e.target.closest('.board-sat-node');
+        if(!el) { Board._satStartRubber(e, canvas); return; }   // clic dans le vide -> cadre
+        e.preventDefault();
+        const isCentre = el.classList.contains('board-sat-centre');
+        const idx = isCentre ? 0 : parseInt(el.dataset.si, 10);
+        if(!isCentre && Board._satSel && Board._satSel.size > 1 && Board._satSel.has(idx)) {
+            Board._satDragGroup(e, canvas, nodes);              // pastille selectionnee -> groupe
+            return;
+        }
+        Board._satClearSel();
+        const nd = nodes[idx];
         if(!nd) return;
-        nd._big = !nd._big;
-        const f = nd._big ? 1.9 : 1;
-        nd.w = nd.bw * f; nd.h = nd.bh * f;
-        node.style.width = nd.w + 'px'; node.style.height = nd.h + 'px';
-        node.style.left = (nd.x - nd.w / 2) + 'px'; node.style.top = (nd.y - nd.h / 2) + 'px';
+        if(!isCentre) el.style.zIndex = String(++Board._satZ); // au premier plan
+        let lastX = e.clientX, lastY = e.clientY;
+        const W = canvas.clientWidth || 900, H = canvas.clientHeight || 600;
+        const move = (ev) => {
+            const dx = ev.clientX - lastX, dy = ev.clientY - lastY;
+            lastX = ev.clientX; lastY = ev.clientY;
+            if(isCentre) { nodes.forEach(n => { n.x += dx; n.y += dy; }); }
+            else { nd.x += dx; nd.y += dy; nd.pinned = true; GraphPhysics.relax(nodes, W, H, 3); }
+            Board._satPaint();
+        };
+        const up = () => { nd.pinned = false; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+    },
+    _satWheel: (e) => {
+        const el = e.target.closest('.board-sat-node');
+        if(!el || el.classList.contains('board-sat-centre')) return;
+        const n = (Board._satNodes || [])[parseInt(el.dataset.si, 10)];
+        if(!n) return;
+        e.preventDefault();
+        n._scale = Math.max(0.4, Math.min(4, (n._scale || 1) + (e.deltaY < 0 ? 0.12 : -0.12)));
+        n.w = n.bw * n._scale; n.h = n.bh * n._scale;
+        el.style.width = n.w + 'px'; el.style.height = n.h + 'px';
+        el.style.left = (n.x - n.w / 2) + 'px'; el.style.top = (n.y - n.h / 2) + 'px';
+    },
+    _satDblClick: (e) => {
+        const el = e.target.closest('.board-sat-node');
+        if(!el || el.classList.contains('board-sat-centre')) return;
+        const n = (Board._satNodes || [])[parseInt(el.dataset.si, 10)];
+        if(!n) return;
+        n._big = !n._big;
+        n._scale = n._big ? 1.9 : 1;
+        n.w = n.bw * n._scale; n.h = n.bh * n._scale;
+        el.style.width = n.w + 'px'; el.style.height = n.h + 'px';
+        el.style.left = (n.x - n.w / 2) + 'px'; el.style.top = (n.y - n.h / 2) + 'px';
     },
     openSatellites: (family, id) => {
         const it = Board._findItem(family, id);
@@ -72605,7 +72774,7 @@ const Board = {
         wrap.innerHTML = `<div class="board-sat-head"><span class="board-sat-title">💡 Idées — ${Utils.escape(it.name || '')}</span><button class="board-sat-close" type="button" onclick="app.Board.closeSatellites()">✖</button></div><div class="board-sat-canvas" id="board-sat-canvas"><svg class="board-sat-svg" id="board-sat-svg"></svg></div>`;
         document.body.appendChild(wrap);
         const _c = document.getElementById('board-sat-canvas');
-        if(_c) { _c.addEventListener('mousedown', Board._satMouseDown); _c.addEventListener('dblclick', Board._satDblClick); }
+        if(_c) { _c.addEventListener('mousedown', Board._satMouseDown); _c.addEventListener('dblclick', Board._satDblClick); _c.addEventListener('wheel', Board._satWheel, { passive: false }); }
         Board._satCtx = { family: family, id: id };
         Board._onSatResize = () => Board._renderSatellites();
         window.addEventListener('resize', Board._onSatResize);
@@ -72626,6 +72795,7 @@ const Board = {
         const svg = document.getElementById('board-sat-svg');
         if(!canvas || !svg) return;
         const items = it.board || [];
+        Board._satSel = null;
         const W = canvas.clientWidth || 900, H = canvas.clientHeight || 600;
         const cx = W / 2, cy = H / 2;
         const centre = { center: true, x: cx, y: cy, w: 160, h: 64 };
