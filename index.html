@@ -4121,6 +4121,10 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .fid-tab:hover { color: var(--primary); background: var(--bg); }
   .fid-tab.is-active { color: var(--primary); background: var(--panel-bg); border-color: var(--border); border-bottom-color: var(--panel-bg); margin-bottom: -1px; }
   .fid-tabpanel { display: none; padding: 16px; flex-direction: column; gap: 14px; }
+  /* Profil affiche comme une fiche de projet (onglets + briques) — chantier casquettes */
+  .profile-fiche-tabbar { margin-top: 6px; }
+  #profile-all-sections.fiche-mode .profile-section.fiche-brique { background: var(--bg); border-radius: 10px; }
+  .facet-cards-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 190px)); justify-content: flex-start; margin-top: 12px; }
   .fid-tabpanel.is-active { display: flex; }
   .fid-tabpanel .fid-block-grip { display: none; }
   @media (max-width: 700px) { .fid-tabbar { padding: 10px 12px 0; } .fid-tabpanel { padding: 12px; } }
@@ -7537,6 +7541,18 @@ body.presentation-mode .presentation-bar {
                     </div>
                     <div id="facet-tabs" class="facet-tabs"></div>
                 </div>
+
+                <div id="profile-fiche-modal" class="card-edit-modal">
+                  <div class="card-edit-modal-content">
+                    <div class="card-edit-modal-header">
+                      <h3 id="profile-fiche-modal-title">Fiche</h3>
+                      <div style="display:flex; gap:10px; align-items:center;">
+                        <button type="button" class="btn btn--success" onclick="app.PublicProfile.saveCurrentProfile()">💾 Enregistrer</button>
+                        <button type="button" class="card-edit-modal-close" onclick="app.PublicProfile.closeFicheCard()">✕</button>
+                      </div>
+                    </div>
+                    <div class="card-edit-modal-body" style="flex:1; padding:16px; overflow:auto;">
+                <div id="profile-fiche-tabs" class="fid-tabbar profile-fiche-tabbar d-none"></div>
                 
                 <!-- Section Identité -->
                 <div class="profile-section" id="profile-identity-section" data-section="identity">
@@ -8427,6 +8443,9 @@ body.presentation-mode .presentation-bar {
                     </div>
                 </div>
         
+                    </div>
+                  </div>
+                </div>
 				<!-- Zone Danger - Suppression profil et compte -->
                 <div class="profile-section" style="border-color: var(--danger); margin-top: 30px;">
                     <h3 class="text-danger">⚠️ Zone Danger</h3>
@@ -40057,6 +40076,19 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         ent:   ['profile-enterprise-section', 'profile-collab-section']
     },
 
+    // Presentation "fiche de projet" du contenu d'une casquette : onglets + briques.
+    // Lot 1 : comedien seulement. Les autres casquettes gardent l'empilement
+    // classique tant qu'elles n'ont pas leur propre entree ici.
+    FICHE_TABS: {
+        actor: [
+            { id: 'profil',     label: '🪪 Profil',                sections: ['profile-identity-section'] },
+            { id: 'physique',   label: '📏 Physique',              sections: ['profile-actor-physical-section', 'profile-languages-section'] },
+            { id: 'photos',     label: '📸 Photos & démo',         sections: ['profile-actor-section', 'profile-actor-demoreel-section'] },
+            { id: 'logistique', label: '📅 Planning & logistique', sections: ['profile-tarif-section', 'profile-collab-section', 'profile-vehicle-section'] }
+        ]
+    },
+    currentFicheTab: null,
+
     // Champs qui appartiennent à la FICHE (comédien/technicien), plus au profil commun
     FACET_SWAP_KEYS: ['name','photo','gender','phone','hidePhone','agentPhone','bio','address','city','latitude','longitude','hideAddress','hideAddressInProjects','contactEmail','dailyRate','rateCurrency','rateNegotiable','collabTypes','availabilityText','availabilityDates','unavailabilityDates','hasVehicle','vehicleType','vehiclePlate','vehicleSeats','vehicleTrunk','vehicleNotes','licenses','vehicleUsage','role','demoreel','demoreels','experience','languages','languagesWithLevels'],
 
@@ -40115,9 +40147,21 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         const bar = document.getElementById('facet-tabs');
         if(!bar) return;
         if(!enabled || enabled.length === 0) { bar.innerHTML = ''; return; }
-        bar.innerHTML = enabled.map(k =>
-            '<button type="button" class="facet-tab' + (PublicProfile.currentFacetTab === k ? ' active' : '') + '" onclick="app.PublicProfile.selectFacetTab(\'' + k + '\')">' + PublicProfile.FACET_LABELS[k] + '</button>'
-        ).join('');
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex] || {};
+        const nameEl = document.getElementById('profile-name');
+        const photoEl = document.getElementById('profile-photo');
+        const name = profile.name || (nameEl ? nameEl.value : '') || 'Sans nom';
+        const photo = profile.photo || (photoEl ? photoEl.value : '') || '';
+        const ICONS = { actor: '🎭', crew: '🎥', asso: '🏛️', ent: '🏢' };
+        // Chaque casquette activee = une carte de fiche (comme dans un projet).
+        // Un clic ouvre la fiche dans une fenetre. Jusqu'a 4 cartes cote a cote.
+        bar.innerHTML = '<div class="compact-cards-grid facet-cards-grid">' + enabled.map(k =>
+            '<div class="compact-card" onclick="app.PublicProfile.openFicheCard(\'' + k + '\')">'
+              + '<div class="compact-card-photo">' + (photo ? '<img src="' + Utils.escape(photo) + '" alt="">' : (ICONS[k] || '👤')) + '</div>'
+              + '<div class="compact-card-name">' + Utils.escape(name) + '</div>'
+              + '<div class="compact-card-role">' + PublicProfile.FACET_LABELS[k] + '</div>'
+            + '</div>'
+        ).join('') + '</div>';
     },
 
     selectFacetTab: (k) => {
@@ -40137,17 +40181,65 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         PublicProfile.showFacetSections();
     },
 
+    // Changement d'onglet DANS une fiche (Profil / Physique / ...). Ne touche ni
+    // aux champs ni a la sauvegarde : on montre juste les sections de l'onglet.
+    selectFicheTab: (id) => {
+        PublicProfile.currentFicheTab = id;
+        PublicProfile.showFacetSections();
+    },
+
+    // Clic sur une carte de casquette : charge la facette puis ouvre sa fiche
+    // dans une fenetre (comme l'ouverture d'une carte dans un projet).
+    openFicheCard: (facet) => {
+        PublicProfile.selectFacetTab(facet);
+        const title = document.getElementById('profile-fiche-modal-title');
+        if(title) title.textContent = PublicProfile.FACET_LABELS[facet] || 'Fiche';
+        const modal = document.getElementById('profile-fiche-modal');
+        if(modal) modal.classList.add('visible');
+    },
+    closeFicheCard: () => {
+        const modal = document.getElementById('profile-fiche-modal');
+        if(modal) modal.classList.remove('visible');
+    },
+
     showFacetSections: () => {
         // Visibilité calculée PAR SECTION : une section partagée entre plusieurs fiches
         // (identité, tarif, collaboration, véhicule) est visible dès qu'elle appartient
         // à la fiche affichée — sans être re-masquée par le passage des autres casquettes.
-        const current = PublicProfile.FACET_SECTIONS[PublicProfile.currentFacetTab] || [];
+        const facet = PublicProfile.currentFacetTab;
+        const current = PublicProfile.FACET_SECTIONS[facet] || [];
         const all = new Set();
         PublicProfile.FACET_KEYS.forEach(k => (PublicProfile.FACET_SECTIONS[k] || []).forEach(id => all.add(id)));
-        all.forEach(id => {
-            const el = document.getElementById(id);
-            if(el) el.style.display = current.includes(id) ? 'block' : 'none';
-        });
+        const ficheTabs = PublicProfile.FICHE_TABS[facet] || null;
+        const container = document.getElementById('profile-all-sections');
+        const bar = document.getElementById('profile-fiche-tabs');
+        if(ficheTabs) {
+            // Presentation "fiche" : une barre d'onglets, et seules les sections de
+            // l'onglet actif s'affichent, habillees en briques grises.
+            if(!ficheTabs.some(t => t.id === PublicProfile.currentFicheTab)) PublicProfile.currentFicheTab = ficheTabs[0].id;
+            const activeTab = ficheTabs.find(t => t.id === PublicProfile.currentFicheTab) || ficheTabs[0];
+            const shown = new Set(activeTab.sections);
+            if(container) container.classList.add('fiche-mode');
+            if(bar) {
+                bar.classList.remove('d-none');
+                bar.innerHTML = ficheTabs.map(t => '<button type="button" class="fid-tab' + (t.id === activeTab.id ? ' is-active' : '') + '" onclick="app.PublicProfile.selectFicheTab(\'' + t.id + '\')">' + t.label + '</button>').join('');
+            }
+            all.forEach(id => {
+                const el = document.getElementById(id);
+                if(!el) return;
+                const inFacet = current.includes(id);
+                el.style.display = (inFacet && shown.has(id)) ? 'block' : 'none';
+                el.classList.toggle('fiche-brique', inFacet);
+            });
+        } else {
+            // Empilement classique (casquette pas encore convertie en fiche).
+            if(container) container.classList.remove('fiche-mode');
+            if(bar) { bar.classList.add('d-none'); bar.innerHTML = ''; }
+            all.forEach(id => {
+                const el = document.getElementById(id);
+                if(el) { el.style.display = current.includes(id) ? 'block' : 'none'; el.classList.remove('fiche-brique'); }
+            });
+        }
     },
     
     // ===== ADRESSE / GÉOLOCALISATION — délégué à ProfileAddress =====
