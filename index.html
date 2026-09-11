@@ -4138,6 +4138,9 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .board-sat-photo img { width: 100%; height: 100%; object-fit: cover; }
   .board-sat-noteb { display: flex; align-items: center; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; font-size: 0.82rem; overflow: hidden; box-shadow: 0 3px 10px rgba(0,0,0,0.2); }
   .board-sat-empty { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); color: var(--text-sec); font-size: 0.9rem; }
+  .board-sat-photo, .board-sat-noteb { cursor: move; user-select: none; }
+  .board-sat-photo img { pointer-events: none; -webkit-user-drag: none; }
+  .compact-card-actions .casting-btn { background: #e67e22; color: #fff; }
   .data-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
   .data-desc { height: 80px; font-size: 0.9rem; resize: none; }
   .group-select { font-size: 0.8rem; padding: 4px; margin-top: 5px; border-radius: 4px; }
@@ -72556,6 +72559,40 @@ const Board = {
     // ---- VUE SATELLITES (idees autour de la fiche, esprit Toile de liaisons) ----
     _satCtx: null,
     _onSatResize: null,
+    _satNodes: null,
+    _satMouseDown: (e) => {
+        const node = e.target.closest('.board-sat-node');
+        if(!node || node.classList.contains('board-sat-centre')) return;
+        const i = parseInt(node.dataset.si, 10);
+        const nd = (Board._satNodes || [])[i];
+        if(!nd) return;
+        e.preventDefault();
+        const canvas = document.getElementById('board-sat-canvas');
+        const startX = e.clientX, startY = e.clientY, ox = nd.x, oy = nd.y;
+        const move = (ev) => {
+            nd.x = ox + (ev.clientX - startX);
+            nd.y = oy + (ev.clientY - startY);
+            node.style.left = (nd.x - nd.w / 2) + 'px';
+            node.style.top = (nd.y - nd.h / 2) + 'px';
+            const line = canvas && canvas.querySelector('.board-sat-line[data-si="' + i + '"]');
+            if(line) { line.setAttribute('x2', nd.x); line.setAttribute('y2', nd.y); }
+        };
+        const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+    },
+    _satDblClick: (e) => {
+        const node = e.target.closest('.board-sat-node');
+        if(!node || node.classList.contains('board-sat-centre')) return;
+        const i = parseInt(node.dataset.si, 10);
+        const nd = (Board._satNodes || [])[i];
+        if(!nd) return;
+        nd._big = !nd._big;
+        const f = nd._big ? 1.9 : 1;
+        nd.w = nd.bw * f; nd.h = nd.bh * f;
+        node.style.width = nd.w + 'px'; node.style.height = nd.h + 'px';
+        node.style.left = (nd.x - nd.w / 2) + 'px'; node.style.top = (nd.y - nd.h / 2) + 'px';
+    },
     openSatellites: (family, id) => {
         const it = Board._findItem(family, id);
         if(!it) return;
@@ -72567,6 +72604,8 @@ const Board = {
         wrap.onclick = (e) => { if(e.target === wrap) Board.closeSatellites(); };
         wrap.innerHTML = `<div class="board-sat-head"><span class="board-sat-title">💡 Idées — ${Utils.escape(it.name || '')}</span><button class="board-sat-close" type="button" onclick="app.Board.closeSatellites()">✖</button></div><div class="board-sat-canvas" id="board-sat-canvas"><svg class="board-sat-svg" id="board-sat-svg"></svg></div>`;
         document.body.appendChild(wrap);
+        const _c = document.getElementById('board-sat-canvas');
+        if(_c) { _c.addEventListener('mousedown', Board._satMouseDown); _c.addEventListener('dblclick', Board._satDblClick); }
         Board._satCtx = { family: family, id: id };
         Board._onSatResize = () => Board._renderSatellites();
         window.addEventListener('resize', Board._onSatResize);
@@ -72598,16 +72637,17 @@ const Board = {
                 const t = n <= 1 ? 0.5 : i / (n - 1);
                 const ang = (baseDeg - 70 + 140 * t) * Math.PI / 180;
                 const ox = Math.cos(ang) * R, oy = Math.sin(ang) * R;
-                nodes.push({ kind: kind, idea: b, w: w, h: h, ox: ox, oy: oy, x: cx + ox, y: cy + oy });
+                nodes.push({ kind: kind, idea: b, w: w, h: h, bw: w, bh: h, ox: ox, oy: oy, x: cx + ox, y: cy + oy });
             });
         };
         ring(items.filter(b => b.kind === 'photo'), 'photo', 0, 116, 116);
         ring(items.filter(b => b.kind === 'note'), 'note', 180, 168, 78);
         GraphPhysics.relax(nodes, W, H, 140);
+        Board._satNodes = nodes;
         svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
         let lines = '';
         for(let i = 1; i < nodes.length; i++) {
-            lines += `<line x1="${cx}" y1="${cy}" x2="${nodes[i].x}" y2="${nodes[i].y}" class="board-sat-line"></line>`;
+            lines += `<line x1="${cx}" y1="${cy}" x2="${nodes[i].x}" y2="${nodes[i].y}" class="board-sat-line" data-si="${i}"></line>`;
         }
         svg.innerHTML = lines;
         const esc = Utils.escape;
@@ -72616,9 +72656,9 @@ const Board = {
             const n = nodes[i];
             const st = `left:${n.x - n.w / 2}px; top:${n.y - n.h / 2}px; width:${n.w}px; height:${n.h}px;`;
             if(n.kind === 'photo') {
-                bubbles += `<div class="board-sat-node board-sat-photo" style="${st}"><img src="${Utils.safeMediaUrl(n.idea.url)}" alt="Idée de référence"></div>`;
+                bubbles += `<div class="board-sat-node board-sat-photo" data-si="${i}" style="${st}"><img src="${Utils.safeMediaUrl(n.idea.url)}" alt="Idée de référence"></div>`;
             } else {
-                bubbles += `<div class="board-sat-node board-sat-noteb" style="${st}">${esc(n.idea.text || '(note vide)')}</div>`;
+                bubbles += `<div class="board-sat-node board-sat-noteb" data-si="${i}" style="${st}">${esc(n.idea.text || '(note vide)')}</div>`;
             }
         }
         if(nodes.length === 1) {
@@ -73180,7 +73220,8 @@ const CardModal = {
                     <button class="edit-btn" onclick="event.stopPropagation(); app.CardModal.open('${type}', ${idx})" title="Modifier">✏️</button>
                     <button class="delete-btn" onclick="event.stopPropagation(); app.Actions.deleteDataItem('${type}', ${idx})" title="Supprimer">🗑️</button>
                     ${CardModal._groupRoundHtml(item, idx, type)}
-                    ${(type === 'characters' || type === 'locations') ? `<button class="board-btn" onclick="event.stopPropagation(); app.Board.openSatellites('${type === 'characters' ? 'character' : 'location'}', '${item.id}')" title="Idées / casting">${type === 'characters' ? '🎭' : '💡'}</button>` : ''}
+                    ${(type === 'characters' || type === 'locations') ? `<button class="board-btn" onclick="event.stopPropagation(); app.Board.openSatellites('${type === 'characters' ? 'character' : 'location'}', '${item.id}')" title="Idées (planche)">💡</button>` : ''}
+                    ${type === 'characters' ? `<button class="casting-btn" onclick="event.stopPropagation(); app.GlobalSearch.openForCharacter(${idx})" title="Casting — comédiens qui matchent">🎭</button>` : ''}
                 </div>
                 ` : ''}
                 ${badge ? `<div class="compact-card-badge">${badge}</div>` : ''}
