@@ -4113,6 +4113,16 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .fid-tabpanel.is-active { display: flex; }
   .fid-tabpanel .fid-block-grip { display: none; }
   @media (max-width: 700px) { .fid-tabbar { padding: 10px 12px 0; } .fid-tabpanel { padding: 12px; } }
+  /* PLANCHE D'IDEES / CASTING (v588) : notes + photos de reference attachees a une fiche. */
+  .board-actions { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .board-empty { color: var(--text-sec); font-size: 0.88rem; padding: 8px 0; }
+  .board-scroller { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 12px; }
+  .board-photo { position: relative; flex: 0 0 auto; width: 130px; height: 130px; }
+  .board-photo img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+  .board-notes { display: flex; flex-direction: column; gap: 8px; }
+  .board-note { position: relative; }
+  .board-note-input { width: 100%; min-height: 44px; }
+  .board-del { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border: none; border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff; cursor: pointer; font-size: 0.75rem; line-height: 1; }
   .data-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
   .data-desc { height: 80px; font-size: 0.9rem; resize: none; }
   .group-select { font-size: 0.8rem; padding: 4px; margin-top: 5px; border-radius: 4px; }
@@ -21706,6 +21716,9 @@ initCategoriesDragDrop: () => {
 
                 // Brique « Notes ».
                 blocks.push(FicheUI.block('character', 'notes', '📝 Notes', FicheUI.field('Bio, intentions, remarques de mise en scène', `<textarea class="data-desc" style="width:100%; min-height:90px;" placeholder="Bio, intentions, remarques de mise en scène..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isView ? 'disabled' : ''}>${Utils.escape(item.bio || '')}</textarea>`)));
+
+                // Brique « Casting » — planche d'idees (notes + photos de reference).
+                blocks.push(FicheUI.block('character', 'casting', '🎭 Casting / Idées', Board.render('character', item.id, isView)));
 
                 contentHtml += FicheBlocks.renderTabbed(blocks, 'character');
             }
@@ -72243,6 +72256,7 @@ const FicheBlocks = {
             { id: 'projet',   label: '🎬 Dans le projet', blocks: ['projet'] },
             { id: 'identite', label: '🪪 Identité',        blocks: ['identite'] },
             { id: 'physique', label: '📏 Physique',        blocks: ['physique'] },
+            { id: 'casting',  label: '🎭 Casting',         blocks: ['casting'] },
             { id: 'notes',    label: '📝 Notes',           blocks: ['notes'] }
         ],
         location: [
@@ -72421,6 +72435,104 @@ const FicheBlocks = {
             FicheBlocks._save(wrap);
         });
     }
+};
+
+// PLANCHE D'IDEES / CASTING (v588).
+// Les idees (notes + photos de reference) sont stockees SUR la fiche elle-meme,
+// dans item.board = [{ id, kind:'note'|'photo', text?, url?, ts }]. Elles heritent
+// donc des droits de la section de leur fiche (aucune nouvelle cle de projet).
+const Board = {
+    _familyArray: (family) => {
+        const map = { character: 'characters', actor: 'actors', crew: 'crew', location: 'locations', resource: 'resources', org: 'orgs', scene: 'scenes' };
+        const key = map[family];
+        return key ? (state.data[key] || null) : null;
+    },
+    _findItem: (family, id) => {
+        const arr = Board._familyArray(family);
+        return arr ? (arr.find(x => String(x.id) === String(id)) || null) : null;
+    },
+    list: (family, id) => { const it = Board._findItem(family, id); return (it && it.board) || []; },
+    _newId: () => 'idea_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36),
+    _rerender: (family, id) => {
+        const w = document.getElementById('board-wrap-' + family + '-' + id);
+        if(w) w.innerHTML = Board._inner(family, id, false);
+    },
+    addNote: (family, id) => {
+        const it = Board._findItem(family, id);
+        if(!it) return;
+        if(!it.board) it.board = [];
+        it.board.push({ id: Board._newId(), kind: 'note', text: '', ts: Date.now() });
+        Store.save();
+        Board._rerender(family, id);
+    },
+    updateNote: (family, id, ideaId, text) => {
+        const it = Board._findItem(family, id);
+        if(!it || !it.board) return;
+        const idea = it.board.find(b => b.id === ideaId);
+        if(idea) { idea.text = text; Store.saveDebounced(); }
+    },
+    remove: (family, id, ideaId) => {
+        const it = Board._findItem(family, id);
+        if(!it || !it.board) return;
+        it.board = it.board.filter(b => b.id !== ideaId);
+        Store.save();
+        Board._rerender(family, id);
+    },
+    addPhoto: async (family, id) => {
+        const it = Board._findItem(family, id);
+        if(!it) return;
+        const input = document.getElementById('board-photo-' + family + '-' + id);
+        if(!input || !input.files || !input.files[0]) { Utils.toast('Choisissez une image.', 'warning'); return; }
+        const file = input.files[0];
+        input.value = '';
+        Utils.toast('Envoi de la photo...', 'info', 1500);
+        const url = await Utils.uploadProjectFile(file, { category: family, entityId: it.id || 'x', kind: 'board', maxDimension: 1920, quality: 0.9, maxKb: 1500 });
+        if(!url) return;
+        if(!it.board) it.board = [];
+        it.board.push({ id: Board._newId(), kind: 'photo', url: url, ts: Date.now() });
+        Store.save();
+        Board._rerender(family, id);
+    },
+    // Contenu de la planche (sans l'enveloppe) : boutons d'ajout, bande de photos, liste de notes.
+    _inner: (family, id, isView) => {
+        const items = Board.list(family, id);
+        const esc = Utils.escape;
+        const fam = esc(family), sid = esc(String(id));
+        let html = '';
+        if(!isView) {
+            html += `<div class="board-actions">
+                <button class="btn btn--primary btn--sm" onclick="app.Board.addNote('${fam}','${sid}')">➕ Note</button>
+                <input type="file" id="board-photo-${fam}-${sid}" accept="image/*" style="display:none;" onchange="app.Board.addPhoto('${fam}','${sid}')">
+                <button class="btn btn--primary btn--sm" onclick="document.getElementById('board-photo-${fam}-${sid}').click()">📸 Photo</button>
+            </div>`;
+        }
+        if(!items.length) {
+            html += `<div class="board-empty">Aucune idée pour l'instant. Ajoute des notes ou des photos de référence.</div>`;
+            return html;
+        }
+        const photos = items.filter(b => b.kind === 'photo');
+        const notes = items.filter(b => b.kind === 'note');
+        if(photos.length) {
+            html += `<div class="board-scroller">`;
+            photos.forEach(p => {
+                html += `<div class="board-photo"><img src="${Utils.safeMediaUrl(p.url)}" alt="Idée de référence">${!isView ? `<button class="board-del" title="Supprimer" onclick="app.Board.remove('${fam}','${sid}','${esc(p.id)}')">✕</button>` : ''}</div>`;
+            });
+            html += `</div>`;
+        }
+        if(notes.length) {
+            html += `<div class="board-notes">`;
+            notes.forEach(n => {
+                if(isView) {
+                    html += `<div class="board-note">${esc(n.text || '')}</div>`;
+                } else {
+                    html += `<div class="board-note"><textarea class="board-note-input" placeholder="Idée, référence, remarque..." oninput="app.Board.updateNote('${fam}','${sid}','${esc(n.id)}', this.value)">${esc(n.text || '')}</textarea><button class="board-del" title="Supprimer" onclick="app.Board.remove('${fam}','${sid}','${esc(n.id)}')">✕</button></div>`;
+                }
+            });
+            html += `</div>`;
+        }
+        return html;
+    },
+    render: (family, id, isView) => `<div class="board-wrap" id="board-wrap-${Utils.escape(family)}-${Utils.escape(String(id))}">${Board._inner(family, id, isView)}</div>`
 };
 
 const CardModal = {
