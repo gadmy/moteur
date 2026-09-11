@@ -21643,7 +21643,7 @@ initCategoriesDragDrop: () => {
                 // Brique « Description ».
                 blocks.push(FicheUI.block('location', 'description', '📝 Description', FicheUI.field('Description du décor', `<textarea class="data-desc" style="width:100%; min-height:80px;" placeholder="Description du décor..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isView?'disabled':''}>${Utils.escape(item.desc || '')}</textarea>`)));
 
-                contentHtml += FicheBlocks.render(blocks);
+                contentHtml += FicheBlocks.renderTabbed(blocks, 'location');
             } else {
                 // PERSONNAGES (characters) — briques repliables equilibrees (v581).
                 div.classList.add('fid-card');
@@ -21670,6 +21670,7 @@ initCategoriesDragDrop: () => {
                     actorControl = `<div style="color:var(--primary);">🎭 ${Utils.escape(linkedActor.name)}</div>`;
                 }
                 projHtml += FicheUI.field('Interprété par', actorControl);
+                if(!isView) projHtml += `<div style="margin-top:6px;"><button class="btn btn--primary btn--sm" onclick="app.GlobalSearch.openForCharacter(${idx})">🔍 Chercher des comédiens qui lui ressemblent</button></div>`;
                 projHtml += UI.renderCost('character', item.id);
                 blocks.push(FicheUI.block('character', 'projet', '🎬 Dans le projet', projHtml, { pin: 'right' }));
 
@@ -21682,6 +21683,26 @@ initCategoriesDragDrop: () => {
                 else if(item.group_id) { const g = (relevantGroups || []).find(x => x.id === item.group_id); if(g) idHtml += FicheUI.field('Groupe', `<div>${Utils.escape(g.name)}</div>`); }
                 idHtml += FicheLinks.pinToggleHtml('characters', item, isView);
                 blocks.push(FicheUI.block('character', 'identite', '🪪 Identité', idHtml));
+
+                // Brique « Description physique » — memes champs d'apparence que le
+                // comedien (memes listes), pour permettre le match perso -> comedien.
+                let phHtml = `<div class="actor-input-row mb-8">
+                        <input class="actor-input" type="number" placeholder="Taille (cm)" value="${Utils.escape(item.height || '')}" onchange="app.Actions.updateCharacterMeta(${idx}, 'height', this.value)" ${isView ? 'disabled' : ''}>
+                    </div>
+                    <div class="actor-input-row mb-8">
+                        <select class="actor-input" onchange="app.Actions.updateCharacterMeta(${idx}, 'eyeColor', this.value)" ${isView ? 'disabled' : ''}>${ProfileRenderer.selectOptions.eyeColor.map(o => '<option value="'+o.value+'" '+(item.eyeColor === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
+                        <select class="actor-input" onchange="app.Actions.updateCharacterMeta(${idx}, 'hairColor', this.value)" ${isView ? 'disabled' : ''}>${ProfileRenderer.selectOptions.hairColor.map(o => '<option value="'+o.value+'" '+(item.hairColor === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
+                        <select class="actor-input" onchange="app.Actions.updateCharacterMeta(${idx}, 'hairLength', this.value)" ${isView ? 'disabled' : ''}>${ProfileRenderer.selectOptions.hairLength.map(o => '<option value="'+o.value+'" '+(item.hairLength === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
+                    </div>
+                    <div class="actor-input-row mb-8">
+                        <select class="actor-input" onchange="app.Actions.updateCharacterMeta(${idx}, 'corpulence', this.value)" ${isView ? 'disabled' : ''}>${ProfileRenderer.selectOptions.corpulence.map(o => '<option value="'+o.value+'" '+(item.corpulence === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
+                        <select class="actor-input" onchange="app.Actions.updateCharacterMeta(${idx}, 'ethnicity', this.value)" ${isView ? 'disabled' : ''}>${ProfileRenderer.selectOptions.ethnicity.map(o => '<option value="'+o.value+'" '+(item.ethnicity === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
+                    </div>
+                    <div class="actor-input-row">
+                        <input class="actor-input" placeholder="Sports pratiqués (équitation, natation...)" value="${Utils.escape(item.sports || '')}" onchange="app.Actions.updateCharacterMeta(${idx}, 'sports', this.value)" ${isView ? 'disabled' : ''}>
+                        <input class="actor-input" placeholder="Langues parlées (français, anglais...)" value="${Utils.escape(item.languages || '')}" onchange="app.Actions.updateCharacterMeta(${idx}, 'languages', this.value)" ${isView ? 'disabled' : ''}>
+                    </div>`;
+                blocks.push(FicheUI.block('character', 'physique', '📏 Description physique', phHtml));
 
                 // Brique « Notes ».
                 blocks.push(FicheUI.block('character', 'notes', '📝 Notes', FicheUI.field('Bio, intentions, remarques de mise en scène', `<textarea class="data-desc" style="width:100%; min-height:90px;" placeholder="Bio, intentions, remarques de mise en scène..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isView ? 'disabled' : ''}>${Utils.escape(item.bio || '')}</textarea>`)));
@@ -36245,7 +36266,7 @@ const DrawingEditor = {
                       <div class="fid-sub">${subLabel}</div>
                   </div>
               </div>
-              ${FicheBlocks.render(rblocks)}
+              ${FicheBlocks.renderTabbed(rblocks, 'resource')}
           </div>
           `;
       },
@@ -41712,7 +41733,25 @@ const GlobalSearch = {
         GlobalSearch.open();
     },
     
-    open: () => {
+    // Ouvre la recherche comedien PRE-REMPLIE depuis la physique d'un personnage
+    // (memes valeurs d'options des deux cotes) pour trouver des comediens ressemblants.
+    openForCharacter: (charIdx) => {
+        const c = state.data.characters && state.data.characters[charIdx];
+        if(!c) return;
+        GlobalSearch.currentType = 'actors';
+        const prefill = {
+            'gs-gender': c.gender, 'gs-ethnicity': c.ethnicity,
+            'gs-hair': c.hairColor, 'gs-eyes': c.eyeColor,
+            'gs-sports': c.sports, 'gs-languages': c.languages
+        };
+        const h = parseInt(c.height, 10);
+        if(h > 0) { prefill['gs-height-min'] = String(h - 5); prefill['gs-height-max'] = String(h + 5); }
+        const am = String(c.storyAge || '').match(/\d{1,3}/);
+        if(am) { const a = parseInt(am[0], 10); prefill['gs-age-min'] = String(Math.max(0, a - 3)); prefill['gs-age-max'] = String(a + 3); }
+        GlobalSearch.open(prefill);
+    },
+    
+    open: (prefill) => {
         const isActors = GlobalSearch.currentType === 'actors';
         
         const modal = document.createElement('div');
@@ -41736,6 +41775,7 @@ const GlobalSearch = {
         `;
         
         document.body.appendChild(modal);
+        if(prefill) { Object.keys(prefill).forEach(id => { const el = document.getElementById(id); if(el && prefill[id] != null && prefill[id] !== '') el.value = prefill[id]; }); }
         GlobalSearch.search();
     },
     
@@ -41958,6 +41998,10 @@ const GlobalSearch = {
             let tagsHTML = '';
             
             if(isActors) {
+                const _pe = [person.email, person.owner_email].filter(Boolean).map(e => String(e).toLowerCase());
+                if(_pe.length && (state.data.actors || []).some(a => [a.email, a.owner_email].filter(Boolean).some(e => _pe.includes(String(e).toLowerCase())))) {
+                    tagsHTML += `<span class="global-search-card-tag" style="background:var(--primary);color:white;">✓ Déjà dans le projet</span>`;
+                }
                 const details = [];
                 if(person.age) details.push(Utils.escape(person.age + ' ans'));
                 if(person.height) details.push(Utils.escape(person.height + ' cm'));
@@ -53728,7 +53772,7 @@ const orgGroups = (state.data.groups || []).filter(g => g.type === 'org');
 
             return `<div class="data-card fid-card chub-card" style="max-width:none; margin:0; box-shadow:none; padding:0;">
                 ${head}
-                ${FicheBlocks.render(oblocks)}
+                ${FicheBlocks.renderTabbed(oblocks, 'org')}
             </div>`;
     },
     openExportModal: () => {
@@ -72198,7 +72242,30 @@ const FicheBlocks = {
         character: [
             { id: 'projet',   label: '🎬 Dans le projet', blocks: ['projet'] },
             { id: 'identite', label: '🪪 Identité',        blocks: ['identite'] },
+            { id: 'physique', label: '📏 Physique',        blocks: ['physique'] },
             { id: 'notes',    label: '📝 Notes',           blocks: ['notes'] }
+        ],
+        location: [
+            { id: 'projet',      label: '🎬 Dans le projet', blocks: ['projet'] },
+            { id: 'lieu',        label: '📍 Lieu',           blocks: ['lieu', 'logistique'] },
+            { id: 'photos',      label: '📸 Photos',         blocks: ['photos'] },
+            { id: 'description', label: '📝 Description',     blocks: ['description', 'classement'] }
+        ],
+        resource: [
+            { id: 'projet',      label: '🎬 Dans le projet', blocks: ['projet'] },
+            { id: 'fiche',       label: '📦 Fiche',          blocks: ['fiche', 'classement'] },
+            { id: 'description', label: '📝 Description',     blocks: ['description'] }
+        ],
+        org: [
+            { id: 'projet',  label: '🎬 Sur ce projet',    blocks: ['projet'] },
+            { id: 'fiche',   label: '🏛️ Fiche structure', blocks: ['fiche'] },
+            { id: 'origine', label: 'ℹ️ Origine',          blocks: ['origine'] }
+        ],
+        scene: [
+            { id: 'projet',   label: '🎬 Dans le projet',      blocks: ['projet'] },
+            { id: 'identite', label: '🎞️ Titre & repères',    blocks: ['identite'] },
+            { id: 'liens',    label: '🔗 Décor & personnages', blocks: ['liens'] },
+            { id: 'resume',   label: '📝 Résumé',              blocks: ['resume'] }
         ]
     },
     _blockIdOf: (html) => { const m = html.match(/data-block-id="([^"]+)"/); return m ? m[1] : ''; },
@@ -72578,7 +72645,7 @@ const CardModal = {
         if(body) body.innerHTML = FicheUI.headHtml({
             name: sc.title || 'Sans titre', id: sc.id, kindLabel: 'Scène', photo: '',
             badgesHtml: '', delBtnHtml: delBtn
-        }) + FicheBlocks.render(blocks);
+        }) + FicheBlocks.renderTabbed(blocks, 'scene');
         CardModal.applyRights('scene');
         if(modal) modal.classList.add('visible');
         // v581 : les briques sont equilibrees par hauteur une fois visibles
