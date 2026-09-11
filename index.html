@@ -4104,6 +4104,15 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .fid-blocks-reset { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
   .fid-blocks-reset button { background: none; border: none; color: var(--text-sec); font-size: 0.78rem; cursor: pointer; padding: 2px 6px; }
   .fid-blocks-reset button:hover { color: var(--primary); text-decoration: underline; }
+  /* ONGLETS DE FICHE (v588) : une brique par onglet, un seul onglet visible a la fois. */
+  .fid-tabbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 12px 16px 0; border-bottom: 1px solid var(--border); }
+  .fid-tab { background: none; border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; padding: 8px 12px; font-size: 0.85rem; font-weight: 600; color: var(--text-sec); cursor: pointer; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .fid-tab:hover { color: var(--primary); background: var(--bg); }
+  .fid-tab.is-active { color: var(--primary); background: var(--panel-bg); border-color: var(--border); border-bottom-color: var(--panel-bg); margin-bottom: -1px; }
+  .fid-tabpanel { display: none; padding: 16px; flex-direction: column; gap: 14px; }
+  .fid-tabpanel.is-active { display: flex; }
+  .fid-tabpanel .fid-block-grip { display: none; }
+  @media (max-width: 700px) { .fid-tabbar { padding: 10px 12px 0; } .fid-tabpanel { padding: 12px; } }
   .data-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
   .data-desc { height: 80px; font-size: 0.9rem; resize: none; }
   .group-select { font-size: 0.8rem; padding: 4px; margin-top: 5px; border-radius: 4px; }
@@ -21580,7 +21589,7 @@ initCategoriesDragDrop: () => {
                 // Brique « Bio ».
                 blocks.push(FicheUI.block('actor', 'bio', '📝 Bio / Notes', `<textarea class="data-desc" style="width:100%; min-height:90px;" placeholder="Parcours, expériences, remarques..." oninput="app.Actions.updateDataItem('${type}', ${idx}, this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(item.bio || '')}</textarea>`));
 
-                contentHtml += FicheBlocks.render(blocks);
+                contentHtml += FicheBlocks.renderTabbed(blocks, 'actor');
                 } else if(type === 'locations') {
                 // DECORS — briques repliables equilibrees (v581).
                 div.classList.add('fid-card');
@@ -72162,6 +72171,61 @@ const FicheBlocks = {
 
     render: (blocksHtmlArray) => {
         return `<div class="fid-blocks"><div class="fid-bcol">${blocksHtmlArray.join('')}</div><div class="fid-bcol"></div><div class="fid-blocks-reset"><button onclick="app.FicheBlocks.reset(this)" title="Revenir à la disposition automatique">↺ Disposition automatique</button></div></div>`;
+    },
+
+    // ---- ONGLETS DE FICHE (v588) ---------------------------------------
+    // Table de repartition : par famille, la liste ORDONNEE des onglets et,
+    // pour chacun, les identifiants de briques qu'il contient. Reordonner un
+    // onglet = deplacer un identifiant ici (une seule ligne). Une brique
+    // presente mais listee nulle part tombe dans un onglet « Autre » ; un
+    // onglet dont aucune brique n'est presente est tout simplement masque.
+    TABS: {
+        actor: [
+            { id: 'projet',     label: '🎬 Dans le projet',        blocks: ['projet'] },
+            { id: 'profil',     label: '🪪 Profil',                blocks: ['identite', 'contact'] },
+            { id: 'physique',   label: '📏 Physique',              blocks: ['physique'] },
+            { id: 'photos',     label: '📸 Photos & démo',         blocks: ['galerie', 'demoreel'] },
+            { id: 'parcours',   label: '📝 Parcours',              blocks: ['bio'] },
+            { id: 'logistique', label: '📅 Planning & logistique', blocks: ['dispos', 'vehicule', 'cachet'] }
+        ]
+    },
+    _blockIdOf: (html) => { const m = html.match(/data-block-id="([^"]+)"/); return m ? m[1] : ''; },
+    // Repartit les briques deja construites entre les onglets de la famille.
+    // N'ajoute AUCUNE structure a deux colonnes, donc balance() la laisse
+    // tranquille : les briques gardent leur repli, on retire juste la poignee.
+    renderTabbed: (blocksHtmlArray, kind) => {
+        const conf = FicheBlocks.TABS[kind];
+        if(!conf) return FicheBlocks.render(blocksHtmlArray);
+        const byId = {};
+        blocksHtmlArray.forEach(h => { const id = FicheBlocks._blockIdOf(h); if(id) byId[id] = h; });
+        const used = {};
+        const tabs = [];
+        conf.forEach(t => {
+            const html = t.blocks.map(id => { if(byId[id]) { used[id] = 1; return byId[id]; } return ''; }).join('');
+            if(html) tabs.push({ id: t.id, label: t.label, html });
+        });
+        const leftover = blocksHtmlArray.filter(h => { const id = FicheBlocks._blockIdOf(h); return id && !used[id]; }).join('');
+        if(leftover) tabs.push({ id: 'autre', label: '➕ Autre', html: leftover });
+        if(!tabs.length) return FicheBlocks.render(blocksHtmlArray);
+        const bar = tabs.map((t, i) => `<button type="button" class="fid-tab${i === 0 ? ' is-active' : ''}" data-tab="${Utils.escape(t.id)}" onclick="app.FicheBlocks.switchTab(this)">${t.label}</button>`).join('');
+        const panels = tabs.map((t, i) => `<div class="fid-tabpanel${i === 0 ? ' is-active' : ''}" data-tab="${Utils.escape(t.id)}">${t.html}</div>`).join('');
+        return `<div class="fid-tabs" data-fiche-kind="${Utils.escape(kind)}"><div class="fid-tabbar" role="tablist">${bar}</div>${panels}</div>`;
+    },
+    switchTab: (btn) => {
+        const tabs = btn.closest('.fid-tabs');
+        if(!tabs) return;
+        const id = btn.dataset.tab;
+        tabs.querySelectorAll(':scope > .fid-tabbar > .fid-tab').forEach(b => b.classList.toggle('is-active', b.dataset.tab === id));
+        let shown = null;
+        tabs.querySelectorAll(':scope > .fid-tabpanel').forEach(p => { const on = p.dataset.tab === id; p.classList.toggle('is-active', on); if(on) shown = p; });
+        // Un calendrier de dispo rendu dans un onglet cache doit etre redessine
+        // a l'ouverture de son onglet (meme garde viewer qu'a l'ouverture).
+        if(shown && state.currentRole !== 'viewer') {
+            shown.querySelectorAll('[id^="actor-calendar-"],[id^="crew-calendar-"]').forEach(cal => {
+                const m = cal.id.match(/^(actor|crew)-calendar-(\d+)$/);
+                if(m) { try { UI.renderAvailabilityCalendar(cal.id, m[1], parseInt(m[2], 10)); } catch(e) {} }
+            });
+        }
     },
 
     // Appele apres affichage : applique la disposition manuelle si elle existe,
