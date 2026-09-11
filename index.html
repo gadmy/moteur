@@ -201,6 +201,16 @@ est raconte aux entrees v562 a v567 de l'historique ci-dessous.)
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v588 (11 Septembre 2026) — FICHES EN ONGLETS + CASTING / IDÉES : les sept familles de fiches passent des briques en deux colonnes à des ONGLETS + onglet PHYSIQUE sur les personnages (mêmes champs que le comédien) qui nourrit une RECHERCHE DE COMÉDIENS pré-remplie + PLANCHE D'IDÉES (notes + photos) sur personnages / lieux / objets, avec une VUE SATELLITES façon Toile de liaisons + boutons de GROUPE remis sur les cartes + SÉLECTION AU RECTANGLE sur les deux toiles.
+  - ONGLETS DE FICHE (FicheBlocks.TABS + renderTabbed + switchTab) : une table par famille décrit l'ordre des onglets et les briques de chacun ; réordonner = une ligne. Les briques (FicheUI.block) et leur repli ne changent pas, on ajoute seulement la couche onglets ; un onglet sans brique présente est masqué. Sept familles branchées (comédien, technicien, personnage, lieu, ressource, structure, scène). Le mini-calendrier de dispo est redessiné à l'ouverture de son onglet (garde du conteneur caché, comme v582).
+  - PERSONNAGE, ONGLET PHYSIQUE : mêmes champs d'apparence que le comédien via les mêmes listes (yeux, cheveux couleur / longueur, corpulence, origine, taille, sports, langues), enregistrés par updateCharacterMeta. Mêmes noms de champs des deux côtés = comparaison directe. L'âge reste « Âge dans le récit » (texte libre) ; le poids du comédien n'est pas repris (sans objet pour un personnage).
+  - RECHERCHE DE COMÉDIENS : bouton casting (fiche + petite carte du personnage) vers GlobalSearch.openForCharacter, qui ouvre la recherche communautaire PRÉ-REMPLIE depuis la physique du personnage (GlobalSearch.open accepte désormais une pré-saisie). Badge « déjà dans le projet » sur les résultats dont l'e-mail correspond à un comédien du projet.
+  - PLANCHE D'IDÉES / CASTING (module Board) : notes + photos de référence stockées SUR la fiche (item.board), héritant donc des droits de sa section — aucune nouvelle clé de projet, aucun SQL. Onglet « Casting » sur les personnages, « Idées » sur lieux et objets. Photos dans le bucket privé du projet via Utils.uploadProjectFile. Re-rendu localisé de la planche pour ne pas perdre l'onglet en cours.
+  - VUE SATELLITES (bouton idée) : la fiche au centre, ses idées autour (photos à droite, notes à gauche) reliées par des traits, placées par GraphPhysics — moteur de la Toile réutilisé sans toucher au module Web. Pastilles déplaçables et passées au premier plan au clic, agrandissables (molette et double-clic) ; le centre suit la souris et entraîne les autres PAR LA PHYSIQUE, comme la Toile.
+  - BOUTONS DE GROUPE : le rond de changement de groupe est de nouveau posé sur les cartes personnage, décor et ressource — _groupRoundHtml généralisé aux types de groupe perso / lieu / resource / org (il ne connaissait qu'actor / crew).
+  - SÉLECTION AU RECTANGLE : sur la toile d'idées ET la Toile de liaisons (Web), un clic dans le vide trace un cadre, sélectionne les fiches contenues, puis les déplace en groupe (les autres se réorganisent). Sélection remise à zéro au re-rendu.
+  - CONTRÔLES DE FIN DE SESSION PASSÉS après chaque lot : syntaxe JavaScript valide (node --check), équilibre des balises div strictement inchangé, zéro U+2550, zéro U+202F. Rien côté serveur (aucun SQL, aucune Edge Function). Reste à la charge de Guillaume : mettre en ligne l'index.html et recharger cache vidé (Ctrl+Shift+R).
+
 v587 (11 Septembre 2026) — FIN DU PARTAGE : STORYBOARD ET MOODBOARD PARTAGEABLES (dernier volet du système v585-v586) + BOUTON « METTRE À JOUR » POUR REFABRIQUER UN PARTAGE VISUEL SANS CHANGER LE LIEN + DEUX CORRECTIFS (panneau de commentaires fermé au changement d'onglet, notifications de commentaires lisibles dans le hub).
   - CHOIX D'ARCHITECTURE, DIFFÉRENT DU PLAN NOTÉ EN v586. L'en-tête v586 prévoyait que l'Edge Function SIGNE / INCORPORE les images côté serveur : abandonné. Un storyboard n'est pas un fichier stocké mais une IMAGE COMPOSÉE dans le navigateur (image de base + calques de dessin + repères techniques), que le serveur ne sait pas reconstituer ; et le relecteur n'a pas de compte, donc pas d'accès au bucket privé. On fige donc les images CÔTÉ AUTEUR au moment du partage (même rendu que l'export PDF, déjà éprouvé) et on les range dans le partage. Le relecteur n'a plus qu'à les afficher. Zéro lecture de bucket, zéro CORS, zéro signature.
   - SOCLE (hors fichier). partage_payload.sql : colonne payload jsonb sur script_shares (idempotent, aucune policy touchée, table toujours verrouillée). Edge Function script-share v587 : constante VISUAL_KINDS = [storyboard, moodboard] ; create range payload pour ces kinds uniquement ; read renvoie payload.scenes tel quel pour ces kinds (au lieu de reconstruire depuis projects.data) ; forme d'élément inchangée { id, number, title, content }, content = HTML d'images prêtes. Un titre de notification en dur (« sur ton scénario ») corrigé en « sur ton partage ».
@@ -2903,12 +2913,13 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
 .compact-card-name { font-weight: 600; font-size: 0.95rem; margin-bottom: 4px; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .compact-card-role { font-size: 0.8rem; color: var(--text-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .compact-card-badge { position: absolute; top: 8px; right: 8px; font-size: 0.7rem; padding: 2px 6px; border-radius: 10px; background: var(--primary); color: white; }
-.compact-card-actions { position: absolute; top: 8px; left: 8px; display: flex; gap: 5px; opacity: 0; transition: opacity 0.2s; }
-.compact-card:hover .compact-card-actions { opacity: 1; }
+.compact-card-actions { position: absolute; top: 8px; left: 8px; display: flex; flex-wrap: wrap; gap: 5px; max-width: calc(100% - 16px); opacity: 0; pointer-events: none; transition: opacity 0.15s; z-index: 4; }
+.compact-card.ctx-open .compact-card-actions { opacity: 1; pointer-events: auto; background: var(--panel-bg); padding: 6px; border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,0.25); }
 .compact-card-actions button { width: 26px; height: 26px; border-radius: 50%; border: none; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; justify-content: center; }
 .compact-card-actions .edit-btn { background: var(--primary); color: white; }
 .compact-card-actions .delete-btn { background: var(--danger); color: white; }
 .compact-card-actions .merge-btn { background: var(--locked); color: white; }
+.compact-card-actions .web-btn { background: #34495e; color: white; }
 .compact-card-actions .group-round-wrap { position: relative; width: 26px; height: 26px; display: inline-flex; }
 .compact-card-actions .group-btn { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; border: none; background: var(--locked); color: white; display: flex; align-items: center; justify-content: center; font-size: 0.72rem; padding: 0; pointer-events: none; }
 .compact-card-actions .group-round-select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: none; }
@@ -6768,7 +6779,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv587</p>
+      <p>vv588</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -20179,6 +20190,24 @@ openBoardPrintEpisodeChooser: () => {
         document.addEventListener('contextmenu', (e) => {
             const tab = e.target.closest('.tab-subbtn, .tab-btn, .tab-category');
             if(tab) UICategories.openTabColorMenu(e, tab);
+        });
+        // Clic droit sur une carte de fiche : au lieu du survol, on revele ses
+        // icones d'action (modifier, groupe, casting, toile...). Delegue au
+        // document pour survivre a tous les re-rendus de cartes.
+        document.addEventListener('contextmenu', (e) => {
+            const card = e.target.closest('.compact-card');
+            if(!card || !card.querySelector('.compact-card-actions')) return;
+            e.preventDefault();
+            document.querySelectorAll('.compact-card.ctx-open').forEach(c => { if(c !== card) c.classList.remove('ctx-open'); });
+            card.classList.toggle('ctx-open');
+        });
+        // Un clic ailleurs, ou Echap, referme le menu d'actions ouvert.
+        document.addEventListener('click', (e) => {
+            if(e.target.closest('.compact-card-actions')) return;
+            document.querySelectorAll('.compact-card.ctx-open').forEach(c => c.classList.remove('ctx-open'));
+        });
+        document.addEventListener('keydown', (e) => {
+            if(e.key === 'Escape') document.querySelectorAll('.compact-card.ctx-open').forEach(c => c.classList.remove('ctx-open'));
         });
     },
     initSubnavContextMenu: () => {
@@ -36182,6 +36211,7 @@ const DrawingEditor = {
                       <button class="delete-btn" onclick="event.stopPropagation(); app.Resources.delete('${res.id}')" title="Supprimer">🗑️</button>
                       ${CardModal._groupRoundHtml(res, idx, 'resources')}
                       <button class="board-btn" onclick="event.stopPropagation(); app.Board.openSatellites('resource', '${res.id}')" title="Idées / références">💡</button>
+                      <button class="web-btn" onclick="event.stopPropagation(); app.Web.open('resource', '${res.id}')" title="Voir dans la toile">🕸️</button>
                   </div>`;
               return `
                   <div class="compact-card" data-category="${res.category}"${dnd} onclick="app.Resources.edit('${res.id}')">
@@ -36357,7 +36387,7 @@ const DrawingEditor = {
           let rDesc = FicheUI.field('Description', `<textarea id="res-description" rows="3" class="n8-input-10" style="width:100%;" placeholder="Description détaillée...">${Utils.escape(resource?.description || '')}</textarea>`);
           rDesc += FicheUI.field('Note', `<textarea id="res-note" rows="2" class="n8-input-10" style="width:100%;" placeholder="Notes supplémentaires...">${Utils.escape(resource?.note || '')}</textarea>`);
           rblocks.push(FicheUI.block('resource', 'description', '📝 Description & note', rDesc));
-          if(resource && resource.id) rblocks.push(FicheUI.block('resource', 'ideas', '💡 Idées', Board.render('resource', resource.id, roRes)));
+          if(resource && resource.id) rblocks.push(FicheUI.block('resource', 'ideas', '💡 Idées', Board.render('resource', resource.id, ((typeof Permissions !== 'undefined' && Permissions.canEditFiche && !Permissions.canEditFiche('resource')) || state.currentRole === 'viewer'))));
 
           return `<div class="data-card fid-card" style="max-width:none; margin:0; box-shadow:none; border:none; padding:0;">
               <div class="fid-head" style="padding:0 0 14px;">
@@ -53760,6 +53790,7 @@ const orgGroups = (state.data.groups || []).filter(g => g.type === 'org');
                     <button class="edit-btn" onclick="event.stopPropagation(); app.Orgs.edit(${i})" title="Modifier">✏️</button>
                     <button class="delete-btn" onclick="event.stopPropagation(); app.Orgs.remove(${i})" title="Supprimer">🗑️</button>
                     <div class="group-round-wrap" title="Changer de groupe"><button class="group-btn" type="button" tabindex="-1">👥</button><select class="group-round-select" onclick="event.stopPropagation();" onchange="event.stopPropagation(); app.Actions.changeGroup('orgs', ${i}, this.value)">${opts}</select></div>
+                    <button class="web-btn" onclick="event.stopPropagation(); app.Web.open('org', '${o.id}')" title="Voir dans la toile">🕸️</button>
                 </div>`;
             const dnd = isView ? '' : ` draggable="true" data-dnd-coll="orgs" data-dnd-idx="${i}"`;
             return `<div class="compact-card"${dnd} onclick="app.Orgs.edit(${i})">${actions}<div class="compact-card-photo">${logo}</div><div class="compact-card-name">${esc(fc.name || o.name || 'Sans nom')}</div><div class="compact-card-role">${typeLabel}</div></div>`;
@@ -73294,6 +73325,7 @@ const CardModal = {
                     <button class="edit-btn" onclick="event.stopPropagation(); app.CardModal.openCrew(${idx})" title="Modifier">✏️</button>
                     <button class="delete-btn" onclick="event.stopPropagation(); app.Crew.deleteMember(${idx})" title="Supprimer">🗑️</button>
                     ${CardModal._groupRoundHtml(member, idx, 'crew')}
+                    <button class="web-btn" onclick="event.stopPropagation(); app.Web.open('crew', '${member.id}')" title="Voir dans la toile">🕸️</button>
                 </div>
                 ` : ''}
                 ${badge ? `<div class="compact-card-badge">${badge}</div>` : ''}
@@ -73393,6 +73425,7 @@ const CardModal = {
                     ${CardModal._groupRoundHtml(item, idx, type)}
                     ${(type === 'characters' || type === 'locations') ? `<button class="board-btn" onclick="event.stopPropagation(); app.Board.openSatellites('${type === 'characters' ? 'character' : 'location'}', '${item.id}')" title="Idées (planche)">💡</button>` : ''}
                     ${type === 'characters' ? `<button class="casting-btn" onclick="event.stopPropagation(); app.GlobalSearch.openForCharacter(${idx})" title="Casting — comédiens qui matchent">🎭</button>` : ''}
+                    <button class="web-btn" onclick="event.stopPropagation(); app.Web.open('${({characters:'character',actors:'actor',locations:'location'})[type]}', '${item.id}')" title="Voir dans la toile">🕸️</button>
                 </div>
                 ` : ''}
                 ${badge ? `<div class="compact-card-badge">${badge}</div>` : ''}
