@@ -38239,6 +38239,7 @@ const DrawingEditor = {
     },
     
     deleteMember: async (idx) => {
+        if(PublicProfile._engineMode) return;
         if(state.currentRole === 'viewer') return;
         
         // Récupérer l'ID et nom du membre avant suppression
@@ -38288,6 +38289,7 @@ const DrawingEditor = {
         Crew.updateMember(idx, 'licenses', lic);
     },
     updateMember: (idx, field, value) => {
+        if(PublicProfile._engineMode) { const p = PublicProfile._engineProfile; if(p) p[field] = value; return; }
         if(state.currentRole === 'viewer') return;
         if(!state.data.crew[idx]) return;
         
@@ -38349,6 +38351,7 @@ const DrawingEditor = {
     },
     
     uploadPhoto: async (idx, input) => {
+        if(PublicProfile._engineMode) { await PublicProfile._engineUploadPhoto(input); return; }
         if(state.currentRole === 'viewer') return;
         if(!state.data.crew[idx]) return;
         if(!input.files || !input.files[0]) return;
@@ -38374,6 +38377,7 @@ const DrawingEditor = {
     },
     
     addGalleryPhoto: async (idx) => {
+        if(PublicProfile._engineMode) { await PublicProfile._engineAddGalleryPhoto(idx); return; }
         if(state.currentRole === 'viewer') return;
         if(!state.data.crew[idx]) return;
         const input = document.getElementById(`crew-gallery-input-${idx}`);
@@ -38399,6 +38403,16 @@ const DrawingEditor = {
     },
     
     removeGalleryPhoto: async (crewIdx, photoIdx) => {
+        if(PublicProfile._engineMode) {
+            const d = PublicProfile._engineProfile;
+            if(d && Array.isArray(d.galleryPhotos)) {
+                const url = d.galleryPhotos[photoIdx];
+                d.galleryPhotos.splice(photoIdx, 1);
+                if(url && url.includes('/gallery/')) { const path = url.split('/gallery/')[1]; if(path) { try { await supabase.storage.from('gallery').remove([path]); } catch(e) {} } }
+                PublicProfile._engineRerenderCard();
+            }
+            return;
+        }
         if(state.currentRole === 'viewer') return;
         if(state.data.crew[crewIdx] && state.data.crew[crewIdx].galleryPhotos) {
             const member = state.data.crew[crewIdx];
@@ -40421,6 +40435,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         // BASCULE : la casquette comedien ouvre la FICHE UNIVERSELLE (moteur du projet).
         // Les autres casquettes gardent l'ancien formulaire tant qu'elles ne sont pas fusionnees.
         if(facet === 'actor') { PublicProfile.openComedienEngine(); return; }
+        if(facet === 'crew') { PublicProfile.openTechnicienEngine(); return; }
         PublicProfile._bindFicheFold();
         PublicProfile.selectFacetTab(facet);
         const title = document.getElementById('profile-fiche-modal-title');
@@ -40439,31 +40454,38 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     // dans facets.actor puis persiste : SEULE la casquette comedien change, jamais les
     // champs communs ni les autres casquettes. Fermer sans enregistrer = aucun effet.
     // Recette d'affichage reprise de UniverseProfileModal._renderFicheInModal.
-    openComedienEngine: () => {
+    openComedienEngine: () => PublicProfile._openProfileEngine('actor'),
+    openTechnicienEngine: () => PublicProfile._openProfileEngine('crew'),
+    // Moteur commun aux casquettes comedien ('actor') et technicien ('crew').
+    _openProfileEngine: (kind) => {
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
         if(!profile) { Utils.toast('Aucun profil chargé.', 'warning'); return; }
         if(!profile.facets) profile.facets = {};
-        if(!profile.facets.actor) profile.facets.actor = { enabled: true };
+        if(!profile.facets[kind]) profile.facets[kind] = { enabled: true };
+        PublicProfile._engineKind = kind;
         // On edite une COPIE de la casquette : le profil reel n'est touche qu'au save.
-        const draft = JSON.parse(JSON.stringify(profile.facets.actor || {}));
-        // Correspondance de vocabulaire : la fiche projet dit 'email', le profil dit
-        // 'contactEmail'. On alimente le champ email de la fiche depuis contactEmail.
+        const draft = JSON.parse(JSON.stringify(profile.facets[kind] || {}));
+        // Vocabulaire : la fiche projet dit 'email', le profil dit 'contactEmail'.
         if(!draft.email) draft.email = draft.contactEmail || '';
-        // Champs COMMUNS (physique + site web) : ils vivent sur le profil, partages entre
-        // casquettes, pas sur la casquette. On les lit depuis le profil (source de verite).
-        ['website','height','weight','eyeColor','hairColor','hairLength','ethnicity','corpulence','sports','sportsWithLevels'].forEach(k => { draft[k] = profile[k]; });
+        // Champs COMMUNS (partages entre casquettes) lus depuis le profil : physique (comedien
+        // seulement, le technicien n'a pas d'onglet physique) + site web.
+        const commonKeys = (kind === 'actor')
+            ? ['website','height','weight','eyeColor','hairColor','hairLength','ethnicity','corpulence','sports','sportsWithLevels']
+            : ['website'];
+        commonKeys.forEach(k => { draft[k] = profile[k]; });
+        PublicProfile._engineCommonKeys = commonKeys;
         PublicProfile._engineMode = true;
         PublicProfile._engineProfile = draft;
-        // Le moteur suppose un projet ouvert (state.data, role). Sur la page profil il
-        // n'y en a pas : on prete un decor vide + role editeur, restaures a la fermeture.
+        // Le moteur suppose un projet ouvert (state.data + role). Sur la page profil il n'y en
+        // a pas : on prete un decor vide, la copie placee a l'index 0 du bon tableau (comediens
+        // ou equipe), pour que tout le moteur (calendrier, vehicule, galerie) marche par index.
+        // Le vrai state.data eventuel est garde par reference et restaure a la fermeture ;
+        // aucune sauvegarde projet ne part (garde _engineMode sur StoreSave).
         PublicProfile._engineSavedData = state.data;
         PublicProfile._engineSavedRole = state.currentRole;
-        // On place la copie DANS le tableau des comediens du decor de projet prete : ainsi
-        // toutes les fonctions du moteur (dont le calendrier de dispo, le vehicule, la galerie)
-        // la lisent/ecrivent naturellement par son index (0). Le vrai state.data eventuel est
-        // garde par reference et restaure a la fermeture ; aucune sauvegarde projet ne part
-        // (garde _engineMode sur StoreSave).
-        state.data = { actors:[draft], characters:[], locations:[], scenes:[], shootingDays:[], episodes:[], expenses:[], resources:[], crew:[], orgs:[], groups:[], vehicles:[], plans:[], contracts:[], seasons:[], budget:{}, history:[] };
+        const blank = { actors:[], characters:[], locations:[], scenes:[], shootingDays:[], episodes:[], expenses:[], resources:[], crew:[], orgs:[], groups:[], vehicles:[], plans:[], contracts:[], seasons:[], budget:{}, history:[] };
+        blank[kind === 'actor' ? 'actors' : 'crew'] = [draft];
+        state.data = blank;
         state.currentRole = 'owner';
         const card = PublicProfile._engineBuildCard();
         if(!card) { PublicProfile._closeComedienEngine(); Utils.toast('Impossible d\'afficher la fiche moteur.', 'error'); return; }
@@ -40474,7 +40496,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         box.style.cssText = 'background:var(--panel, var(--surface, var(--bg, #ffffff))); color:inherit; max-width:660px; width:92%; margin:5vh auto; max-height:88vh; overflow:auto; border-radius:12px; padding:16px; box-shadow:0 10px 40px rgba(0,0,0,.4);';
         const bar = document.createElement('div');
         bar.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:8px; padding:0 0 10px;';
-        bar.innerHTML = '<span style="font-weight:600;">🎭 Comédien·ne</span>'
+        bar.innerHTML = '<span style="font-weight:600;">' + (PublicProfile._engineKind === 'crew' ? '🎥 Technicien·ne' : '🎭 Comédien·ne') + '</span>'
             + '<span style="display:flex; gap:8px;">'
             + '<button class="btn btn--primary btn--sm" id="comedien-engine-save">💾 Enregistrer</button>'
             + '<button class="btn btn--sm" id="comedien-engine-close">Fermer</button>'
@@ -40486,14 +40508,15 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         document.getElementById('comedien-engine-save').onclick = async () => {
             // On recopie la COPIE editee dans la vraie casquette, puis on persiste.
             const d = PublicProfile._engineProfile;
+            const kind = PublicProfile._engineKind || 'actor';
             // Retraduction : email (fiche) -> contactEmail (profil), sans laisser de cle parasite.
             d.contactEmail = d.email || d.contactEmail || '';
             delete d.email;
             // Champs COMMUNS -> profil (partages entre casquettes), retires de la casquette.
-            ['website','height','weight','eyeColor','hairColor','hairLength','ethnicity','corpulence','sports','sportsWithLevels'].forEach(k => { if(d[k] !== undefined) { profile[k] = d[k]; delete d[k]; } });
-            profile.facets.actor = d;
+            (PublicProfile._engineCommonKeys || []).forEach(k => { if(d[k] !== undefined) { profile[k] = d[k]; delete d[k]; } });
+            profile.facets[kind] = d;
             await PublicProfile.saveCurrentProfile();
-            Utils.toast('Casquette comédien enregistrée.', 'success');
+            Utils.toast((kind === 'crew' ? 'Casquette technicien' : 'Casquette comédien') + ' enregistrée.', 'success');
         };
         document.getElementById('comedien-engine-close').onclick = () => PublicProfile._closeComedienEngine();
     },
@@ -40511,11 +40534,16 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     // doivent deja etre en place (openComedienEngine).
     _engineBuildCard: () => {
         const draft = PublicProfile._engineProfile;
+        const kind = PublicProfile._engineKind || 'actor';
         let card = null;
         try {
-            const temp = document.createElement('div');
-            UI.renderDataCards([draft], 'actors', temp, [], false);
-            card = temp.firstElementChild;
+            if(kind === 'crew') {
+                card = UI.createCrewCard(draft, 0, [], false);
+            } else {
+                const temp = document.createElement('div');
+                UI.renderDataCards([draft], 'actors', temp, [], false);
+                card = temp.firstElementChild;
+            }
         } catch(e) { console.warn('Fiche moteur:', e); }
         if(!card) return null;
         const tabs = card.querySelector('.fid-tabs');
@@ -40551,9 +40579,9 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         if(!card) return;
         if(box.children.length >= 2) box.replaceChild(card, box.lastElementChild); else box.appendChild(card);
         setTimeout(() => {
-            card.querySelectorAll('[id^="actor-calendar-"]').forEach(cal => {
-                const m = cal.id.match(/actor-calendar-(-?\d+)/);
-                if(m) { try { UI.renderAvailabilityCalendar(cal.id, 'actor', parseInt(m[1], 10)); } catch(e) {} }
+            card.querySelectorAll('[id^="actor-calendar-"],[id^="crew-calendar-"]').forEach(cal => {
+                const m = cal.id.match(/(actor|crew)-calendar-(-?\d+)/);
+                if(m) { try { UI.renderAvailabilityCalendar(cal.id, m[1], parseInt(m[2], 10)); } catch(e) {} }
             });
         }, 60);
     },
@@ -40582,7 +40610,8 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     },
     // Galerie en mode profil : envoi vers le bucket gallery (max 3), stockee sur la copie.
     _engineAddGalleryPhoto: async (idx) => {
-        const input = document.getElementById('actor-gallery-input-' + idx);
+        const prefix = (PublicProfile._engineKind === 'crew') ? 'crew-gallery-input-' : 'actor-gallery-input-';
+        const input = document.getElementById(prefix + idx);
         if(!input || !input.files || !input.files[0]) { Utils.toast('Veuillez sélectionner une photo.', 'warning'); return; }
         const file = input.files[0]; input.value = '';
         if(!file.type.startsWith('image/')) { Utils.toast('Fichier image invalide.', 'warning'); return; }
