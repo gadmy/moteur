@@ -2948,6 +2948,7 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
 .compact-card-name { font-weight: 600; font-size: 0.95rem; margin-bottom: 4px; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .compact-card-role { font-size: 0.8rem; color: var(--text-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .compact-card-badge { position: absolute; top: 8px; right: 8px; font-size: 0.7rem; padding: 2px 6px; border-radius: 10px; background: var(--primary); color: white; }
+.compact-card-badge.card-offline { background: #e67e22; }
 .compact-card-actions { position: absolute; top: 8px; left: 8px; display: flex; flex-wrap: wrap; gap: 5px; max-width: calc(100% - 16px); opacity: 0; pointer-events: none; transition: opacity 0.15s; z-index: 4; }
 /* --- MENU EN ETOILE : clic droit sur une carte de fiche (v590) --- */
 .compact-card.ctx-open { overflow: visible; z-index: 30; }
@@ -21640,7 +21641,7 @@ initCategoriesDragDrop: () => {
                     name: item.name, id: item.id, kindLabel: 'Comédien·ne',
                     placeholder: 'Nom du comédien', photo: item.photo || '',
                     onchangeAttr: isReadOnly ? '' : `onchange="app.Actions.updateActorMeta(${idx}, 'name', this.value)"`,
-                    badgesHtml: lockedBadge + starBtn, delBtnHtml: delBtn
+                    badgesHtml: (item._offline ? FicheUI.badge('🚧 Hors ligne') : '') + lockedBadge + starBtn, delBtnHtml: delBtn
                 });
                 const blocks = [];
 
@@ -22009,7 +22010,7 @@ initCategoriesDragDrop: () => {
             name: member.name, id: member.id, kindLabel: 'Technicien·ne',
             placeholder: 'Nom du technicien', photo: member.photo || '',
             onchangeAttr: isReadOnly ? '' : `onchange="app.Crew.updateMember(${idx}, 'name', this.value)"`,
-            badgesHtml: lockedC + starC, delBtnHtml: delBtnC
+            badgesHtml: (member._offline ? FicheUI.badge('🚧 Hors ligne') : '') + lockedC + starC, delBtnHtml: delBtnC
         });
         const blocks = [];
 
@@ -25229,6 +25230,11 @@ initCategoriesDragDrop: () => {
                           const extraData = publicData.data || {};
                           // CASQUETTE comédien : source par-casquette (repli sur l'ancien emplacement à plat).
                           const facet = (extraData.facets && extraData.facets.actor) || {};
+                          // CASQUETTE masquee/desactivee dans l'Univers : on GARDE le dernier instantane
+                          // (pas d'ecrasement) et on marque la fiche hors ligne.
+                          const offline = facet.visible === false || facet.enabled === false;
+                          actor._offline = offline;
+                          if(!offline) {
                           // --- Champs PAR CASQUETTE (facets.actor d'abord) ---
                           actor.name = facet.name || publicData.name || actor.name;
                           actor.photo = facet.photo || publicData.photo || actor.photo;
@@ -25269,6 +25275,7 @@ initCategoriesDragDrop: () => {
                           actor.website = facet.website || extraData.website || actor.website;
                           // Préférences de visibilité
                           actor.hiddenProject = extraData.hiddenProject || [];
+                          }
                           // Marquer comme synchronisé
                           actor.lastSyncedAt = Date.now();
                       }
@@ -25322,6 +25329,10 @@ initCategoriesDragDrop: () => {
                           const extraData = publicData.data || {};
                           // CASQUETTE technicien : source par-casquette (repli sur l'ancien emplacement).
                           const facet = (extraData.facets && extraData.facets.crew) || {};
+                          // CASQUETTE masquee/desactivee dans l'Univers : on GARDE le dernier instantane et on marque hors ligne.
+                          const offline = facet.visible === false || facet.enabled === false;
+                          member._offline = offline;
+                          if(!offline) {
                           member.name = facet.name || publicData.name || member.name;
                           member.photo = facet.photo || publicData.photo || member.photo;
                           member.phone = facet.phone || publicData.phone || member.phone;
@@ -25352,6 +25363,7 @@ initCategoriesDragDrop: () => {
                           member.collabType = extraData.collabType || member.collabType;
                           // Préférences de visibilité
                           member.hiddenProject = extraData.hiddenProject || [];
+                          }
                           // Marquer comme synchronisé
                           member.lastSyncedAt = Date.now();
                       }
@@ -54366,7 +54378,11 @@ const Orgs = {
                 const p = byId[o.profileId];
                 if(!p) return; // fiche introuvable (supprimee/privee) : on garde l'instantane existant
                 const kind = (o.type === 'asso') ? 'asso' : 'ent';
-                o.fiche = Orgs._ficheFrom(Object.assign({}, p, p.data || {}), (p.data || {}).facets, kind);
+                const fct = ((p.data || {}).facets || {})[kind] || {};
+                // Casquette masquee/desactivee : on GARDE le dernier instantane et on marque hors ligne.
+                const offline = fct.visible === false || fct.enabled === false;
+                o._offline = offline;
+                if(!offline) o.fiche = Orgs._ficheFrom(Object.assign({}, p, p.data || {}), (p.data || {}).facets, kind);
                 changed = true;
             });
             if(changed) Store.save();
@@ -54650,7 +54666,7 @@ const orgGroups = (state.data.groups || []).filter(g => g.type === 'org');
                     <button class="web-btn" onclick="event.stopPropagation(); app.Web.open('org', '${o.id}')" title="Voir dans la toile">🕸️</button>
                 </div>`;
             const dnd = isView ? '' : ` draggable="true" data-dnd-coll="orgs" data-dnd-idx="${i}"`;
-            return `<div class="compact-card"${dnd} onclick="app.Orgs.edit(${i})">${actions}<div class="compact-card-photo">${logo}</div><div class="compact-card-name">${esc(fc.name || o.name || 'Sans nom')}</div><div class="compact-card-role">${typeLabel}</div></div>`;
+            return `<div class="compact-card"${dnd} onclick="app.Orgs.edit(${i})">${actions}${o._offline ? '<div class="compact-card-badge card-offline" title="Hors ligne — masqué de l’Univers">🚧</div>' : ''}<div class="compact-card-photo">${logo}</div><div class="compact-card-name">${esc(fc.name || o.name || 'Sans nom')}</div><div class="compact-card-role">${typeLabel}</div></div>`;
         };
         const idxPairs = list.map((o, i) => [o, i]);
         let sections = '';
@@ -54741,7 +54757,7 @@ const orgGroups = (state.data.groups || []).filter(g => g.type === 'org');
             const head = `<div class="fid-head">
                 ${avatarHtml}
                 <div class="fid-head-main">${nameHtml}<div class="fid-sub">${typeLabel} · fiche n° ${esc(String(o.id || ''))}</div></div>
-                <div class="fid-head-side">${roBadge}<button onclick="app.Orgs.remove(${i})" title="${delTitle}" style="background:none; border:none; cursor:pointer; font-size:1.1rem; color:var(--text-sec);">🗑</button></div>
+                <div class="fid-head-side">${o._offline ? FicheUI.badge('🚧 Hors ligne') : ''}${roBadge}<button onclick="app.Orgs.remove(${i})" title="${delTitle}" style="background:none; border:none; cursor:pointer; font-size:1.1rem; color:var(--text-sec);">🗑</button></div>
             </div>`;
 
             // Colonne gauche : IDENTITE (type + fiche structure).
@@ -74326,7 +74342,7 @@ const CardModal = {
             
             const photoContent = member.photo ? `<img src="${member.photo}" alt="Photo du membre de l'équipe">` : '👤';
             const roleInfo = member.role || '<em style="opacity:0.6">Fonction non définie</em>';
-            const badge = member.publicProfileId ? '🔒' : '';
+            const badge = member.publicProfileId ? (member._offline ? '🚧' : '🔒') : '';
             
             card.innerHTML = `
                 ${!isView ? `
@@ -74337,7 +74353,7 @@ const CardModal = {
                     <button class="web-btn" onclick="event.stopPropagation(); app.Web.open('crew', '${member.id}')" title="Voir dans la toile">🕸️</button>
                 </div>
                 ` : ''}
-                ${badge ? `<div class="compact-card-badge">${badge}</div>` : ''}
+                ${badge ? `<div class="compact-card-badge${member._offline ? ' card-offline' : ''}"${member._offline ? ' title="Hors ligne — masqué de l’Univers"' : ''}>${badge}</div>` : ''}
                 <div class="compact-card-photo">${photoContent}</div>
                 <div class="compact-card-name">${Utils.escape(member.name || 'Sans nom')}</div>
                 <div class="compact-card-role">${roleInfo}</div>
@@ -74420,7 +74436,7 @@ const CardModal = {
                 photoContent = item.photo ? `<img src="${item.photo}" alt="Photo">` : '🎬';
                 const linkedChar = state.data.characters.find(c => c.actor_id === item.id);
                 roleInfo = linkedChar ? '🎭 ' + Utils.escape(linkedChar.name) : '<em style="opacity:0.5">Pas de rôle</em>';
-                if(item.publicProfileId) badge = '🔒';
+                if(item.publicProfileId) badge = item._offline ? '🚧' : '🔒';
             } else if(type === 'locations') {
                 photoContent = item.photo ? `<img src="${item.photo}" alt="Photo du décor">` : '🏠';
                 roleInfo = item.realLocationName ? Utils.escape(item.realLocationName) : '<em style="opacity:0.5">Lieu non défini</em>';
@@ -74437,7 +74453,7 @@ const CardModal = {
                     <button class="web-btn" onclick="event.stopPropagation(); app.Web.open('${({characters:'character',actors:'actor',locations:'location'})[type]}', '${item.id}')" title="Voir dans la toile">🕸️</button>
                 </div>
                 ` : ''}
-                ${badge ? `<div class="compact-card-badge">${badge}</div>` : ''}
+                ${badge ? `<div class="compact-card-badge${item._offline ? ' card-offline' : ''}"${item._offline ? ' title="Hors ligne — masqué de l’Univers"' : ''}>${badge}</div>` : ''}
                 <div class="compact-card-photo">${photoContent}</div>
                 <div class="compact-card-name">${Utils.escape(item.name || 'Sans nom')}</div>
                 <div class="compact-card-role">${roleInfo}</div>
