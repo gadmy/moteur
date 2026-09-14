@@ -25,7 +25,7 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 
 ================================================================================
-                 RESTE À FAIRE — ÉTAT AU 10 SEPTEMBRE 2026 (v586)
+                 RESTE À FAIRE — ÉTAT AU 14 SEPTEMBRE 2026 (v590)
 ================================================================================
 En-tete PURGE le 4 septembre (v582), a la demande de Guillaume : les recaps de
 sessions, le detail des MIGRATIONS SQL et le JOURNAL DU CHANTIER FEUILLE DE
@@ -36,18 +36,24 @@ chacune, detail au journal) : une regle effacee est une regle qu'on recasse.
 --------------------------------------------------------------------------------
 OUVERT
 --------------------------------------------------------------------------------
-Rien d'ouvert cote code au 10 septembre en dehors des chantiers ci-dessous.
+Rien d'ouvert cote code au 14 septembre en dehors des chantiers ci-dessous.
 
-[ ] PARTAGE ETENDU A PLUSIEURS ONGLETS (generalisation du systeme v585) —
-    Synopsis et Sequencier FAITS (v586, lots 1-4 ; SQL + Edge Function cote
-    Supabase, boutons Partager/Commentaires + vue lecteur + reception cote
-    fichier). RESTENT Storyboard et Moodboard : ils demandent que l'Edge
-    Function SIGNE / INCORPORE elle-meme les images cote serveur (le relecteur
-    n'a pas de compte, il ne peut pas lire le bucket prive) — travail serveur
-    non commence. A rouvrir sur demande. Deux dettes volontaires heritees de
-    v585 restent : pas de saisie interne de commentaires (reception invites
-    seule), bulle des onglets sans temps reel (reevaluee au changement
-    d'onglet / chargement).
+[ ] FUSION DES FICHES DE PROFIL (« une seule fiche par type, partout ») —
+    COMEDIEN et TECHNICIEN FAITS (v590) : dans « Mon Profil », la carte de la
+    casquette ouvre la fiche du MOTEUR DU PROJET (renderDataCards pour le
+    comedien, createCrewCard pour le technicien), en edition, au lieu de
+    l'ancien formulaire. La sauvegarde n'ecrit QUE la casquette concernee
+    (facets.actor / facets.crew) ; les champs communs (physique, site web)
+    restent partages ; propagation vers les projets a l'ouverture d'onglet
+    (syncActors/syncCrew casquette-aware, email de CONTACT compris).
+    RESTENT ASSO et ENTREPRISE : elles n'utilisent PAS ce moteur mais Orgs.edit
+    (#card-edit-modal) et une structure differente (o.fiche + champs a plat
+    assoName / entName / assoMission / entDescription / SIRET / siege...,
+    normalisee par Orgs._ficheFrom) ; a fusionner sur le meme principe (copie
+    jetable, stub state.data.orgs[0], gardes _engineMode sur
+    Orgs.updateFiche/update/delete, mapping facet<->fiche). Leur propagation
+    passe par Orgs.syncFromUniverse, PAS encore rendue casquette-aware.
+    Detail complet au journal v590. Voir REGLES VIVANTES / FUSION.
 
 [ ] STRIPE / FEATURE GATING — EN PAUSE, ne pas ouvrir sans demande explicite.
     Prerequis juridique : domicile de l'editeur dans les mentions legales
@@ -98,6 +104,16 @@ ARCHITECTURE
   montant. (v572/v573/v575)
 - Ouverture de fiche : porte unique UI.openFiche / canOpenFiche /
   canEditFiche pour les onze familles. (v575/v577)
+- FUSION PROFIL (v590) : la casquette comedien / technicien de « Mon Profil »
+  ouvre la fiche du MOTEUR DU PROJET (PublicProfile._openProfileEngine), sur une
+  COPIE de facets.<kind>. On prete un state.data VIDE (la copie a l'index 0 du
+  tableau actors/crew) + role 'owner', restaures a la fermeture. GARDE : les
+  ecritures (StoreSave.save/saveDebounced, updateActorMeta, Crew.updateMember,
+  deleteDataItem, Crew.deleteMember) sortent tant que _engineMode est vrai —
+  AUCUNE sauvegarde projet ne part de la fiche profil ; ne pas retirer.
+  Enregistrer n'ecrit QUE la casquette ; physique + site web sont COMMUNS
+  (portes par le profil). Asso / entreprise PAS encore fusionnees (Orgs.edit,
+  structure a part). Detail au journal v590.
 - Cles de depouillement (DECORS-LIEUX...) = identifiants stockes : ne bougent
   pas, affichage via Utils.catLabel. (v566)
 DECISIONS CLOSES (ne pas rouvrir)
@@ -201,6 +217,16 @@ est raconte aux entrees v562 a v567 de l'historique ci-dessous.)
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v590 (14 Septembre 2026) — FUSION DES FICHES DE PROFIL, VOLET 1 : COMEDIEN ET TECHNICIEN. Dans « Mon Profil », cliquer la casquette comedien (ou technicien) n'ouvre plus l'ancien formulaire mais LA FICHE DU MOTEUR DU PROJET, en edition — une seule fiche par type, partout (projet, Univers, creation de profil) — plus la propagation automatique vers les projets qui ont pris la personne, a l'ouverture d'onglet. Asso et entreprise restent a faire (volet 2, structure differente).
+  - MOTEUR COMMUN. PublicProfile._openProfileEngine(kind), kind = 'actor' | 'crew' ; wrappers openComedienEngine / openTechnicienEngine ; routage dans PublicProfile.openFicheCard (actor -> comedien, crew -> technicien ; asso/ent tombent sur l'ancien formulaire). Rendu : comedien -> UI.renderDataCards([draft],'actors',...) ; technicien -> UI.createCrewCard(draft,0,groups,false). On edite une COPIE de facets.<kind> (jamais l'objet reel avant Enregistrer). Enregistrer recopie la copie dans facets.<kind> puis saveCurrentProfile : SEULE la casquette change, JAMAIS les champs communs ni les autres casquettes. Fermer sans enregistrer = aucun effet. (Un bug de session anterieur ecrivait dans les champs communs et polluait les autres casquettes ; corrige par ce modele « copie + casquette seule ».)
+  - LE MOTEUR SUPPOSE UN PROJET OUVERT (il lit state.data + le role courant). Sur la page profil il n'y en a pas : on prete un state.data VIDE avec la copie placee a l'INDEX 0 du bon tableau (actors ou crew), et le role force a 'owner' ; le tout est garde par reference et restaure a la fermeture (_engineSavedData / _engineSavedRole). Grace a l'index 0, TOUT le moteur marche par index : calendrier de dispo, vehicule, galerie. GARDE CRITIQUE, ne pas retirer : StoreSave.save ET StoreSave.saveDebounced sortent sans rien ecrire tant que PublicProfile._engineMode est vrai — aucune sauvegarde projet ne peut partir de la fiche profil. Memes gardes _engineMode sur updateActorMeta, Crew.updateMember, deleteDataItem, Crew.deleteMember (elles ecrivent sur la copie _engineProfile, pas sur un projet).
+  - ADAPTATIONS PROFIL (chirurgie DOM sur la carte, PublicProfile._engineBuildCard). Onglet « Dans le projet » retire (meme technique que la fiche Univers). Bloc « Cachet & statut » (salaire, SIRET, n° securite sociale) MASQUE : sans objet dans une casquette publique. « Notes generales » (technicien) masquee. Etoile de mise en contact + menu de groupe retires. Injecte dans la brique Contact : « Telephone de l'agent » + case « ne pas afficher mon telephone perso » (concepts propres au profil, absents du moteur projet).
+  - CORRESPONDANCE DE VOCABULAIRE. La fiche projet dit 'email', le profil dit 'contactEmail' : mapping dans les deux sens (affichage <- contactEmail ; enregistrement -> contactEmail ; pas de cle 'email' parasite laissee sur la casquette). Champs COMMUNS, partages entre casquettes et portes par le profil (PAS par la casquette) : physique (comedien) + site web — lus depuis le profil a l'ouverture, reecrits sur le profil a l'enregistrement (PublicProfile._engineCommonKeys). Technicien : le profil range le departement dans 'department' (gcX), la fiche projet dans 'group_id' -> pont dans les deux sens ; departements/postes = liste PREDEFINIE (departements lus depuis le selecteur #profile-department de la page ; postes via CONFIG.crewRoles[departement]) ; changer le departement rafraichit les postes (re-rendu de la carte qui CONSERVE l'onglet actif).
+  - MEDIA cable sur le stockage du PROFIL (pas du projet). Photo -> bucket avatars (avatar commun : ecrit sur profile.photo ET sur la copie), via PublicProfile._engineUploadPhoto. Galerie -> bucket gallery (max 3, sur la copie), via PublicProfile._engineAddGalleryPhoto ; suppression symetrique. Re-rendu de la carte apres upload (PublicProfile._engineRerenderCard, conserve l'onglet actif). Les fonctions Crew.uploadPhoto / addGalleryPhoto / removeGalleryPhoto sont gardees vers ces chemins en mode moteur.
+  - LISTES DE DISPO REDONDANTES RETIREES sous le calendrier (comedien ET technicien, dans renderDataCards ET createCrewCard) : le calendrier affiche deja les periodes en vert/rouge et permet d'ajouter/retirer une date au clic (un clic sur une date marquee la desactive).
+  - PROPAGATION CASQUETTE-AWARE, a l'ouverture de l'onglet Comediens / Equipe d'un projet. syncActorsFromPublicProfiles et syncCrewFromPublicProfiles lisent desormais la BONNE casquette du profil public (facets.actor / facets.crew), avec repli sur l'ancien emplacement a plat pour les profils anciens ; les champs communs (physique, site web) restent lus au niveau profil. L'EMAIL DE CONTACT (contactEmail) est desormais propage (il ne l'etait pas). Le technicien propage aussi departement (group_id) + poste. Consequence voulue par Guillaume : changer son profil -> les projets qui l'ont pris, et leurs feuilles de service, se mettent a jour a la prochaine ouverture d'onglet (pas de temps reel : choix assume).
+  - RESTE OUVERT (volet 2). ASSO / ENTREPRISE non fusionnees : elles passent par Orgs.edit (#card-edit-modal) et une structure differente d'actor/crew — un objet org avec o.fiche imbriquee + champs a plat cote profil aux noms propres (assoName, assoType, assoMission, assoSiret, assoYear ; entName, entType, entDescription, entSiret, entLegal, entServices ; siege dans facets.<kind>.hqAddress), normalisee par Orgs._ficheFrom(b, facets, kind). A fusionner sur le meme principe (copie jetable, stub state.data.orgs[0], gardes _engineMode sur Orgs.updateFiche / Orgs.update / suppression, mapping facet <-> o.fiche). Leur propagation passe par Orgs.syncFromUniverse, PAS encore rendue casquette-aware. L'ancien formulaire de profil reste en FILET pour les 4 types (et les sections comedien/technicien restent dans le DOM, seulement court-circuitees par openFicheCard) : a retirer une fois les 4 types fusionnes et valides en usage reel.
+  - CONTROLES DE FIN DE SESSION passes apres chaque lot : node --check OK, equilibre des balises div strictement inchange, zero U+2550, zero U+202F. RIEN cote serveur (aucun SQL, aucune Edge Function). Reste a la charge de Guillaume : mettre en ligne l'index.html et recharger cache vide (Ctrl+Shift+R) avant de tester.
 v589 (14 Septembre 2026) — LE PROFIL PUBLIC DEVIENT UN HUB DE FICHES : « Mes casquettes » laisse place à un en-tête (photo + nom + projets) au-dessus de QUATRE CARTES (comédien, technicien, association, entreprise), grisées tant qu'inactives. Un clic active la casquette et OUVRE SA FICHE DANS UNE FENÊTRE, présentée comme une fiche de projet (barre d'ONGLETS + briques grises repliables). Chaque carte active porte une croix (regriser, données gardées), une bascule « 👁 Univers » et un bouton « Effacer » — l'ancien « Remettre à zéro cette carte » de la Zone Danger, désormais retiré. Onglet « Photos & démo » remonté en 2e position et bio isolée dans un onglet « Parcours » (fiches comédien / technicien, ici comme dans les projets). En amont de session : les icônes d'action des cartes de fiche passent du SURVOL au CLIC DROIT + nouveau bouton « Voir dans la toile » (🕸️) ouvrant la Toile centrée sur la fiche + correctif du plantage roRes à l'ouverture d'une fiche ressource.
   - HORS FICHIER (base Supabase). Visibilité des profils démo corrigée : la fonction public_profiles_for_me (SECURITY DEFINER) contournait la policy RLS de la table et exposait les profils is_demo à tout le monde — désormais ils ne sortent que pour ga.dmy@ikmail.com. Et 280 PROFILS DE DÉMONSTRATION livrés en SQL ré-exécutable (France + monde : 50 comédiens, 50 techniciens, 20 assos, 20 entreprises de chaque côté), visibles de toi seul, pour les présentations. Photos et « bande démo » via URLs de portraits (service gratuit, visages répétés) ; la bande démo est une image fixe, pas une vidéo.
 
@@ -6831,7 +6857,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv589</p>
+      <p>vv590</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -40437,6 +40463,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         // Les autres casquettes gardent l'ancien formulaire tant qu'elles ne sont pas fusionnees.
         if(facet === 'actor') { PublicProfile.openComedienEngine(); return; }
         if(facet === 'crew') { PublicProfile.openTechnicienEngine(); return; }
+        if(facet === 'asso') { PublicProfile.openAssoEngine(); return; }
         PublicProfile._bindFicheFold();
         PublicProfile.selectFacetTab(facet);
         const title = document.getElementById('profile-fiche-modal-title');
@@ -40660,6 +40687,141 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             PublicProfile._engineRerenderCard();
             Utils.toast('Photo ajoutée.', 'success');
         } catch(e) { console.warn('Galerie profil (moteur):', e); Utils.toast('Erreur envoi : ' + ((e && e.message) || 'inconnue'), 'error'); }
+    },
+
+    // ===== FUSION VOLET 2 : fiche asso / entreprise via le MOTEUR DU PROJET =====
+    // Ouvre la casquette structure dans le meme moteur que la fiche Orgs d'un projet,
+    // EN EDITION, sur une COPIE (stub jetable) construite depuis les champs a plat du
+    // profil (Orgs._ficheFrom). Enregistrer remappe la copie vers les champs a plat +
+    // facets.<kind>.hqAddress : SEULE la casquette concernee change, jamais les autres
+    // (les champs non exposes par la fiche sont preserves). Fermer sans enregistrer = rien.
+    openAssoEngine: () => PublicProfile._openOrgEngine('asso'),
+    openEntrepriseEngine: () => PublicProfile._openOrgEngine('ent'),
+    _openOrgEngine: (kind) => {
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile) { Utils.toast('Aucun profil chargé.', 'warning'); return; }
+        if(!profile.facets) profile.facets = {};
+        if(!profile.facets[kind]) profile.facets[kind] = { enabled: true, visible: true, hqAddress: '', hqLatitude: null, hqLongitude: null };
+        PublicProfile._engineKind = kind;
+        // Stub d'org EDITABLE (pas de profileId -> branche editable de _detailHtml),
+        // construit depuis les champs a plat du profil et le siege (facets.<kind>.hqAddress).
+        const fiche = Orgs._ficheFrom(profile, profile.facets, kind);
+        const stub = { id: profile.id || Utils.generateUniqueId(), type: kind, name: fiche.name || '', fiche: fiche, department: '', role: '', notes: '', profileId: null, srcId: null };
+        PublicProfile._engineMode = true;
+        PublicProfile._engineProfile = stub;
+        // Le moteur suppose un projet ouvert (state.data + role). On prete un decor vide,
+        // le stub place a l'index 0 de orgs, role 'owner' ; restaure a la fermeture.
+        // Aucune sauvegarde projet ne part (garde _engineMode sur StoreSave).
+        PublicProfile._engineSavedData = state.data;
+        PublicProfile._engineSavedRole = state.currentRole;
+        const blank = { actors:[], characters:[], locations:[], scenes:[], shootingDays:[], episodes:[], expenses:[], resources:[], crew:[], orgs:[], groups:[], vehicles:[], plans:[], contracts:[], seasons:[], budget:{}, history:[] };
+        blank.orgs = [stub];
+        state.data = blank;
+        state.currentRole = 'owner';
+        const card = PublicProfile._orgEngineBuildCard();
+        if(!card) { PublicProfile._closeOrgEngine(); Utils.toast('Impossible d\'afficher la fiche structure.', 'error'); return; }
+        const overlay = document.createElement('div');
+        overlay.id = 'org-engine-overlay';
+        overlay.style.cssText = 'position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,.55); overflow:auto; display:block;';
+        const box = document.createElement('div');
+        box.style.cssText = 'background:var(--panel, var(--surface, var(--bg, #ffffff))); color:inherit; max-width:660px; width:92%; margin:5vh auto; max-height:88vh; overflow:auto; border-radius:12px; padding:16px; box-shadow:0 10px 40px rgba(0,0,0,.4);';
+        const bar = document.createElement('div');
+        bar.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:8px; padding:0 0 10px;';
+        bar.innerHTML = '<span style="font-weight:600;">' + (kind === 'ent' ? '🏢 Entreprise' : '🏛️ Association') + '</span>'
+            + '<span style="display:flex; gap:8px;">'
+            + '<button class="btn btn--primary btn--sm" id="org-engine-save">💾 Enregistrer</button>'
+            + '<button class="btn btn--sm" id="org-engine-close">Fermer</button>'
+            + '</span>';
+        box.appendChild(bar);
+        box.appendChild(card);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        document.getElementById('org-engine-save').onclick = async () => {
+            const d = PublicProfile._engineProfile;
+            const k = PublicProfile._engineKind || 'asso';
+            const fc = (d && d.fiche) || {};
+            const pre = (k === 'asso') ? 'asso' : 'ent';
+            // Champs communs a la structure, exposes par la fiche projet -> champs a plat du profil.
+            profile[pre + 'Name'] = fc.name || '';
+            profile[pre + 'Type'] = fc.type || '';
+            profile[pre + 'Siret'] = fc.siret || '';
+            profile[pre + 'Year'] = fc.year || '';
+            profile[pre + 'Phone'] = fc.phone || '';
+            profile[pre + 'Website'] = fc.website || '';
+            profile[pre + 'Email'] = fc.email || '';
+            // Siege -> facets.<kind>.hqAddress (reinit des coordonnees si l'adresse change).
+            if(!profile.facets[k]) profile.facets[k] = { enabled: true, visible: true };
+            const prevHq = profile.facets[k].hqAddress || '';
+            if((fc.hq || '') !== prevHq) { profile.facets[k].hqLatitude = null; profile.facets[k].hqLongitude = null; }
+            profile.facets[k].hqAddress = fc.hq || '';
+            if(k === 'asso') {
+                profile.assoMembers = fc.size || '';
+                profile.assoPresident = fc.leader || '';
+                profile.assoMission = fc.mission || '';
+            } else {
+                profile.entEmployees = fc.size || '';
+                profile.entDirector = fc.leader || '';
+                profile.entLegal = fc.legalForm || '';
+                profile.entDescription = fc.mission || '';
+            }
+            profile.name = profile[pre + 'Name'] || profile.name;
+            if(!profile.type) profile.type = (k === 'asso') ? 'association' : 'enterprise';
+            await PublicProfile.saveCurrentProfile();
+            Utils.toast((k === 'asso' ? 'Casquette association' : 'Casquette entreprise') + ' enregistrée.', 'success');
+        };
+        document.getElementById('org-engine-close').onclick = () => PublicProfile._closeOrgEngine();
+    },
+    _closeOrgEngine: () => {
+        PublicProfile._engineMode = false;
+        PublicProfile._engineProfile = null;
+        if('_engineSavedData' in PublicProfile) { state.data = PublicProfile._engineSavedData; delete PublicProfile._engineSavedData; }
+        if('_engineSavedRole' in PublicProfile) { state.currentRole = PublicProfile._engineSavedRole; delete PublicProfile._engineSavedRole; }
+        const ov = document.getElementById('org-engine-overlay');
+        if(ov) ov.remove();
+    },
+    // Construit la carte fiche structure (moteur Orgs) depuis le stub, avec les retraits
+    // propres au profil : onglets « Sur ce projet » + « Origine » otes, bouton supprimer ote,
+    // selecteur asso/entreprise remplace par le selecteur de TYPE (categorie, champ requis).
+    _orgEngineBuildCard: () => {
+        const stub = PublicProfile._engineProfile;
+        const kind = PublicProfile._engineKind || 'asso';
+        let card = null;
+        try {
+            const temp = document.createElement('div');
+            temp.innerHTML = Orgs._detailHtml(stub, 0);
+            card = temp.firstElementChild;
+        } catch(e) { console.warn('Fiche structure (moteur):', e); }
+        if(!card) return null;
+        const tabs = card.querySelector('.fid-tabs');
+        if(tabs) {
+            ['projet', 'origine'].forEach(t => {
+                const b = tabs.querySelector(':scope > .fid-tabbar > .fid-tab[data-tab="' + t + '"]');
+                const p = tabs.querySelector(':scope > .fid-tabpanel[data-tab="' + t + '"]');
+                if(b) b.remove();
+                if(p) p.remove();
+            });
+            tabs.querySelectorAll(':scope > .fid-tabbar > .fid-tab.is-active, :scope > .fid-tabpanel.is-active').forEach(el => el.classList.remove('is-active'));
+            const fB = tabs.querySelector(':scope > .fid-tabbar > .fid-tab');
+            const fP = tabs.querySelector(':scope > .fid-tabpanel');
+            if(fB) fB.classList.add('is-active');
+            if(fP) fP.classList.add('is-active');
+        }
+        // Pas de suppression depuis le profil.
+        card.querySelectorAll('.fid-head-side button').forEach(el => el.remove());
+        const ficheBody = card.querySelector('.fid-block[data-block-id="fiche"] .fid-block-body');
+        if(ficheBody) {
+            // Le selecteur asso/entreprise (Orgs.update 'type') n'a pas lieu d'etre : la carte est dediee.
+            const kindField = ficheBody.querySelector('.fid-field');
+            if(kindField) kindField.remove();
+            // Selecteur de TYPE (categorie) = champ requis a la sauvegarde ; ecrit sur fiche.type.
+            const cats = (kind === 'ent') ? (CONFIG.enterpriseTypes || []) : (CONFIG.associationTypes || []);
+            const cur = (stub.fiche && stub.fiche.type) || '';
+            const opts = '<option value="">— Type —</option>' + cats.map(t => '<option value="' + Utils.escape(t.id) + '"' + (t.id === cur ? ' selected' : '') + '>' + Utils.escape(t.name) + '</option>').join('');
+            const wrap = document.createElement('div');
+            wrap.innerHTML = FicheUI.field((kind === 'ent' ? 'Type d\'entreprise' : 'Type d\'association'), '<select class="actor-input" onchange="app.Orgs.updateFiche(0, \'type\', this.value)">' + opts + '</select>');
+            if(wrap.firstElementChild) ficheBody.insertBefore(wrap.firstElementChild, ficheBody.firstChild);
+        }
+        return card;
     },
 
     // Activer une casquette depuis sa carte grisee : coche l'etat cache, met a
@@ -54088,6 +54250,15 @@ const Orgs = {
 
     // Edition d'un champ de la fiche (structures NON liees a l'Univers uniquement).
     updateFiche: (idx, key, value) => {
+        // FUSION profil (volet 2) : en mode moteur, on ecrit sur la copie jetable, sans notifier ni sauvegarder le projet.
+        if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) {
+            const l = Orgs._list();
+            if(!l[idx]) return;
+            if(!l[idx].fiche) l[idx].fiche = Orgs._fiche(l[idx]);
+            l[idx].fiche[key] = value;
+            if(key === 'name') l[idx].name = value;
+            return;
+        }
         if(!Permissions.canEditFiche('org')) return;
         const list = Orgs._list();
         if(!list[idx]) return;
@@ -54323,6 +54494,12 @@ const Orgs = {
     },
 
     update: (idx, field, value) => {
+        // FUSION profil (volet 2) : en mode moteur, ecriture sur la copie jetable, aucun effet projet.
+        if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) {
+            const l = Orgs._list();
+            if(l[idx]) l[idx][field] = value;
+            return;
+        }
         if(!Permissions.canEditFiche('org')) return;
         const list = Orgs._list();
         if(!list[idx]) return;
@@ -54353,6 +54530,8 @@ const Orgs = {
     // Suppression DEFINITIVE : cet onglet est le pole des structures. Supprimer ici retire
     // aussi la structure des Partenaires de la Presentation (la Presentation n'est qu'une vitrine).
     remove: async (idx) => {
+        // FUSION profil (volet 2) : pas de suppression depuis la fiche profil.
+        if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) return;
         const list = Orgs._list();
         if(!list[idx]) return;
         const o = list[idx];
