@@ -24844,6 +24844,7 @@ initCategoriesDragDrop: () => {
       // Garde d'ecriture : voir updateActorMeta.
       updateDataItem: (type, idx, val) => { const k = { characters:'character', actors:'actor', locations:'location', crew:'crew' }[type]; if(k && !Permissions.canEditFiche(k)) return; if(state.data[type][idx]) { const key = (type === 'characters' || type === 'actors') ? 'bio' : 'desc'; state.data[type][idx][key] = val; Store.saveDebounced(); } },
       deleteDataItem: async (type, idx) => { 
+          if(PublicProfile._engineMode) return; // fiche moteur : pas de suppression ici
           if(await ConfirmModal.confirmDelete("Cet élément sera supprimé.")) { 
               if(typeof CardModal !== 'undefined' && CardModal.closeIfShowing) CardModal.closeIfShowing(type, state.data[type][idx]?.id);
               // Si on supprime un acteur, délier les personnages associés
@@ -25421,6 +25422,14 @@ initCategoriesDragDrop: () => {
           Actions.updateActorMeta(idx, 'licenses', lic);
       },
       updateActorMeta: (idx, field, val) => { 
+          // FUSION : en mode « fiche moteur », on ecrit DIRECTEMENT dans l'objet
+          // casquette comedien (une copie), jamais sur un comedien de projet ni sur
+          // les champs communs. idx (=-1) est ignore.
+          if(PublicProfile._engineMode) {
+              const p = PublicProfile._engineProfile;
+              if(p) p[field] = val;
+              return;
+          }
           // GARDE D'ECRITURE (26 aout) : le droit se verifie AUSSI ici. Griser
           // un champ n'est qu'un affichage — tant que la fonction qui enregistre
           // ne verifie rien, le droit n'existe pas vraiment.
@@ -25450,6 +25459,7 @@ initCategoriesDragDrop: () => {
       updateCharacterMeta: (idx, field, val) => { if(state.data.characters[idx]) { state.data.characters[idx][field] = val; Store.saveDebounced(); } },
       toggleActorVehicle: (idx, hasVehicle) => { if(state.data.actors[idx]) { state.data.actors[idx].hasVehicle = hasVehicle; Store.save(); const vehicleDetails = document.getElementById(`actor-vehicle-${idx}`); if(vehicleDetails) { if(hasVehicle) { vehicleDetails.classList.add('visible'); } else { vehicleDetails.classList.remove('visible'); } } } },
       uploadActorPhoto: async (idx, input) => {
+          if(PublicProfile._engineMode) { Utils.toast('La photo se règle depuis ton formulaire pour l\'instant (branchée au lot suivant).', 'info'); return; }
           if(!state.data.actors[idx]) return;
           if(!input.files || !input.files[0]) return;
           const file = input.files[0];
@@ -40262,6 +40272,13 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     },
     currentFicheTab: null,
 
+    // FUSION : mode « fiche moteur » pour la creation de profil. Actif, la fiche
+    // comedien affichee via le moteur du projet lit/ecrit DIRECTEMENT la casquette
+    // comedien (objet facets.actor), sur une COPIE ; rien n'est ecrit sur les champs
+    // communs ni les autres casquettes. Eteint par defaut.
+    _engineMode: false,
+    _engineProfile: null,
+
     // Champs qui appartiennent à la FICHE (comédien/technicien), plus au profil commun
     FACET_SWAP_KEYS: ['name','photo','gender','phone','hidePhone','agentPhone','bio','address','city','latitude','longitude','hideAddress','hideAddressInProjects','contactEmail','dailyRate','rateCurrency','rateNegotiable','collabTypes','availabilityText','availabilityDates','unavailabilityDates','hasVehicle','vehicleType','vehiclePlate','vehicleSeats','vehicleTrunk','vehicleNotes','licenses','vehicleUsage','role','demoreel','demoreels','experience','languages','languagesWithLevels'],
 
@@ -40358,6 +40375,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                 + '<div class="compact-card-role">' + label + '</div>'
                 + '<label class="facet-card-vis" onclick="event.stopPropagation();"><input type="checkbox" ' + (visOn ? 'checked' : '') + ' onchange="app.PublicProfile.toggleFacetVisible(\'' + k + '\', this.checked)"> 👁 Univers</label>'
                 + '<button type="button" class="facet-card-erase" onclick="event.stopPropagation(); app.PublicProfile.effaceFacetCard(\'' + k + '\')">🧹 Effacer</button>'
+                + (k === 'actor' ? '<button type="button" class="facet-card-erase" style="background:#6c5ce7; color:#fff;" onclick="event.stopPropagation(); app.PublicProfile.openComedienEngine()">🧪 Tester la fiche moteur</button>' : '')
             + '</div>';
         }).join('') + '</div>';
     },
@@ -40399,6 +40417,81 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     closeFicheCard: () => {
         const modal = document.getElementById('profile-fiche-modal');
         if(modal) modal.classList.remove('visible');
+    },
+
+    // ===== FUSION : fiche comedien via le MOTEUR DU PROJET =====
+    // Bouton de test. Ouvre la casquette comedien dans le meme moteur que la fiche de
+    // projet, EN EDITION, sur une COPIE de facets.actor. Enregistrer recopie la copie
+    // dans facets.actor puis persiste : SEULE la casquette comedien change, jamais les
+    // champs communs ni les autres casquettes. Fermer sans enregistrer = aucun effet.
+    // Recette d'affichage reprise de UniverseProfileModal._renderFicheInModal.
+    openComedienEngine: () => {
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile) { Utils.toast('Aucun profil chargé.', 'warning'); return; }
+        if(!(profile.facets && profile.facets.actor)) { Utils.toast('Active d\'abord la casquette comédien.', 'warning'); return; }
+        // On edite une COPIE de la casquette : le profil reel n'est touche qu'au save.
+        const draft = JSON.parse(JSON.stringify(profile.facets.actor || {}));
+        PublicProfile._engineMode = true;
+        PublicProfile._engineProfile = draft;
+        // Le moteur suppose un projet ouvert (state.data, role). Sur la page profil il
+        // n'y en a pas : on prete un decor vide + role editeur, restaures a la fermeture.
+        PublicProfile._engineSavedData = state.data;
+        PublicProfile._engineSavedRole = state.currentRole;
+        if(!state.data) state.data = { actors:[], characters:[], locations:[], scenes:[], shootingDays:[], episodes:[], expenses:[], resources:[], crew:[], orgs:[], groups:[], vehicles:[], plans:[], contracts:[], seasons:[], budget:{}, history:[] };
+        state.currentRole = 'owner';
+        let card = null;
+        try {
+            const temp = document.createElement('div');
+            UI.renderDataCards([draft], 'actors', temp, [], false);
+            card = temp.firstElementChild;
+        } catch(e) { console.warn('Fiche moteur (test):', e); }
+        if(!card) { PublicProfile._closeComedienEngine(); Utils.toast('Impossible d\'afficher la fiche moteur.', 'error'); return; }
+        // Retirer l'onglet « Dans le projet » (sans objet ici) — meme chirurgie que l'Univers.
+        const tabs = card.querySelector('.fid-tabs');
+        if(tabs) {
+            const pB = tabs.querySelector(':scope > .fid-tabbar > .fid-tab[data-tab="projet"]');
+            const pP = tabs.querySelector(':scope > .fid-tabpanel[data-tab="projet"]');
+            if(pB) pB.remove();
+            if(pP) pP.remove();
+            tabs.querySelectorAll(':scope > .fid-tabbar > .fid-tab.is-active, :scope > .fid-tabpanel.is-active').forEach(el => el.classList.remove('is-active'));
+            const fB = tabs.querySelector(':scope > .fid-tabbar > .fid-tab');
+            const fP = tabs.querySelector(':scope > .fid-tabpanel');
+            if(fB) fB.classList.add('is-active');
+            if(fP) fP.classList.add('is-active');
+        }
+        // Boutons « projet » sans objet ici : etoile de contact et menu de groupe.
+        card.querySelectorAll('.save-contact-btn, .group-select').forEach(el => el.remove());
+        const overlay = document.createElement('div');
+        overlay.id = 'comedien-engine-overlay';
+        overlay.style.cssText = 'position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,.55); overflow:auto; display:block;';
+        const box = document.createElement('div');
+        box.style.cssText = 'background:var(--panel, var(--surface, var(--bg, #ffffff))); color:inherit; max-width:660px; width:92%; margin:5vh auto; max-height:88vh; overflow:auto; border-radius:12px; padding:16px; box-shadow:0 10px 40px rgba(0,0,0,.4);';
+        const bar = document.createElement('div');
+        bar.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:8px; padding:0 0 10px;';
+        bar.innerHTML = '<span style="font-weight:600;">🧪 Fiche comédien (moteur) — test</span>'
+            + '<span style="display:flex; gap:8px;">'
+            + '<button class="btn btn--primary btn--sm" id="comedien-engine-save">💾 Enregistrer</button>'
+            + '<button class="btn btn--sm" id="comedien-engine-close">Fermer</button>'
+            + '</span>';
+        box.appendChild(bar);
+        box.appendChild(card);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        document.getElementById('comedien-engine-save').onclick = async () => {
+            // On recopie la COPIE editee dans la vraie casquette, puis on persiste.
+            profile.facets.actor = PublicProfile._engineProfile;
+            await PublicProfile.saveCurrentProfile();
+            Utils.toast('Casquette comédien enregistrée.', 'success');
+        };
+        document.getElementById('comedien-engine-close').onclick = () => PublicProfile._closeComedienEngine();
+    },
+    _closeComedienEngine: () => {
+        PublicProfile._engineMode = false;
+        PublicProfile._engineProfile = null;
+        if('_engineSavedData' in PublicProfile) { state.data = PublicProfile._engineSavedData; delete PublicProfile._engineSavedData; }
+        if('_engineSavedRole' in PublicProfile) { state.currentRole = PublicProfile._engineSavedRole; delete PublicProfile._engineSavedRole; }
+        const ov = document.getElementById('comedien-engine-overlay');
+        if(ov) ov.remove();
     },
 
     // Activer une casquette depuis sa carte grisee : coche l'etat cache, met a
@@ -40817,9 +40910,14 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             return;
         }
         
-        // Sauvegarder le formulaire dans l'objet profil
-        PublicProfile.saveFormToCurrentProfile();
-        PublicProfile._commitFlatToFacet(PublicProfile.profiles[PublicProfile.currentProfileIndex], PublicProfile.currentFacetTab);
+        // Sauvegarder le formulaire dans l'objet profil.
+        // FUSION : en mode « fiche moteur », les modifs sont deja dans facets.actor ;
+        // on NE relit PAS l'ancien formulaire et on NE recommite PAS le plat -> les
+        // champs communs (top-level) restent inchanges, seule facets.actor evolue.
+        if(!PublicProfile._engineMode) {
+            PublicProfile.saveFormToCurrentProfile();
+            PublicProfile._commitFlatToFacet(PublicProfile.profiles[PublicProfile.currentProfileIndex], PublicProfile.currentFacetTab);
+        }
         
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
         
