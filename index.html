@@ -2185,6 +2185,12 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
 .universe-view-toggle button.active { background: var(--primary); color: white; }
 .universe-view-toggle button:hover:not(.active) { background: var(--border); }
 .profile-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: var(--z-modal); padding: 20px; }
+/* Fiche a onglets (moteur de la fiche de projet) hebergee dans le modal Univers */
+#pm-fiche { display: none; }
+.profile-modal-body.pm-mode-fiche > .profile-modal-section { display: none !important; }
+.profile-modal-body.pm-mode-fiche #pm-fiche { display: block; }
+.profile-modal-body #pm-fiche .fid-head { display: none; }
+.profile-modal-body #pm-fiche .data-card { border: none; box-shadow: none; padding: 0; margin: 0; background: none; }
 .profile-modal-box { background: var(--panel-bg); border-radius: 16px; width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
 .profile-modal-header { position: relative; padding: 30px; text-align: center; border-bottom: 1px solid var(--border); }
 .profile-modal-photo { width: 120px; height: 120px; border-radius: 50%; margin: 0 auto 15px; background: var(--bg); display: flex; align-items: center; justify-content: center; font-size: 3rem; overflow: hidden; border: 3px solid var(--primary); }
@@ -7669,7 +7675,10 @@ body.presentation-mode .presentation-bar {
                 <!-- Section Parcours / Bio (comedien & technicien) -->
                 <div class="profile-section d-none" id="profile-bio-section">
                     <h3><span class="section-title">📝 Parcours</span></h3>
-                    <textarea class="profile-input profile-textarea" id="profile-bio" placeholder="Bio / Présentation"></textarea>
+                    <label class="text-sec-sm2" style="display:block; margin-bottom:4px;">Bio</label>
+                    <textarea class="profile-input profile-textarea" id="profile-bio" placeholder="Présentation, parcours en quelques mots..."></textarea>
+                    <label class="text-sec-sm2" style="display:block; margin:10px 0 4px;">Expérience</label>
+                    <textarea class="profile-input profile-textarea" id="profile-experience" placeholder="Filmographie, rôles, réalisations, matériel, formations..."></textarea>
                 </div>
 
                 <!-- Section Comédien - Description Physique (visible si actor) -->
@@ -8527,6 +8536,7 @@ body.presentation-mode .presentation-bar {
       <div id="pm-moderation-badge" style="display:none; margin-top:12px; padding:10px 14px; border-radius:8px; font-size:0.85rem; text-align:left;"></div>
     </div>
     <div class="profile-modal-body">
+      <div id="pm-fiche" class="pm-fiche-host"></div>
       <div class="profile-modal-section" id="pm-bio-section">
         <h4>Bio</h4>
         <p id="pm-bio"></p>
@@ -22079,6 +22089,10 @@ initCategoriesDragDrop: () => {
         }
 
         // Brique « Notes générales ».
+        blocks.push(FicheUI.block('crew', 'bio', '📝 Bio & expérience',
+            FicheUI.field('Bio', `<textarea class="data-desc" style="width:100%; min-height:90px;" placeholder="Présentation, parcours en quelques mots..." onchange="app.Crew.updateMember(${idx}, 'bio', this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(member.bio || '')}</textarea>`)
+          + FicheUI.field('Expérience', `<textarea class="data-desc" style="width:100%; min-height:90px;" placeholder="Références, réalisations, matériel maîtrisé, formations..." onchange="app.Crew.updateMember(${idx}, 'experience', this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(member.experience || '')}</textarea>`)
+        ));
         blocks.push(FicheUI.block('crew', 'notes', '📝 Notes générales', `<textarea class="crew-input" style="min-height:70px; width:100%;" placeholder="Notes générales..." onchange="app.Crew.updateMember(${idx}, 'notes', this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(member.notes || '')}</textarea>`));
 
         card.innerHTML = FicheBlocks.renderTabbed(blocks, 'crew');
@@ -24830,6 +24844,7 @@ initCategoriesDragDrop: () => {
       // Garde d'ecriture : voir updateActorMeta.
       updateDataItem: (type, idx, val) => { const k = { characters:'character', actors:'actor', locations:'location', crew:'crew' }[type]; if(k && !Permissions.canEditFiche(k)) return; if(state.data[type][idx]) { const key = (type === 'characters' || type === 'actors') ? 'bio' : 'desc'; state.data[type][idx][key] = val; Store.saveDebounced(); } },
       deleteDataItem: async (type, idx) => { 
+          if(PublicProfile._engineMode) return; // fiche moteur : pas de suppression de profil ici
           if(await ConfirmModal.confirmDelete("Cet élément sera supprimé.")) { 
               if(typeof CardModal !== 'undefined' && CardModal.closeIfShowing) CardModal.closeIfShowing(type, state.data[type][idx]?.id);
               // Si on supprime un acteur, délier les personnages associés
@@ -25407,6 +25422,17 @@ initCategoriesDragDrop: () => {
           Actions.updateActorMeta(idx, 'licenses', lic);
       },
       updateActorMeta: (idx, field, val) => { 
+          // FUSION (lot 1) : en mode « fiche moteur » (creation de profil), on ecrit
+          // sur LE PROFIL et sa casquette, jamais sur un comedien de projet. idx (=-1)
+          // est ignore. On saute aussi le controle de droit projet et l'invitation email.
+          if(PublicProfile._engineMode) {
+              const p = PublicProfile._engineProfile;
+              if(p) {
+                  p[field] = val;
+                  PublicProfile.setFacetField(p, PublicProfile._engineFacet, field, PublicProfile._cloneFacetVal(val));
+              }
+              return;
+          }
           // GARDE D'ECRITURE (26 aout) : le droit se verifie AUSSI ici. Griser
           // un champ n'est qu'un affichage — tant que la fonction qui enregistre
           // ne verifie rien, le droit n'existe pas vraiment.
@@ -25436,6 +25462,7 @@ initCategoriesDragDrop: () => {
       updateCharacterMeta: (idx, field, val) => { if(state.data.characters[idx]) { state.data.characters[idx][field] = val; Store.saveDebounced(); } },
       toggleActorVehicle: (idx, hasVehicle) => { if(state.data.actors[idx]) { state.data.actors[idx].hasVehicle = hasVehicle; Store.save(); const vehicleDetails = document.getElementById(`actor-vehicle-${idx}`); if(vehicleDetails) { if(hasVehicle) { vehicleDetails.classList.add('visible'); } else { vehicleDetails.classList.remove('visible'); } } } },
       uploadActorPhoto: async (idx, input) => {
+          if(PublicProfile._engineMode) { Utils.toast('La photo se règle depuis ton formulaire pour l\'instant (branchée au lot suivant).', 'info'); return; }
           if(!state.data.actors[idx]) return;
           if(!input.files || !input.files[0]) return;
           const file = input.files[0];
@@ -39824,6 +39851,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         document.getElementById('profile-hide-address-projects').checked = profile.hideAddressInProjects || false;
         document.getElementById('profile-website').value = profile.website || '';
         document.getElementById('profile-bio').value = profile.bio || '';
+        { const _ex = document.getElementById('profile-experience'); if(_ex) _ex.value = profile.experience || ''; }
         
         // Mettre à jour les options de confidentialité
         setTimeout(() => PublicProfile.updateAddressPrivacyOptions(), 100);
@@ -40037,6 +40065,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         profile.hideAddressInProjects = document.getElementById('profile-hide-address-projects')?.checked || false;
         profile.website = document.getElementById('profile-website').value.trim();
         profile.bio = document.getElementById('profile-bio').value.trim();
+        { const _ex = document.getElementById('profile-experience'); if(_ex) profile.experience = _ex.value.trim(); }
         
         // Comédien (les champs à l'écran appartiennent à la fiche affichée)
         if(PublicProfile.currentFacetTab === 'actor') {
@@ -40246,6 +40275,14 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     },
     currentFicheTab: null,
 
+    // FUSION (lot 1) : mode « fiche moteur » pour la creation de profil. Quand il
+    // est actif, la fiche comedien affichee via le moteur du projet ecrit sur LE
+    // PROFIL (et sa casquette), pas sur un comedien de projet, et la sauvegarde ne
+    // repasse PAS par les 54 champs de l'ancien formulaire. Eteint par defaut.
+    _engineMode: false,
+    _engineFacet: null,
+    _engineProfile: null,
+
     // Champs qui appartiennent à la FICHE (comédien/technicien), plus au profil commun
     FACET_SWAP_KEYS: ['name','photo','gender','phone','hidePhone','agentPhone','bio','address','city','latitude','longitude','hideAddress','hideAddressInProjects','contactEmail','dailyRate','rateCurrency','rateNegotiable','collabTypes','availabilityText','availabilityDates','unavailabilityDates','hasVehicle','vehicleType','vehiclePlate','vehicleSeats','vehicleTrunk','vehicleNotes','licenses','vehicleUsage','role','demoreel','demoreels','experience','languages','languagesWithLevels'],
 
@@ -40342,6 +40379,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                 + '<div class="compact-card-role">' + label + '</div>'
                 + '<label class="facet-card-vis" onclick="event.stopPropagation();"><input type="checkbox" ' + (visOn ? 'checked' : '') + ' onchange="app.PublicProfile.toggleFacetVisible(\'' + k + '\', this.checked)"> 👁 Univers</label>'
                 + '<button type="button" class="facet-card-erase" onclick="event.stopPropagation(); app.PublicProfile.effaceFacetCard(\'' + k + '\')">🧹 Effacer</button>'
+                + (k === 'actor' ? '<button type="button" class="facet-card-erase" style="background:#6c5ce7; color:#fff;" onclick="event.stopPropagation(); app.PublicProfile.openComedienEngine()">🧪 Tester la fiche moteur</button>' : '')
             + '</div>';
         }).join('') + '</div>';
     },
@@ -40383,6 +40421,67 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     closeFicheCard: () => {
         const modal = document.getElementById('profile-fiche-modal');
         if(modal) modal.classList.remove('visible');
+    },
+
+    // ===== FUSION (lot 1) : fiche comedien via le MOTEUR DU PROJET =====
+    // Bouton de test PROVISOIRE. Ouvre la casquette comedien dans le meme moteur que
+    // la fiche de projet, EN EDITION, a cote du formulaire actuel (qui reste intact).
+    // Recette d'affichage reprise de UniverseProfileModal._renderFicheInModal.
+    openComedienEngine: () => {
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile) { Utils.toast('Aucun profil chargé.', 'warning'); return; }
+        if(!(profile.facets && profile.facets.actor)) { Utils.toast('Active d\'abord la casquette comédien.', 'warning'); return; }
+        PublicProfile._loadFacetToFlat(profile, 'actor'); // valeurs de la casquette -> champs plats
+        PublicProfile._engineMode = true;
+        PublicProfile._engineFacet = 'actor';
+        PublicProfile._engineProfile = profile;
+        let card = null;
+        try {
+            const temp = document.createElement('div');
+            UI.renderDataCards([profile], 'actors', temp, [], false);
+            card = temp.firstElementChild;
+        } catch(e) { console.warn('Fiche moteur (test):', e); }
+        if(!card) { PublicProfile._closeComedienEngine(); Utils.toast('Impossible d\'afficher la fiche moteur.', 'error'); return; }
+        // Retirer l'onglet « Dans le projet » (sans objet ici) — meme chirurgie que l'Univers.
+        const tabs = card.querySelector('.fid-tabs');
+        if(tabs) {
+            const pB = tabs.querySelector(':scope > .fid-tabbar > .fid-tab[data-tab="projet"]');
+            const pP = tabs.querySelector(':scope > .fid-tabpanel[data-tab="projet"]');
+            if(pB) pB.remove();
+            if(pP) pP.remove();
+            tabs.querySelectorAll(':scope > .fid-tabbar > .fid-tab.is-active, :scope > .fid-tabpanel.is-active').forEach(el => el.classList.remove('is-active'));
+            const fB = tabs.querySelector(':scope > .fid-tabbar > .fid-tab');
+            const fP = tabs.querySelector(':scope > .fid-tabpanel');
+            if(fB) fB.classList.add('is-active');
+            if(fP) fP.classList.add('is-active');
+        }
+        const overlay = document.createElement('div');
+        overlay.id = 'comedien-engine-overlay';
+        overlay.style.cssText = 'position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,.55); overflow:auto; display:block;';
+        const box = document.createElement('div');
+        box.style.cssText = 'background:var(--panel, var(--surface, var(--bg, #ffffff))); color:inherit; max-width:660px; width:92%; margin:5vh auto; max-height:88vh; overflow:auto; border-radius:12px; padding:16px; box-shadow:0 10px 40px rgba(0,0,0,.4);';
+        const bar = document.createElement('div');
+        bar.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:8px; padding:0 0 10px;';
+        bar.innerHTML = '<span style="font-weight:600;">🧪 Fiche comédien (moteur) — test</span>'
+            + '<span style="display:flex; gap:8px;">'
+            + '<button class="btn btn--primary btn--sm" id="comedien-engine-save">💾 Enregistrer</button>'
+            + '<button class="btn btn--sm" id="comedien-engine-close">Fermer</button>'
+            + '</span>';
+        box.appendChild(bar);
+        box.appendChild(card);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        document.getElementById('comedien-engine-save').onclick = async () => {
+            await PublicProfile.saveCurrentProfile();
+        };
+        document.getElementById('comedien-engine-close').onclick = () => PublicProfile._closeComedienEngine();
+    },
+    _closeComedienEngine: () => {
+        PublicProfile._engineMode = false;
+        PublicProfile._engineFacet = null;
+        PublicProfile._engineProfile = null;
+        const ov = document.getElementById('comedien-engine-overlay');
+        if(ov) ov.remove();
     },
 
     // Activer une casquette depuis sa carte grisee : coche l'etat cache, met a
@@ -40801,9 +40900,14 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             return;
         }
         
-        // Sauvegarder le formulaire dans l'objet profil
-        PublicProfile.saveFormToCurrentProfile();
-        PublicProfile._commitFlatToFacet(PublicProfile.profiles[PublicProfile.currentProfileIndex], PublicProfile.currentFacetTab);
+        // Sauvegarder le formulaire dans l'objet profil.
+        // FUSION (lot 1) : en mode « fiche moteur », les champs sont deja ecrits sur
+        // le profil + la casquette par updateActorMeta ; on NE repasse PAS par les 54
+        // champs de l'ancien formulaire, qui ecraseraient le profil.
+        if(!PublicProfile._engineMode) {
+            PublicProfile.saveFormToCurrentProfile();
+            PublicProfile._commitFlatToFacet(PublicProfile.profiles[PublicProfile.currentProfileIndex], PublicProfile.currentFacetTab);
+        }
         
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
         
@@ -63945,6 +64049,44 @@ const UniverseProfileModal = {
         UniverseProfileModal.openProfileModal(p, next);
     },
 
+    // 3b — Rend un profil comedien/technicien dans le MEME moteur que la fiche
+    // de projet (lecture seule), et retire l'onglet « Dans le projet » (sans
+    // objet pour un profil public). asso / entreprise / projet gardent l'affichage
+    // classique (sections fixes du modal).
+    _renderFicheInModal: (fullProfile, cur) => {
+        const host = document.getElementById('pm-fiche');
+        const body = host ? host.parentElement : null;
+        if(!host || !body) return false;
+        if(cur !== 'actor' && cur !== 'crew') { host.innerHTML = ''; body.classList.remove('pm-mode-fiche'); return false; }
+        host.innerHTML = '';
+        let card = null;
+        try {
+            if(cur === 'actor') {
+                const temp = document.createElement('div');
+                UI.renderDataCards([fullProfile], 'actors', temp, [], true);
+                card = temp.firstElementChild;
+            } else {
+                card = UI.createCrewCard(fullProfile, -1, [], true);
+            }
+        } catch(e) { console.warn('Fiche Univers:', e); }
+        if(!card) { body.classList.remove('pm-mode-fiche'); return false; }
+        const tabs = card.querySelector('.fid-tabs');
+        if(tabs) {
+            const pB = tabs.querySelector(':scope > .fid-tabbar > .fid-tab[data-tab="projet"]');
+            const pP = tabs.querySelector(':scope > .fid-tabpanel[data-tab="projet"]');
+            if(pB) pB.remove();
+            if(pP) pP.remove();
+            tabs.querySelectorAll(':scope > .fid-tabbar > .fid-tab.is-active, :scope > .fid-tabpanel.is-active').forEach(el => el.classList.remove('is-active'));
+            const fB = tabs.querySelector(':scope > .fid-tabbar > .fid-tab');
+            const fP = tabs.querySelector(':scope > .fid-tabpanel');
+            if(fB) fB.classList.add('is-active');
+            if(fP) fP.classList.add('is-active');
+        }
+        host.appendChild(card);
+        body.classList.add('pm-mode-fiche');
+        return true;
+    },
+
     openProfileModal: async (profile, facetView) => {
         // Casquette affichée : celle demandée par le pager, sinon la première visible
         const vf = profile.visibleFacets || (PublicProfile._typeToFacet(profile.type) ? [PublicProfile._typeToFacet(profile.type)] : []);
@@ -63990,6 +64132,7 @@ const UniverseProfileModal = {
         }
         
         Universe.currentProfile = fullProfile;
+        UniverseProfileModal._renderFicheInModal(fullProfile, cur);
         
         // Photo
         const photoEl = document.getElementById('pm-photo');
@@ -72768,7 +72911,7 @@ const FicheBlocks = {
             { id: 'projet',     label: '🎬 Dans le projet',        blocks: ['projet'] },
             { id: 'photos',     label: '📸 Photos & démo',         blocks: ['galerie', 'demoreel'] },
             { id: 'profil',     label: '🪪 Profil',                blocks: ['identite', 'contact'] },
-            { id: 'parcours',   label: '📝 Parcours',              blocks: ['notes'] },
+            { id: 'parcours',   label: '📝 Parcours',              blocks: ['bio', 'notes'] },
             { id: 'logistique', label: '📅 Planning & logistique', blocks: ['dispos', 'vehicule', 'cachet'] }
         ],
         character: [
