@@ -25457,7 +25457,7 @@ initCategoriesDragDrop: () => {
       updateCharacterMeta: (idx, field, val) => { if(state.data.characters[idx]) { state.data.characters[idx][field] = val; Store.saveDebounced(); } },
       toggleActorVehicle: (idx, hasVehicle) => { if(state.data.actors[idx]) { state.data.actors[idx].hasVehicle = hasVehicle; Store.save(); const vehicleDetails = document.getElementById(`actor-vehicle-${idx}`); if(vehicleDetails) { if(hasVehicle) { vehicleDetails.classList.add('visible'); } else { vehicleDetails.classList.remove('visible'); } } } },
       uploadActorPhoto: async (idx, input) => {
-          if(PublicProfile._engineMode) { Utils.toast('La photo se règle depuis ton formulaire pour l\'instant (branchée au lot suivant).', 'info'); return; }
+          if(PublicProfile._engineMode) { await PublicProfile._engineUploadPhoto(input); return; }
           if(!state.data.actors[idx]) return;
           if(!input.files || !input.files[0]) return;
           const file = input.files[0];
@@ -25484,6 +25484,7 @@ initCategoriesDragDrop: () => {
           CardModal.refresh();
       },
       addActorGalleryPhoto: async (idx) => {
+          if(PublicProfile._engineMode) { Utils.toast('La galerie du profil reste à brancher (à venir).', 'info'); return; }
           if(!state.data.actors[idx]) return;
           const input = document.getElementById(`actor-gallery-input-${idx}`);
           if(!input || !input.files || !input.files[0]) { Utils.toast('Veuillez sélectionner une photo.', 'warning'); return; }
@@ -25514,6 +25515,7 @@ initCategoriesDragDrop: () => {
           CardModal.refresh();
       },
       removeActorGalleryPhoto: async (actorIdx, photoIdx) => {
+          if(PublicProfile._engineMode) return;
           if(state.data.actors[actorIdx] && state.data.actors[actorIdx].galleryPhotos) {
               const actor = state.data.actors[actorIdx];
               const actorName = actor.name || 'comédien';
@@ -40451,40 +40453,8 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         // (garde _engineMode sur StoreSave).
         state.data = { actors:[draft], characters:[], locations:[], scenes:[], shootingDays:[], episodes:[], expenses:[], resources:[], crew:[], orgs:[], groups:[], vehicles:[], plans:[], contracts:[], seasons:[], budget:{}, history:[] };
         state.currentRole = 'owner';
-        let card = null;
-        try {
-            const temp = document.createElement('div');
-            UI.renderDataCards([draft], 'actors', temp, [], false);
-            card = temp.firstElementChild;
-        } catch(e) { console.warn('Fiche moteur (test):', e); }
+        const card = PublicProfile._engineBuildCard();
         if(!card) { PublicProfile._closeComedienEngine(); Utils.toast('Impossible d\'afficher la fiche moteur.', 'error'); return; }
-        // Retirer l'onglet « Dans le projet » (sans objet ici) — meme chirurgie que l'Univers.
-        const tabs = card.querySelector('.fid-tabs');
-        if(tabs) {
-            const pB = tabs.querySelector(':scope > .fid-tabbar > .fid-tab[data-tab="projet"]');
-            const pP = tabs.querySelector(':scope > .fid-tabpanel[data-tab="projet"]');
-            if(pB) pB.remove();
-            if(pP) pP.remove();
-            tabs.querySelectorAll(':scope > .fid-tabbar > .fid-tab.is-active, :scope > .fid-tabpanel.is-active').forEach(el => el.classList.remove('is-active'));
-            const fB = tabs.querySelector(':scope > .fid-tabbar > .fid-tab');
-            const fP = tabs.querySelector(':scope > .fid-tabpanel');
-            if(fB) fB.classList.add('is-active');
-            if(fP) fP.classList.add('is-active');
-        }
-        // Boutons « projet » sans objet ici : etoile de contact et menu de groupe.
-        card.querySelectorAll('.save-contact-btn, .group-select').forEach(el => el.remove());
-        // Bloc paie/legal (salaire, SIRET, n° securite sociale) : propre au projet,
-        // sans objet dans une casquette publique -> masque.
-        card.querySelectorAll('.fid-block[data-block-id="cachet"]').forEach(el => el.remove());
-        // Le moteur du projet n'a pas le telephone d'agent ni le masquage du telephone
-        // perso (concepts propres au profil public) : on les injecte dans la brique Contact.
-        const _contactBody = card.querySelector('.fid-block[data-block-id="contact"] .fid-block-body');
-        if(_contactBody) {
-            const _extra = document.createElement('div');
-            _extra.innerHTML = FicheUI.field('Téléphone de l\'agent', '<input class="actor-input" value="' + Utils.escape(draft.agentPhone || '') + '" placeholder="Affiché à la place du téléphone perso" onchange="app.Actions.updateActorMeta(-1, \'agentPhone\', this.value)">')
-                + '<label style="display:flex; gap:8px; align-items:center; margin-top:6px;"><input type="checkbox" ' + (draft.hidePhone ? 'checked' : '') + ' onchange="app.Actions.updateActorMeta(-1, \'hidePhone\', this.checked)"> Ne pas afficher mon téléphone perso sur mon profil public</label>';
-            _contactBody.appendChild(_extra);
-        }
         const overlay = document.createElement('div');
         overlay.id = 'comedien-engine-overlay';
         overlay.style.cssText = 'position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,.55); overflow:auto; display:block;';
@@ -40522,6 +40492,81 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         if('_engineSavedRole' in PublicProfile) { state.currentRole = PublicProfile._engineSavedRole; delete PublicProfile._engineSavedRole; }
         const ov = document.getElementById('comedien-engine-overlay');
         if(ov) ov.remove();
+    },
+
+    // Construit la carte fiche comedien (moteur du projet) a partir de la copie en cours,
+    // avec les retraits/injections propres au profil. Le decor de projet prete et le role
+    // doivent deja etre en place (openComedienEngine).
+    _engineBuildCard: () => {
+        const draft = PublicProfile._engineProfile;
+        let card = null;
+        try {
+            const temp = document.createElement('div');
+            UI.renderDataCards([draft], 'actors', temp, [], false);
+            card = temp.firstElementChild;
+        } catch(e) { console.warn('Fiche moteur:', e); }
+        if(!card) return null;
+        const tabs = card.querySelector('.fid-tabs');
+        if(tabs) {
+            const pB = tabs.querySelector(':scope > .fid-tabbar > .fid-tab[data-tab="projet"]');
+            const pP = tabs.querySelector(':scope > .fid-tabpanel[data-tab="projet"]');
+            if(pB) pB.remove();
+            if(pP) pP.remove();
+            tabs.querySelectorAll(':scope > .fid-tabbar > .fid-tab.is-active, :scope > .fid-tabpanel.is-active').forEach(el => el.classList.remove('is-active'));
+            const fB = tabs.querySelector(':scope > .fid-tabbar > .fid-tab');
+            const fP = tabs.querySelector(':scope > .fid-tabpanel');
+            if(fB) fB.classList.add('is-active');
+            if(fP) fP.classList.add('is-active');
+        }
+        card.querySelectorAll('.save-contact-btn, .group-select').forEach(el => el.remove());
+        card.querySelectorAll('.fid-block[data-block-id="cachet"]').forEach(el => el.remove());
+        const contactBody = card.querySelector('.fid-block[data-block-id="contact"] .fid-block-body');
+        if(contactBody) {
+            const extra = document.createElement('div');
+            extra.innerHTML = FicheUI.field('Téléphone de l\'agent', '<input class="actor-input" value="' + Utils.escape(draft.agentPhone || '') + '" placeholder="Affiché à la place du téléphone perso" onchange="app.Actions.updateActorMeta(-1, \'agentPhone\', this.value)">')
+                + '<label style="display:flex; gap:8px; align-items:center; margin-top:6px;"><input type="checkbox" ' + (draft.hidePhone ? 'checked' : '') + ' onchange="app.Actions.updateActorMeta(-1, \'hidePhone\', this.checked)"> Ne pas afficher mon téléphone perso sur mon profil public</label>';
+            contactBody.appendChild(extra);
+        }
+        return card;
+    },
+    // Redessine la carte dans la fenetre ouverte (apres un changement de photo, etc.).
+    _engineRerenderCard: () => {
+        const overlay = document.getElementById('comedien-engine-overlay');
+        if(!overlay) return;
+        const box = overlay.firstElementChild;
+        if(!box) return;
+        const card = PublicProfile._engineBuildCard();
+        if(!card) return;
+        if(box.children.length >= 2) box.replaceChild(card, box.lastElementChild); else box.appendChild(card);
+        setTimeout(() => {
+            card.querySelectorAll('[id^="actor-calendar-"]').forEach(cal => {
+                const m = cal.id.match(/actor-calendar-(-?\d+)/);
+                if(m) { try { UI.renderAvailabilityCalendar(cal.id, 'actor', parseInt(m[1], 10)); } catch(e) {} }
+            });
+        }, 60);
+    },
+    // Photo en mode profil : envoi vers le bucket avatars (le profil n'a pas de projet).
+    _engineUploadPhoto: async (input) => {
+        if(!input || !input.files || !input.files[0]) return;
+        const file = input.files[0];
+        input.value = '';
+        if(!file.type.startsWith('image/')) { Utils.toast('Fichier image invalide.', 'warning'); return; }
+        Utils.toast('Envoi de la photo…', 'info', 1500);
+        try {
+            const blob = await PublicProfile.compressImageToBlob(file, 800, 0.85);
+            const userId = state.currentUser.id;
+            const filePath = userId + '/avatar_' + Date.now() + '.jpg';
+            const { error } = await supabase.storage.from('avatars').upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
+            if(error) throw error;
+            const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(filePath);
+            const url = (urlData && urlData.publicUrl) ? urlData.publicUrl : '';
+            if(!url) throw new Error('URL vide');
+            const p = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+            if(p) p.photo = url;                                        // avatar commun du profil
+            if(PublicProfile._engineProfile) PublicProfile._engineProfile.photo = url; // + copie en cours
+            PublicProfile._engineRerenderCard();
+            Utils.toast('Photo mise à jour.', 'success');
+        } catch(e) { console.warn('Photo profil (moteur):', e); Utils.toast('Erreur envoi photo : ' + ((e && e.message) || 'inconnue'), 'error'); }
     },
 
     // Activer une casquette depuis sa carte grisee : coche l'etat cache, met a
