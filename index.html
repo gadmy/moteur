@@ -6329,6 +6329,11 @@ body.presentation-mode .presentation-bar {
   .wm-r-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
   /* sous-onglet sorti en fenêtre : contenu affiché dans la fenêtre, bouton retiré de la barre */
   .wm-window .wm-body .tab-content.wm-hosted { display: block !important; max-width: none; margin: 0; padding: 0; }
+  /* Carte de l'Univers hebergee dans une fenetre flottante (casting) : on masque
+     son en-tete plein ecran et on la fait tenir a la hauteur de la fenetre. */
+  .wm-window .wm-body #universe-view { height: 100%; }
+  .wm-window .wm-body #universe-view > .forum-header { display: none; }
+  .wm-window .wm-body #universe-view .universe-container { height: auto; min-height: 0; flex: 1 1 auto; }
   .tab-subbtn.wm-popped { position: relative; opacity: 0.72; }
   .wm-toggle { width: 34px; height: 18px; border-radius: 9px; border: none; background: #b8bcc4; position: relative; cursor: pointer; margin-left: 8px; flex: 0 0 auto; padding: 0; transition: background .15s; }
   .wm-toggle::after { content: ''; position: absolute; width: 14px; height: 14px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
@@ -22662,7 +22667,14 @@ initCategoriesDragDrop: () => {
           const n = Web.nodes[i];
           if(!Web._nodeIsFiche(n)) return;
           const kind = n.kind, id = n.id;
-          Web.close();
+          // « Ouvrir la fiche » SANS quitter la Toile : la fenetre s'ouvre
+          // PAR-DESSUS. La Toile partage le palier --z-modal avec les fenetres
+          // de fiche ; on la fait passer juste en dessous (--z-overlay) pour que
+          // la fiche soit visible et cliquable — sinon elle resterait cachee
+          // derriere (le bug d'empilement d'aout). Web.render la remet a son
+          // niveau des qu'on renavigue dans la Toile.
+          const wm = document.getElementById('web-modal');
+          if(wm) wm.style.setProperty('z-index', 'var(--z-overlay)');
           if(typeof UI !== 'undefined' && UI.openFiche) UI.openFiche(kind, id);
       },
       revealInProject: (i) => {
@@ -22921,6 +22933,9 @@ initCategoriesDragDrop: () => {
           const canvas = document.getElementById('web-canvas');
           const svg = document.getElementById('web-svg');
           if(!canvas || !svg || !Web.center) return;
+          // Si une fiche a ete ouverte PAR-DESSUS la Toile (openNode l'abaisse
+          // sous le palier modal), on la remet a son niveau des qu'on renavigue.
+          const _wm = document.getElementById('web-modal'); if(_wm) _wm.style.zIndex = '';
           Web._sel = null;
           const esc = Utils.escape;
           const c = Web.center;
@@ -42167,12 +42182,24 @@ const GlobalSearch = {
     openForCharacter: async (charIdx) => {
         const c = state.data.characters && state.data.characters[charIdx];
         if(!c) return;
-        // On ouvre la CARTE DE L'UNIVERS (annuaire communautaire) au lieu d'une
-        // petite modale : elle a toute la place pour faire « pop » les profils.
-        // On bascule sur les comediens, en vue eventail (cartes), on pre-remplit
-        // les filtres depuis la physique du personnage, puis on lance la
-        // recherche — exactement comme un clic sur « Rechercher » depuis l'Univers.
-        await Universe.openFromMenu();
+        const uv = document.getElementById('universe-view');
+        if(!uv || typeof WindowManager === 'undefined') return;
+        // On n'ouvre PAS l'Univers en plein ecran : on charge ses profils puis on
+        // DEPLACE sa carte dans une FENETRE flottante (systeme WindowManager,
+        // comme un sous-onglet detache), sans quitter le projet — elle est remise
+        // a sa place a la fermeture. Pre-remplie depuis la physique du perso, en
+        // vue eventail (cartes qui poppent), recherche lancee.
+        if(!Universe._initialized) { await Universe.init(); Universe._initialized = true; }
+        const origParent = uv.parentNode, origNext = uv.nextSibling;
+        WindowManager.open('universe-casting', '🎭 Casting — chercher un comédien', uv, {
+            w: 960, h: 640,
+            onClose: () => {
+                if(origParent) origParent.insertBefore(uv, origNext);
+                uv.style.display = 'none';
+                if(Universe.setViewMode) Universe.setViewMode('map');
+            }
+        });
+        uv.style.display = 'flex';
         const typeSel = document.getElementById('universe-type');
         if(typeSel) { typeSel.value = 'actor'; if(Universe.onTypeChange) Universe.onTypeChange(); }
         if(Universe.setViewMode) await Universe.setViewMode('fan');
