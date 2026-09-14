@@ -25304,7 +25304,8 @@ initCategoriesDragDrop: () => {
                           member.city = facet.city || publicData.city || member.city;
                           member.address = facet.address || extraData.address || member.address;
                           member.role = facet.role || extraData.role || member.role;
-                          member.department = facet.department || extraData.department || member.department;
+                          member.department = facet.department || facet.group_id || extraData.department || member.department;
+                          member.group_id = facet.group_id || facet.department || member.group_id;
                           member.dailyRate = facet.dailyRate || extraData.dailyRate || member.dailyRate;
                           member.rateCurrency = facet.rateCurrency || extraData.rateCurrency || member.rateCurrency;
                           member.rateType = extraData.rateType || member.rateType;
@@ -38289,7 +38290,7 @@ const DrawingEditor = {
         Crew.updateMember(idx, 'licenses', lic);
     },
     updateMember: (idx, field, value) => {
-        if(PublicProfile._engineMode) { const p = PublicProfile._engineProfile; if(p) p[field] = value; return; }
+        if(PublicProfile._engineMode) { const p = PublicProfile._engineProfile; if(p) p[field] = value; if(field === 'group_id') PublicProfile._engineRerenderCard(); return; }
         if(state.currentRole === 'viewer') return;
         if(!state.data.crew[idx]) return;
         
@@ -40474,6 +40475,9 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             : ['website'];
         commonKeys.forEach(k => { draft[k] = profile[k]; });
         PublicProfile._engineCommonKeys = commonKeys;
+        // Technicien : le profil range le departement dans 'department' (gcX), la fiche projet
+        // dans 'group_id'. On fait le pont pour que le selecteur Departement se preselectionne.
+        if(kind === 'crew' && !draft.group_id && draft.department) draft.group_id = draft.department;
         PublicProfile._engineMode = true;
         PublicProfile._engineProfile = draft;
         // Le moteur suppose un projet ouvert (state.data + role). Sur la page profil il n'y en
@@ -40514,6 +40518,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             delete d.email;
             // Champs COMMUNS -> profil (partages entre casquettes), retires de la casquette.
             (PublicProfile._engineCommonKeys || []).forEach(k => { if(d[k] !== undefined) { profile[k] = d[k]; delete d[k]; } });
+            if(kind === 'crew') d.department = d.group_id || d.department || ''; // pont group_id -> department (profil/sync)
             profile.facets[kind] = d;
             await PublicProfile.saveCurrentProfile();
             Utils.toast((kind === 'crew' ? 'Casquette technicien' : 'Casquette comédien') + ' enregistrée.', 'success');
@@ -40538,7 +40543,10 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         let card = null;
         try {
             if(kind === 'crew') {
-                card = UI.createCrewCard(draft, 0, [], false);
+                // Departements predefinis : lus depuis le selecteur du profil deja present dans la page.
+                const deptSel = document.getElementById('profile-department');
+                const groups = deptSel ? Array.from(deptSel.options).filter(o => o.value).map(o => ({ id: o.value, name: o.textContent.trim() })) : [];
+                card = UI.createCrewCard(draft, 0, groups, false);
             } else {
                 const temp = document.createElement('div');
                 UI.renderDataCards([draft], 'actors', temp, [], false);
@@ -40560,6 +40568,8 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         }
         card.querySelectorAll('.save-contact-btn, .group-select').forEach(el => el.remove());
         card.querySelectorAll('.fid-block[data-block-id="cachet"]').forEach(el => el.remove());
+        // « Notes générales » (crew) : note interne, sans objet dans une casquette publique.
+        card.querySelectorAll('.fid-block[data-block-id="notes"]').forEach(el => el.remove());
         const contactBody = card.querySelector('.fid-block[data-block-id="contact"] .fid-block-body');
         if(contactBody) {
             const extra = document.createElement('div');
