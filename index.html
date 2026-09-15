@@ -207,11 +207,12 @@ est raconte aux entrees v562 a v567 de l'historique ci-dessous.)
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
-v592 (15 Septembre 2026) — QUATRE CORRECTIFS D'INTERFACE : FENETRE CASTING, ZONE DANGER, AFFICHE, VUE SATELLITES.
+v592 (15 Septembre 2026) — CINQ CORRECTIFS : FENETRE CASTING, ZONE DANGER, AFFICHE, VUE SATELLITES, RAYON UNIVERS.
   - FENETRE CASTING QUI SURVIVAIT AU PROJET. La fenetre flottante « Casting » (recherche de comediens ouverte depuis un personnage) restait affichee au retour au HUB. Nouveau WindowManager.closeAll qui ferme TOUTES les fenetres flottantes (casting + sous-onglets detaches, avec leur onClose), appele en tete de UI.showDashboard. Les positions des sous-onglets restent persistees (seules les fenetres 'tab:' etaient sauvegardees).
-  - ZONE DANGER CENTREE dans « Mon Profil » : titre et bloc « Supprimer mon compte » centres (text-align + justify-content sur la section).
+  - ZONE DANGER dans « Mon Profil » : titre reellement centre (le h3 est en display:flex, donc text-align n'y faisait rien -> justify-content:center), bloc « Supprimer mon compte » centre, et rectangle retreci et centre (max-width 520px, marges auto).
   - AFFICHE DU PROJET (Production > Presentation) : l'image uploadee ne s'affichait qu'apres rechargement. Le bucket « projects » etant prive, le chemin fraichement envoye est desormais signe + mis en cache (Utils._cacheNewPath) juste apres l'upload, comme le logo de prod. Seul upload direct qui l'oubliait ; les photos comedien/technicien et planches d'idees passent par l'uploader commun (deja OK), galeries/avatars/logos de structure vont sur des buckets publics (affichage direct).
   - VUE SATELLITES (bouton idee) : clic droit sur la fiche au CENTRE -> petit menu « Ajouter une note » / « Ajouter une image », pour enrichir la planche sans repasser par la fiche. Note saisie via ConfirmModal.prompt, image via selecteur + Utils.uploadProjectFile ; la toile se redessine aussitot. Garde d'ecriture par droit de section (Permissions.canEditFiche), le clic droit ne demarre plus un glisser, le menu se ferme au clic exterieur. Message d'invite vide mis a jour.
+  - AUDIT UNIVERS — LE RAYON KM NE FILTRAIT RIEN. Le curseur « distance » (universe-distance) etait purement decoratif : jamais lu par UniverseSearch.search, aucune fonction de distance n'existait dans le module. Desormais, quand une ville ET un rayon < 500 km sont poses, la ville devient le CENTRE (et non plus un filtre texte) et les resultats sont filtres par distance a vol d'oiseau (haversine, UniverseSearch._distanceKm/_applyRadius) : lat/lng du profil si presentes, sinon geocodage de sa ville (cache memoire/localStorage/DB, repli Nominatim). 500 = ∞ conserve le comportement « ville en filtre texte ». Applique aux profils ET aux projets. CAVEAT : une premiere recherche sur des villes non encore en cache geocode 1 ville / 1,1 s (limite OSM), puis c'est instantane.
 v591 (15 Septembre 2026) — FUSION DES FICHES, VOLET 2 : ASSO + ENTREPRISE, ET CACHET/STATUT REPENSE. Les casquettes association et entreprise ouvrent desormais LA FICHE DU MOTEUR (comme comedien/technicien), en edition, sur une copie jetable remappee aux champs a plat du profil + facets.<kind>.hqAddress a l'enregistrement (aucune autre casquette touchee). La fiche structure (partagee projet + profil) est enrichie (logo par upload, reseaux sociaux, contact, activites, bande demo) et eclatee en onglets Identite / Contact / Presence, avec le libelle de CHAQUE champ AU-DESSUS du champ. Badge « Hors ligne » (tuile + fiche) quand une casquette est masquee de l'Univers, et la synchro ne reecrit plus une fiche dont la casquette est eteinte/masquee (les 4 casquettes). Les 4 casquettes sont donc unifiees ; l'ancien formulaire de profil reste comme filet.
   - CACHET / STATUT SEPARES. Le SALAIRE (chiffres negocies) est propriete du PROJET : editable par la prod meme sur une fiche revendiquee, jamais synchronise, absent du profil. Le STATUT et la paie (intermittent, n Secu, n Conges Spectacles, SIRET, mode de collaboration) sont renseignes par la PERSONNE sur son profil, synchronises vers les projets (facet d'abord), en lecture seule si la fiche est revendiquee. Le MODE DE COLLABORATION est visible sur le profil public de l'Univers (drapeau _publicView) ; salaire et statut-admin restent masques cote public.
   - AUDIT FICHES (6 axes) + CORRECTIFS. Gardes d'ecriture « fiche revendiquee/liee = lecture seule » cote logique (updateActorMeta, Crew.updateMember, updateDataItem, Orgs.updateFiche) + garde lecteur sur updateCharacterMeta / updateLocationMeta. Comptage des scenes d'un decor par locationId seul (fin du repli par titre). Code mort Orgs._extraFields retire. Console : gap:-5px invalide retire ; « els is not defined » au changement de statut corrige (renderDataTab retrouve son conteneur, handlers inline sans els) ; conservation du scroll au re-dessin des fiches profil.
@@ -8527,8 +8528,8 @@ body.presentation-mode .presentation-bar {
                   </div>
                 </div>
 				<!-- Zone Danger - Suppression profil et compte -->
-                <div class="profile-section" style="border-color: var(--danger); margin-top: 30px;">
-                    <h3 class="text-danger" style="text-align: center;">⚠️ Zone Danger</h3>
+                <div class="profile-section" style="border-color: var(--danger); margin-top: 30px; max-width: 520px; margin-left: auto; margin-right: auto;">
+                    <h3 class="text-danger" style="justify-content: center;">⚠️ Zone Danger</h3>
                     <div style="display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; text-align: center;">
                         <div style="flex: 1; min-width: 250px;">
                             <p class="text-sec-sm-mb10">
@@ -64128,10 +64129,41 @@ const UniverseFan = {
 };
 
 const UniverseSearch = {
+    // Distance a vol d'oiseau entre deux points {lat,lng}, en km (haversine).
+    _distanceKm: (a, b) => {
+        const R = 6371, toRad = (d) => d * Math.PI / 180;
+        const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+        const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+        return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+    },
+    // Filtre une liste (profils ou projets) autour de la ville CENTRE, dans le
+    // rayon donne (km). Quand le rayon est actif, la ville sert de centre et non
+    // de filtre texte. Coordonnees : lat/lng du profil si presentes, sinon
+    // geocodage de sa ville (cache memoire/localStorage/DB/Nominatim).
+    _applyRadius: async (list, cityCenter, radiusStr) => {
+        const radius = parseInt(radiusStr, 10);
+        if(!cityCenter || isNaN(radius) || radius <= 0 || radius >= 500) return list;
+        const center = await Universe.geocodeCity(cityCenter);
+        if(!center) { Utils.toast('Ville introuvable — filtre distance ignoré', 'warning'); return list; }
+        const out = [];
+        for(const item of list) {
+            let coords = null;
+            if(item.latitude != null && item.longitude != null) coords = { lat: item.latitude, lng: item.longitude };
+            else { const c = item.city || item.location || ''; if(c) coords = await Universe.geocodeCity(c); }
+            if(coords && UniverseSearch._distanceKm(center, coords) <= radius) out.push(item);
+        }
+        return out;
+    },
     // Recherche
     search: async () => {
         const type = document.getElementById('universe-type').value;
         const city = document.getElementById('universe-city').value.trim().toLowerCase();
+        // Rayon (km) autour de la ville. 500 = ∞ (pas de limite). Quand il est
+        // actif, la ville devient le CENTRE et non un filtre texte.
+        const distEl = document.getElementById('universe-distance');
+        const radiusStr = distEl ? distEl.value : '';
+        const radiusKm = parseInt(radiusStr, 10);
+        const radiusActive = !!city && !isNaN(radiusKm) && radiusKm > 0 && radiusKm < 500;
         
         // Si on cherche des projets
         if(type === 'project') {
@@ -64158,7 +64190,7 @@ const UniverseSearch = {
                     return crewCount + customCount > 0;
                 });
             }
-            if(city) {
+            if(city && !radiusActive) {
                 results = results.filter(p => p.city && p.city.toLowerCase().includes(city));
             }
             
@@ -64168,6 +64200,7 @@ const UniverseSearch = {
                 results = results.filter(p => p.productionType === productionType);
             }
             
+            if(radiusActive) results = await UniverseSearch._applyRadius(results, city, radiusStr);
             Universe.filteredProjects = results;
             Universe.filteredProfiles = [];
             UniverseSearch.renderSearchResults();
@@ -64191,7 +64224,7 @@ const UniverseSearch = {
         }
         
         // Filtrer par ville
-        if(city) {
+        if(city && !radiusActive) {
             results = results.filter(p => p.city && p.city.toLowerCase().includes(city));
         }
         
@@ -64288,6 +64321,7 @@ const UniverseSearch = {
             }
         }
         
+        if(radiusActive) results = await UniverseSearch._applyRadius(results, city, radiusStr);
         Universe.filteredProfiles = results;
         Universe.filteredProjects = [];
         UniverseSearch.renderSearchResults();
