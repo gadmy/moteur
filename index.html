@@ -207,12 +207,15 @@ est raconte aux entrees v562 a v567 de l'historique ci-dessous.)
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
-v592 (15 Septembre 2026) — CINQ CORRECTIFS : FENETRE CASTING, ZONE DANGER, AFFICHE, VUE SATELLITES, RAYON UNIVERS.
+v592 (15 Septembre 2026) — CORRECTIFS INTERFACE + AUDIT UNIVERS : CASTING, ZONE DANGER, AFFICHE, VUE SATELLITES, RAYON + COHERENCE CARTE/LISTE + AUTOCOMPLETION LIEU, SUPPRESSION COMPTE PAR MOT DE PASSE.
   - FENETRE CASTING QUI SURVIVAIT AU PROJET. La fenetre flottante « Casting » (recherche de comediens ouverte depuis un personnage) restait affichee au retour au HUB. Nouveau WindowManager.closeAll qui ferme TOUTES les fenetres flottantes (casting + sous-onglets detaches, avec leur onClose), appele en tete de UI.showDashboard. Les positions des sous-onglets restent persistees (seules les fenetres 'tab:' etaient sauvegardees).
   - ZONE DANGER dans « Mon Profil » : titre reellement centre (le h3 est en display:flex, donc text-align n'y faisait rien -> justify-content:center), bloc « Supprimer mon compte » centre, et rectangle retreci et centre (max-width 520px, marges auto).
   - AFFICHE DU PROJET (Production > Presentation) : l'image uploadee ne s'affichait qu'apres rechargement. Le bucket « projects » etant prive, le chemin fraichement envoye est desormais signe + mis en cache (Utils._cacheNewPath) juste apres l'upload, comme le logo de prod. Seul upload direct qui l'oubliait ; les photos comedien/technicien et planches d'idees passent par l'uploader commun (deja OK), galeries/avatars/logos de structure vont sur des buckets publics (affichage direct).
   - VUE SATELLITES (bouton idee) : clic droit sur la fiche au CENTRE -> petit menu « Ajouter une note » / « Ajouter une image », pour enrichir la planche sans repasser par la fiche. Note saisie via ConfirmModal.prompt, image via selecteur + Utils.uploadProjectFile ; la toile se redessine aussitot. Garde d'ecriture par droit de section (Permissions.canEditFiche), le clic droit ne demarre plus un glisser, le menu se ferme au clic exterieur. Message d'invite vide mis a jour.
   - AUDIT UNIVERS — LE RAYON KM NE FILTRAIT RIEN. Le curseur « distance » (universe-distance) etait purement decoratif : jamais lu par UniverseSearch.search, aucune fonction de distance n'existait dans le module. Desormais, quand une ville ET un rayon < 500 km sont poses, la ville devient le CENTRE (et non plus un filtre texte) et les resultats sont filtres par distance a vol d'oiseau (haversine, UniverseSearch._distanceKm/_applyRadius) : lat/lng du profil si presentes, sinon geocodage de sa ville (cache memoire/localStorage/DB, repli Nominatim). 500 = ∞ conserve le comportement « ville en filtre texte ». Applique aux profils ET aux projets. CAVEAT : une premiere recherche sur des villes non encore en cache geocode 1 ville / 1,1 s (limite OSM), puis c'est instantane.
+  - UNIVERS — CARTE ET LISTE DIVERGEAIENT. La liste (renderFanView) affichait TOUJOURS tous les profils en ignorant la recherche, alors que la carte respectait le filtre : apres une recherche les deux vues ne montraient pas la meme chose, et le rayon paraissait sans effet quand on regardait la liste. Nouveau drapeau Universe.searchActive, pose par la recherche et retire au changement de type / au reset ; les DEUX vues et loadMapMarkers le suivent (resultats filtres si recherche active, tout sinon). Note : les profils de test de ga.dmy@ikmail.com SONT bien dans le pool de recherche (aucune exclusion des emails internes cote Univers), a condition d'avoir au moins une casquette « 👁 Univers » visible.
+  - UNIVERS — CHAMP « LIEU » AVEC AUTOCOMPLETION. Le champ « Ville » devient « Lieu » (ville / adresse / pays) et propose, apres une courte pause de frappe, des endroits REELS via Nominatim (OSM). Choisir une suggestion remplit le champ ET amorce le cache (memoire + localStorage) avec ses coordonnees EXACTES, qui deviennent le centre du filtre par rayon — plus d'ambiguite sur la localisation. Debounce 450 ms (limite OSM respectee), Entree valide la 1re suggestion ou lance la recherche, Echap ferme la liste. UniverseSearch.onLocationInput/_renderLocSuggest/pickLocation + facades sur Universe.
+  - SUPPRESSION DE COMPTE — la confirmation par le mot « SUPPRIMER » est remplacee par la saisie du MOT DE PASSE du compte, verifie par reauthentification (supabase.auth.signInWithPassword) AVANT toute suppression ; mot de passe faux = suppression annulee. Champ masque via une nouvelle option inputType:'password' de ConfirmModal.show.
 v591 (15 Septembre 2026) — FUSION DES FICHES, VOLET 2 : ASSO + ENTREPRISE, ET CACHET/STATUT REPENSE. Les casquettes association et entreprise ouvrent desormais LA FICHE DU MOTEUR (comme comedien/technicien), en edition, sur une copie jetable remappee aux champs a plat du profil + facets.<kind>.hqAddress a l'enregistrement (aucune autre casquette touchee). La fiche structure (partagee projet + profil) est enrichie (logo par upload, reseaux sociaux, contact, activites, bande demo) et eclatee en onglets Identite / Contact / Presence, avec le libelle de CHAQUE champ AU-DESSUS du champ. Badge « Hors ligne » (tuile + fiche) quand une casquette est masquee de l'Univers, et la synchro ne reecrit plus une fiche dont la casquette est eteinte/masquee (les 4 casquettes). Les 4 casquettes sont donc unifiees ; l'ancien formulaire de profil reste comme filet.
   - CACHET / STATUT SEPARES. Le SALAIRE (chiffres negocies) est propriete du PROJET : editable par la prod meme sur une fiche revendiquee, jamais synchronise, absent du profil. Le STATUT et la paie (intermittent, n Secu, n Conges Spectacles, SIRET, mode de collaboration) sont renseignes par la PERSONNE sur son profil, synchronises vers les projets (facet d'abord), en lecture seule si la fiche est revendiquee. Le MODE DE COLLABORATION est visible sur le profil public de l'Univers (drapeau _publicView) ; salaire et statut-admin restent masques cote public.
   - AUDIT FICHES (6 axes) + CORRECTIFS. Gardes d'ecriture « fiche revendiquee/liee = lecture seule » cote logique (updateActorMeta, Crew.updateMember, updateDataItem, Orgs.updateFiche) + garde lecteur sur updateCharacterMeta / updateLocationMeta. Comptage des scenes d'un decor par locationId seul (fin du repli par titre). Code mort Orgs._extraFields retire. Console : gap:-5px invalide retire ; « els is not defined » au changement de statut corrige (renderDataTab retrouve son conteneur, handlers inline sans els) ; conservation du scroll au re-dessin des fiches profil.
@@ -7329,7 +7332,10 @@ body.presentation-mode .presentation-bar {
                     <option value="project">🎬 Projets</option>
                 </select>
                 
-                <input type="text" id="universe-city" placeholder="📍 Ville..." class="form-input">
+                <div style="position: relative;">
+                    <input type="text" id="universe-city" placeholder="📍 Lieu — ville, adresse ou pays..." class="form-input" autocomplete="off" oninput="app.Universe.onLocationInput(this.value)" onkeydown="app.Universe.onLocationKey(event)" onblur="app.Universe.hideLocationSuggest()">
+                    <div id="universe-city-suggest" style="display:none; position:absolute; left:0; right:0; top:100%; z-index:var(--z-tooltip); background:var(--panel-bg); border:1px solid var(--border); border-radius:0 0 8px 8px; box-shadow:0 8px 20px rgba(0,0,0,0.25); max-height:240px; overflow-y:auto;"></div>
+                </div>
                 
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span class="text-sec-sm2">Distance:</span>
@@ -12227,14 +12233,14 @@ crewRoles: {
       // Affiche une modale de confirmation
       show: (options) => {
           return new Promise((resolve) => {
-              const { title = 'Confirmation', message = 'Êtes-vous sûr ?', icon = '❓', confirmText = 'Confirmer', cancelText = 'Annuler', type = 'confirm', inputPlaceholder = '', inputValue = '', dangerous = false, hideCancel = false } = options;
+              const { title = 'Confirmation', message = 'Êtes-vous sûr ?', icon = '❓', confirmText = 'Confirmer', cancelText = 'Annuler', type = 'confirm', inputPlaceholder = '', inputValue = '', inputType = 'text', dangerous = false, hideCancel = false } = options;
               
               const overlay = document.createElement('div');
               overlay.className = 'confirm-modal-overlay';
               overlay.onclick = (e) => { if(e.target === overlay) { overlay.remove(); resolve(type === 'prompt' ? null : false); } };
               
               const btnClass = dangerous ? 'danger' : 'confirm';
-              const inputHtml = type === 'prompt' ? `<input type="text" class="confirm-modal-input" id="confirm-modal-input" placeholder="${inputPlaceholder}" value="${inputValue}">` : '';
+              const inputHtml = type === 'prompt' ? `<input type="${inputType === 'password' ? 'password' : 'text'}" class="confirm-modal-input" id="confirm-modal-input" placeholder="${inputPlaceholder}" value="${inputValue}">` : '';
               
               overlay.innerHTML = `
                   <div class="confirm-modal-box">
@@ -39606,14 +39612,15 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         const confirm1 = await ConfirmModal.show({ title: '⚠️ Supprimer votre compte ?', message: 'Vous allez supprimer définitivement votre compte.\n\nTous vos projets dont vous êtes propriétaire seront supprimés.\n\nCette action est IRRÉVERSIBLE.', icon: '☠️', dangerous: true, confirmText: 'Continuer' });
         if(!confirm1) return;
         
-        const confirm2 = await ConfirmModal.prompt('Pour confirmer, tapez "SUPPRIMER" :', "Confirmation finale", "SUPPRIMER");
-        if(confirm2 !== 'SUPPRIMER') {
-            Utils.toast('Suppression annulée.', 'info');
-            return;
-        }
+        const pwd = await ConfirmModal.show({ title: '🔒 Confirmation par mot de passe', message: 'Entrez le mot de passe de votre compte pour confirmer la suppression.', icon: '🔒', type: 'prompt', inputType: 'password', inputPlaceholder: 'Mot de passe', confirmText: 'Supprimer définitivement', dangerous: true });
+        if(pwd == null) { Utils.toast('Suppression annulée.', 'info'); return; }
+        if(!String(pwd).trim()) { Utils.toast('Mot de passe requis.', 'warning'); return; }
+        const email = state.currentUser.email.toLowerCase();
+        // Reauthentification : on verifie le mot de passe AVANT toute suppression.
+        const { error: pwdErr } = await supabase.auth.signInWithPassword({ email: email, password: pwd });
+        if(pwdErr) { Utils.toast('Mot de passe incorrect. Suppression annulée.', 'error'); return; }
         
         try {
-            const email = state.currentUser.email.toLowerCase();
             
             // 1. Supprimer les projets dont l'utilisateur est propriétaire
             await supabase.from('projects').delete().eq('owner_email', email);
@@ -64129,6 +64136,71 @@ const UniverseFan = {
 };
 
 const UniverseSearch = {
+    // ---- Autocompletion de lieu (ville / adresse / pays) via Nominatim ----
+    // Choisir une suggestion fixe des coordonnees CERTAINES (amorcees dans le
+    // cache), qui servent ensuite de centre au filtre par rayon.
+    _locTimer: null,
+    _locSuggest: [],
+    onLocationInput: (value) => {
+        const box = document.getElementById('universe-city-suggest');
+        const q = (value || '').trim();
+        if(UniverseSearch._locTimer) clearTimeout(UniverseSearch._locTimer);
+        if(q.length < 3) { if(box) { box.style.display = 'none'; box.innerHTML = ''; } return; }
+        UniverseSearch._locTimer = setTimeout(async () => {
+            try {
+                const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=6&addressdetails=0&q=${encodeURIComponent(q)}`, { headers: { 'Accept': 'application/json' } });
+                if(!r.ok) return;
+                const data = await r.json();
+                UniverseSearch._locSuggest = (data || []).map(d => ({
+                    label: ((d.display_name || '').split(',')[0].trim()) || (d.display_name || ''),
+                    full: d.display_name || '',
+                    lat: parseFloat(d.lat), lng: parseFloat(d.lon)
+                })).filter(s => s.label && !isNaN(s.lat) && !isNaN(s.lng));
+                UniverseSearch._renderLocSuggest();
+            } catch(_) {}
+        }, 450);
+    },
+    _renderLocSuggest: () => {
+        const box = document.getElementById('universe-city-suggest');
+        if(!box) return;
+        const list = UniverseSearch._locSuggest || [];
+        if(!list.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+        const esc = Utils.escape;
+        box.innerHTML = list.map((s, i) =>
+            `<div onmousedown="event.preventDefault(); app.Universe.pickLocation(${i})" onmouseover="this.style.background='var(--highlight)'" onmouseout="this.style.background='transparent'" style="padding:8px 10px; cursor:pointer; border-bottom:1px solid var(--border);"><span style="font-weight:600;">${esc(s.label)}</span><span style="display:block; font-size:0.75rem; color:var(--text-sec); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(s.full)}</span></div>`
+        ).join('');
+        box.style.display = 'block';
+    },
+    pickLocation: (idx) => {
+        const s = (UniverseSearch._locSuggest || [])[idx];
+        if(!s) return;
+        const input = document.getElementById('universe-city');
+        if(input) input.value = s.label;
+        // Coordonnees certaines : amorcer le cache (memoire + localStorage) pour
+        // que geocodeCity renvoie CE point exact au filtre par rayon.
+        const key = s.label.toLowerCase().trim();
+        Universe.geoCache[key] = { lat: s.lat, lng: s.lng };
+        try {
+            const cached = localStorage.getItem('fmp_geocache');
+            const cacheData = cached ? JSON.parse(cached) : {};
+            cacheData[key] = { lat: s.lat, lng: s.lng };
+            localStorage.setItem('fmp_geocache', JSON.stringify(cacheData));
+        } catch(_) {}
+        UniverseSearch.hideLocationSuggest(true);
+    },
+    hideLocationSuggest: (now) => {
+        const hide = () => { const box = document.getElementById('universe-city-suggest'); if(box) box.style.display = 'none'; };
+        if(now) hide(); else setTimeout(hide, 200);
+    },
+    onLocationKey: (e) => {
+        if(e.key === 'Escape') { UniverseSearch.hideLocationSuggest(true); return; }
+        if(e.key === 'Enter') {
+            const box = document.getElementById('universe-city-suggest');
+            const open = box && box.style.display !== 'none' && (UniverseSearch._locSuggest || []).length;
+            if(open) { e.preventDefault(); UniverseSearch.pickLocation(0); }
+            else Universe.search();
+        }
+    },
     // Distance a vol d'oiseau entre deux points {lat,lng}, en km (haversine).
     _distanceKm: (a, b) => {
         const R = 6371, toRad = (d) => d * Math.PI / 180;
@@ -64164,6 +64236,7 @@ const UniverseSearch = {
         const radiusStr = distEl ? distEl.value : '';
         const radiusKm = parseInt(radiusStr, 10);
         const radiusActive = !!city && !isNaN(radiusKm) && radiusKm > 0 && radiusKm < 500;
+        Universe.searchActive = true;
         
         // Si on cherche des projets
         if(type === 'project') {
@@ -64525,6 +64598,7 @@ const UniverseSearch = {
         document.getElementById('universe-filters-association').style.display = 'none';
         document.getElementById('universe-filters-enterprise').style.display = 'none';
         
+        Universe.searchActive = false;
         Universe.filteredProfiles = [];
         Universe.filteredProjects = [];
         Universe.render();
@@ -65761,7 +65835,7 @@ const UniverseMap = {
     // Charger les marqueurs sur la carte
     loadMapMarkers: async () => {
         // Si des filtres sont actifs, utiliser les résultats filtrés
-        if(Universe.filteredProfiles.length > 0 || Universe.filteredProjects.length > 0) {
+        if(Universe.searchActive) {
             await Universe.loadFilteredMapMarkers();
         } else {
             await UniverseMap.loadMapMarkersInView();
@@ -65935,7 +66009,8 @@ const UniverseMap = {
             mapBtn.style.border = '1px solid var(--border)';
             
             mapContainer.style.display = 'none';
-            Universe.renderFanView(scene);
+            if(Universe.searchActive) UniverseSearch.renderSearchResultsFan(scene);
+            else Universe.renderFanView(scene);
         }
     },
 };
@@ -65943,6 +66018,7 @@ const UniverseMap = {
 const Universe = {
     // ===================== ÉTAT & CONFIG =====================
     filteredProfiles: [],
+    searchActive: false, // recherche en cours : carte ET liste affichent le meme filtre
     allProjects: [],
     filteredProjects: [],
     currentProfile: null,
@@ -66006,6 +66082,7 @@ hoverCard: null,
         document.getElementById('universe-filters-enterprise').style.display = 'none';
         
         // Réinitialiser les filtres pour forcer le rechargement par type
+        Universe.searchActive = false;
         Universe.filteredProfiles = [];
         Universe.filteredProjects = [];
         
@@ -66249,6 +66326,10 @@ Universe.setViewMode('map');
     search: (...a) => UniverseSearch.search(...a),
     loadFilteredMapMarkers: (...a) => UniverseSearch.loadFilteredMapMarkers(...a),
     reset: (...a) => UniverseSearch.reset(...a),
+    onLocationInput: (...a) => UniverseSearch.onLocationInput(...a),
+    onLocationKey: (...a) => UniverseSearch.onLocationKey(...a),
+    pickLocation: (...a) => UniverseSearch.pickLocation(...a),
+    hideLocationSuggest: (...a) => UniverseSearch.hideLocationSuggest(...a),
     // Ouvre le modal de profil
 	// Ouvre le modal d'un projet
 	
