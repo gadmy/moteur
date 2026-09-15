@@ -211,7 +211,7 @@ v592 (15 Septembre 2026) — CORRECTIFS INTERFACE + AUDIT UNIVERS : CASTING, ZON
   - FENETRE CASTING QUI SURVIVAIT AU PROJET. La fenetre flottante « Casting » (recherche de comediens ouverte depuis un personnage) restait affichee au retour au HUB. Nouveau WindowManager.closeAll qui ferme TOUTES les fenetres flottantes (casting + sous-onglets detaches, avec leur onClose), appele en tete de UI.showDashboard. Les positions des sous-onglets restent persistees (seules les fenetres 'tab:' etaient sauvegardees).
   - ZONE DANGER dans « Mon Profil » : titre reellement centre (le h3 est en display:flex, donc text-align n'y faisait rien -> justify-content:center), bloc « Supprimer mon compte » centre, et rectangle retreci et centre (max-width 520px, marges auto).
   - AFFICHE DU PROJET (Production > Presentation) : l'image uploadee ne s'affichait qu'apres rechargement. Le bucket « projects » etant prive, le chemin fraichement envoye est desormais signe + mis en cache (Utils._cacheNewPath) juste apres l'upload, comme le logo de prod. Seul upload direct qui l'oubliait ; les photos comedien/technicien et planches d'idees passent par l'uploader commun (deja OK), galeries/avatars/logos de structure vont sur des buckets publics (affichage direct).
-  - VUE SATELLITES (bouton idee) : clic droit sur la fiche au CENTRE -> petit menu « Ajouter une note » / « Ajouter une image », pour enrichir la planche sans repasser par la fiche. Note saisie via ConfirmModal.prompt, image via selecteur + Utils.uploadProjectFile ; la toile se redessine aussitot. Garde d'ecriture par droit de section (Permissions.canEditFiche), le clic droit ne demarre plus un glisser, le menu se ferme au clic exterieur. Message d'invite vide mis a jour. Chaque pastille (note/photo) porte aussi une CROIX (supprimer) et un COEUR (favori) — les favoris ressortent par un lisere rose et un halo ; en lecture seule seul le coeur plein subsiste comme repere (Board._satRemove / _satToggleFav, champ item.fav). Les photos respectent leur FORMAT reel (fini le carre rogne : object-fit contain + ajustement de la pastille au ratio a l'onload, Board._satFitPhoto) et le zoom molette monte plus haut (x8 au lieu de x4).
+  - VUE SATELLITES (bouton idee) : clic droit sur la fiche au CENTRE -> petit menu « Ajouter une note » / « Ajouter une image », pour enrichir la planche sans repasser par la fiche. Note saisie via ConfirmModal.prompt, image via selecteur + Utils.uploadProjectFile ; la toile se redessine aussitot. Garde d'ecriture par droit de section (Permissions.canEditFiche), le clic droit ne demarre plus un glisser, le menu se ferme au clic exterieur. Message d'invite vide mis a jour. Chaque pastille (note/photo) porte aussi une CROIX (supprimer) et un COEUR (favori) — les favoris ressortent par un lisere rose et un halo ; en lecture seule seul le coeur plein subsiste comme repere (Board._satRemove / _satToggleFav, champ item.fav). Les photos respectent leur FORMAT reel (fini le carre rogne : object-fit contain + ajustement de la pastille au ratio a l'onload, Board._satFitPhoto) et le zoom molette monte plus haut (x8 au lieu de x4). Le zoom molette est centre sur le CURSEUR (le point vise reste sous la souris) ; cliquer le coeur se fait EN PLACE (plus de re-render) et un ajout/suppression conserve zoom, format et position des autres pastilles (snapshot par id d'idee) — les zooms ne repassent plus a zero.
   - AUDIT UNIVERS — LE RAYON KM NE FILTRAIT RIEN. Le curseur « distance » (universe-distance) etait purement decoratif : jamais lu par UniverseSearch.search, aucune fonction de distance n'existait dans le module. Desormais, quand une ville ET un rayon < 500 km sont poses, la ville devient le CENTRE (et non plus un filtre texte) et les resultats sont filtres par distance a vol d'oiseau (haversine, UniverseSearch._distanceKm/_applyRadius) : lat/lng du profil si presentes, sinon geocodage de sa ville (cache memoire/localStorage/DB, repli Nominatim). 500 = ∞ conserve le comportement « ville en filtre texte ». Applique aux profils ET aux projets. CAVEAT : une premiere recherche sur des villes non encore en cache geocode 1 ville / 1,1 s (limite OSM), puis c'est instantane.
   - UNIVERS — CARTE ET LISTE DIVERGEAIENT. La liste (renderFanView) affichait TOUJOURS tous les profils en ignorant la recherche, alors que la carte respectait le filtre : apres une recherche les deux vues ne montraient pas la meme chose, et le rayon paraissait sans effet quand on regardait la liste. Nouveau drapeau Universe.searchActive, pose par la recherche et retire au changement de type / au reset ; les DEUX vues et loadMapMarkers le suivent (resultats filtres si recherche active, tout sinon). Note : les profils de test de ga.dmy@ikmail.com SONT bien dans le pool de recherche (aucune exclusion des emails internes cote Univers), a condition d'avoir au moins une casquette « 👁 Univers » visible.
   - UNIVERS — CHAMP « LIEU » AVEC AUTOCOMPLETION. Le champ « Ville » devient « Lieu » (ville / adresse / pays) et propose, apres une courte pause de frappe, des endroits REELS via Nominatim (OSM). Choisir une suggestion remplit le champ ET amorce le cache (memoire + localStorage) avec ses coordonnees EXACTES, qui deviennent le centre du filtre par rayon — plus d'ambiguite sur la localisation. Debounce 450 ms (limite OSM respectee), Entree valide la 1re suggestion ou lance la recherche, Echap ferme la liste. UniverseSearch.onLocationInput/_renderLocSuggest/pickLocation + facades sur Universe.
@@ -73939,13 +73939,26 @@ const Board = {
     _satWheel: (e) => {
         const el = e.target.closest('.board-sat-node');
         if(!el || el.classList.contains('board-sat-centre')) return;
-        const n = (Board._satNodes || [])[parseInt(el.dataset.si, 10)];
+        const idx = parseInt(el.dataset.si, 10);
+        const n = (Board._satNodes || [])[idx];
         if(!n) return;
         e.preventDefault();
+        const canvas = document.getElementById('board-sat-canvas');
+        const rect = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0 };
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        // Fraction du curseur DANS la pastille avant zoom (pour garder le point
+        // sous la souris a la meme place apres redimensionnement).
+        const fx = n.w ? (mx - (n.x - n.w / 2)) / n.w : 0.5;
+        const fy = n.h ? (my - (n.y - n.h / 2)) / n.h : 0.5;
         n._scale = Math.max(0.4, Math.min(8, (n._scale || 1) + (e.deltaY < 0 ? 0.18 : -0.18)));
         n.w = n.bw * n._scale; n.h = n.bh * n._scale;
+        // Recentre pour que le point vise reste sous le curseur
+        n.x = mx - fx * n.w + n.w / 2;
+        n.y = my - fy * n.h + n.h / 2;
         el.style.width = n.w + 'px'; el.style.height = n.h + 'px';
         el.style.left = (n.x - n.w / 2) + 'px'; el.style.top = (n.y - n.h / 2) + 'px';
+        const svg = document.getElementById('board-sat-svg');
+        if(svg) { const line = svg.querySelector('.board-sat-line[data-si="' + idx + '"]'); if(line) { line.setAttribute('x2', n.x); line.setAttribute('y2', n.y); } }
     },
     _satDblClick: (e) => {
         const el = e.target.closest('.board-sat-node');
@@ -74061,7 +74074,14 @@ const Board = {
         if(!n || !n.idea) return;
         n.idea.fav = !n.idea.fav;
         Store.save();
-        Board._renderSatellites();
+        // Mise a jour EN PLACE (pas de re-render) : les zooms restent.
+        const canvas = document.getElementById('board-sat-canvas');
+        const el = canvas && canvas.querySelector('.board-sat-node[data-si="' + i + '"]');
+        if(el) {
+            el.classList.toggle('is-fav', !!n.idea.fav);
+            const btn = el.querySelector('.board-sat-fav');
+            if(btn) { btn.classList.toggle('on', !!n.idea.fav); btn.textContent = n.idea.fav ? '❤' : '🤍'; btn.title = n.idea.fav ? 'Retirer des favoris' : "J'aime"; }
+        }
     },
     // Ajuste la pastille photo au FORMAT reel de l'image une fois chargee
     // (fini le carre qui rognait) ; conserve le centre et le zoom courant.
@@ -74118,6 +74138,10 @@ const Board = {
         const svg = document.getElementById('board-sat-svg');
         if(!canvas || !svg) return;
         const items = it.board || [];
+        // Memoriser zoom/format/position par idee pour les restituer apres
+        // reconstruction (un ajout/suppression ne doit pas remettre les zooms a zero).
+        const prev = {};
+        (Board._satNodes || []).forEach(nd => { if(nd && nd.idea && nd.idea.id) prev[nd.idea.id] = nd; });
         Board._satSel = null;
         const W = canvas.clientWidth || 900, H = canvas.clientHeight || 600;
         const cx = W / 2, cy = H / 2;
@@ -74136,6 +74160,19 @@ const Board = {
         ring(items.filter(b => b.kind === 'photo'), 'photo', 0, 116, 116);
         ring(items.filter(b => b.kind === 'note'), 'note', 180, 168, 78);
         GraphPhysics.relax(nodes, W, H, 140);
+        // Restituer l'etat memorise (zoom, format image, position) des idees deja affichees.
+        for(let k = 1; k < nodes.length; k++) {
+            const nd = nodes[k];
+            if(!nd.idea) continue;
+            const p = prev[nd.idea.id];
+            if(!p) continue;
+            if(p.bw) { nd.bw = p.bw; nd.bh = p.bh; }
+            if(p._scale) nd._scale = p._scale;
+            nd._big = p._big;
+            const sc = nd._scale || 1;
+            nd.w = nd.bw * sc; nd.h = nd.bh * sc;
+            if(typeof p.x === 'number' && typeof p.y === 'number') { nd.x = p.x; nd.y = p.y; }
+        }
         Board._satNodes = nodes;
         svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
         let lines = '';
