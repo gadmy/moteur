@@ -216,6 +216,7 @@ v592 (15 Septembre 2026) — CORRECTIFS INTERFACE + AUDIT UNIVERS : CASTING, ZON
   - UNIVERS — CARTE ET LISTE DIVERGEAIENT. La liste (renderFanView) affichait TOUJOURS tous les profils en ignorant la recherche, alors que la carte respectait le filtre : apres une recherche les deux vues ne montraient pas la meme chose, et le rayon paraissait sans effet quand on regardait la liste. Nouveau drapeau Universe.searchActive, pose par la recherche et retire au changement de type / au reset ; les DEUX vues et loadMapMarkers le suivent (resultats filtres si recherche active, tout sinon). Note : les profils de test de ga.dmy@ikmail.com SONT bien dans le pool de recherche (aucune exclusion des emails internes cote Univers), a condition d'avoir au moins une casquette « 👁 Univers » visible.
   - UNIVERS — CHAMP « LIEU » AVEC AUTOCOMPLETION. Le champ « Ville » devient « Lieu » (ville / adresse / pays) et propose, apres une courte pause de frappe, des endroits REELS via Nominatim (OSM). Choisir une suggestion remplit le champ ET amorce le cache (memoire + localStorage) avec ses coordonnees EXACTES, qui deviennent le centre du filtre par rayon — plus d'ambiguite sur la localisation. Debounce 450 ms (limite OSM respectee), Entree valide la 1re suggestion ou lance la recherche, Echap ferme la liste. UniverseSearch.onLocationInput/_renderLocSuggest/pickLocation + facades sur Universe.
   - SUPPRESSION DE COMPTE — la confirmation par le mot « SUPPRIMER » est remplacee par la saisie du MOT DE PASSE du compte, verifie par reauthentification (supabase.auth.signInWithPassword) AVANT toute suppression ; mot de passe faux = suppression annulee. Champ masque via une nouvelle option inputType:'password' de ConfirmModal.show.
+  - LECTEUR PHOTO DES GALERIES DE FICHES. Cliquer une photo de galerie (comedien, decor, technicien) ouvrait l'URL brute dans un onglet (« page bizarre », surtout en bucket prive : le decor faisait window.open). Nouveau module reutilisable PhotoViewer : lecteur plein ecran avec defilement gauche/droite (fleches a l'ecran + clavier + Echap), compteur, COEUR (favori, stocke dans entity.galleryFav, la vignette favorite est surlignee) et CROIX (supprime via la fonction propre a chaque famille). Expose sur app. Les galeries des profils PUBLICS de l'Univers gardent leur ancien affichage (donnees et bucket differents).
 v591 (15 Septembre 2026) — FUSION DES FICHES, VOLET 2 : ASSO + ENTREPRISE, ET CACHET/STATUT REPENSE. Les casquettes association et entreprise ouvrent desormais LA FICHE DU MOTEUR (comme comedien/technicien), en edition, sur une copie jetable remappee aux champs a plat du profil + facets.<kind>.hqAddress a l'enregistrement (aucune autre casquette touchee). La fiche structure (partagee projet + profil) est enrichie (logo par upload, reseaux sociaux, contact, activites, bande demo) et eclatee en onglets Identite / Contact / Presence, avec le libelle de CHAQUE champ AU-DESSUS du champ. Badge « Hors ligne » (tuile + fiche) quand une casquette est masquee de l'Univers, et la synchro ne reecrit plus une fiche dont la casquette est eteinte/masquee (les 4 casquettes). Les 4 casquettes sont donc unifiees ; l'ancien formulaire de profil reste comme filet.
   - CACHET / STATUT SEPARES. Le SALAIRE (chiffres negocies) est propriete du PROJET : editable par la prod meme sur une fiche revendiquee, jamais synchronise, absent du profil. Le STATUT et la paie (intermittent, n Secu, n Conges Spectacles, SIRET, mode de collaboration) sont renseignes par la PERSONNE sur son profil, synchronises vers les projets (facet d'abord), en lecture seule si la fiche est revendiquee. Le MODE DE COLLABORATION est visible sur le profil public de l'Univers (drapeau _publicView) ; salaire et statut-admin restent masques cote public.
   - AUDIT FICHES (6 axes) + CORRECTIFS. Gardes d'ecriture « fiche revendiquee/liee = lecture seule » cote logique (updateActorMeta, Crew.updateMember, updateDataItem, Orgs.updateFiche) + garde lecteur sur updateCharacterMeta / updateLocationMeta. Comptage des scenes d'un decor par locationId seul (fin du repli par titre). Code mort Orgs._extraFields retire. Console : gap:-5px invalide retire ; « els is not defined » au changement de statut corrige (renderDataTab retrouve son conteneur, handlers inline sans els) ; conservation du scroll au re-dessin des fiches profil.
@@ -4227,6 +4228,23 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .board-sat-x { background: rgba(0,0,0,0.6); color: #fff; }
   .board-sat-fav { background: rgba(255,255,255,0.9); }
   .board-sat-fav.on { background: #ffe3ef; }
+  /* LECTEUR PHOTO (galeries de fiches) */
+  .pv-overlay { position: fixed; inset: 0; z-index: var(--z-tooltip); background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; }
+  .pv-img { max-width: 90vw; max-height: 82vh; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0,0,0,0.6); background: #111; }
+  .pv-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 48px; height: 48px; border-radius: 50%; border: none; background: rgba(255,255,255,0.15); color: #fff; font-size: 1.8rem; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .pv-nav:hover { background: rgba(255,255,255,0.32); }
+  .pv-prev { left: 18px; }
+  .pv-next { right: 18px; }
+  .pv-close { position: absolute; top: 16px; right: 18px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,0.15); color: #fff; font-size: 1.1rem; cursor: pointer; }
+  .pv-close:hover { background: rgba(255,255,255,0.32); }
+  .pv-count { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 0.9rem; background: rgba(0,0,0,0.45); padding: 4px 12px; border-radius: 20px; }
+  .pv-actions { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%); display: flex; gap: 14px; }
+  .pv-actions button, .pv-actions span { width: 46px; height: 46px; border-radius: 50%; border: none; cursor: pointer; font-size: 1.2rem; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+  .pv-fav { background: rgba(255,255,255,0.9); }
+  .pv-fav.on { background: #ffe3ef; }
+  .pv-del { background: #c0392b; color: #fff; }
+  .gallery-fav-badge { position: absolute; top: 3px; left: 3px; font-size: 0.8rem; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6)); pointer-events: none; }
+  .gallery-thumb-fav { outline: 2px solid #e84393; outline-offset: 1px; }
   .board-sat-centre { display: flex; align-items: center; justify-content: center; text-align: center; background: var(--primary); color: #fff; border-radius: 12px; font-weight: 600; padding: 8px; }
   .board-sat-photo { border-radius: 10px; overflow: hidden; border: 2px solid var(--panel-bg); box-shadow: 0 4px 14px rgba(0,0,0,0.3); }
   .board-sat-photo img { width: 100%; height: 100%; object-fit: contain; }
@@ -21726,7 +21744,7 @@ initCategoriesDragDrop: () => {
                 // Brique « Galerie ».
                 if(UI.isSectionVisibleForProject(item, 'gallery')) {
                     const galleryPhotos = item.galleryPhotos || [];
-                    const galleryHTML = galleryPhotos.map((url, i2) => `<div style="position:relative; width:80px; height:80px;"><img src="${Utils.safeMediaUrl(url)}" alt="Photo de la galerie" style="width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--border);">${!isReadOnly ? `<button onclick="app.Actions.removeActorGalleryPhoto(${idx}, ${i2})" class="n8-avatar-3">✕</button>` : ''}</div>`).join('');
+                    const galleryHTML = galleryPhotos.map((url, i2) => `<div style="position:relative; width:80px; height:80px;"><img src="${Utils.safeMediaUrl(url)}" alt="Photo de la galerie" class="${(item.galleryFav||[]).includes(url) ? 'gallery-thumb-fav' : ''}" style="width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--border); cursor:pointer;" onclick="app.PhotoViewer.open('actors', ${idx}, ${i2})">${(item.galleryFav||[]).includes(url) ? '<span class="gallery-fav-badge">❤</span>' : ''}${!isReadOnly ? `<button onclick="app.Actions.removeActorGalleryPhoto(${idx}, ${i2})" class="n8-avatar-3">✕</button>` : ''}</div>`).join('');
                     let galHtml = `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px;">${galleryHTML || '<span style="color:var(--text-sec); font-size:0.85rem;">Aucune photo</span>'}</div>
                         ${!isReadOnly ? `<div class="flex-gap10" style="align-items:center;"><input type="file" id="actor-gallery-input-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.addActorGalleryPhoto(${idx})"><button onclick="document.getElementById('actor-gallery-input-${idx}').click()" class="btn btn--primary btn--sm" ${galleryPhotos.length >= 3 ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>📤 Ajouter une photo${galleryPhotos.length > 0 ? ` (${galleryPhotos.length}/3)` : ''}</button></div>` : ''}`;
                     blocks.push(FicheUI.block('actor', 'galerie', '📸 Galerie photos', galHtml));
@@ -21842,7 +21860,7 @@ initCategoriesDragDrop: () => {
 
                 // Brique « Photos de repérage ».
                 let photosHtml = `<div id="location-gallery-${idx}" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-                    ${(item.galleryPhotos || []).map((photo, pIdx) => `<div style="position:relative; width:80px; height:80px;"><img src="${Utils.safeMediaUrl(photo)}" alt="Photo" style="width:100%; height:100%; object-fit:cover; border-radius:4px; cursor:pointer;" onclick="window.open('${Utils.safeMediaUrl(photo)}', '_blank')">${!isView ? `<button onclick="app.Actions.removeLocationPhoto(${idx}, ${pIdx})" style="position:absolute; top:-5px; right:-5px; background:var(--danger); color:white; border:none; border-radius:50%; width:18px; height:18px; cursor:pointer; font-size:10px;">✕</button>` : ''}</div>`).join('')}
+                    ${(item.galleryPhotos || []).map((photo, pIdx) => `<div style="position:relative; width:80px; height:80px;"><img src="${Utils.safeMediaUrl(photo)}" alt="Photo" class="${(item.galleryFav||[]).includes(photo) ? 'gallery-thumb-fav' : ''}" style="width:100%; height:100%; object-fit:cover; border-radius:4px; cursor:pointer;" onclick="app.PhotoViewer.open('locations', ${idx}, ${pIdx})">${(item.galleryFav||[]).includes(photo) ? '<span class="gallery-fav-badge">❤</span>' : ''}${!isView ? `<button onclick="app.Actions.removeLocationPhoto(${idx}, ${pIdx})" style="position:absolute; top:-5px; right:-5px; background:var(--danger); color:white; border:none; border-radius:50%; width:18px; height:18px; cursor:pointer; font-size:10px;">✕</button>` : ''}</div>`).join('')}
                     ${(item.galleryPhotos || []).length === 0 ? '<span style="color:var(--text-sec); font-size:0.85rem; font-style:italic;">Aucune photo</span>' : ''}
                 </div>
                 ${!isView ? `<div class="flex-gap10" style="align-items:center;"><input type="file" id="loc-gallery-input-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.addLocationPhoto(${idx}, this)"><button onclick="document.getElementById('loc-gallery-input-${idx}').click()" class="btn btn--primary btn--sm">📤 Ajouter une photo</button></div>` : ''}`;
@@ -22070,7 +22088,7 @@ initCategoriesDragDrop: () => {
 
         // Brique « Galerie ».
         if(UI.isSectionVisibleForProject(member, 'crew-gallery')) {
-            let galHtml = `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px;">${(member.galleryPhotos || []).map((url, i2) => `<div style="position:relative; width:80px; height:80px;"><img src="${Utils.safeMediaUrl(url)}" alt="Photo de la galerie" style="width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--border);">${!isReadOnly ? `<button onclick="app.Crew.removeGalleryPhoto(${idx}, ${i2})" class="n8-avatar-3">✕</button>` : ''}</div>`).join('') || '<span style="color:var(--text-sec); font-size:0.85rem;">Aucune photo</span>'}</div>
+            let galHtml = `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px;">${(member.galleryPhotos || []).map((url, i2) => `<div style="position:relative; width:80px; height:80px;"><img src="${Utils.safeMediaUrl(url)}" alt="Photo de la galerie" class="${(member.galleryFav||[]).includes(url) ? 'gallery-thumb-fav' : ''}" style="width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--border); cursor:pointer;" onclick="app.PhotoViewer.open('crew', ${idx}, ${i2})">${(member.galleryFav||[]).includes(url) ? '<span class="gallery-fav-badge">❤</span>' : ''}${!isReadOnly ? `<button onclick="app.Crew.removeGalleryPhoto(${idx}, ${i2})" class="n8-avatar-3">✕</button>` : ''}</div>`).join('') || '<span style="color:var(--text-sec); font-size:0.85rem;">Aucune photo</span>'}</div>
                 ${!isReadOnly ? `<div class="flex-gap10" style="align-items:center;"><input type="file" id="crew-gallery-input-${idx}" accept="image/*" style="display:none;" onchange="app.Crew.addGalleryPhoto(${idx})"><button onclick="document.getElementById('crew-gallery-input-${idx}').click()" class="btn btn--primary btn--sm">📤 Ajouter une photo</button></div>` : ''}`;
             blocks.push(FicheUI.block('crew', 'galerie', '📸 Galerie photos', galHtml));
         }
@@ -74216,6 +74234,100 @@ const Board = {
     render: (family, id, isView) => `<div class="board-wrap" id="board-wrap-${Utils.escape(family)}-${Utils.escape(String(id))}">${Board._inner(family, id, isView)}</div>`
 };
 
+// ============================================================
+// LECTEUR PHOTO reutilisable pour les galeries de fiches
+// (comedien, decor, technicien). Defilement gauche/droite, coeur
+// (favori, stocke dans entity.galleryFav) et croix (supprimer via la
+// fonction de suppression propre a chaque famille).
+// ============================================================
+const PhotoViewer = {
+    _coll: null, _idx: 0, _i: 0, _photos: [],
+    _famOf: { actors: 'actor', locations: 'location', crew: 'crew' },
+    _removeFn: {
+        actors: (idx, i) => Actions.removeActorGalleryPhoto(idx, i),
+        locations: (idx, i) => Actions.removeLocationPhoto(idx, i),
+        crew: (idx, i) => Crew.removeGalleryPhoto(idx, i)
+    },
+    _entity: () => { const c = PhotoViewer._coll; return (c && state.data[c] && state.data[c][PhotoViewer._idx]) || null; },
+    _canEdit: () => {
+        const fam = PhotoViewer._famOf[PhotoViewer._coll];
+        return (typeof Permissions === 'undefined' || !Permissions.canEditFiche) ? true : Permissions.canEditFiche(fam);
+    },
+    open: (coll, idx, start) => {
+        const ent = state.data[coll] && state.data[coll][idx];
+        if(!ent) return;
+        const photos = ent.galleryPhotos || [];
+        if(!photos.length) return;
+        PhotoViewer._coll = coll; PhotoViewer._idx = idx; PhotoViewer._photos = photos;
+        PhotoViewer._i = Math.max(0, Math.min(start || 0, photos.length - 1));
+        let ov = document.getElementById('pv-overlay');
+        if(!ov) {
+            ov = document.createElement('div');
+            ov.id = 'pv-overlay'; ov.className = 'pv-overlay';
+            ov.addEventListener('click', (e) => { if(e.target === ov) PhotoViewer.close(); });
+            document.body.appendChild(ov);
+            document.addEventListener('keydown', PhotoViewer._onKey);
+        }
+        PhotoViewer._render();
+    },
+    close: () => {
+        const ov = document.getElementById('pv-overlay');
+        if(ov) ov.remove();
+        document.removeEventListener('keydown', PhotoViewer._onKey);
+    },
+    _onKey: (e) => {
+        if(!document.getElementById('pv-overlay')) return;
+        if(e.key === 'Escape') PhotoViewer.close();
+        else if(e.key === 'ArrowLeft') PhotoViewer.prev();
+        else if(e.key === 'ArrowRight') PhotoViewer.next();
+    },
+    prev: () => { const n = PhotoViewer._photos.length; if(!n) return; PhotoViewer._i = (PhotoViewer._i - 1 + n) % n; PhotoViewer._render(); },
+    next: () => { const n = PhotoViewer._photos.length; if(!n) return; PhotoViewer._i = (PhotoViewer._i + 1) % n; PhotoViewer._render(); },
+    _toggleFav: () => {
+        const ent = PhotoViewer._entity();
+        if(!ent || !PhotoViewer._canEdit()) return;
+        const url = PhotoViewer._photos[PhotoViewer._i];
+        if(!url) return;
+        if(!Array.isArray(ent.galleryFav)) ent.galleryFav = [];
+        const k = ent.galleryFav.indexOf(url);
+        if(k === -1) ent.galleryFav.push(url); else ent.galleryFav.splice(k, 1);
+        Store.save();
+        if(typeof CardModal !== 'undefined' && CardModal.refresh) CardModal.refresh();
+        PhotoViewer._render();
+    },
+    _delete: async () => {
+        const ent = PhotoViewer._entity();
+        if(!ent || !PhotoViewer._canEdit()) return;
+        const i = PhotoViewer._i;
+        const fn = PhotoViewer._removeFn[PhotoViewer._coll];
+        if(fn) await fn(PhotoViewer._idx, i);
+        const ent2 = PhotoViewer._entity();
+        const photos = (ent2 && ent2.galleryPhotos) || [];
+        PhotoViewer._photos = photos;
+        if(!photos.length) { PhotoViewer.close(); return; }
+        PhotoViewer._i = Math.min(i, photos.length - 1);
+        PhotoViewer._render();
+    },
+    _render: () => {
+        const ov = document.getElementById('pv-overlay');
+        if(!ov) return;
+        const ent = PhotoViewer._entity();
+        const photos = PhotoViewer._photos || [];
+        const url = photos[PhotoViewer._i] || '';
+        const n = photos.length;
+        const canEdit = PhotoViewer._canEdit();
+        const fav = !!(ent && Array.isArray(ent.galleryFav) && ent.galleryFav.includes(url));
+        const esc = Utils.escape;
+        const nav = n > 1
+            ? `<button class="pv-nav pv-prev" onclick="event.stopPropagation(); app.PhotoViewer.prev()" title="Précédente">‹</button><button class="pv-nav pv-next" onclick="event.stopPropagation(); app.PhotoViewer.next()" title="Suivante">›</button>`
+            : '';
+        const actions = canEdit
+            ? `<div class="pv-actions"><button class="pv-fav${fav ? ' on' : ''}" onclick="event.stopPropagation(); app.PhotoViewer._toggleFav()" title="${fav ? 'Retirer des favoris' : "J'aime"}">${fav ? '❤' : '🤍'}</button><button class="pv-del" onclick="event.stopPropagation(); app.PhotoViewer._delete()" title="Supprimer">✕</button></div>`
+            : (fav ? `<div class="pv-actions"><span class="pv-fav on">❤</span></div>` : '');
+        ov.innerHTML = `<button class="pv-close" onclick="event.stopPropagation(); app.PhotoViewer.close()" title="Fermer">✕</button>${n > 1 ? `<div class="pv-count">${PhotoViewer._i + 1} / ${n}</div>` : ''}<img class="pv-img" src="${esc(Utils.safeMediaUrl(url))}" alt="Photo">${nav}${actions}`;
+    }
+};
+
 const CardModal = {
     currentType: null,
     currentIdx: null,
@@ -81883,7 +81995,7 @@ const Weather = {
       },
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, CoursesWeb, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo, DBPresence, LockManager, LockDomains, Links, Web, FicheLinks, Diag, FicheUI, FicheBlocks, Board, ScriptShare, ScriptReader, ScriptReview, ProjectWelcome };
+  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileCalendar, ProfileGallery, ProfileSkills, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, CoursesWeb, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo, DBPresence, LockManager, LockDomains, Links, Web, FicheLinks, Diag, FicheUI, FicheBlocks, Board, ScriptShare, ScriptReader, ScriptReview, ProjectWelcome, PhotoViewer };
 })();
 </script>
 
