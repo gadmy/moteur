@@ -25,7 +25,7 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 
 ================================================================================
-                 RESTE À FAIRE — ÉTAT AU 15 SEPTEMBRE 2026 (v591)
+                 RESTE À FAIRE — ÉTAT AU 15 SEPTEMBRE 2026 (v592)
 ================================================================================
 En-tete PURGE le 4 septembre (v582), a la demande de Guillaume : les recaps de
 sessions, le detail des MIGRATIONS SQL et le JOURNAL DU CHANTIER FEUILLE DE
@@ -207,6 +207,11 @@ est raconte aux entrees v562 a v567 de l'historique ci-dessous.)
 ================================================================================
                          HISTORIQUE DES VERSIONS
 ================================================================================
+v592 (15 Septembre 2026) — QUATRE CORRECTIFS D'INTERFACE : FENETRE CASTING, ZONE DANGER, AFFICHE, VUE SATELLITES.
+  - FENETRE CASTING QUI SURVIVAIT AU PROJET. La fenetre flottante « Casting » (recherche de comediens ouverte depuis un personnage) restait affichee au retour au HUB. Nouveau WindowManager.closeAll qui ferme TOUTES les fenetres flottantes (casting + sous-onglets detaches, avec leur onClose), appele en tete de UI.showDashboard. Les positions des sous-onglets restent persistees (seules les fenetres 'tab:' etaient sauvegardees).
+  - ZONE DANGER CENTREE dans « Mon Profil » : titre et bloc « Supprimer mon compte » centres (text-align + justify-content sur la section).
+  - AFFICHE DU PROJET (Production > Presentation) : l'image uploadee ne s'affichait qu'apres rechargement. Le bucket « projects » etant prive, le chemin fraichement envoye est desormais signe + mis en cache (Utils._cacheNewPath) juste apres l'upload, comme le logo de prod. Seul upload direct qui l'oubliait ; les photos comedien/technicien et planches d'idees passent par l'uploader commun (deja OK), galeries/avatars/logos de structure vont sur des buckets publics (affichage direct).
+  - VUE SATELLITES (bouton idee) : clic droit sur la fiche au CENTRE -> petit menu « Ajouter une note » / « Ajouter une image », pour enrichir la planche sans repasser par la fiche. Note saisie via ConfirmModal.prompt, image via selecteur + Utils.uploadProjectFile ; la toile se redessine aussitot. Garde d'ecriture par droit de section (Permissions.canEditFiche), le clic droit ne demarre plus un glisser, le menu se ferme au clic exterieur. Message d'invite vide mis a jour.
 v591 (15 Septembre 2026) — FUSION DES FICHES, VOLET 2 : ASSO + ENTREPRISE, ET CACHET/STATUT REPENSE. Les casquettes association et entreprise ouvrent desormais LA FICHE DU MOTEUR (comme comedien/technicien), en edition, sur une copie jetable remappee aux champs a plat du profil + facets.<kind>.hqAddress a l'enregistrement (aucune autre casquette touchee). La fiche structure (partagee projet + profil) est enrichie (logo par upload, reseaux sociaux, contact, activites, bande demo) et eclatee en onglets Identite / Contact / Presence, avec le libelle de CHAQUE champ AU-DESSUS du champ. Badge « Hors ligne » (tuile + fiche) quand une casquette est masquee de l'Univers, et la synchro ne reecrit plus une fiche dont la casquette est eteinte/masquee (les 4 casquettes). Les 4 casquettes sont donc unifiees ; l'ancien formulaire de profil reste comme filet.
   - CACHET / STATUT SEPARES. Le SALAIRE (chiffres negocies) est propriete du PROJET : editable par la prod meme sur une fiche revendiquee, jamais synchronise, absent du profil. Le STATUT et la paie (intermittent, n Secu, n Conges Spectacles, SIRET, mode de collaboration) sont renseignes par la PERSONNE sur son profil, synchronises vers les projets (facet d'abord), en lecture seule si la fiche est revendiquee. Le MODE DE COLLABORATION est visible sur le profil public de l'Univers (drapeau _publicView) ; salaire et statut-admin restent masques cote public.
   - AUDIT FICHES (6 axes) + CORRECTIFS. Gardes d'ecriture « fiche revendiquee/liee = lecture seule » cote logique (updateActorMeta, Crew.updateMember, updateDataItem, Orgs.updateFiche) + garde lecteur sur updateCharacterMeta / updateLocationMeta. Comptage des scenes d'un decor par locationId seul (fin du repli par titre). Code mort Orgs._extraFields retire. Console : gap:-5px invalide retire ; « els is not defined » au changement de statut corrige (renderDataTab retrouve son conteneur, handlers inline sans els) ; conservation du scroll au re-dessin des fiches profil.
@@ -73778,6 +73783,7 @@ const Board = {
         }
     },
     _satMouseDown: (e) => {
+        if(e.button && e.button !== 0) return;   // clic droit/milieu -> laisse le menu contextuel
         const canvas = document.getElementById('board-sat-canvas');
         const nodes = Board._satNodes || [];
         if(!canvas || !nodes.length) return;
@@ -73830,6 +73836,89 @@ const Board = {
         el.style.width = n.w + 'px'; el.style.height = n.h + 'px';
         el.style.left = (n.x - n.w / 2) + 'px'; el.style.top = (n.y - n.h / 2) + 'px';
     },
+    // Peut-on ecrire sur la planche de la fiche au centre ? (droit de sa section)
+    _satCanEdit: () => {
+        const ctx = Board._satCtx;
+        if(!ctx) return false;
+        return (typeof Permissions === 'undefined' || !Permissions.canEditFiche) ? true : Permissions.canEditFiche(ctx.family);
+    },
+    _satCloseMenu: () => {
+        const m = document.getElementById('board-sat-menu');
+        if(m) m.remove();
+    },
+    // Clic droit sur la fiche au centre : petit menu « Ajouter une note » /
+    // « Ajouter une image » pour enrichir la planche sans repasser par la fiche.
+    _satCtxMenu: (e) => {
+        const centre = e.target.closest('.board-sat-centre');
+        if(!centre) return;
+        e.preventDefault();
+        Board._satCloseMenu();
+        if(!Board._satCanEdit()) return;
+        const canvas = document.getElementById('board-sat-canvas');
+        if(!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const menu = document.createElement('div');
+        menu.id = 'board-sat-menu';
+        menu.style.cssText = 'position:absolute; z-index:10000; background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,0.35); padding:4px; min-width:190px;';
+        menu.style.left = Math.max(0, Math.min(e.clientX - rect.left, rect.width - 200)) + 'px';
+        menu.style.top = Math.max(0, Math.min(e.clientY - rect.top, rect.height - 96)) + 'px';
+        const mk = (label, fn) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = label;
+            b.style.cssText = 'display:block; width:100%; text-align:left; background:none; border:none; padding:9px 12px; border-radius:6px; cursor:pointer; color:var(--text-main); font-size:0.9rem;';
+            b.onmouseover = () => { b.style.background = 'var(--highlight)'; };
+            b.onmouseout = () => { b.style.background = 'none'; };
+            b.addEventListener('click', () => { Board._satCloseMenu(); fn(); });
+            return b;
+        };
+        menu.appendChild(mk('📝 Ajouter une note', Board._satAddNote));
+        menu.appendChild(mk('📸 Ajouter une image', Board._satAddPhoto));
+        canvas.appendChild(menu);
+        setTimeout(() => {
+            const off = (ev) => { if(!ev.target.closest('#board-sat-menu')) { Board._satCloseMenu(); document.removeEventListener('mousedown', off, true); } };
+            document.addEventListener('mousedown', off, true);
+        }, 0);
+    },
+    _satAddNote: async () => {
+        const ctx = Board._satCtx;
+        if(!ctx || !Board._satCanEdit()) return;
+        const it = Board._findItem(ctx.family, ctx.id);
+        if(!it) return;
+        let text = '';
+        try { text = await ConfirmModal.prompt('Texte de la note', '📝 Nouvelle note', 'Idée, référence, remarque…'); } catch(_) { text = ''; }
+        if(text == null) return;
+        text = String(text).trim();
+        if(!text) return;
+        if(!it.board) it.board = [];
+        it.board.push({ id: Board._newId(), kind: 'note', text: text, ts: Date.now() });
+        Store.save();
+        Board._renderSatellites();
+    },
+    _satAddPhoto: () => {
+        const ctx = Board._satCtx;
+        if(!ctx || !Board._satCanEdit()) return;
+        const it = Board._findItem(ctx.family, ctx.id);
+        if(!it) return;
+        const input = document.createElement('input');
+        input.type = 'file'; input.accept = 'image/*'; input.style.display = 'none';
+        document.body.appendChild(input);
+        input.addEventListener('change', async () => {
+            const file = input.files && input.files[0];
+            if(file) {
+                Utils.toast('Envoi de la photo...', 'info', 1500);
+                const url = await Utils.uploadProjectFile(file, { category: ctx.family, entityId: it.id || 'x', kind: 'board', maxDimension: 1920, quality: 0.9, maxKb: 1500 });
+                if(url) {
+                    if(!it.board) it.board = [];
+                    it.board.push({ id: Board._newId(), kind: 'photo', url: url, ts: Date.now() });
+                    Store.save();
+                    Board._renderSatellites();
+                }
+            }
+            input.remove();
+        });
+        input.click();
+    },
     openSatellites: (family, id) => {
         const it = Board._findItem(family, id);
         if(!it) return;
@@ -73842,7 +73931,7 @@ const Board = {
         wrap.innerHTML = `<div class="board-sat-head"><span class="board-sat-title">💡 Idées — ${Utils.escape(it.name || '')}</span><button class="board-sat-close" type="button" onclick="app.Board.closeSatellites()">✖</button></div><div class="board-sat-canvas" id="board-sat-canvas"><svg class="board-sat-svg" id="board-sat-svg"></svg></div>`;
         document.body.appendChild(wrap);
         const _c = document.getElementById('board-sat-canvas');
-        if(_c) { _c.addEventListener('mousedown', Board._satMouseDown); _c.addEventListener('dblclick', Board._satDblClick); _c.addEventListener('wheel', Board._satWheel, { passive: false }); }
+        if(_c) { _c.addEventListener('mousedown', Board._satMouseDown); _c.addEventListener('dblclick', Board._satDblClick); _c.addEventListener('wheel', Board._satWheel, { passive: false }); _c.addEventListener('contextmenu', Board._satCtxMenu); }
         Board._satCtx = { family: family, id: id };
         Board._onSatResize = () => Board._renderSatellites();
         window.addEventListener('resize', Board._onSatResize);
@@ -73900,7 +73989,7 @@ const Board = {
             }
         }
         if(nodes.length === 1) {
-            bubbles += `<div class="board-sat-empty">Aucune idée pour l'instant. Ajoute des notes ou des photos depuis l'onglet de la fiche.</div>`;
+            bubbles += `<div class="board-sat-empty">Aucune idée pour l'instant. Clic droit sur la fiche au centre pour ajouter une note ou une image.</div>`;
         }
         canvas.querySelectorAll('.board-sat-node,.board-sat-empty').forEach(el => el.remove());
         canvas.insertAdjacentHTML('beforeend', bubbles);
