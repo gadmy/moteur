@@ -3532,6 +3532,9 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .moodboard-board-tab .tab-close:hover { opacity: 1; }
   .moodboard-canvas-wrapper { flex: 1; overflow: hidden; position: relative; background: #2a2a2a; }
   .moodboard-canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; cursor: grab; background: #ffffff; box-shadow: 0 0 0 1px #ccc, 0 4px 20px rgba(0,0,0,0.15); }
+  .mb-snap-line { position: absolute; background: #ec4899; z-index: 500; pointer-events: none; }
+  .mb-snap-line-v { width: 1px; top: 0; bottom: 0; }
+  .mb-snap-line-h { height: 1px; left: 0; right: 0; }
   .moodboard-canvas.format-free { width: 5000px; height: 5000px; }
   .moodboard-element { position: absolute; cursor: move; border: 2px solid transparent; border-radius: 8px; transition: border-color 0.2s, box-shadow 0.2s; min-width: 80px; min-height: 80px; }
   .moodboard-element:hover { border-color: var(--primary); }
@@ -28365,11 +28368,16 @@ const MoodBoard = {
         }
         
         if(el.type === 'text') {
+            const bg = (el.bgColor && el.bgColor !== 'transparent') ? el.bgColor : 'transparent';
             const style = `
                 font-family: ${el.fontFamily || 'Inter, sans-serif'};
                 font-size: ${el.fontSize || 18}px;
                 text-align: ${el.textAlign || 'left'};
                 color: ${el.textColor || '#333333'};
+                font-weight: ${el.fontBold ? 'bold' : 'normal'};
+                font-style: ${el.fontItalic ? 'italic' : 'normal'};
+                text-decoration: ${el.fontUnderline ? 'underline' : 'none'};
+                background: ${bg};
             `;
             content = `<div class="moodboard-element-text" style="${style}">${Utils.escape(el.content || '').replace(/\n/g, '<br>')}</div>`;
         }
@@ -28531,24 +28539,48 @@ const MoodBoard = {
         MoodBoard.dragOffsetX = (e.clientX / MoodBoard.zoom) - element.x;
         MoodBoard.dragOffsetY = (e.clientY / MoodBoard.zoom) - element.y;
         
+        // Alignement (v594) : bords/centres des AUTRES elements de la planche,
+        // pour aimanter la position pendant le glisser et tracer un repere.
+        const others = board.elements.filter(o => o.id !== elementId);
+        const linesX = [], linesY = [];
+        others.forEach(o => {
+            linesX.push(o.x, o.x + o.width / 2, o.x + o.width);
+            linesY.push(o.y, o.y + o.height / 2, o.y + o.height);
+        });
+        const SNAP = 8 / MoodBoard.zoom;
+        
         const onMouseMove = (e) => {
             if(!MoodBoard.isDraggingElement) return;
             
-            const newX = (e.clientX / MoodBoard.zoom) - MoodBoard.dragOffsetX;
-            const newY = (e.clientY / MoodBoard.zoom) - MoodBoard.dragOffsetY;
+            let newX = (e.clientX / MoodBoard.zoom) - MoodBoard.dragOffsetX;
+            let newY = (e.clientY / MoodBoard.zoom) - MoodBoard.dragOffsetY;
+            newX = Math.max(0, newX);
+            newY = Math.max(0, newY);
             
-            element.x = Math.max(0, newX);
-            element.y = Math.max(0, newY);
+            let snapLineX = null, snapLineY = null;
+            for(const cx of [newX, newX + element.width / 2, newX + element.width]) {
+                const match = linesX.find(lx => Math.abs(lx - cx) <= SNAP);
+                if(match != null) { newX += (match - cx); snapLineX = match; break; }
+            }
+            for(const cy of [newY, newY + element.height / 2, newY + element.height]) {
+                const match = linesY.find(ly => Math.abs(ly - cy) <= SNAP);
+                if(match != null) { newY += (match - cy); snapLineY = match; break; }
+            }
+            
+            element.x = newX;
+            element.y = newY;
             
             const domEl = document.getElementById('mb-el-' + elementId);
             if(domEl) {
                 domEl.style.left = element.x + 'px';
                 domEl.style.top = element.y + 'px';
             }
+            MoodBoard.showSnapGuides(snapLineX, snapLineY);
         };
         
         const onMouseUp = () => {
             MoodBoard.isDraggingElement = false;
+            MoodBoard.hideSnapGuides();
             board.modifiedAt = Date.now();
             // A la FIN du deplacement, pas pendant : redessiner la vignette a
             // chaque mouvement de souris ferait ramer une planche chargee.
@@ -28560,6 +28592,27 @@ const MoodBoard = {
         
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
+    },
+
+    // Trace/efface les deux reperes d'aimantation (vertical + horizontal).
+    showSnapGuides: (x, y) => {
+        const canvas = document.getElementById('moodboardCanvas');
+        if(!canvas) return;
+        let vLine = document.getElementById('mbSnapLineV');
+        if(x != null) {
+            if(!vLine) { vLine = document.createElement('div'); vLine.id = 'mbSnapLineV'; vLine.className = 'mb-snap-line mb-snap-line-v'; canvas.appendChild(vLine); }
+            vLine.style.left = x + 'px';
+        } else if(vLine) vLine.remove();
+        let hLine = document.getElementById('mbSnapLineH');
+        if(y != null) {
+            if(!hLine) { hLine = document.createElement('div'); hLine.id = 'mbSnapLineH'; hLine.className = 'mb-snap-line mb-snap-line-h'; canvas.appendChild(hLine); }
+            hLine.style.top = y + 'px';
+        } else if(hLine) hLine.remove();
+    },
+
+    hideSnapGuides: () => {
+        const vLine = document.getElementById('mbSnapLineV'); if(vLine) vLine.remove();
+        const hLine = document.getElementById('mbSnapLineH'); if(hLine) hLine.remove();
     },
     
     startResize: (elementId, e) => {
