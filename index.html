@@ -35871,11 +35871,26 @@ const DrawingEditor = {
           const catLabel = categoryLabels[category] || category;
           if(editId) {
               const idx = state.data.resources.findIndex(r => r.id === editId);
+              let oldName = null;
               if(idx > -1) {
+                  oldName = state.data.resources[idx].name;
                   state.data.resources[idx] = { ...state.data.resources[idx], name, category, photo, description, note, owner };
               }
               Utils.toast('Ressource modifiée', 'success');
               History.log('EDIT', `Modification ${catLabel} : ${name}`, { target: { kind: 'resource', id: editId, label: name }, link: { kind: 'resource', id: editId } });
+              // v594 : le nom d'une ressource est aussi mis en cache dans les
+              // etiquettes du depouillement (meme principe que personnages/
+              // decors) — sans ca, la colonne de droite et le trait jaune
+              // restent bloques sur l'ancien nom apres un renommage.
+              if(oldName && oldName !== name) {
+                  (state.data.scenes || []).forEach(s => {
+                      if(!s || !s.breakdown) return;
+                      Object.values(s.breakdown).forEach(arr => {
+                          (arr || []).forEach(it => { if(it && typeof it === 'object' && it.id === editId) it.t = name; });
+                      });
+                  });
+                  if(typeof RenameReview !== 'undefined') RenameReview.check(oldName, name);
+              }
           } else {
               const newResource = {
                   id: 'res_' + Utils.generateUniqueId(),
@@ -72528,7 +72543,7 @@ const RenameReview = {
             const oldN = String(oldName || '').trim();
             const newN = String(newName || '').trim();
             if(!oldN || oldN.toLowerCase() === newN.toLowerCase()) return;
-            const re = new RegExp('\\b' + oldN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+            const re = new RegExp('(?:^|[^\\wÀ-ÿ-])(' + oldN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')(?![\\wÀ-ÿ-])', 'gi');
             let total = 0;
             (state.data.scenes || []).forEach(s => {
                 if(!s || !s.scriptContent) return;
