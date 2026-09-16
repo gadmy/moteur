@@ -3646,7 +3646,8 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .generated-color-item:hover { transform: translateX(5px); box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
   .generated-color-swatch { width: 50px; height: 50px; border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1); }
   .generated-color-info { flex: 1; }
-  .generated-color-hex { font-family: 'Courier New', monospace; font-weight: 600; font-size: 1rem; }
+  .generated-color-hex { font-family: 'Courier New', monospace; font-weight: 600; font-size: 1rem; border: 1px solid transparent; background: transparent; color: var(--text-main); padding: 2px 4px; border-radius: 4px; width: 90px; }
+  .generated-color-hex:hover, .generated-color-hex:focus { border-color: var(--border); background: var(--panel-bg); outline: none; }
   .generated-color-rgb { font-size: 0.8rem; color: var(--text-sec); margin-top: 2px; }
   .color-wheel-actions { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; padding-top: 15px; border-top: 1px solid var(--border); }
   .color-wheel-actions button { padding: 10px 20px; border-radius: 8px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
@@ -3834,8 +3835,8 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .bd-col-scenes:hover { width: 340px; flex: 0 0 340px; }
   .bd-col-scenes:hover .bd-scene-row-title { white-space: normal; overflow: visible; text-overflow: clip; }
   .bd-col-script { flex: 1 1 auto; min-width: 300px; }
-  .bd-col-fiches { width: 470px; flex: 0 0 470px; }
-  @media (max-width: 1500px) { .bd-col-fiches { width: 380px; flex: 0 0 380px; } }
+  .bd-col-fiches { width: 270px; flex: 0 0 270px; }
+  @media (max-width: 1500px) { .bd-col-fiches { width: 240px; flex: 0 0 240px; } }
   @media (max-width: 1100px) {
     .breakdown-layout { flex-wrap: wrap; }
     .bd-col-scenes { width: 100%; flex: 1 1 100%; max-height: 220px; }
@@ -27433,15 +27434,30 @@ const ColorWheel = {
         container.innerHTML = ColorWheel.colors.map((c, i) => {
             const rgb = ColorWheel.hexToRgb(c.hex);
             return `
-                <div class="generated-color-item" onclick="navigator.clipboard.writeText('${c.hex}'); Utils.toast('${c.hex} copié !', 'success');">
-                    <div class="generated-color-swatch" style="background: ${c.hex}"></div>
+                <div class="generated-color-item">
+                    <div class="generated-color-swatch" style="background: ${c.hex}; cursor:pointer;" onclick="navigator.clipboard.writeText('${c.hex}'); Utils.toast('${c.hex} copié !', 'success');" title="Cliquer pour copier"></div>
                     <div class="generated-color-info">
-                        <div class="generated-color-hex">${c.hex}</div>
-                        <div class="generated-color-rgb">RGB(${rgb.r}, ${rgb.g}, ${rgb.b})</div>
+                        <input class="generated-color-hex" type="text" value="${c.hex}" maxlength="7" spellcheck="false"
+                            onclick="event.stopPropagation()" onchange="ColorWheel.setColorHex(${i}, this.value)">
+                        <div class="generated-color-rgb">RGB(${rgb ? rgb.r : 0}, ${rgb ? rgb.g : 0}, ${rgb ? rgb.b : 0})</div>
                     </div>
                 </div>
             `;
         }).join('');
+    },
+
+    // Saisie manuelle d'un hex (en plus du choix sur la roue) : recalcule la
+    // teinte/saturation/luminosité internes pour rester cohérent (marqueur,
+    // luminosité affichée...).
+    setColorHex: (i, val) => {
+        let hex = String(val || '').trim();
+        if(hex && hex[0] !== '#') hex = '#' + hex;
+        if(!/^#[0-9A-Fa-f]{6}$/.test(hex)) { ColorWheel.renderColors(); return; }
+        hex = hex.toUpperCase();
+        const hsl = ColorWheel.hexToHsl(hex);
+        ColorWheel.colors[i] = { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex };
+        ColorWheel.renderColors();
+        ColorWheel.updateMarkers();
     },
     
     updateMarkers: () => {
@@ -28405,7 +28421,7 @@ const MoodBoard = {
             <div class="moodboard-element ${isSelected ? 'selected' : ''}" 
                  id="mb-el-${el.id}"
                  data-id="${el.id}"
-                 style="left: ${el.x}px; top: ${el.y}px; width: ${el.width}px; height: ${el.height}px; transform: rotate(${el.rotation || 0}deg);">
+                 style="left: ${el.x}px; top: ${el.y}px; width: ${el.width}px; height: ${el.height}px; transform: rotate(${el.rotation || 0}deg); opacity: ${el.opacity == null ? 1 : el.opacity};">
                 ${linkedBadge}
                 ${rotateHandle}
                 ${content}
@@ -28431,7 +28447,7 @@ const MoodBoard = {
                     MoodBoard.startResize(elementId, e);
                 } else if(e.target.classList.contains('rotate-handle')) {
                     MoodBoard.startRotate(elementId, e);
-                } else if(!e.target.classList.contains('moodboard-element-text')) {
+                } else {
                     MoodBoard.startDrag(elementId, e);
                 }
             }
@@ -28885,6 +28901,10 @@ const MoodBoard = {
                     <input type="number" value="${Math.round(element.height)}" onchange="app.MoodBoard.updateElementProp('${element.id}', 'height', parseFloat(this.value))">
                 </div>
                 <div class="info-row">
+                    <label>Opacité (%)</label>
+                    <input type="number" min="0" max="100" value="${Math.round((element.opacity == null ? 1 : element.opacity) * 100)}" onchange="app.MoodBoard.updateElementProp('${element.id}', 'opacity', Math.max(0, Math.min(100, parseFloat(this.value) || 0)) / 100)">
+                </div>
+                <div class="info-row">
                     <label>Lié à</label>
                     <input type="text" value="${element.linkedTo ? element.linkedTo.type + (element.linkedTo.id ? ': ' + element.linkedTo.id : '') : 'Aucun'}" readonly style="cursor: pointer;" onclick="app.MoodBoard.linkElement('${element.id}')">
                 </div>
@@ -29133,6 +29153,11 @@ const MoodBoard = {
         // Ajouter option renommer pour les palettes
         if(element && element.type === 'palette') {
             items.splice(4, 0, { icon: '✏️', label: 'Renommer', action: () => MoodBoard.renamePalette(elementId) });
+        }
+        
+        // Extraire une palette de couleurs depuis une photo posée sur la planche
+        if(element && (element.type === 'image' || element.type === 'drawing')) {
+            items.splice(4, 0, { icon: '🎨', label: 'Extraire palette', action: () => MoodBoard.extractPaletteFromImage(elementId) });
         }
         
         const radius = 85;
@@ -29608,6 +29633,54 @@ const MoodBoard = {
         Utils.toast('Forme ajoutée', 'success');
     },
     
+    // Extrait une palette de 5 couleurs dominantes depuis une image posee sur
+    // la planche (echantillonnage + regroupement grossier des teintes proches,
+    // pas une vraie quantification k-means, mais suffisant pour une palette).
+    // Reutilise le chargeur d'image de StoryboardExport : les images du bucket
+    // prive doivent passer par un blob telecharge, jamais par crossOrigin sur
+    // l'URL signee (sinon le canvas est "tainte" et illisible).
+    extractPaletteFromImage: (elementId) => {
+        const board = MoodBoard.getCurrentBoard();
+        const element = board?.elements.find(el => el.id === elementId);
+        if(!element || !element.src) return;
+        if(typeof StoryboardExport === 'undefined' || !StoryboardExport._loadPrintImg) { Utils.toast('Extraction indisponible.', 'error'); return; }
+        Utils.toast('Analyse de la photo...', 'info', 2000);
+        const img = new Image();
+        StoryboardExport._loadPrintImg(img, element.src, () => {
+            try {
+                const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+                if(!w || !h) throw new Error('image vide');
+                const maxDim = 120; // echantillonnage grossier : suffisant pour une palette
+                const scale = Math.min(1, maxDim / Math.max(w, h));
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.max(1, Math.round(w * scale));
+                canvas.height = Math.max(1, Math.round(h * scale));
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                // Buckets de 16 niveaux par canal : les teintes proches se
+                // regroupent, la plus peuplee gagne.
+                const buckets = {};
+                for(let i = 0; i < data.length; i += 4) {
+                    if(data[i + 3] < 100) continue; // pixel transparent ignore
+                    const r = data[i], g = data[i + 1], b = data[i + 2];
+                    const key = (r >> 4) + ',' + (g >> 4) + ',' + (b >> 4);
+                    const bkt = buckets[key] || (buckets[key] = { r: 0, g: 0, b: 0, n: 0 });
+                    bkt.r += r; bkt.g += g; bkt.b += b; bkt.n++;
+                }
+                const top = Object.values(buckets).sort((a, b) => b.n - a.n).slice(0, 5);
+                if(!top.length) { Utils.toast("Impossible d'analyser cette image.", 'error'); return; }
+                const hexColors = top.map(c => '#' + [c.r, c.g, c.b].map(v => Math.round(v / c.n).toString(16).padStart(2, '0')).join('').toUpperCase());
+                MoodBoard.contextX = element.x;
+                MoodBoard.contextY = element.y + element.height + 20;
+                MoodBoard.addPaletteToBoard(hexColors, 'Palette extraite');
+            } catch(e) {
+                console.warn('[MoodBoard] extractPaletteFromImage:', e);
+                Utils.toast("Impossible d'analyser cette image (protégée par le navigateur).", 'error');
+            }
+        });
+    },
+
     addPaletteToBoard: (colors, name) => {
         const board = MoodBoard.getCurrentBoard();
         if(!board) return;
