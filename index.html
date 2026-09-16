@@ -27674,13 +27674,16 @@ const ColorWheel = {
                 sat = baseSat;
             }
             let l = harmonyData.lightnesses ? harmonyData.lightnesses[i] : light;
-            
-            ColorWheel.colors.push({
-                hue: hue,
-                saturation: Math.round(sat),
-                lightness: l,
-                hex: ColorWheel.hslToHex(hue, sat, l)
-            });
+            const hex = ColorWheel.hslToHex(hue, sat, l);
+            const c = { hue: hue, saturation: Math.round(sat), lightness: l, hex: hex };
+            // Mode extraction : replacer le point sur la photo, au pixel le
+            // plus proche de cette nouvelle couleur — sinon il disparaitrait
+            // a chaque changement d'harmonie/luminosite.
+            if(ColorWheel.photoOpts && ColorWheel.photoOpts.findNearestPixel) {
+                const p = ColorWheel.photoOpts.findNearestPixel(hex);
+                c.x = p.x; c.y = p.y;
+            }
+            ColorWheel.colors.push(c);
         }
         
         ColorWheel.renderColors();
@@ -27736,7 +27739,12 @@ const ColorWheel = {
         if(!/^#[0-9A-Fa-f]{6}$/.test(hex)) { ColorWheel.renderColors(); return; }
         hex = hex.toUpperCase();
         const hsl = ColorWheel.hexToHsl(hex);
-        ColorWheel.colors[i] = { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex };
+        const c = { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex };
+        if(ColorWheel.photoOpts && ColorWheel.photoOpts.findNearestPixel) {
+            const p = ColorWheel.photoOpts.findNearestPixel(hex);
+            c.x = p.x; c.y = p.y;
+        }
+        ColorWheel.colors[i] = c;
         ColorWheel.renderColors();
         ColorWheel.updateMarkers();
         if(ColorWheel.photoOpts) ColorWheel.renderPhotoMarkers();
@@ -30001,11 +30009,30 @@ const MoodBoard = {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                 const photoSrc = canvas.toDataURL();
+                const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
                 const sample = (x, y) => {
                     const px = Math.max(0, Math.min(canvas.width - 1, Math.round(x)));
                     const py = Math.max(0, Math.min(canvas.height - 1, Math.round(y)));
-                    const d = ctx.getImageData(px, py, 1, 1).data;
-                    return '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+                    const i = (py * canvas.width + px) * 4;
+                    return '#' + [pixels[i], pixels[i + 1], pixels[i + 2]].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+                };
+                // Retrouve, dans la photo, le pixel le plus proche d'une couleur
+                // donnee — utilise pour replacer le point quand la couleur change
+                // sans venir d'un clic sur la photo (harmonie, luminosite, hex saisi).
+                const findNearestPixel = (hex) => {
+                    const rgb = ColorWheel.hexToRgb(hex) || { r: 0, g: 0, b: 0 };
+                    let best = null, bestDist = Infinity;
+                    const step = 2; // un pixel sur deux : largement assez fin, deux fois plus rapide
+                    for(let y = 0; y < canvas.height; y += step) {
+                        for(let x = 0; x < canvas.width; x += step) {
+                            const i = (y * canvas.width + x) * 4;
+                            if(pixels[i + 3] < 100) continue;
+                            const dr = pixels[i] - rgb.r, dg = pixels[i + 1] - rgb.g, db = pixels[i + 2] - rgb.b;
+                            const d = dr * dr + dg * dg + db * db;
+                            if(d < bestDist) { bestDist = d; best = { x, y }; }
+                        }
+                    }
+                    return best || { x: canvas.width / 2, y: canvas.height / 2 };
                 };
                 const initialPoints = MoodBoard._bucketColors(canvas, ctx);
                 ColorWheel.open((colors, name) => {
@@ -30014,7 +30041,7 @@ const MoodBoard = {
                     MoodBoard.addPaletteToBoard(colors, name);
                 }, initialPoints.map(c => c.hex), 'Palette extraite', {
                     photoSrc, canvasW: canvas.width, canvasH: canvas.height,
-                    initialPoints, sample,
+                    initialPoints, sample, findNearestPixel,
                     onAuto: () => MoodBoard._bucketColors(canvas, ctx)
                 });
             } catch(e) {
