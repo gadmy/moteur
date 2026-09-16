@@ -3655,8 +3655,11 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .generated-color-hex:hover, .generated-color-hex:focus { border-color: var(--border); background: var(--panel-bg); outline: none; }
   .generated-color-rgb { font-size: 0.8rem; color: var(--text-sec); margin-top: 2px; }
   .color-wheel-photo { flex: 1; min-width: 220px; display: flex; flex-direction: column; align-items: center; }
-  .pe-photo-wrap { position: relative; width: 100%; max-width: 380px; margin: 0 auto; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px var(--border); user-select: none; }
-  .pe-photo-wrap img { width: 100%; display: block; pointer-events: none; }
+  .pe-photo-wrap { position: relative; width: 100%; max-width: 380px; margin: 0 auto; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px var(--border); user-select: none; cursor: crosshair; }
+  .pe-photo-inner { position: relative; transition: transform 0.06s linear; }
+  .pe-photo-inner img { width: 100%; display: block; pointer-events: none; }
+  .pe-marker { position: absolute; width: 20px; height: 20px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 2px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.3); transform: translate(-50%, -50%); cursor: grab; }
+  .pe-marker:active { cursor: grabbing; }
   .color-wheel-actions { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; padding-top: 15px; border-top: 1px solid var(--border); }
   .color-wheel-actions button { padding: 10px 20px; border-radius: 8px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
   .color-wheel-actions .cancel { background: var(--bg); border: 1px solid var(--border); color: var(--text-main); }
@@ -27384,7 +27387,12 @@ const ColorWheel = {
         
         const photoColumnHtml = photoOpts ? `
                     <div class="color-wheel-photo">
-                        <div class="pe-photo-wrap"><img src="${photoOpts.photoSrc}" alt="" draggable="false"></div>
+                        <div class="pe-photo-wrap" id="cwPhotoWrap" onmousemove="ColorWheel.magnifyPhoto(event)" onmouseleave="ColorWheel.resetPhotoZoom()">
+                            <div class="pe-photo-inner" id="cwPhotoInner">
+                                <img src="${photoOpts.photoSrc}" alt="" draggable="false">
+                            </div>
+                        </div>
+                        <div style="font-size:0.75rem; color:var(--text-sec); margin-top:8px; text-align:center;">Glisse un point sur la photo pour ajuster sa couleur.</div>
                     </div>` : '';
         
         modal.innerHTML = `
@@ -27444,30 +27452,116 @@ const ColorWheel = {
         // QUELLES, pas de la formule d'harmonie qui n'en retiendrait qu'une
         // approximation a partir de la seule premiere teinte.
         if(photoOpts && existingColors && existingColors.length) {
-            ColorWheel.colors = existingColors.map(hex => {
+            const pts = photoOpts.initialPoints || [];
+            ColorWheel.colors = existingColors.map((hex, i) => {
                 const hsl = ColorWheel.hexToHsl(hex);
-                return { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex };
+                const p = pts[i] || {};
+                return { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex, x: p.x, y: p.y };
             });
             ColorWheel.renderColors();
         } else {
             ColorWheel.generateColors();
         }
         ColorWheel.updateMarkers();
+        if(photoOpts) ColorWheel.renderPhotoMarkers();
         ColorWheel.setupEvents();
     },
 
+    // Agrandit la photo autour du curseur, pour placer un point avec
+    // precision. Gele pendant un glisser (le calcul de position reste simple
+    // avec une echelle/origine fixe au lieu de suivre un zoom qui bougerait).
+    _photoZoom: { ox: 0.5, oy: 0.5, scale: 1 },
+    _draggingMarker: false,
+    magnifyPhoto: (e) => {
+        if(ColorWheel._draggingMarker) return;
+        const wrap = document.getElementById('cwPhotoWrap');
+        const inner = document.getElementById('cwPhotoInner');
+        if(!wrap || !inner) return;
+        const rect = wrap.getBoundingClientRect();
+        const ox = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const oy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+        ColorWheel._photoZoom = { ox, oy, scale: 2 };
+        inner.style.transformOrigin = (ox * 100) + '% ' + (oy * 100) + '%';
+        inner.style.transform = 'scale(2)';
+    },
+    resetPhotoZoom: () => {
+        if(ColorWheel._draggingMarker) return;
+        ColorWheel._photoZoom = { ox: 0.5, oy: 0.5, scale: 1 };
+        const inner = document.getElementById('cwPhotoInner');
+        if(inner) inner.style.transform = 'scale(1)';
+    },
+
+    // Pose les points colores sur la photo, a la position d'ou vient chaque
+    // couleur. Une couleur saisie a la main (pas de x/y connu) n'a pas de point.
+    renderPhotoMarkers: () => {
+        const inner = document.getElementById('cwPhotoInner');
+        if(!inner || !ColorWheel.photoOpts) return;
+        inner.querySelectorAll('.pe-marker').forEach(m => m.remove());
+        const { canvasW, canvasH } = ColorWheel.photoOpts;
+        ColorWheel.colors.forEach((c, i) => {
+            if(c.x == null || c.y == null) return;
+            const m = document.createElement('div');
+            m.className = 'pe-marker';
+            m.dataset.idx = i;
+            m.style.left = (c.x / canvasW * 100) + '%';
+            m.style.top = (c.y / canvasH * 100) + '%';
+            m.style.background = c.hex;
+            m.title = 'Glisser pour ajuster';
+            m.addEventListener('mousedown', (ev) => ColorWheel._startPhotoMarkerDrag(ev, i));
+            inner.appendChild(m);
+        });
+    },
+
+    _startPhotoMarkerDrag: (e, i) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const wrap = document.getElementById('cwPhotoWrap');
+        const inner = document.getElementById('cwPhotoInner');
+        if(!wrap || !inner || !ColorWheel.photoOpts) return;
+        ColorWheel._draggingMarker = true;
+        const zoom = { ...ColorWheel._photoZoom }; // figee pour la duree du glisser
+        const marker = inner.querySelector(`.pe-marker[data-idx="${i}"]`);
+        const { canvasW, canvasH, sample } = ColorWheel.photoOpts;
+
+        const onMove = (ev) => {
+            const rect = wrap.getBoundingClientRect();
+            const dispFx = (ev.clientX - rect.left) / rect.width;
+            const dispFy = (ev.clientY - rect.top) / rect.height;
+            let fx = zoom.scale !== 1 ? (zoom.ox + (dispFx - zoom.ox) / zoom.scale) : dispFx;
+            let fy = zoom.scale !== 1 ? (zoom.oy + (dispFy - zoom.oy) / zoom.scale) : dispFy;
+            fx = Math.max(0, Math.min(1, fx));
+            fy = Math.max(0, Math.min(1, fy));
+            const x = fx * canvasW, y = fy * canvasH;
+            const hex = sample(x, y);
+            const hsl = ColorWheel.hexToHsl(hex);
+            ColorWheel.colors[i] = { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex, x, y };
+            if(marker) { marker.style.left = (fx * 100) + '%'; marker.style.top = (fy * 100) + '%'; marker.style.background = hex; }
+            ColorWheel.renderColors();
+        };
+        const onUp = () => {
+            ColorWheel._draggingMarker = false;
+            inner.style.transform = 'scale(1)';
+            ColorWheel._photoZoom = { ox: 0.5, oy: 0.5, scale: 1 };
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    },
+
     // Rappelle l'extraction automatique depuis la photo (mode extraction
-    // uniquement) : remplace les 5 couleurs par une nouvelle extraction.
+    // uniquement) : remplace les 5 couleurs et repositionne leurs points.
     autoFromPhoto: () => {
         if(!ColorWheel.photoOpts || !ColorWheel.photoOpts.onAuto) return;
-        const colors = ColorWheel.photoOpts.onAuto();
-        if(!colors || !colors.length) return;
-        ColorWheel.colors = colors.map(hex => {
-            const hsl = ColorWheel.hexToHsl(hex);
-            return { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex };
+        const pts = ColorWheel.photoOpts.onAuto();
+        if(!pts || !pts.length) return;
+        ColorWheel.colors = pts.map(p => {
+            const hsl = ColorWheel.hexToHsl(p.hex);
+            return { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex: p.hex, x: p.x, y: p.y };
         });
         ColorWheel.renderColors();
         ColorWheel.updateMarkers();
+        ColorWheel.renderPhotoMarkers();
     },
     
     close: () => {
@@ -27590,6 +27684,7 @@ const ColorWheel = {
         }
         
         ColorWheel.renderColors();
+        if(ColorWheel.photoOpts) ColorWheel.renderPhotoMarkers();
     },
     
     hslToHex: (h, s, l) => {
@@ -27644,6 +27739,7 @@ const ColorWheel = {
         ColorWheel.colors[i] = { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex };
         ColorWheel.renderColors();
         ColorWheel.updateMarkers();
+        if(ColorWheel.photoOpts) ColorWheel.renderPhotoMarkers();
     },
     
     updateMarkers: () => {
@@ -29905,12 +30001,22 @@ const MoodBoard = {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                 const photoSrc = canvas.toDataURL();
-                const extract = () => MoodBoard._bucketColors(canvas, ctx).map(c => c.hex);
+                const sample = (x, y) => {
+                    const px = Math.max(0, Math.min(canvas.width - 1, Math.round(x)));
+                    const py = Math.max(0, Math.min(canvas.height - 1, Math.round(y)));
+                    const d = ctx.getImageData(px, py, 1, 1).data;
+                    return '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+                };
+                const initialPoints = MoodBoard._bucketColors(canvas, ctx);
                 ColorWheel.open((colors, name) => {
                     MoodBoard.contextX = element.x;
                     MoodBoard.contextY = element.y + element.height + 20;
                     MoodBoard.addPaletteToBoard(colors, name);
-                }, extract(), 'Palette extraite', { photoSrc, onAuto: extract });
+                }, initialPoints.map(c => c.hex), 'Palette extraite', {
+                    photoSrc, canvasW: canvas.width, canvasH: canvas.height,
+                    initialPoints, sample,
+                    onAuto: () => MoodBoard._bucketColors(canvas, ctx)
+                });
             } catch(e) {
                 console.warn('[MoodBoard] extractPaletteFromImage:', e);
                 Utils.toast("Impossible d'analyser cette image (protégée par le navigateur).", 'error');
