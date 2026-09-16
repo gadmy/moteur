@@ -3880,7 +3880,7 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .bd-marked.bd-highlight { background-color: #ffd700 !important; color: #333 !important; text-decoration: none !important; box-shadow: 0 0 8px rgba(255, 215, 0, 0.6); }
   .bd-tag { transition: all 0.2s ease; cursor: pointer; }
   .bd-tag.bd-highlight { background-color: #ffd700 !important; color: #333 !important; box-shadow: 0 0 8px rgba(255, 215, 0, 0.6); transform: scale(1.05); }
-  .rn-pending-mark { position: fixed; background: rgba(255,152,0,0.25); border-bottom: 2px solid #ff9800; border-radius: 2px; cursor: pointer; pointer-events: auto; z-index: 6500; }
+  .rn-pending-mark { position: fixed; background: rgba(255,152,0,0.25); border-bottom: 2px solid #ff9800; border-radius: 2px; cursor: pointer; pointer-events: auto; z-index: 9998; }
   .rn-pending-mark:hover { background: rgba(255,152,0,0.4); }
   /* 7d - liaison vers une fiche. Vert : l'element existe dans l'inventaire.
      Orange : rien derriere le mot. Volontairement discret (une pastille de
@@ -72577,20 +72577,26 @@ const RenameReview = {
     // scene en meme temps), puis peint les surlignages orange.
     reveal: () => {
         const off = document.getElementById('rename-review-offer'); if(off) off.remove();
-        const dejaContinu = typeof ScriptEditor !== 'undefined' && ScriptEditor.viewMode === 'continuous';
         if(typeof UI !== 'undefined' && UI.switchTab) UI.switchTab('script');
-        if(!dejaContinu && typeof ScriptEditorViewMode !== 'undefined') ScriptEditorViewMode.set('continuous');
-        setTimeout(() => { RenameReview.paint(); setTimeout(RenameReview.gotoFirst, 80); }, dejaContinu ? 30 : 300);
+        if(typeof ScriptEditorViewMode !== 'undefined') ScriptEditorViewMode.set('continuous');
+        setTimeout(() => RenameReview._gotoFirstRetry(8), 200);
     },
 
     // Amene directement sur la premiere occurrence en attente — pas juste
     // en haut de la vue continue (qui peut commencer par des scenes sans
-    // rien a verifier).
-    gotoFirst: () => {
-        const target = document.querySelector('.rn-pending-mark');
-        if(!target) return;
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        setTimeout(() => RenameReview._showTip(target.dataset.reviewId, target), 350);
+    // rien a verifier). Reessaie plusieurs fois : le temps que la vue
+    // continue finisse de se construire, les marques ne sont pas encore la.
+    _gotoFirstRetry: (attemptsLeft) => {
+        RenameReview.paint();
+        setTimeout(() => {
+            const target = document.querySelector('.rn-pending-mark');
+            if(target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => RenameReview._showTip(target.dataset.reviewId, target), 350);
+            } else if(attemptsLeft > 0) {
+                RenameReview._gotoFirstRetry(attemptsLeft - 1);
+            }
+        }, 120);
     },
 
     // Les deux endroits ou le texte d'une scene est editable : vue par
@@ -72673,9 +72679,12 @@ const RenameReview = {
         const rect = markEl.getBoundingClientRect();
         const tip = document.createElement('div');
         tip.id = 'rn-tip';
-        tip.style.cssText = 'position:fixed; z-index:var(--z-tooltip); background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); padding:10px 12px; min-width:220px; font-size:0.85rem;';
+        const TIP_H = 70; // hauteur approximative, avant mesure reelle
+        const placeAbove = (rect.bottom + TIP_H + 10) > window.innerHeight;
+        tip.style.cssText = 'position:fixed; z-index:9999; background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); padding:10px 12px; min-width:220px; font-size:0.85rem;';
         tip.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 240)) + 'px';
-        tip.style.top = (rect.bottom + 6) + 'px';
+        if(placeAbove) tip.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+        else tip.style.top = (rect.bottom + 6) + 'px';
         tip.innerHTML = '<div style="margin-bottom:8px;">« ' + Utils.escape(rev.oldName) + ' » remplacé par « ' + Utils.escape(rev.newName) + ' » — vérifier le texte</div>'
             + '<div style="display:flex; gap:14px; font-size:1.05rem;">'
             + '<span title="Ignorer" style="cursor:pointer;" onclick="app.RenameReview.dismiss(\'' + rev.id + '\')">✕</span>'
