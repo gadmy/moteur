@@ -27520,8 +27520,7 @@ const ColorWheel = {
         if(!wrap || !inner || !ColorWheel.photoOpts) return;
         ColorWheel._draggingMarker = true;
         const zoom = { ...ColorWheel._photoZoom }; // figee pour la duree du glisser
-        const marker = inner.querySelector(`.pe-marker[data-idx="${i}"]`);
-        const { canvasW, canvasH, sample } = ColorWheel.photoOpts;
+        const { canvasW, canvasH, sample, chaseHarmony } = ColorWheel.photoOpts;
 
         const onMove = (ev) => {
             const rect = wrap.getBoundingClientRect();
@@ -27533,10 +27532,21 @@ const ColorWheel = {
             fy = Math.max(0, Math.min(1, fy));
             const x = fx * canvasW, y = fy * canvasH;
             const hex = sample(x, y);
-            const hsl = ColorWheel.hexToHsl(hex);
-            ColorWheel.colors[i] = { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex, x, y };
-            if(marker) { marker.style.left = (fx * 100) + '%'; marker.style.top = (fy * 100) + '%'; marker.style.background = hex; }
+            // Les 4 autres points se recalent sur l'harmonie en cours, autour
+            // de la couleur qu'on est en train de deplacer.
+            const chased = chaseHarmony ? chaseHarmony(i, hex, x, y, ColorWheel.harmony) : null;
+            if(chased) {
+                ColorWheel.colors = chased.map(p => {
+                    if(!p) return null;
+                    const hsl = ColorWheel.hexToHsl(p.hex);
+                    return { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex: p.hex, x: p.x, y: p.y };
+                }).filter(Boolean);
+            } else {
+                const hsl = ColorWheel.hexToHsl(hex);
+                ColorWheel.colors[i] = { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex, x, y };
+            }
             ColorWheel.renderColors();
+            ColorWheel.renderPhotoMarkers();
         };
         const onUp = () => {
             ColorWheel._draggingMarker = false;
@@ -27553,7 +27563,7 @@ const ColorWheel = {
     // uniquement) : remplace les 5 couleurs et repositionne leurs points.
     autoFromPhoto: () => {
         if(!ColorWheel.photoOpts || !ColorWheel.photoOpts.onAuto) return;
-        const pts = ColorWheel.photoOpts.onAuto();
+        const pts = ColorWheel.photoOpts.onAuto(ColorWheel.harmony);
         if(!pts || !pts.length) return;
         ColorWheel.colors = pts.map(p => {
             const hsl = ColorWheel.hexToHsl(p.hex);
@@ -30034,7 +30044,8 @@ const MoodBoard = {
                     }
                     return best || { x: canvas.width / 2, y: canvas.height / 2 };
                 };
-                const initialPoints = MoodBoard._bucketColors(canvas, ctx);
+                const candidates = MoodBoard._buildColorCandidates(canvas, ctx);
+                const initialPoints = MoodBoard._pickHarmonyColors(candidates, 'analogous').map(c => ({ hex: c.hex, x: c.x, y: c.y }));
                 ColorWheel.open((colors, name) => {
                     MoodBoard.contextX = element.x;
                     MoodBoard.contextY = element.y + element.height + 20;
@@ -30042,7 +30053,11 @@ const MoodBoard = {
                 }, initialPoints.map(c => c.hex), 'Palette extraite', {
                     photoSrc, canvasW: canvas.width, canvasH: canvas.height,
                     initialPoints, sample, findNearestPixel,
-                    onAuto: () => MoodBoard._bucketColors(canvas, ctx)
+                    onAuto: (harmonyKey) => (harmonyKey ? MoodBoard._pickHarmonyColors(candidates, harmonyKey) : MoodBoard._pickDiverse(candidates, 5))
+                        .map(c => ({ hex: c.hex, x: c.x, y: c.y })),
+                    // Glisser un point : les 4 autres se recalent sur l'harmonie
+                    // en cours, autour de CE point-la.
+                    chaseHarmony: (draggedIdx, hex, x, y, harmonyKey) => MoodBoard._chaseHarmony(candidates, harmonyKey, draggedIdx, hex, x, y)
                 });
             } catch(e) {
                 console.warn('[MoodBoard] extractPaletteFromImage:', e);
@@ -30051,12 +30066,12 @@ const MoodBoard = {
         });
     },
 
-    // Regroupe les pixels par teintes proches (buckets de 16 niveaux/canal),
-    // puis choisit 5 couleurs en exigeant un ecart minimal entre elles : sans
-    // ca, une grande zone uniforme (drapeau, pan de mur) rafle a elle seule
-    // les 5 buckets les plus peuples, et la palette entiere vient d'un seul
-    // endroit de la photo au lieu de la representer dans son ensemble.
-    _bucketColors: (canvas, ctx) => {
+    // Scanne la photo et construit la liste des couleurs candidates (une par
+    // bucket de teinte proche), avec teinte/saturation/luminosite calculees.
+    // Calcule UNE FOIS a l'ouverture, puis reutilise par Auto et par le
+    // glisser en direct — rescanner toute l'image a chaque mouvement de
+    // souris serait trop lent.
+    _buildColorCandidates: (canvas, ctx) => {
         const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
         const buckets = {};
         for(let y = 0; y < canvas.height; y++) {
@@ -30069,24 +30084,114 @@ const MoodBoard = {
                 bkt.r += r; bkt.g += g; bkt.b += b; bkt.n++;
             }
         }
-        const sorted = Object.values(buckets).map(c => ({
-            r: Math.round(c.r / c.n), g: Math.round(c.g / c.n), b: Math.round(c.b / c.n),
-            n: c.n, x: c.sampleX, y: c.sampleY
-        })).sort((a, b) => b.n - a.n);
+        return Object.values(buckets).map(c => {
+            const r = Math.round(c.r / c.n), g = Math.round(c.g / c.n), b = Math.round(c.b / c.n);
+            const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+            const hsl = ColorWheel.hexToHsl(hex);
+            return { r, g, b, n: c.n, x: c.sampleX, y: c.sampleY, hex, hue: hsl.h, sat: hsl.s, light: hsl.l };
+        }).sort((a, b) => b.n - a.n).slice(0, 200);
+    },
 
+    // Choix "sans harmonie" (par defaut) : les 5 couleurs les plus frequentes,
+    // en exigeant un ecart minimal entre elles — sans ca, une grande zone
+    // uniforme (drapeau, pan de mur) rafle a elle seule les 5 places.
+    _pickDiverse: (candidates, n) => {
         const dist = (a, b) => Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
         const picked = [];
-        for(let minDist = 70; minDist >= 0 && picked.length < 5; minDist -= 20) {
-            for(const c of sorted) {
-                if(picked.length >= 5) break;
+        for(let minDist = 70; minDist >= 0 && picked.length < n; minDist -= 20) {
+            for(const c of candidates) {
+                if(picked.length >= n) break;
                 if(picked.includes(c)) continue;
                 if(picked.every(p => dist(p, c) >= minDist)) picked.push(c);
             }
         }
-        return picked.slice(0, 5).map(c => ({
-            hex: '#' + [c.r, c.g, c.b].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase(),
-            x: c.x, y: c.y
-        }));
+        return picked.slice(0, n);
+    },
+
+    // Choix "avec harmonie" : reprend les memes ecarts de teinte que la roue
+    // (ColorWheel.harmonies) mais va chercher, pour chaque ecart, la couleur
+    // REELLEMENT presente dans la photo la plus proche de cette teinte —
+    // au lieu de la calculer par formule comme le fait la roue seule.
+    // anchorHueOverride : pour ancrer sur une teinte precise (ex. celle du
+    // point qu'on est en train de glisser) plutot que la couleur dominante.
+    _pickHarmonyColors: (candidates, harmonyKey, anchorHueOverride) => {
+        const def = (typeof ColorWheel !== 'undefined' && ColorWheel.harmonies[harmonyKey]) || { angles: [-30, -15, 0, 15, 30] };
+        const hueDist = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+        const anchorHue = anchorHueOverride != null ? anchorHueOverride : (candidates.length ? candidates[0].hue : 0);
+
+        // Nuances / Monochrome : la variation attendue est la luminosite, pas
+        // la teinte — on reste sur la teinte d'ancrage et on etale du plus
+        // sombre au plus clair.
+        if(harmonyKey === 'shades' || harmonyKey === 'monochromatic') {
+            const near = candidates.filter(c => c.sat < 12 || hueDist(c.hue, anchorHue) < 35).sort((a, b) => a.light - b.light);
+            if(near.length >= 5) {
+                return [0, 0.25, 0.5, 0.75, 1].map(t => near[Math.round(t * (near.length - 1))]);
+            }
+            return MoodBoard._pickDiverse(candidates, 5);
+        }
+
+        // Autres harmonies : pour chaque ecart de teinte, prendre la couleur
+        // de la photo la plus proche en teinte (assez saturee pour que sa
+        // teinte soit fiable — le gris/noir n'a pas de teinte significative).
+        const saturated = candidates.filter(c => c.sat > 12);
+        const pool = saturated.length >= 5 ? saturated : candidates;
+        const used = new Set();
+        const picks = def.angles.map(angle => {
+            const target = (anchorHue + angle + 360) % 360;
+            let best = null, bestScore = Infinity;
+            pool.forEach(c => {
+                if(used.has(c)) return;
+                const score = hueDist(c.hue, target);
+                if(score < bestScore) { bestScore = score; best = c; }
+            });
+            if(best) used.add(best);
+            return best;
+        }).filter(Boolean);
+
+        let i = 0;
+        while(picks.length < 5 && i < pool.length) {
+            if(!used.has(pool[i])) { picks.push(pool[i]); used.add(pool[i]); }
+            i++;
+        }
+        return picks.slice(0, 5);
+    },
+
+    // Glisser un point (v594) : les 4 autres se recalent sur l'harmonie
+    // choisie autour de CE point-la — meme logique que _pickHarmonyColors,
+    // mais ancree sur la couleur qu'on est en train de deplacer, et celle-ci
+    // reste exactement le pixel sous le curseur (pas une couleur "la plus
+    // proche" parmi les candidats).
+    _chaseHarmony: (candidates, harmonyKey, draggedIdx, draggedHex, draggedX, draggedY) => {
+        const def = (typeof ColorWheel !== 'undefined' && ColorWheel.harmonies[harmonyKey]) || { angles: [-30, -15, 0, 15, 30] };
+        const hueDist = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+        const draggedHsl = ColorWheel.hexToHsl(draggedHex);
+
+        if(harmonyKey === 'shades' || harmonyKey === 'monochromatic') {
+            const near = candidates.filter(c => c.sat < 12 || hueDist(c.hue, draggedHsl.h) < 35).sort((a, b) => a.light - b.light);
+            const pool = near.length >= 5 ? near : candidates.slice().sort((a, b) => a.light - b.light);
+            return [0, 0.25, 0.5, 0.75, 1].map((t, j) => {
+                if(j === draggedIdx) return { hex: draggedHex, x: draggedX, y: draggedY };
+                const c = pool[Math.round(t * (pool.length - 1))];
+                return c ? { hex: c.hex, x: c.x, y: c.y } : null;
+            });
+        }
+
+        const anchorHue = (draggedHsl.h - def.angles[draggedIdx] + 360) % 360;
+        const saturated = candidates.filter(c => c.sat > 12);
+        const pool = saturated.length >= 5 ? saturated : candidates;
+        const used = [];
+        return def.angles.map((angle, j) => {
+            if(j === draggedIdx) return { hex: draggedHex, x: draggedX, y: draggedY };
+            const target = (anchorHue + angle + 360) % 360;
+            let best = null, bestScore = Infinity;
+            pool.forEach(c => {
+                if(used.includes(c)) return;
+                const score = hueDist(c.hue, target);
+                if(score < bestScore) { bestScore = score; best = c; }
+            });
+            if(best) used.push(best);
+            return best ? { hex: best.hex, x: best.x, y: best.y } : null;
+        });
     },
 
     addPaletteToBoard: (colors, name) => {
