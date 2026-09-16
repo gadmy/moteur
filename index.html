@@ -3830,7 +3830,9 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   
   .breakdown-layout { display: flex; gap: 14px; min-height: 100%; }
   .breakdown-col { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; max-height: 80vh; overflow-y: auto; }
-  .bd-col-scenes { width: 190px; flex: 0 0 190px; }
+  .bd-col-scenes { width: 190px; flex: 0 0 190px; transition: width 0.15s ease, flex-basis 0.15s ease; z-index: 5; }
+  .bd-col-scenes:hover { width: 340px; flex: 0 0 340px; }
+  .bd-col-scenes:hover .bd-scene-row-title { white-space: normal; overflow: visible; text-overflow: clip; }
   .bd-col-script { flex: 1 1 auto; min-width: 300px; }
   .bd-col-fiches { width: 470px; flex: 0 0 470px; }
   @media (max-width: 1500px) { .bd-col-fiches { width: 380px; flex: 0 0 380px; } }
@@ -3855,12 +3857,12 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
      onglets (.compact-card), pour qu'une fiche se reconnaisse partout. Elles
      GARDENT la classe .bd-tag : c'est elle que lit le trace de liaison vers le
      scenario, la renommer l'aurait casse en silence. */
-  .bd-fiches-grid { grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap: 10px; padding: 0; }
+  .bd-fiches-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; padding: 0; }
   .bd-fiche { padding: 12px 8px 9px; }
-  .bd-fiche .compact-card-photo { width: 54px; height: 54px; font-size: 1.5rem; margin-bottom: 7px; border-width: 2px; }
-  .bd-fiche .compact-card-name { font-size: 0.85rem; }
-  .bd-fiche .compact-card-role { font-size: 0.72rem; }
-  .bd-fiche-cat { font-size: 0.65rem; color: var(--text-sec); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bd-fiche .compact-card-photo { width: 60px; height: 60px; font-size: 1.6rem; margin-bottom: 7px; border-width: 2px; }
+  .bd-fiche .compact-card-name { font-size: 0.85rem; white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.25; }
+  .bd-fiche .compact-card-role { font-size: 0.72rem; white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.2; }
+  .bd-fiche-cat { font-size: 0.65rem; color: var(--text-sec); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.3px; white-space: normal; overflow: visible; text-overflow: clip; }
   .bd-fiche-state { position: absolute; top: 8px; right: 8px; width: 8px; height: 8px; border-radius: 50%; }
   .bd-fiche-state.ok { background: var(--success, #2e7d32); }
   .bd-fiche-state.missing { background: #ef6c00; }
@@ -26040,37 +26042,42 @@ initCategoriesDragDrop: () => {
           
           function drawLink(term, layoutRect, svg, charTerm) {
               svg.innerHTML = '';
-              // Chercher d'abord .bd-marked avec le terme direct, sinon match "flou" sur charTerm
-              let marked = document.querySelector(`.bd-marked[data-term="${term}"]`);
-              if(!marked && charTerm) {
+              // Toutes les marques de ce terme dans le texte — un trait par
+              // occurrence, pas seulement la premiere trouvee.
+              let markedList = Array.from(document.querySelectorAll(`.bd-marked[data-term="${term}"]`));
+              if(!markedList.length && charTerm) {
                   const firstName = charTerm.split(' ')[0];
-                  // Essais successifs : nom exact, prénom exact, marque commençant par le prénom, prénom commençant par la marque
                   const allMarked = Array.from(document.querySelectorAll('.bd-marked[data-term]'));
-                  marked = allMarked.find(el => el.dataset.term === charTerm)
-                        || allMarked.find(el => el.dataset.term === firstName)
-                        || allMarked.find(el => (el.dataset.term || '').startsWith(firstName + ' '))
-                        || allMarked.find(el => firstName.startsWith(el.dataset.term || 'xxx'));
+                  markedList = allMarked.filter(el => el.dataset.term === charTerm);
+                  if(!markedList.length) markedList = allMarked.filter(el => el.dataset.term === firstName);
+                  if(!markedList.length) markedList = allMarked.filter(el => (el.dataset.term || '').startsWith(firstName + ' '));
+                  if(!markedList.length) markedList = allMarked.filter(el => firstName.startsWith(el.dataset.term || 'xxx'));
               }
               const tag = document.querySelector(`.bd-tag[data-term="${term}"]`);
-              if(!marked || !tag) return;
-              // Vérifier que les éléments sont visibles
-              const r1 = marked.getBoundingClientRect();
+              if(!markedList.length || !tag) return;
               const r2 = tag.getBoundingClientRect();
-              if(r1.width === 0 || r2.width === 0) return;
+              if(r2.width === 0) return;
               const scrollLeft = layout.scrollLeft || 0;
               const scrollTop = layout.scrollTop || 0;
-              const x1 = r1.right - layoutRect.left + scrollLeft;
-              const y1 = r1.top + r1.height/2 - layoutRect.top + scrollTop;
               const x2 = r2.left - layoutRect.left + scrollLeft;
               const y2 = r2.top + r2.height/2 - layoutRect.top + scrollTop;
-              const cx1 = x1 + (x2 - x1) * 0.3;
-              const cx2 = x1 + (x2 - x1) * 0.7;
-              const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-              path.setAttribute('d', `M${x1},${y1} C${cx1},${y1} ${cx2},${y2} ${x2},${y2}`);
+              let drawn = 0;
+              markedList.forEach(marked => {
+                  const r1 = marked.getBoundingClientRect();
+                  if(r1.width === 0) return;
+                  const x1 = r1.right - layoutRect.left + scrollLeft;
+                  const y1 = r1.top + r1.height/2 - layoutRect.top + scrollTop;
+                  const cx1 = x1 + (x2 - x1) * 0.3;
+                  const cx2 = x1 + (x2 - x1) * 0.7;
+                  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                  path.setAttribute('d', `M${x1},${y1} C${cx1},${y1} ${cx2},${y2} ${x2},${y2}`);
+                  svg.appendChild(path);
+                  drawn++;
+              });
+              if(!drawn) return;
               const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
               arrow.setAttribute('points', `${x2},${y2} ${x2-8},${y2-4} ${x2-8},${y2+4}`);
               arrow.setAttribute('fill', '#ffd700');
-              svg.appendChild(path);
               svg.appendChild(arrow);
           }
       },
@@ -72694,10 +72701,10 @@ const RenameReview = {
         if(placeAbove) tip.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
         else tip.style.top = (rect.bottom + 6) + 'px';
         tip.innerHTML = '<div style="margin-bottom:8px;">« ' + Utils.escape(rev.oldName) + ' » remplacé par « ' + Utils.escape(rev.newName) + ' » — vérifier le texte</div>'
-            + '<div style="display:flex; gap:14px; font-size:1.05rem;">'
-            + '<span title="Ignorer" style="cursor:pointer;" onclick="app.RenameReview.dismiss(\'' + rev.id + '\')">✕</span>'
-            + '<span title="Suivant" style="cursor:pointer;" onclick="app.RenameReview.next(\'' + rev.id + '\')">➡️</span>'
-            + '<span title="Corrigé, suivant" style="cursor:pointer;" onclick="app.RenameReview.fixedNext(\'' + rev.id + '\')">✅</span>'
+            + '<div style="display:flex; gap:14px; font-size:0.85rem;">'
+            + '<span style="cursor:pointer; display:flex; align-items:center; gap:4px;" onclick="app.RenameReview.dismiss(\'' + rev.id + '\')">✕ Ignorer</span>'
+            + '<span style="cursor:pointer; display:flex; align-items:center; gap:4px;" onclick="app.RenameReview.next(\'' + rev.id + '\')">➡️ Suivant</span>'
+            + '<span style="cursor:pointer; display:flex; align-items:center; gap:4px;" onclick="app.RenameReview.fixedNext(\'' + rev.id + '\')">✅ Corrigé</span>'
             + '</div>';
         tip.addEventListener('mouseenter', () => clearTimeout(RenameReview._hideT));
         tip.addEventListener('mouseleave', () => RenameReview._scheduleHideTip());
