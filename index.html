@@ -3652,6 +3652,10 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .generated-color-hex { font-family: 'Courier New', monospace; font-weight: 600; font-size: 1rem; border: 1px solid transparent; background: transparent; color: var(--text-main); padding: 2px 4px; border-radius: 4px; width: 90px; }
   .generated-color-hex:hover, .generated-color-hex:focus { border-color: var(--border); background: var(--panel-bg); outline: none; }
   .generated-color-rgb { font-size: 0.8rem; color: var(--text-sec); margin-top: 2px; }
+  .pe-photo-wrap { position: relative; width: 100%; max-width: 380px; margin: 0 auto; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px var(--border); user-select: none; }
+  .pe-photo-wrap img { width: 100%; display: block; pointer-events: none; }
+  .pe-marker { position: absolute; width: 22px; height: 22px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 2px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.3); transform: translate(-50%, -50%); cursor: grab; }
+  .pe-marker:active { cursor: grabbing; }
   .color-wheel-actions { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; padding-top: 15px; border-top: 1px solid var(--border); }
   .color-wheel-actions button { padding: 10px 20px; border-radius: 8px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
   .color-wheel-actions .cancel { background: var(--bg); border: 1px solid var(--border); color: var(--text-main); }
@@ -29686,12 +29690,14 @@ const MoodBoard = {
         Utils.toast('Forme ajoutée', 'success');
     },
     
-    // Extrait une palette de 5 couleurs dominantes depuis une image posee sur
-    // la planche (echantillonnage + regroupement grossier des teintes proches,
-    // pas une vraie quantification k-means, mais suffisant pour une palette).
-    // Reutilise le chargeur d'image de StoryboardExport : les images du bucket
-    // prive doivent passer par un blob telecharge, jamais par crossOrigin sur
-    // l'URL signee (sinon le canvas est "tainte" et illisible).
+    // Extrait une palette depuis une image posee sur la planche, puis ouvre
+    // une fenetre d'ajustement (palette a gauche, photo a droite avec un
+    // point deplacable par couleur). Reutilise le chargeur d'image de
+    // StoryboardExport : les images du bucket prive doivent passer par un
+    // blob telecharge, jamais par crossOrigin sur l'URL signee (sinon le
+    // canvas est "tainte" et illisible).
+    _paletteExtract: null,   // { elementId, canvas, ctx, colors: [{hex,x,y}] }
+
     extractPaletteFromImage: (elementId) => {
         const board = MoodBoard.getCurrentBoard();
         const element = board?.elements.find(el => el.id === elementId);
@@ -29703,35 +29709,185 @@ const MoodBoard = {
             try {
                 const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
                 if(!w || !h) throw new Error('image vide');
-                const maxDim = 120; // echantillonnage grossier : suffisant pour une palette
+                const maxDim = 600; // assez fin pour un point deplace a la main
                 const scale = Math.min(1, maxDim / Math.max(w, h));
                 const canvas = document.createElement('canvas');
                 canvas.width = Math.max(1, Math.round(w * scale));
                 canvas.height = Math.max(1, Math.round(h * scale));
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-                // Buckets de 16 niveaux par canal : les teintes proches se
-                // regroupent, la plus peuplee gagne.
-                const buckets = {};
-                for(let i = 0; i < data.length; i += 4) {
-                    if(data[i + 3] < 100) continue; // pixel transparent ignore
-                    const r = data[i], g = data[i + 1], b = data[i + 2];
-                    const key = (r >> 4) + ',' + (g >> 4) + ',' + (b >> 4);
-                    const bkt = buckets[key] || (buckets[key] = { r: 0, g: 0, b: 0, n: 0 });
-                    bkt.r += r; bkt.g += g; bkt.b += b; bkt.n++;
-                }
-                const top = Object.values(buckets).sort((a, b) => b.n - a.n).slice(0, 5);
-                if(!top.length) { Utils.toast("Impossible d'analyser cette image.", 'error'); return; }
-                const hexColors = top.map(c => '#' + [c.r, c.g, c.b].map(v => Math.round(v / c.n).toString(16).padStart(2, '0')).join('').toUpperCase());
-                MoodBoard.contextX = element.x;
-                MoodBoard.contextY = element.y + element.height + 20;
-                MoodBoard.addPaletteToBoard(hexColors, 'Palette extraite');
+                MoodBoard._paletteExtract = { elementId, canvas, ctx, colors: [] };
+                MoodBoard.openPaletteExtractModal();
             } catch(e) {
                 console.warn('[MoodBoard] extractPaletteFromImage:', e);
                 Utils.toast("Impossible d'analyser cette image (protégée par le navigateur).", 'error');
             }
         });
+    },
+
+    // Regroupe les pixels par teintes proches (buckets de 16 niveaux/canal) et
+    // retient les 5 plus peuplees, chacune avec la position d'un pixel qui lui
+    // appartient (pour poser le point de depart sur la photo).
+    _bucketColors: (canvas, ctx) => {
+        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        const buckets = {};
+        for(let y = 0; y < canvas.height; y++) {
+            for(let x = 0; x < canvas.width; x++) {
+                const i = (y * canvas.width + x) * 4;
+                if(data[i + 3] < 100) continue; // pixel transparent ignore
+                const r = data[i], g = data[i + 1], b = data[i + 2];
+                const key = (r >> 4) + ',' + (g >> 4) + ',' + (b >> 4);
+                const bkt = buckets[key] || (buckets[key] = { r: 0, g: 0, b: 0, n: 0, sampleX: x, sampleY: y });
+                bkt.r += r; bkt.g += g; bkt.b += b; bkt.n++;
+            }
+        }
+        return Object.values(buckets).sort((a, b) => b.n - a.n).slice(0, 5).map(c => ({
+            hex: '#' + [c.r, c.g, c.b].map(v => Math.round(v / c.n).toString(16).padStart(2, '0')).join('').toUpperCase(),
+            x: c.sampleX, y: c.sampleY
+        }));
+    },
+
+    // Relance l'extraction automatique (bouton "Auto") : remet les 5 points a
+    // leur position d'origine, ecrase les ajustements manuels.
+    autoExtractColors: () => {
+        const pe = MoodBoard._paletteExtract;
+        if(!pe) return;
+        pe.colors = MoodBoard._bucketColors(pe.canvas, pe.ctx);
+        MoodBoard.renderPaletteExtractSwatches();
+        MoodBoard.renderPaletteExtractMarkers();
+    },
+
+    openPaletteExtractModal: () => {
+        const pe = MoodBoard._paletteExtract;
+        if(!pe) return;
+        pe.colors = MoodBoard._bucketColors(pe.canvas, pe.ctx);
+
+        const modal = document.createElement('div');
+        modal.className = 'color-wheel-modal';
+        modal.id = 'paletteExtractModal';
+        modal.onclick = (e) => { if(e.target === modal) MoodBoard.closePaletteExtractModal(); };
+        modal.innerHTML = `
+            <div class="color-wheel-container">
+                <div class="color-wheel-header">
+                    <h3>🎨 Extraire une palette</h3>
+                    <button class="color-wheel-close" onclick="app.MoodBoard.closePaletteExtractModal()">✕</button>
+                </div>
+                <div class="color-wheel-body">
+                    <div class="color-wheel-left">
+                        <div class="generated-colors" id="peSwatches"></div>
+                        <button class="cancel" style="margin-top:14px; width:100%;" onclick="app.MoodBoard.autoExtractColors()">🔄 Auto</button>
+                    </div>
+                    <div class="color-wheel-right">
+                        <div class="pe-photo-wrap" id="pePhotoWrap">
+                            <img src="${pe.canvas.toDataURL()}" alt="" draggable="false">
+                        </div>
+                        <div style="font-size:0.75rem; color:var(--text-sec); margin-top:8px; text-align:center;">Glisse un point sur la photo pour ajuster sa couleur.</div>
+                    </div>
+                </div>
+                <div class="color-wheel-actions">
+                    <input type="text" id="peNameInput" placeholder="Nom de la palette..." data-tooltip="Nom de la palette..." style="flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-main);">
+                    <button class="cancel" onclick="app.MoodBoard.closePaletteExtractModal()">Annuler</button>
+                    <button class="confirm" onclick="app.MoodBoard.confirmPaletteExtract()">Ajouter au moodboard</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        MoodBoard.renderPaletteExtractSwatches();
+        MoodBoard.renderPaletteExtractMarkers();
+    },
+
+    renderPaletteExtractSwatches: () => {
+        const pe = MoodBoard._paletteExtract;
+        const container = document.getElementById('peSwatches');
+        if(!container || !pe) return;
+        container.innerHTML = pe.colors.map((c, i) => {
+            const rgb = ColorWheel.hexToRgb(c.hex);
+            return `
+                <div class="generated-color-item">
+                    <div class="generated-color-swatch" style="background: ${c.hex};"></div>
+                    <div class="generated-color-info">
+                        <input class="generated-color-hex" type="text" value="${c.hex}" maxlength="7" spellcheck="false"
+                            onclick="event.stopPropagation()" onchange="app.MoodBoard.setExtractColorHex(${i}, this.value)">
+                        <div class="generated-color-rgb">RGB(${rgb ? rgb.r : 0}, ${rgb ? rgb.g : 0}, ${rgb ? rgb.b : 0})</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    },
+
+    setExtractColorHex: (i, val) => {
+        const pe = MoodBoard._paletteExtract;
+        if(!pe || !pe.colors[i]) return;
+        let hex = String(val || '').trim();
+        if(hex && hex[0] !== '#') hex = '#' + hex;
+        if(!/^#[0-9A-Fa-f]{6}$/.test(hex)) { MoodBoard.renderPaletteExtractSwatches(); return; }
+        pe.colors[i].hex = hex.toUpperCase();
+        MoodBoard.renderPaletteExtractSwatches();
+        MoodBoard.renderPaletteExtractMarkers();
+    },
+
+    renderPaletteExtractMarkers: () => {
+        const pe = MoodBoard._paletteExtract;
+        const wrap = document.getElementById('pePhotoWrap');
+        if(!wrap || !pe) return;
+        wrap.querySelectorAll('.pe-marker').forEach(m => m.remove());
+        pe.colors.forEach((c, i) => {
+            const m = document.createElement('div');
+            m.className = 'pe-marker';
+            m.dataset.idx = i;
+            m.style.left = (c.x / pe.canvas.width * 100) + '%';
+            m.style.top = (c.y / pe.canvas.height * 100) + '%';
+            m.style.background = c.hex;
+            m.title = 'Glisser pour ajuster';
+            m.addEventListener('mousedown', (ev) => MoodBoard._startMarkerDrag(ev, i));
+            wrap.appendChild(m);
+        });
+    },
+
+    _startMarkerDrag: (e, i) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const pe = MoodBoard._paletteExtract;
+        const wrap = document.getElementById('pePhotoWrap');
+        if(!pe || !wrap) return;
+        const marker = wrap.querySelector(`.pe-marker[data-idx="${i}"]`);
+        const onMove = (ev) => {
+            const rect = wrap.getBoundingClientRect();
+            const px = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+            const py = Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height));
+            const x = Math.round(px * (pe.canvas.width - 1));
+            const y = Math.round(py * (pe.canvas.height - 1));
+            const pixel = pe.ctx.getImageData(x, y, 1, 1).data;
+            const hex = '#' + [pixel[0], pixel[1], pixel[2]].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+            pe.colors[i] = { hex, x, y };
+            if(marker) { marker.style.left = (px * 100) + '%'; marker.style.top = (py * 100) + '%'; marker.style.background = hex; }
+            MoodBoard.renderPaletteExtractSwatches();
+        };
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    },
+
+    closePaletteExtractModal: () => {
+        const modal = document.getElementById('paletteExtractModal');
+        if(modal) modal.remove();
+        MoodBoard._paletteExtract = null;
+    },
+
+    confirmPaletteExtract: () => {
+        const pe = MoodBoard._paletteExtract;
+        if(!pe || !pe.colors.length) return;
+        const nameInput = document.getElementById('peNameInput');
+        const name = (nameInput && nameInput.value.trim()) ? nameInput.value.trim() : 'Palette extraite';
+        const hexColors = pe.colors.map(c => c.hex);
+        const board = MoodBoard.getCurrentBoard();
+        const element = board?.elements.find(el => el.id === pe.elementId);
+        if(element) { MoodBoard.contextX = element.x; MoodBoard.contextY = element.y + element.height + 20; }
+        MoodBoard.closePaletteExtractModal();
+        MoodBoard.addPaletteToBoard(hexColors, name);
     },
 
     addPaletteToBoard: (colors, name) => {
