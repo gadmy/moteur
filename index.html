@@ -29882,9 +29882,11 @@ const MoodBoard = {
         });
     },
 
-    // Regroupe les pixels par teintes proches (buckets de 16 niveaux/canal) et
-    // retient les 5 plus peuplees, chacune avec la position d'un pixel qui lui
-    // appartient (pour poser le point de depart sur la photo).
+    // Regroupe les pixels par teintes proches (buckets de 16 niveaux/canal),
+    // puis choisit 5 couleurs en exigeant un ecart minimal entre elles : sans
+    // ca, une grande zone uniforme (drapeau, pan de mur) rafle a elle seule
+    // les 5 buckets les plus peuples, et la palette entiere vient d'un seul
+    // endroit de la photo au lieu de la representer dans son ensemble.
     _bucketColors: (canvas, ctx) => {
         const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
         const buckets = {};
@@ -29898,9 +29900,23 @@ const MoodBoard = {
                 bkt.r += r; bkt.g += g; bkt.b += b; bkt.n++;
             }
         }
-        return Object.values(buckets).sort((a, b) => b.n - a.n).slice(0, 5).map(c => ({
-            hex: '#' + [c.r, c.g, c.b].map(v => Math.round(v / c.n).toString(16).padStart(2, '0')).join('').toUpperCase(),
-            x: c.sampleX, y: c.sampleY
+        const sorted = Object.values(buckets).map(c => ({
+            r: Math.round(c.r / c.n), g: Math.round(c.g / c.n), b: Math.round(c.b / c.n),
+            n: c.n, x: c.sampleX, y: c.sampleY
+        })).sort((a, b) => b.n - a.n);
+
+        const dist = (a, b) => Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
+        const picked = [];
+        for(let minDist = 70; minDist >= 0 && picked.length < 5; minDist -= 20) {
+            for(const c of sorted) {
+                if(picked.length >= 5) break;
+                if(picked.includes(c)) continue;
+                if(picked.every(p => dist(p, c) >= minDist)) picked.push(c);
+            }
+        }
+        return picked.slice(0, 5).map(c => ({
+            hex: '#' + [c.r, c.g, c.b].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase(),
+            x: c.x, y: c.y
         }));
     },
 
@@ -29933,6 +29949,7 @@ const MoodBoard = {
                     <div class="color-wheel-left">
                         <div class="generated-colors" id="peSwatches"></div>
                         <button class="cancel" style="margin-top:14px; width:100%;" onclick="app.MoodBoard.autoExtractColors()">🔄 Auto</button>
+                        <button class="cancel" style="margin-top:8px; width:100%;" onclick="app.MoodBoard.openWheelFromExtract()">🎨 Ouvrir la roue</button>
                     </div>
                     <div class="color-wheel-right">
                         <div class="pe-photo-wrap" id="pePhotoWrap">
@@ -30026,6 +30043,23 @@ const MoodBoard = {
         };
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
+    },
+
+    // Bascule vers l'outil roue teinte/harmonie (le meme que la creation
+    // normale de palette), pre-rempli avec les couleurs deja extraites — pour
+    // avoir les deux outils dans le meme flux plutot que l'un ou l'autre.
+    openWheelFromExtract: () => {
+        const pe = MoodBoard._paletteExtract;
+        if(!pe) return;
+        const startColors = pe.colors.map(c => c.hex);
+        const elementId = pe.elementId;
+        MoodBoard.closePaletteExtractModal();
+        ColorWheel.open((colors, name) => {
+            const board = MoodBoard.getCurrentBoard();
+            const element = board?.elements.find(el => el.id === elementId);
+            if(element) { MoodBoard.contextX = element.x; MoodBoard.contextY = element.y + element.height + 20; }
+            MoodBoard.addPaletteToBoard(colors, name);
+        }, startColors, 'Palette extraite');
     },
 
     closePaletteExtractModal: () => {
@@ -75717,20 +75751,22 @@ const Synopsis = {
     },
 
     // Champ optionnel (intention/realisateur/producteur) : grise dans la nav
-    // tant qu'on n'a pas clique dessus au moins une fois. Memorise par appareil.
-    _activatedKey: 'moteur_synopsis_activated',
+    // tant qu'on n'a pas clique dessus au moins une fois. Memorise dans la
+    // donnee du projet (state.data.uiConfig, deja synchronisee et declaree
+    // cote serveur) — PAS le localStorage, qui ne suit ni un autre appareil
+    // ni la navigation privee, d'ou un regrisage a chaque nouvelle session.
     activateField: (type) => {
-        let arr = [];
-        try { arr = JSON.parse(localStorage.getItem(Synopsis._activatedKey) || '[]'); } catch(e) {}
-        if(!arr.includes(type)) { arr.push(type); try { localStorage.setItem(Synopsis._activatedKey, JSON.stringify(arr)); } catch(e) {} }
+        if(!state.data.uiConfig) state.data.uiConfig = {};
+        if(!Array.isArray(state.data.uiConfig.synopsisActivated)) state.data.uiConfig.synopsisActivated = [];
+        const arr = state.data.uiConfig.synopsisActivated;
+        if(!arr.includes(type)) { arr.push(type); Store.save(); }
         const btn = document.querySelector(`.synopsis-nav-btn[data-target="${type}"]`);
         if(btn) btn.classList.remove('is-dormant');
     },
     // Applique l'etat grise/actif de chaque champ optionnel au chargement :
     // actif si deja clique une fois OU s'il a deja du contenu (vieux projet).
     applyDormantState: () => {
-        let arr = [];
-        try { arr = JSON.parse(localStorage.getItem(Synopsis._activatedKey) || '[]'); } catch(e) {}
+        const arr = (state.data.uiConfig && Array.isArray(state.data.uiConfig.synopsisActivated)) ? state.data.uiConfig.synopsisActivated : [];
         Synopsis.OPTIONAL_FIELDS.forEach(type => {
             const f = Synopsis.FIELDS[type];
             const hasContent = !!(state.data[f.key] && String(state.data[f.key]).replace(/<[^>]+>/g, '').trim());
