@@ -3168,6 +3168,7 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
      sait pas ou la scene va tomber dans une grille. */
   .seq-card.drop-before { box-shadow: -4px 0 0 0 var(--primary), 0 8px 24px rgba(0,0,0,0.2); }
   .seq-card.drop-after { box-shadow: 4px 0 0 0 var(--primary), 0 8px 24px rgba(0,0,0,0.2); }
+  .seq-drop-placeholder { border: 2px dashed var(--primary); border-radius: 10px; background: rgba(43,110,246,0.08); box-sizing: border-box; }
   .card h3 { margin: 0 0 5px; font-size: 1rem; color: var(--text-main); display:flex; align-items:center; gap:8px; }
   .card .meta { font-size: 0.8rem; color: var(--text-sec); font-style: italic; margin-bottom: 8px; }
 
@@ -21466,15 +21467,28 @@ initCategoriesDragDrop: () => {
         if(state.currentRole === 'viewer') return;
         const drag = document.querySelector(selector + '.dragging');
         if(!drag) return;
+        // v596 : la carte glissée ne bouge plus dans le DOM à chaque pixel de
+        // survol (c'était la cause du clignotement et des dépôts imprécis) —
+        // seul un emplacement fantôme, de la taille d'une carte, se déplace
+        // pour montrer où elle atterrira ; les autres cartes s'écartent
+        // naturellement puisque c'est une grille CSS normale. Le déplacement
+        // réel de la carte n'a lieu qu'au relâchement (voir dragend).
+        let placeholder = container.querySelector('.seq-drop-placeholder');
+        if(!placeholder) {
+            placeholder = document.createElement('div');
+            placeholder.className = 'seq-drop-placeholder';
+            const r = drag.getBoundingClientRect();
+            placeholder.style.width = r.width + 'px';
+            placeholder.style.height = r.height + 'px';
+        }
         const others = [...container.querySelectorAll(selector + ':not(.dragging)')];
-        if(!others.length) { container.appendChild(drag); return; }
+        if(!others.length) { container.appendChild(placeholder); return; }
         // Grille ou liste ? Deux cartes sur la meme ligne = grille.
         const r0 = others[0].getBoundingClientRect();
         const enGrille = others.some(el => Math.abs(el.getBoundingClientRect().top - r0.top) < 4 && el !== others[0]);
-        others.forEach(el => el.classList.remove('drop-before', 'drop-after'));
         if(!enGrille) {
             const after = Utils.getDragAfterElement(container, e.clientY, selector);
-            if(after) container.insertBefore(drag, after); else container.appendChild(drag);
+            if(after) container.insertBefore(placeholder, after); else container.appendChild(placeholder);
             return;
         }
         let best = null, bestD = Infinity, avant = true;
@@ -21485,9 +21499,8 @@ initCategoriesDragDrop: () => {
             if(d < bestD) { bestD = d; best = el; avant = e.clientX < cx; }
         });
         if(!best) return;
-        best.classList.add(avant ? 'drop-before' : 'drop-after');
-        if(avant) container.insertBefore(drag, best);
-        else container.insertBefore(drag, best.nextSibling);
+        if(avant) container.insertBefore(placeholder, best);
+        else container.insertBefore(placeholder, best.nextSibling);
     },
     goToStoryboard: (sceneId) => {
       UI.switchTab('storyboard');
@@ -23321,10 +23334,15 @@ initCategoriesDragDrop: () => {
                   el.addEventListener('contextmenu', (e) => Actions.openTagMenu(e, s.id)); 
                   el.addEventListener('dragstart', ()=>el.classList.add('dragging')); 
                   el.addEventListener('dragend', ()=>{
+                      // v596 : la carte glissée n'a pas bougé pendant le survol —
+                      // on la place maintenant réellement à l'emplacement du
+                      // fantôme, qui matérialisait où elle allait atterrir.
+                      const placeholder = els.boardList.querySelector('.seq-drop-placeholder');
+                      if(placeholder) {
+                          els.boardList.insertBefore(el, placeholder);
+                          placeholder.remove();
+                      }
                       el.classList.remove('dragging');
-                      // Les reperes d'insertion doivent disparaitre meme si la
-                      // depose a lieu hors d'une carte.
-                      els.boardList.querySelectorAll('.drop-before, .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
                       Actions.updateOrder('board');
                   }); 
               } 
@@ -32330,26 +32348,63 @@ const StoryboardExport = {
         });
     },
     
+    // v595 : précharge (et attend) les images des objets (photos insérées,
+    // icônes SVG d'annotation) avant de les dessiner sur un canvas d'export.
+    // Sans ça, renderObjectsOnCanvas dessine un placeholder "Chargement…" si
+    // l'image n'est pas déjà en cache — placeholder qui reste figé dans le
+    // PDF puisque ce canvas hors-écran n'est jamais redessiné après coup.
+    _preloadObjectImages: (objects) => {
+        if(!Array.isArray(objects) || objects.length === 0) return Promise.resolve();
+        const catalog = CONFIG.annotationObjects || [];
+        const waits = [];
+        objects.forEach(o => {
+            if(!o || !o.type) return;
+            let cacheKey, trigger;
+            if(o.type === 'image') {
+                if(!o.imageData) return;
+                cacheKey = 'uploaded|' + o.id;
+                trigger = () => Storyboard.getOrCreateUploadedImage(o.id, o.imageData);
+            } else {
+                const def = catalog.find(d => d.type === o.type);
+                if(!def || !def.svg) return; // pas de SVG -> fallback emoji, rien à précharger
+                cacheKey = o.type + '|currentColor';
+                trigger = () => Storyboard.getOrCreateSvgImage(o.type);
+            }
+            const existing = Storyboard._svgImageCache[cacheKey];
+            if(existing && existing.ready) return;
+            trigger();
+            waits.push(new Promise(resolve => {
+                const check = () => {
+                    const entry = Storyboard._svgImageCache[cacheKey];
+                    if(entry && entry.ready) { resolve(); return; }
+                    setTimeout(check, 60);
+                };
+                check();
+                setTimeout(resolve, 8000);
+            }));
+        });
+        return Promise.all(waits);
+    },
+    
     // [Phase C.2.6] Helper : dessine un calque technique (lighting/camera/actors) PAR-DESSUS un canvas
     // existant. Utilisé par createPrintShot pour superposer dans un seul canvas (pas 2 séparés).
-    _drawTechLayerOnTop: (ctx, shot, techLayer, wantsTechLayer) => {
+    _drawTechLayerOnTop: async (ctx, shot, techLayer, wantsTechLayer) => {
         if(!wantsTechLayer || !shot.drawings || !shot.drawings[techLayer]) return;
         const techZone = shot.drawings[techLayer];
         
         // 3 cas : image uploadée, drawingData (calques de dessin), objects (objets vectoriels)
         if(techZone.imageType === 'upload' && techZone.imageUrl) {
             const layerImg = new Image();
-            StoryboardExport._loadPrintImg(layerImg, techZone.imageUrl, () => { ctx.drawImage(layerImg, 0, 0, ctx.canvas.width, ctx.canvas.height); });
+            await StoryboardExport._loadPrintImg(layerImg, techZone.imageUrl, () => { ctx.drawImage(layerImg, 0, 0, ctx.canvas.width, ctx.canvas.height); });
         } else if(techZone.drawingData) {
             // Dessine les calques DrawingEditor du zone tech par dessus (renderDrawingData fait drawImage async)
             DrawingEditor.renderDrawingData(ctx, techZone.drawingData);
         }
         
-        // Objets vectoriels du zone tech par-dessus
+        // Objets vectoriels du zone tech par-dessus — attend que leurs images soient prêtes
         if(Array.isArray(techZone.objects) && techZone.objects.length > 0) {
-            setTimeout(() => {
-                Storyboard.renderObjectsOnCanvas(ctx, techZone.objects);
-            }, 150);
+            await StoryboardExport._preloadObjectImages(techZone.objects);
+            Storyboard.renderObjectsOnCanvas(ctx, techZone.objects);
         }
     },
     
@@ -32375,7 +32430,7 @@ const StoryboardExport = {
         // 1) Calque ORIGINAL en premier (image uploadée OU drawing original)
         if(shot.imageType === 'upload' && shot.imageUrl) {
             const img = new Image();
-            StoryboardExport._loadPrintImg(img, shot.imageUrl, () => {
+            const baseP = StoryboardExport._loadPrintImg(img, shot.imageUrl, () => {
                 // Garder l'aspect ratio : dessiner centré dans le canvas
                 const ratio = Math.min(composedCanvas.width / img.naturalWidth, composedCanvas.height / img.naturalHeight);
                 const w = img.naturalWidth * ratio;
@@ -32383,22 +32438,23 @@ const StoryboardExport = {
                 const x = (composedCanvas.width - w) / 2;
                 const y = (composedCanvas.height - h) / 2;
                 composedCtx.drawImage(img, x, y, w, h);
-                // Puis dessiner le calque technique par-dessus (après le load)
-                Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer);
             });
+            // Puis dessiner le calque technique par-dessus, une fois l'image de base posée
+            const techP = baseP.then(() => Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer));
+            if(StoryboardExport._printCapturing) StoryboardExport._printImgPromises.push(techP);
             hasContent = true;
         } else if(shot.imageType === 'drawing' && shot.drawingData) {
-            // Rendu du dessin (renderDrawingData gère ses async)
-            DrawingEditor.renderDrawingData(composedCtx, shot.drawingData);
-            // Objets vectoriels de la zone Original par-dessus
+            // Rendu du dessin (renderDrawingData renvoie une promesse désormais suivie)
+            const baseP = DrawingEditor.renderDrawingData(composedCtx, shot.drawingData) || Promise.resolve();
+            // Objets vectoriels de la zone Original par-dessus, une fois le dessin de base posé
             const originalZone = shot.drawings && shot.drawings.original;
-            if(originalZone && Array.isArray(originalZone.objects) && originalZone.objects.length > 0) {
-                setTimeout(() => {
-                    Storyboard.renderObjectsOnCanvas(composedCtx, originalZone.objects);
-                }, 200);
-            }
+            const objectsP = (originalZone && Array.isArray(originalZone.objects) && originalZone.objects.length > 0)
+                ? baseP.then(() => StoryboardExport._preloadObjectImages(originalZone.objects))
+                       .then(() => Storyboard.renderObjectsOnCanvas(composedCtx, originalZone.objects))
+                : baseP;
             // Puis le calque technique par-dessus
-            setTimeout(() => Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer), 250);
+            const techP = objectsP.then(() => Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer));
+            if(StoryboardExport._printCapturing) StoryboardExport._printImgPromises.push(techP);
             hasContent = true;
         }
         
@@ -34646,14 +34702,16 @@ const DrawingEditor = {
     },
     
     renderDrawingData: (ctx, drawingData) => {
-        if(!drawingData || !drawingData.layers) return;
+        if(!drawingData || !drawingData.layers) return Promise.resolve();
         
+        const promises = [];
         drawingData.layers.forEach(layerData => {
             if(!layerData.visible) return;
             
             const img = new Image();
-            StoryboardExport._loadPrintImg(img, layerData.imageData, () => { ctx.drawImage(img, 0, 0); });
+            promises.push(StoryboardExport._loadPrintImg(img, layerData.imageData, () => { ctx.drawImage(img, 0, 0); }));
         });
+        return Promise.all(promises);
     }
 };
 
