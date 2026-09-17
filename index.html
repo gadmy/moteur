@@ -176,6 +176,17 @@ DETTE / À SAVOIR
 (Condensé par périodes le 15 septembre 2026, v593. Le détail des sessions vit
 dans l'historique git jusqu'à son vidage.)
 
+v609 (17 Septembre 2026) — MOOD BOARD : CALQUES — CORRECTIF BLOCAGE + POIGNÉE
+  DE GLISSER. A) Plus rien ne pouvait être déplacé nulle part (signalé) :
+  _canInteract comparait au calque actif STOCKÉ, qui pouvait devenir
+  incohérent (ne plus correspondre à aucun calque réel) et bloquait alors
+  TOUT sans exception. getCurrentBoard corrige maintenant activeLayerId à
+  chaque appel s'il ne pointe plus vers un calque existant, et
+  _canInteract passe par le getter qui s'auto-répare plutôt que par la
+  valeur brute. B) Réordonnancement des calques par poignée de
+  glisser-déposer (⋮⋮, même principe que les calques du Storyboard) au
+  lieu des boutons monter/descendre, retirés.
+
 v608 (17 Septembre 2026) — MOOD BOARD : CORRECTIF CALQUES — VISIBLE MAIS PAS
   ISOLÉ. Correction de v607, qui masquait les autres calques (mauvaise
   interprétation) : tous les calques visibles s'affichent à nouveau
@@ -3883,13 +3894,14 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .moodboard-layer-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; margin-bottom: 4px; cursor: pointer; background: var(--bg); border: 1px solid var(--border); }
   .moodboard-layer-item:hover { border-color: var(--primary); }
   .moodboard-layer-item.selected { border-color: var(--primary); background: rgba(59, 130, 246, 0.1); }
+  .moodboard-layer-item .ml-handle { cursor: grab; opacity: 0.4; font-size: 0.9rem; flex-shrink: 0; user-select: none; }
+  .moodboard-layer-item .ml-handle:active { cursor: grabbing; }
   .moodboard-layer-item .ml-eye, .moodboard-layer-item .ml-lock { background: none; border: none; cursor: pointer; font-size: 0.85rem; padding: 2px; flex-shrink: 0; }
   .moodboard-layer-item .ml-name { flex: 1; font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .moodboard-layer-item .ml-count { font-size: 0.72rem; color: var(--text-sec); flex-shrink: 0; }
-  .moodboard-layer-item .ml-actions { display: none; gap: 2px; flex-shrink: 0; }
-  .moodboard-layer-item:hover .ml-actions { display: flex; }
-  .moodboard-layer-item .ml-actions button { width: 22px; height: 22px; border: none; border-radius: 4px; cursor: pointer; background: var(--panel-bg); font-size: 0.68rem; }
-  .moodboard-layer-item .ml-actions button:hover { background: var(--border); }
+  .moodboard-layer-item .ml-delete { display: none; width: 22px; height: 22px; border: none; border-radius: 4px; cursor: pointer; background: var(--panel-bg); font-size: 0.68rem; flex-shrink: 0; }
+  .moodboard-layer-item:hover .ml-delete { display: block; }
+  .moodboard-layer-item .ml-delete:hover { background: var(--border); }
   .moodboard-element-item { padding: 10px 12px; border-radius: 8px; margin-bottom: 6px; cursor: pointer; background: var(--bg); border: 1px solid var(--border); transition: all 0.2s; display: flex; align-items: center; gap: 10px; }
   .moodboard-element-item:hover { border-color: var(--primary); background: var(--panel-bg); }
   .moodboard-element-item.selected { border-color: var(--primary); background: rgba(59, 130, 246, 0.1); }
@@ -29200,7 +29212,7 @@ const MoodBoard = {
         if(board && (!board.layers || board.layers.length === 0)) {
             board.layers = [{ id: 'layer_' + Date.now(), name: 'Calque 1', visible: true, locked: false }];
         }
-        if(board && !board.activeLayerId) {
+        if(board && (!board.activeLayerId || !board.layers.some(l => l.id === board.activeLayerId))) {
             board.activeLayerId = board.layers[0].id;
         }
         return board;
@@ -29230,7 +29242,7 @@ const MoodBoard = {
     // calque ACTIF et que ce calque n'est pas verrouillé. Le contenu des
     // autres calques reste visible mais intouchable.
     _canInteract: (board, el) => {
-        return MoodBoard._elementLayerId(board, el) === board.activeLayerId && !MoodBoard._layerLocked(board, el);
+        return MoodBoard._elementLayerId(board, el) === MoodBoard._activeLayerId(board) && !MoodBoard._layerLocked(board, el);
     },
     
     addLayer: () => {
@@ -29319,38 +29331,6 @@ const MoodBoard = {
         MoodBoard.renderCanvas();
     },
     
-    // Dans le panneau, les calques s'affichent du dessus (premier de la liste)
-    // vers le dessous — l'inverse de leur ordre de stockage (board.layers[0] =
-    // arrière-plan). "Monter" dans le panneau = avancer dans le tableau.
-    moveLayerUp: (layerId) => {
-        if(!MoodBoard.canWrite()) return;
-        const board = MoodBoard.getCurrentBoard();
-        if(!board) return;
-        const i = board.layers.findIndex(l => l.id === layerId);
-        if(i < board.layers.length - 1) {
-            const temp = board.layers[i];
-            board.layers[i] = board.layers[i + 1];
-            board.layers[i + 1] = temp;
-            board.modifiedAt = Date.now();
-            Store.save();
-            MoodBoard.renderCanvas();
-        }
-    },
-    moveLayerDown: (layerId) => {
-        if(!MoodBoard.canWrite()) return;
-        const board = MoodBoard.getCurrentBoard();
-        if(!board) return;
-        const i = board.layers.findIndex(l => l.id === layerId);
-        if(i > 0) {
-            const temp = board.layers[i];
-            board.layers[i] = board.layers[i - 1];
-            board.layers[i - 1] = temp;
-            board.modifiedAt = Date.now();
-            Store.save();
-            MoodBoard.renderCanvas();
-        }
-    },
-    
     // Déplace un élément vers un autre calque (menu de l'élément dans la liste).
     moveElementToLayer: (elementId, layerId) => {
         if(!MoodBoard.canWrite()) return;
@@ -29376,19 +29356,65 @@ const MoodBoard = {
             const count = board.elements.filter(el => MoodBoard._elementLayerId(board, el) === layer.id).length;
             const hidden = layer.visible === false;
             return `
-                <div class="moodboard-layer-item ${isActive ? 'selected' : ''}" onclick="app.MoodBoard.setActiveLayer('${layer.id}')">
+                <div class="moodboard-layer-item ${isActive ? 'selected' : ''}" draggable="true"
+                     onclick="app.MoodBoard.setActiveLayer('${layer.id}')"
+                     ondragstart="app.MoodBoard._layerDragStart(event, '${layer.id}')"
+                     ondragover="app.MoodBoard._layerDragOver(event)"
+                     ondragleave="app.MoodBoard._layerDragLeave(event)"
+                     ondrop="app.MoodBoard._layerDrop(event, '${layer.id}')"
+                     ondragend="app.MoodBoard._layerDragEnd(event)">
+                    <span class="ml-handle" title="Glisser pour réordonner">⋮⋮</span>
                     <button class="ml-eye" onclick="event.stopPropagation(); app.MoodBoard.toggleLayerVisibility('${layer.id}')" title="${hidden ? 'Afficher' : 'Masquer'}">${hidden ? '🙈' : '👁️'}</button>
                     <button class="ml-lock" onclick="event.stopPropagation(); app.MoodBoard.toggleLayerLock('${layer.id}')" title="${layer.locked ? 'Déverrouiller' : 'Verrouiller'}">${layer.locked ? '🔒' : '🔓'}</button>
                     <div class="ml-name" ondblclick="event.stopPropagation(); app.MoodBoard.renameLayer('${layer.id}')" title="Double-clic pour renommer">${Utils.escape(layer.name)}</div>
                     <div class="ml-count">${count}</div>
-                    <div class="ml-actions">
-                        <button onclick="event.stopPropagation(); app.MoodBoard.moveLayerUp('${layer.id}')" title="Monter">🔼</button>
-                        <button onclick="event.stopPropagation(); app.MoodBoard.moveLayerDown('${layer.id}')" title="Descendre">🔽</button>
-                        <button onclick="event.stopPropagation(); app.MoodBoard.deleteLayer('${layer.id}')" title="Supprimer">🗑️</button>
-                    </div>
+                    <button class="ml-delete" onclick="event.stopPropagation(); app.MoodBoard.deleteLayer('${layer.id}')" title="Supprimer">🗑️</button>
                 </div>`;
         }).join('');
         container.innerHTML = rows;
+    },
+    
+    // ===== Glisser-déposer pour réordonner les calques (remplace les boutons
+    // monter/descendre). L'ordre visuel est inversé par rapport au stockage
+    // (haut de liste = premier plan = fin du tableau board.layers), mais on
+    // travaille par identifiant donc ça n'a pas d'importance ici. =====
+    _dragLayerId: null,
+    _layerDragStart: (e, layerId) => {
+        MoodBoard._dragLayerId = layerId;
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', layerId); } catch(err) {}
+        e.currentTarget.style.opacity = '0.5';
+    },
+    _layerDragOver: (e) => {
+        if(!MoodBoard._dragLayerId) return;
+        e.preventDefault();
+        e.currentTarget.style.borderTop = '2px solid var(--primary)';
+    },
+    _layerDragLeave: (e) => {
+        e.currentTarget.style.borderTop = '';
+    },
+    _layerDrop: (e, targetLayerId) => {
+        e.preventDefault();
+        e.currentTarget.style.borderTop = '';
+        const draggedId = MoodBoard._dragLayerId;
+        MoodBoard._dragLayerId = null;
+        if(!draggedId || draggedId === targetLayerId) return;
+        if(!MoodBoard.canWrite()) return;
+        const board = MoodBoard.getCurrentBoard();
+        if(!board) return;
+        const layers = board.layers;
+        const fromIdx = layers.findIndex(l => l.id === draggedId);
+        const toIdx = layers.findIndex(l => l.id === targetLayerId);
+        if(fromIdx === -1 || toIdx === -1) return;
+        const [moved] = layers.splice(fromIdx, 1);
+        layers.splice(toIdx, 0, moved);
+        board.modifiedAt = Date.now();
+        Store.save();
+        MoodBoard.renderCanvas();
+    },
+    _layerDragEnd: (e) => {
+        e.currentTarget.style.opacity = '';
+        MoodBoard._dragLayerId = null;
     },
     
     deleteBoard: async (boardId) => {
