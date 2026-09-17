@@ -5387,12 +5387,19 @@ body.presentation-mode .presentation-bar {
   body.has-minichat .feedback-bubble { bottom: 84px; }
   body.wm-taskbar-open .feedback-bubble { bottom: calc(28px + var(--wm-taskbar-h, 0px)); }
   body.wm-taskbar-open.has-minichat .feedback-bubble { bottom: calc(92px + var(--wm-taskbar-h, 0px)); }
-  .fb-ov { position: fixed; inset: 0; z-index: var(--z-modal); background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; padding: 16px; }
-  .fb-box { background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 12px; max-width: 460px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.6); overflow: hidden; }
+  /* v595 : petit panneau ancré (même emplacement/comportement que le mini-chat)
+     au lieu d'une modale plein écran centrée. La bulle se cache pendant que le
+     panneau est ouvert, comme pour le mini-chat. */
+  .fb-ov { position: fixed; bottom: 20px; left: 20px; z-index: var(--z-dropdown); width: 320px; max-width: calc(100vw - 40px); max-height: calc(100vh - 40px); display: flex; }
+  body.has-minichat .fb-ov { bottom: 84px; }
+  body.wm-taskbar-open .fb-ov { bottom: calc(28px + var(--wm-taskbar-h, 0px)); }
+  body.wm-taskbar-open.has-minichat .fb-ov { bottom: calc(92px + var(--wm-taskbar-h, 0px)); }
+  body:has(#fb-ov) .feedback-bubble { display: none; }
+  .fb-box { background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 12px; width: 100%; max-height: 100%; box-shadow: 0 12px 32px rgba(0,0,0,.35); overflow: hidden; display: flex; flex-direction: column; }
   .fb-head { display: flex; align-items: center; justify-content: space-between; padding: 15px 18px; border-bottom: 1px solid var(--border); }
   .fb-head h3 { margin: 0; font-size: 1.05rem; }
   .fb-x { background: transparent; border: none; color: var(--text-main); font-size: 1.5rem; line-height: 1; cursor: pointer; opacity: .7; }
-  .fb-body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .fb-body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
   .fb-intro { font-size: .88rem; opacity: .75; line-height: 1.45; margin: 0; }
   .fb-types { display: flex; gap: 8px; flex-wrap: wrap; }
   .fb-type { flex: 1 1 auto; border: 1px solid var(--border); background: transparent; color: var(--text-main); border-radius: 8px; padding: 9px 10px; cursor: pointer; font-size: .88rem; }
@@ -32775,7 +32782,7 @@ const DrawingEditor = {
                     originalUrl = shot.imageUrl;
                 }
                 
-                // 3) Sinon, dessin à composer depuis les calques de l'original
+                // 3) Sinon, dessin à composer depuis les calques + objets de l'original
                 if(!originalUrl) {
                     let originalDrawingData = null;
                     if(shot.drawings && shot.drawings.original && shot.drawings.original.drawingData) {
@@ -32783,43 +32790,50 @@ const DrawingEditor = {
                     } else if(shot.drawingData) {
                         originalDrawingData = shot.drawingData;
                     }
+                    // v595 : les images insérées en objet dans le dessin original doivent
+                    // aussi apparaître en arrière-plan des zones lumière/caméra/acteurs —
+                    // avant, seuls les calques pixel étaient composés, les objets
+                    // restaient invisibles derrière.
+                    const originalObjects = (shot.drawings && shot.drawings.original && Array.isArray(shot.drawings.original.objects))
+                        ? shot.drawings.original.objects : [];
+                    const originalLayers = (originalDrawingData && Array.isArray(originalDrawingData.layers)) ? originalDrawingData.layers : [];
                     
-                    if(originalDrawingData && Array.isArray(originalDrawingData.layers) && originalDrawingData.layers.length > 0) {
-                        // Composer les calques visibles dans un canvas temporaire
+                    if(originalLayers.length > 0 || originalObjects.length > 0) {
+                        // Composer les calques visibles + leurs objets, dans l'ordre, dans un canvas temporaire
                         const tmpCanvas = document.createElement('canvas');
                         tmpCanvas.width = DrawingEditor.canvas.width;
                         tmpCanvas.height = DrawingEditor.canvas.height;
                         const tmpCtx = tmpCanvas.getContext('2d');
-                        let pending = 0;
-                        let resolved = 0;
-                        const layersToCompose = originalDrawingData.layers.filter(l => l.visible !== false && l.imageData);
-                        if(layersToCompose.length === 0) {
-                            // Rien à composer, on laisse originalBgImage à null
-                        } else {
-                            const finalize = () => {
-                                const dataUrl = tmpCanvas.toDataURL();
-                                const img = new Image();
-                                img.onload = () => { DrawingEditor.redraw(); };
-                                img.src = dataUrl;
-                                DrawingEditor.originalBgImage = img;
-                            };
-                            layersToCompose.forEach(layer => {
-                                pending++;
-                                const im = new Image();
-                                im.onload = () => {
-                                    tmpCtx.drawImage(im, 0, 0);
-                                    resolved++;
-                                    if(resolved === pending) finalize();
-                                };
-                                im.onerror = () => {
-                                    resolved++;
-                                    if(resolved === pending) finalize();
-                                };
-                                // [Phase C.2.6 fix] crossOrigin obligatoire pour pouvoir convertir le canvas en PDF
-                                if(typeof layer.imageData === 'string' && layer.imageData.startsWith('http')) im.crossOrigin = 'anonymous';
-                                im.src = Utils.signedUrlFor(layer.imageData);
+                        const layersToCompose = originalLayers.filter(l => l.visible !== false);
+                        const layerIds = new Set(originalLayers.map(l => l.id));
+                        const orphanObjects = originalObjects.filter(o => !o.layerId || !layerIds.has(o.layerId));
+                        
+                        const loadImg = (src, cors) => new Promise(resolve => {
+                            if(!src) { resolve(null); return; }
+                            const im = new Image();
+                            // [Phase C.2.6 fix] crossOrigin obligatoire pour pouvoir convertir le canvas en PDF
+                            if(cors) im.crossOrigin = 'anonymous';
+                            im.onload = () => resolve(im);
+                            im.onerror = () => resolve(null);
+                            im.src = Utils.signedUrlFor(src);
+                        });
+                        
+                        Promise.all(layersToCompose.map(l => loadImg(l.imageData, typeof l.imageData === 'string' && l.imageData.startsWith('http')))).then(loadedImgs => {
+                            // Calque par calque, dans l'ordre : les pixels du calque, puis
+                            // ses objets — même logique que le rendu live (DrawingEditor.redraw)
+                            layersToCompose.forEach((layer, i) => {
+                                if(loadedImgs[i]) tmpCtx.drawImage(loadedImgs[i], 0, 0);
+                                const layerObjects = originalObjects.filter(o => o.layerId === layer.id);
+                                if(layerObjects.length > 0) Storyboard.renderObjectsOnCanvas(tmpCtx, layerObjects);
                             });
-                        }
+                            if(orphanObjects.length > 0) Storyboard.renderObjectsOnCanvas(tmpCtx, orphanObjects);
+                            
+                            const dataUrl = tmpCanvas.toDataURL();
+                            const img = new Image();
+                            img.onload = () => { DrawingEditor.redraw(); };
+                            img.src = dataUrl;
+                            DrawingEditor.originalBgImage = img;
+                        });
                     }
                 }
                 
