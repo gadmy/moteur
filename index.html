@@ -27622,6 +27622,10 @@ const ColorWheel = {
         
         wrap.addEventListener('mousedown', (e) => {
             ColorWheel.isDragging = true;
+            // Mode photo : retenir quel point (parmi les 5) est le plus
+            // proche du clic, pour l'ancrer lui — pas le point "principal"
+            // par defaut — pendant tout le glisser.
+            ColorWheel._wheelDragIdx = ColorWheel._nearestMarkerIdx(e);
             ColorWheel.handleDrag(e);
         });
         
@@ -27635,6 +27639,23 @@ const ColorWheel = {
             });
         }
     },
+
+    // Point (parmi les 5 actuels) le plus proche d'une position d'ecran sur
+    // la roue.
+    _nearestMarkerIdx: (e) => {
+        const rect = ColorWheel.canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        let best = 0, bestDist = Infinity;
+        ColorWheel.colors.forEach((c, i) => {
+            const rad = (c.hue - 90) * Math.PI / 180;
+            const dist = (c.saturation / 100) * ColorWheel.radius;
+            const mx2 = ColorWheel.centerX + dist * Math.cos(rad);
+            const my2 = ColorWheel.centerY + dist * Math.sin(rad);
+            const d = Math.hypot(mx - mx2, my - my2);
+            if(d < bestDist) { bestDist = d; best = i; }
+        });
+        return best;
+    },
     
     handleDrag: (e) => {
         const rect = ColorWheel.canvas.getBoundingClientRect();
@@ -27646,6 +27667,25 @@ const ColorWheel = {
         
         const distance = Math.sqrt(x * x + y * y);
         const saturation = Math.min(100, Math.max(10, (distance / ColorWheel.radius) * 100));
+        
+        // Mode photo : le point saisi ET les 4 autres restent ancres dans de
+        // vraies couleurs de la photo, dans la forme de l'harmonie en cours —
+        // pas une formule theorique qui ignorerait l'image.
+        if(ColorWheel.photoOpts && ColorWheel.photoOpts.chaseHarmonyFromHue) {
+            const idx = ColorWheel._wheelDragIdx != null ? ColorWheel._wheelDragIdx : 0;
+            const chased = ColorWheel.photoOpts.chaseHarmonyFromHue(idx, angle, ColorWheel.harmony);
+            if(chased) {
+                ColorWheel.colors = chased.map(p => {
+                    if(!p) return null;
+                    const hsl = ColorWheel.hexToHsl(p.hex);
+                    return { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex: p.hex, x: p.x, y: p.y };
+                }).filter(Boolean);
+                ColorWheel.renderColors();
+                ColorWheel.updateMarkers();
+                ColorWheel.renderPhotoMarkers();
+                return;
+            }
+        }
         
         ColorWheel.baseHue = angle;
         ColorWheel.baseSaturation = saturation;
@@ -27752,6 +27792,26 @@ const ColorWheel = {
         if(hex && hex[0] !== '#') hex = '#' + hex;
         if(!/^#[0-9A-Fa-f]{6}$/.test(hex)) { ColorWheel.renderColors(); return; }
         hex = hex.toUpperCase();
+
+        // Mode photo : ancrer ce hex sur le pixel de la photo le plus proche,
+        // puis faire suivre les 4 autres selon l'harmonie — meme logique que
+        // le glisser sur la photo ou sur la roue.
+        if(ColorWheel.photoOpts && ColorWheel.photoOpts.chaseHarmony && ColorWheel.photoOpts.findNearestPixel) {
+            const p = ColorWheel.photoOpts.findNearestPixel(hex);
+            const chased = ColorWheel.photoOpts.chaseHarmony(i, hex, p.x, p.y, ColorWheel.harmony);
+            if(chased) {
+                ColorWheel.colors = chased.map(pt => {
+                    if(!pt) return null;
+                    const hsl = ColorWheel.hexToHsl(pt.hex);
+                    return { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex: pt.hex, x: pt.x, y: pt.y };
+                }).filter(Boolean);
+                ColorWheel.renderColors();
+                ColorWheel.updateMarkers();
+                ColorWheel.renderPhotoMarkers();
+                return;
+            }
+        }
+
         const hsl = ColorWheel.hexToHsl(hex);
         const c = { hue: hsl.h, saturation: Math.round(hsl.s), lightness: Math.round(hsl.l), hex };
         if(ColorWheel.photoOpts && ColorWheel.photoOpts.findNearestPixel) {
@@ -30061,7 +30121,10 @@ const MoodBoard = {
                         .map(c => ({ hex: c.hex, x: c.x, y: c.y })),
                     // Glisser un point : les 4 autres se recalent sur l'harmonie
                     // en cours, autour de CE point-la.
-                    chaseHarmony: (draggedIdx, hex, x, y, harmonyKey) => MoodBoard._chaseHarmony(candidates, harmonyKey, draggedIdx, hex, x, y)
+                    chaseHarmony: (draggedIdx, hex, x, y, harmonyKey) => MoodBoard._chaseHarmony(candidates, harmonyKey, draggedIdx, hex, x, y),
+                    // Meme chose depuis un glisser sur la roue (teinte seule,
+                    // pas de pixel exact a donner).
+                    chaseHarmonyFromHue: (draggedIdx, hue, harmonyKey) => MoodBoard._chaseHarmonyFromHue(candidates, harmonyKey, draggedIdx, hue)
                 });
             } catch(e) {
                 console.warn('[MoodBoard] extractPaletteFromImage:', e);
@@ -30196,6 +30259,20 @@ const MoodBoard = {
             if(best) used.push(best);
             return best ? { hex: best.hex, x: best.x, y: best.y } : null;
         });
+    },
+
+    // Comme _chaseHarmony, mais pour un glisser sur la ROUE (qui ne donne
+    // qu'une teinte, pas un pixel exact) : on resout d'abord le point saisi
+    // au pixel de la photo le plus proche de cette teinte, puis on fait
+    // suivre les 4 autres normalement.
+    _chaseHarmonyFromHue: (candidates, harmonyKey, draggedIdx, draggedHue) => {
+        const hueDist = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+        const saturated = candidates.filter(c => c.sat > 12);
+        const pool = saturated.length ? saturated : candidates;
+        let draggedMatch = null, bestScore = Infinity;
+        pool.forEach(c => { const s = hueDist(c.hue, draggedHue); if(s < bestScore) { bestScore = s; draggedMatch = c; } });
+        if(!draggedMatch) return null;
+        return MoodBoard._chaseHarmony(candidates, harmonyKey, draggedIdx, draggedMatch.hex, draggedMatch.x, draggedMatch.y);
     },
 
     addPaletteToBoard: (colors, name) => {
