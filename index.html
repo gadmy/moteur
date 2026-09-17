@@ -176,6 +176,34 @@ DETTE / À SAVOIR
 (Condensé par périodes le 15 septembre 2026, v593. Le détail des sessions vit
 dans l'historique git jusqu'à son vidage.)
 
+v601 (17 Septembre 2026) — FIN (PRESQUE) DE LA CONSOLIDATION DES EXPORTS PDF.
+  Personnages, Comédiens et Décors redirigés vers le hub — mais seulement
+  pour un projet normal : un projet "série" garde l'ancien chemin (choix de
+  saison), que le hub ne sait pas encore faire pour ces trois sections.
+  Aucune perte, dans un cas comme dans l'autre. Total : 12 sections sur ~15
+  consolidées. Volontairement laissés de côté : le PDF du Scénario (sa
+  fenêtre contient aussi un raccourci "Partager le scénario" qui n'existe
+  nulle part ailleurs — le redonner au hub perdrait ce raccourci, pas
+  seulement des options), et Titre / Présentation / Dépouillement (export
+  direct au clic, pas de fenêtre à dupliquer). Exports vraiment ponctuels
+  laissés tels quels par choix (v598) : un contrat, une journée de planning,
+  le profil public.
+
+v600 (17 Septembre 2026) — SUITE DE LA CONSOLIDATION DES EXPORTS PDF VERS LE
+  HUB. Six sections de plus redirigées vers le hub unique (bouton de l'onglet
+  = hub avec juste cette case cochée, ancienne fenêtre dédiée retirée) :
+  Ressources, Équipe, Asso/Entreprises, Statistiques, Budget, Synopsis —
+  options déjà identiques des deux côtés, rien perdu. Planning et Mood Board
+  ont suivi avec, en plus, un petit bouton popup repris de l'ancienne fenêtre
+  ("📅 Jours…", "🎨 Planches…") pour choisir un sous-ensemble plutôt que
+  tout exporter, même principe que "🎬 Scènes…" du Storyboard (v599). Total :
+  9 sections sur ~15 consolidées. Restent : Personnages / Comédiens / Décors
+  et le PDF du Scénario, qui ont tous un choix de saisons pour les projets
+  de type "série" — bloqués en attente de savoir si un projet réel est
+  concerné avant de décider comment le reprendre. Titre, Présentation et
+  Dépouillement n'ont pas de fenêtre dédiée (export direct au clic) : rien à
+  consolider pour eux.
+
 v599 (17 Septembre 2026) — HUB D'EXPORT : SÉLECTION DE SCÈNES STORYBOARD ET
   GROUPES REPLIABLES. La sélection de scènes retirée en v598 revient sous
   forme de petite fenêtre à part ("🎬 Scènes…" dans la ligne Storyboard) au
@@ -10583,6 +10611,9 @@ body.presentation-mode .presentation-bar {
                         <span class="exp-drag-handle exp-drag-handle-row" title="Glisser pour réorganiser">⋮⋮</span>
                         <label class="exp-row-main"><input type="checkbox" class="exp-section-chk" data-section="moodboard"><span>Mood Board</span></label>
                         <label class="exp-row-cover"><input type="checkbox" class="exp-cover-chk" data-section="moodboard" checked><span>📋 Page de garde</span></label>
+                        <div class="exp-row-opts">
+                            <button type="button" class="exp-suboption" id="exp-moodboard-boards-btn" onclick="app.Actions.expOpenMoodboardBoards(event)">🎨 Planches…</button>
+                        </div>
                     </div>
                     
                     <div class="exp-section-row" data-section="storyboard" draggable="true">
@@ -10704,6 +10735,7 @@ body.presentation-mode .presentation-bar {
                         <label class="exp-row-cover"><input type="checkbox" class="exp-cover-chk" data-section="planning" checked><span>📋 Page de garde</span></label>
                         <div class="exp-row-opts">
                             <label class="exp-suboption" title="Inclure les convocations détaillées (techniciens / comédiens) pour chaque jour"><input type="checkbox" id="exp-planning-callsheet" checked><span>Feuille de service</span></label>
+                            <button type="button" class="exp-suboption" id="exp-planning-days-btn" onclick="app.Actions.expOpenPlanningDays(event)">📅 Jours…</button>
                         </div>
                     </div>
                     
@@ -25367,6 +25399,8 @@ initCategoriesDragDrop: () => {
       openExportModal: (...a) => ActionsExport.openExportModal(...a),
       expToggleGroupFold: (...a) => ActionsExport.expToggleGroupFold(...a),
       expOpenStoryboardScenes: (...a) => ActionsExport.expOpenStoryboardScenes(...a),
+      expOpenPlanningDays: (...a) => ActionsExport.expOpenPlanningDays(...a),
+      expOpenMoodboardBoards: (...a) => ActionsExport.expOpenMoodboardBoards(...a),
       expApplyPermissions: (...a) => ActionsExport.expApplyPermissions(...a),
       expToggleAll: (...a) => ActionsExport.expToggleAll(...a),
       expToggleAllCovers: (...a) => ActionsExport.expToggleAllCovers(...a),
@@ -25412,6 +25446,10 @@ initCategoriesDragDrop: () => {
           ActionsExport.expPopulateBoardSeasons();
           // [Storyboard] Étiquette du bouton de sélection de scènes (reflète un filtre déjà posé)
           ActionsExport._updateStoryboardScenesLabel();
+          // [Planning] Étiquette du bouton de sélection de jours (reflète un filtre déjà posé)
+          ActionsExport._updatePlanningDaysLabel();
+          // [Mood Board] Étiquette du bouton de sélection de planches (reflète un filtre déjà posé)
+          ActionsExport._updateMoodboardBoardsLabel();
           // Appliquer l'ordre custom mémorisé (si présent) avant de poser le drag
           if(Actions.expRestoreOrder) Actions.expRestoreOrder();
           // Repliage des groupes : ouvert depuis le bouton d'un onglet précis (focusSection
@@ -25481,6 +25519,113 @@ initCategoriesDragDrop: () => {
           if(!btn) return;
           const sel = ActionsExport._sbSceneIds;
           btn.textContent = sel ? `🎬 Scènes (${sel.length})` : '🎬 Scènes…';
+      },
+      
+      // ===== [Planning] Sélection des jours de tournage à inclure (même
+      // principe que les scènes du Storyboard : popup à part). =====
+      _planningDayIds: null, // null = tous les jours
+      expOpenPlanningDays: (e) => {
+          if(e) e.stopPropagation();
+          const days = state.data.shootingDays || [];
+          if(days.length === 0) { Utils.toast('Aucun jour de tournage', 'warning'); return; }
+          const sorted = [...days].sort((a, b) => {
+              const da = new Date(a.startDate || a.date || 0);
+              const db = new Date(b.startDate || b.date || 0);
+              return da - db;
+          });
+          const selected = ActionsExport._planningDayIds;
+          const items = sorted.map(d => {
+              const startDate = d.startDate || d.date;
+              const dateObj = startDate ? new Date(startDate) : null;
+              const dateStr = dateObj && !isNaN(dateObj)
+                  ? dateObj.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+                  : '(date non définie)';
+              const dayName = Planning.dayLabel(d);
+              const validBadge = d.validated ? '<span style="background:var(--success);color:#fff;padding:1px 6px;border-radius:4px;font-size:0.7rem;margin-left:6px;">✅ Validé</span>' : '';
+              const checked = !selected || selected.includes(d.id);
+              return `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()">
+                  <td style="width:24px;padding:5px 8px;vertical-align:middle;"><input type="checkbox" class="exp-pl-day-chk" value="${d.id}" ${checked ? 'checked' : ''} style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td>
+                  <td style="padding:5px 8px;font-size:0.85rem;line-height:1.3;vertical-align:middle;"><strong>${Utils.escape(dayName)}</strong> — ${dateStr}${validBadge}</td>
+              </tr>`;
+          }).join('');
+          const overlay = document.createElement('div');
+          overlay.className = 'confirm-modal-overlay';
+          overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:480px;padding:20px;max-height:80vh;overflow-y:auto;">
+              <div style="font-size:1rem;font-weight:bold;margin-bottom:12px;">📅 Jours de tournage à inclure</div>
+              <div style="display:flex;gap:6px;margin-bottom:10px;">
+                  <button type="button" id="exp-pl-days-all" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout cocher</button>
+                  <button type="button" id="exp-pl-days-none" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout décocher</button>
+                  <button type="button" id="exp-pl-days-validated" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">✅ Validés</button>
+              </div>
+              <div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:14px;"><table style="width:100%;border-collapse:collapse;">${items}</table></div>
+              <div style="display:flex;gap:8px;justify-content:flex-end;">
+                  <button class="confirm-modal-btn confirm" id="exp-pl-days-ok" style="margin:0;">OK</button>
+              </div>
+          </div>`;
+          document.body.appendChild(overlay);
+          overlay.querySelector('#exp-pl-days-all').onclick = () => overlay.querySelectorAll('.exp-pl-day-chk').forEach(cb => cb.checked = true);
+          overlay.querySelector('#exp-pl-days-none').onclick = () => overlay.querySelectorAll('.exp-pl-day-chk').forEach(cb => cb.checked = false);
+          overlay.querySelector('#exp-pl-days-validated').onclick = () => {
+              const validIds = new Set(sorted.filter(d => d.validated).map(d => d.id));
+              overlay.querySelectorAll('.exp-pl-day-chk').forEach(cb => { cb.checked = validIds.has(cb.value); });
+          };
+          overlay.onclick = (ev) => { if(ev.target === overlay) overlay.remove(); };
+          overlay.querySelector('#exp-pl-days-ok').onclick = () => {
+              const all = Array.from(overlay.querySelectorAll('.exp-pl-day-chk'));
+              const checkedIds = all.filter(cb => cb.checked).map(cb => cb.value);
+              ActionsExport._planningDayIds = (checkedIds.length === all.length) ? null : checkedIds;
+              overlay.remove();
+              ActionsExport._updatePlanningDaysLabel();
+          };
+      },
+      _updatePlanningDaysLabel: () => {
+          const btn = document.getElementById('exp-planning-days-btn');
+          if(!btn) return;
+          const sel = ActionsExport._planningDayIds;
+          btn.textContent = sel ? `📅 Jours (${sel.length})` : '📅 Jours…';
+      },
+      
+      // ===== [Mood Board] Sélection des planches à inclure (même principe). =====
+      _mbBoardIds: null, // null = toutes les planches
+      expOpenMoodboardBoards: (e) => {
+          if(e) e.stopPropagation();
+          const boards = state.data.moodboards || [];
+          if(boards.length === 0) { Utils.toast('Aucune planche', 'warning'); return; }
+          const selected = ActionsExport._mbBoardIds;
+          const rows = boards.map(b => {
+              const checked = !selected || selected.includes(b.id);
+              return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:0.85rem;"><input type="checkbox" class="exp-mb-board-chk" data-board-id="${Utils.escape(b.id)}" ${checked ? 'checked' : ''} style="margin:0;width:auto;"> ${Utils.escape(b.name || 'Planche')}</label>`;
+          }).join('');
+          const overlay = document.createElement('div');
+          overlay.className = 'confirm-modal-overlay';
+          overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:420px;padding:20px;max-height:80vh;overflow-y:auto;">
+              <div style="font-size:1rem;font-weight:bold;margin-bottom:12px;">🎨 Planches Mood Board à inclure</div>
+              <div style="display:flex;gap:6px;margin-bottom:10px;">
+                  <button type="button" class="confirm-modal-btn" id="exp-mb-boards-all" style="margin:0;padding:4px 10px;font-size:0.75rem;">Toutes</button>
+                  <button type="button" class="confirm-modal-btn" id="exp-mb-boards-none" style="margin:0;padding:4px 10px;font-size:0.75rem;">Aucune</button>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;margin-bottom:14px;">${rows}</div>
+              <div style="display:flex;gap:8px;justify-content:flex-end;">
+                  <button class="confirm-modal-btn confirm" id="exp-mb-boards-ok" style="margin:0;">OK</button>
+              </div>
+          </div>`;
+          document.body.appendChild(overlay);
+          overlay.querySelector('#exp-mb-boards-all').onclick = () => overlay.querySelectorAll('.exp-mb-board-chk').forEach(cb => cb.checked = true);
+          overlay.querySelector('#exp-mb-boards-none').onclick = () => overlay.querySelectorAll('.exp-mb-board-chk').forEach(cb => cb.checked = false);
+          overlay.onclick = (ev) => { if(ev.target === overlay) overlay.remove(); };
+          overlay.querySelector('#exp-mb-boards-ok').onclick = () => {
+              const all = Array.from(overlay.querySelectorAll('.exp-mb-board-chk'));
+              const checkedIds = all.filter(cb => cb.checked).map(cb => cb.dataset.boardId);
+              ActionsExport._mbBoardIds = (checkedIds.length === all.length) ? null : checkedIds;
+              overlay.remove();
+              ActionsExport._updateMoodboardBoardsLabel();
+          };
+      },
+      _updateMoodboardBoardsLabel: () => {
+          const btn = document.getElementById('exp-moodboard-boards-btn');
+          if(!btn) return;
+          const sel = ActionsExport._mbBoardIds;
+          btn.textContent = sel ? `🎨 Planches (${sel.length})` : '🎨 Planches…';
       },
       
       // v578 (cloisonnement) : correspondance ligne d'export -> section de droits.
@@ -25855,7 +26000,8 @@ initCategoriesDragDrop: () => {
           });
           const planningOpts = () => ({
               includeCover:    getCover('planning'),
-              includeCallSheet: document.getElementById('exp-planning-callsheet')?.checked !== false
+              includeCallSheet: document.getElementById('exp-planning-callsheet')?.checked !== false,
+              dayIds:          ActionsExport._planningDayIds || undefined
           });
           // [Séquencier] Épisodes correspondant aux saisons cochées (undefined pour les films
           // → exportSequencerPDF exporte tout sans ouvrir son chooser, seasons.length===0)
@@ -25880,7 +26026,7 @@ initCategoriesDragDrop: () => {
               synopsis:     { label: 'Synopsis',              build: (extra) => Synopsis.synopsisToPDF({ includeCover: getCover('synopsis'), ...opts.synopsis, ...extra }) },
               board:        { label: 'Séquencier',            build: (extra) => BeatBoard.exportSequencerPDF({ includeCover: getCover('board'), episodeIds: boardEpisodeIds(), ...extra }) },
               script:       { label: 'Scénario',              build: (extra) => Exporter.scenarioToPDF({ includeCover: getCover('script'), ...opts.script, ...extra }) },
-              moodboard:    { label: 'Mood Board',            build: (extra) => MoodBoard.exportPDF({ includeCover: getCover('moodboard'), ...extra }) },
+              moodboard:    { label: 'Mood Board',            build: (extra) => MoodBoard.exportPDF({ includeCover: getCover('moodboard'), boardIds: ActionsExport._mbBoardIds || undefined, ...extra }) },
               storyboard:   { label: 'Storyboard',            build: (extra) => Storyboard.exportPDF({ ...storyboardOpts(), ...extra }) },
               presentation: { label: 'Présentation',          build: (extra) => Presentation.exportPDF({ includeCover: getCover('presentation'), ...extra }) },
               chars:        { label: 'Personnages',           build: (extra) => FichesPDF.exportCharacters({ includeCover: getCover('chars'), ...opts.chars, ...extra }) },
@@ -30804,45 +30950,10 @@ const MoodBoard = {
     openPdfModal: () => {
         const boards = state.data.moodboards || [];
         if(boards.length === 0) { Utils.toast('Aucune planche à exporter', 'warning'); return; }
-        const rows = boards.map(b =>
-            `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:0.85rem;"><input type="checkbox" class="mb-pdf-board" value="${Utils.escape(b.id)}" checked style="margin:0;width:auto;"> ${Utils.escape(b.name || 'Planche')}</label>`
-        ).join('');
-        const overlay = document.createElement('div');
-        overlay.className = 'confirm-modal-overlay';
-        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:520px;padding:20px;">
-            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:14px;">🎨 Mood Board PDF — Options</div>
-            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Page de garde :</div>
-            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
-                <button type="button" class="fmt-btn active" id="mb-pdf-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre</button>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);">Planches à inclure :</div>
-                <div style="display:flex;gap:6px;">
-                    <button type="button" class="confirm-modal-btn" id="mb-pdf-all" style="margin:0;padding:3px 8px;font-size:0.72rem;">Toutes</button>
-                    <button type="button" class="confirm-modal-btn" id="mb-pdf-none" style="margin:0;padding:3px 8px;font-size:0.72rem;">Aucune</button>
-                </div>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;margin-bottom:14px;">${rows}</div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <button class="confirm-modal-btn cancel" id="mb-pdf-cancel" style="margin:0;">Annuler</button>
-                <button class="confirm-modal-btn confirm" id="mb-pdf-ok" style="margin:0;">📄 Générer le PDF</button>
-            </div>
-        </div>`;
-        document.body.appendChild(overlay);
-        const q = (s) => overlay.querySelector(s);
-        const coverBtn = q('#mb-pdf-cover');
-        coverBtn.onclick = () => { const a = coverBtn.classList.toggle('active'); coverBtn.dataset.active = a ? '1' : '0'; };
-        q('#mb-pdf-all').onclick = () => overlay.querySelectorAll('.mb-pdf-board').forEach(cb => cb.checked = true);
-        q('#mb-pdf-none').onclick = () => overlay.querySelectorAll('.mb-pdf-board').forEach(cb => cb.checked = false);
-        q('#mb-pdf-cancel').onclick = () => overlay.remove();
-        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
-        q('#mb-pdf-ok').onclick = () => {
-            const boardIds = Array.from(overlay.querySelectorAll('.mb-pdf-board:checked')).map(cb => cb.value);
-            if(boardIds.length === 0) { Utils.toast('Sélectionne au moins une planche', 'warning'); return; }
-            const includeCover = coverBtn.dataset.active === '1';
-            overlay.remove();
-            MoodBoard.exportPDF({ includeCover, boardIds });
-        };
+        Actions.openExportModal('moodboard');
+        document.querySelectorAll('#export-modal .exp-section-chk').forEach(cb => {
+            cb.checked = (cb.dataset.section === 'moodboard');
+        });
     },
 };
 
@@ -37274,18 +37385,10 @@ const DrawingEditor = {
               Utils.toast('Aucune ressource à exporter', 'warning');
               return;
           }
-          const modes = [
-              { value: 'detailed', label: 'Détaillé', desc: 'Par catégorie, vignette + description + propriétaire + scènes' },
-              { value: 'list',     label: 'Liste',    desc: 'Tableau dense : nom · description · propriétaire · note · scènes' },
-              { value: 'card',     label: 'Fiche',    desc: '1 page A4 par ressource (photo + tous les détails)' }
-          ];
-          if(typeof FichesPDF !== 'undefined' && FichesPDF._openOptionsModal) {
-              FichesPDF._openOptionsModal('📦', 'Ressources PDF — Options', modes, (opts) => {
-                  Resources.exportPDF(opts);
-              });
-          } else {
-              Resources.exportPDF({ mode: 'detailed', includeCover: true });
-          }
+          Actions.openExportModal('resources');
+          document.querySelectorAll('#export-modal .exp-section-chk').forEach(cb => {
+              cb.checked = (cb.dataset.section === 'resources');
+          });
       },
       
       exportPDF: async (opts = {}) => {
@@ -37643,18 +37746,10 @@ const DrawingEditor = {
             Utils.toast('Aucun membre d\'équipe à exporter', 'warning');
             return;
         }
-        const modes = [
-            { value: 'detailed', label: 'Détaillé', desc: 'Par département : photo + rôle + contact + véhicule + tarif' },
-            { value: 'list',     label: 'Liste',    desc: 'Tableau dense : nom · rôle · email · tél' },
-            { value: 'card',     label: 'Fiche',    desc: '1 page A4 paysage par technicien (photo + tous les détails)' }
-        ];
-        if(typeof FichesPDF !== 'undefined' && FichesPDF._openOptionsModal) {
-            FichesPDF._openOptionsModal('👥', 'Équipe PDF — Options', modes, (opts) => {
-                CrewExport.exportPDF(opts);
-            });
-        } else {
-            CrewExport.exportPDF({ mode: 'detailed', includeCover: true });
-        }
+        Actions.openExportModal('crew');
+        document.querySelectorAll('#export-modal .exp-section-chk').forEach(cb => {
+            cb.checked = (cb.dataset.section === 'crew');
+        });
     },
     
     exportPDF: async (opts = {}) => {
@@ -44321,75 +44416,10 @@ if(isActors) {
             Utils.toast('Aucun jour de tournage à exporter', 'warning');
             return;
         }
-        
-        const sorted = [...days].sort((a, b) => {
-            const da = new Date(a.startDate || a.date || 0);
-            const db = new Date(b.startDate || b.date || 0);
-            return da - db;
+        Actions.openExportModal('planning');
+        document.querySelectorAll('#export-modal .exp-section-chk').forEach(cb => {
+            cb.checked = (cb.dataset.section === 'planning');
         });
-        
-        const items = sorted.map((d, i) => {
-            const startDate = d.startDate || d.date;
-            const dateObj = startDate ? new Date(startDate) : null;
-            const dateStr = dateObj && !isNaN(dateObj)
-                ? dateObj.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
-                : '(date non définie)';
-            const dayName = Planning.dayLabel(d);
-            const location = d.location || d.locationRealName || '—';
-            const sceneCount = (d.scenes || []).length;
-            const callCount = (d.callSheet || []).length;
-            const validBadge = d.validated ? '<span style="background:var(--success);color:#fff;padding:1px 6px;border-radius:4px;font-size:0.7rem;margin-left:6px;">✅ Validé</span>' : '';
-            return `<tr style="cursor:pointer;" onclick="this.querySelector('input').click()">
-                <td style="width:24px;padding:5px 8px;vertical-align:middle;"><input type="checkbox" class="fds-pdfchk" value="${d.id}" checked style="margin:0;cursor:pointer;" onclick="event.stopPropagation()"></td>
-                <td style="padding:5px 8px;font-size:0.85rem;line-height:1.3;vertical-align:middle;">
-                    <strong>${Utils.escape(dayName)}</strong> — ${dateStr}${validBadge}
-                    <div style="color:var(--text-sec);font-size:0.78rem;margin-top:2px;">📍 ${Utils.escape(location)} · 🎬 ${sceneCount} sc. · 👥 ${callCount} convoqué(s)</div>
-                </td>
-            </tr>`;
-        }).join('');
-        
-        const overlay = document.createElement('div');
-        overlay.className = 'confirm-modal-overlay';
-        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:560px;padding:20px;">
-            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:12px;">📅 Export Planning PDF</div>
-            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:8px;">Jours de tournage à inclure (${sorted.length}) :</div>
-            <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;"><table style="width:100%;border-collapse:collapse;">${items}</table></div>
-            <div style="display:flex;gap:6px;margin-bottom:14px;">
-                <button type="button" id="fds-pdf-all" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout cocher</button>
-                <button type="button" id="fds-pdf-none" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">Tout décocher</button>
-                <button type="button" id="fds-pdf-validated" style="flex:1;padding:5px;font-size:0.78rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;cursor:pointer;">✅ Validés uniquement</button>
-            </div>
-            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Page de garde :</div>
-            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
-                <button type="button" class="fmt-btn active" id="fds-pdf-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre</button>
-            </div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <button class="confirm-modal-btn cancel" id="fds-pdf-cancel" style="margin:0;">Annuler</button>
-                <button class="confirm-modal-btn confirm" id="fds-pdf-ok" style="margin:0;">📄 Générer le PDF</button>
-            </div>
-        </div>`;
-        document.body.appendChild(overlay);
-        
-        overlay.querySelector('#fds-pdf-all').onclick = () => overlay.querySelectorAll('.fds-pdfchk').forEach(cb => cb.checked = true);
-        overlay.querySelector('#fds-pdf-none').onclick = () => overlay.querySelectorAll('.fds-pdfchk').forEach(cb => cb.checked = false);
-        overlay.querySelector('#fds-pdf-validated').onclick = () => {
-            const validIds = new Set(sorted.filter(d => d.validated).map(d => d.id));
-            overlay.querySelectorAll('.fds-pdfchk').forEach(cb => { cb.checked = validIds.has(cb.value); });
-        };
-        const coverBtn = overlay.querySelector('#fds-pdf-cover');
-        coverBtn.onclick = () => {
-            const isActive = coverBtn.classList.toggle('active');
-            coverBtn.dataset.active = isActive ? '1' : '0';
-        };
-        overlay.querySelector('#fds-pdf-cancel').onclick = () => overlay.remove();
-        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
-        overlay.querySelector('#fds-pdf-ok').onclick = () => {
-            const dayIds = Array.from(overlay.querySelectorAll('.fds-pdfchk:checked')).map(cb => cb.value);
-            if(dayIds.length === 0) { Utils.toast('Aucun jour sélectionné', 'warning'); return; }
-            const includeCover = coverBtn.dataset.active === '1';
-            overlay.remove();
-            PlanningExport.exportPlanningPDF({ dayIds, includeCover });
-        };
     },
     
     exportPlanningPDF: async (opts = {}) => {
@@ -51333,35 +51363,10 @@ const Stats = {
     // 4. Une seule modale : page de garde oui/non
     
     openExportModal: () => {
-        const overlay = document.createElement('div');
-        overlay.className = 'confirm-modal-overlay';
-        const scopeLabel = Stats.getScopeLabel();
-        const scopeNote = scopeLabel ? `<div style="font-size:0.8rem;color:var(--text-sec);margin-bottom:14px;text-align:left;">📊 Périmètre actuel : <strong>${Utils.escape(scopeLabel)}</strong></div>` : '';
-        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:460px;padding:20px;">
-            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:14px;">📊 Statistiques PDF — Options</div>
-            ${scopeNote}
-            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Page de garde :</div>
-            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
-                <button type="button" class="fmt-btn active" id="stats-opt-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre</button>
-            </div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <button class="confirm-modal-btn cancel" id="stats-opt-cancel" style="margin:0;">Annuler</button>
-                <button class="confirm-modal-btn confirm" id="stats-opt-ok" style="margin:0;">📄 Générer le PDF</button>
-            </div>
-        </div>`;
-        document.body.appendChild(overlay);
-        const coverBtn = overlay.querySelector('#stats-opt-cover');
-        coverBtn.onclick = () => {
-            const isActive = coverBtn.classList.toggle('active');
-            coverBtn.dataset.active = isActive ? '1' : '0';
-        };
-        overlay.querySelector('#stats-opt-cancel').onclick = () => overlay.remove();
-        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
-        overlay.querySelector('#stats-opt-ok').onclick = () => {
-            const includeCover = coverBtn.dataset.active === '1';
-            overlay.remove();
-            Stats.exportPDF({ includeCover });
-        };
+        Actions.openExportModal('stats');
+        document.querySelectorAll('#export-modal .exp-section-chk').forEach(cb => {
+            cb.checked = (cb.dataset.section === 'stats');
+        });
     },
     
     exportPDF: async (opts = {}) => {
@@ -55104,16 +55109,10 @@ const orgGroups = (state.data.groups || []).filter(g => g.type === 'org');
     openExportModal: () => {
         const list = Orgs._list();
         if(!list.length) { Utils.toast('Aucune structure à exporter', 'warning'); return; }
-        const modes = [
-            { value: 'detailed', label: 'Détaillé', desc: 'Par groupe : logo + type + SIRET + dirigeant + contact + mission + fonction' },
-            { value: 'list', label: 'Liste', desc: 'Tableau dense : nom · type · contact · fonction' },
-            { value: 'card', label: 'Fiche', desc: '1 page A4 paysage par structure (logo + tous les détails)' }
-        ];
-        if(typeof FichesPDF !== 'undefined' && FichesPDF._openOptionsModal) {
-            FichesPDF._openOptionsModal('🏛️', 'Asso / Entreprises PDF — Options', modes, (opts) => { Orgs.exportPDF(opts); });
-        } else {
-            Orgs.exportPDF({ mode: 'list', includeCover: true });
-        }
+        Actions.openExportModal('orgs');
+        document.querySelectorAll('#export-modal .exp-section-chk').forEach(cb => {
+            cb.checked = (cb.dataset.section === 'orgs');
+        });
     },
     exportPDF: async (opts = {}) => {
         await LazyLib.load('pdfexport'); const { jsPDF } = window.jspdf;
@@ -58653,45 +58652,10 @@ const ExpensesExport = {
     // Modal d'options du bouton d'onglet — aligné sur le modal Export global
     // (mode Simple par défaut + toggle page de garde)
     openExportModal: () => {
-        const overlay = document.createElement('div');
-        overlay.className = 'confirm-modal-overlay';
-        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:460px;padding:20px;">
-            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:14px;">💰 Budget PDF — Options</div>
-            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Page de garde :</div>
-            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
-                <button type="button" class="fmt-btn active" id="bud-opt-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre</button>
-            </div>
-            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Mode de rendu :</div>
-            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;" id="bud-opt-modes">
-                <button type="button" class="fmt-btn active" data-mode="simple" style="padding:10px 14px;font-size:0.85rem;text-align:left;">Simple<br><span style="font-size:0.75rem;color:var(--text-sec);font-weight:normal;">Résumé global + totaux par catégorie CNC</span></button>
-                <button type="button" class="fmt-btn" data-mode="detailed" style="padding:10px 14px;font-size:0.85rem;text-align:left;">Détaillé<br><span style="font-size:0.75rem;color:var(--text-sec);font-weight:normal;">Résumé + tableau complet des dépenses</span></button>
-            </div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <button class="confirm-modal-btn cancel" id="bud-opt-cancel" style="margin:0;">Annuler</button>
-                <button class="confirm-modal-btn confirm" id="bud-opt-ok" style="margin:0;">📄 Générer le PDF</button>
-            </div>
-        </div>`;
-        document.body.appendChild(overlay);
-        const coverBtn = overlay.querySelector('#bud-opt-cover');
-        coverBtn.onclick = () => {
-            const isActive = coverBtn.classList.toggle('active');
-            coverBtn.dataset.active = isActive ? '1' : '0';
-        };
-        let selectedMode = 'simple';
-        overlay.querySelectorAll('#bud-opt-modes .fmt-btn').forEach(btn => {
-            btn.onclick = () => {
-                overlay.querySelectorAll('#bud-opt-modes .fmt-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                selectedMode = btn.dataset.mode;
-            };
+        Actions.openExportModal('budget');
+        document.querySelectorAll('#export-modal .exp-section-chk').forEach(cb => {
+            cb.checked = (cb.dataset.section === 'budget');
         });
-        overlay.querySelector('#bud-opt-cancel').onclick = () => overlay.remove();
-        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
-        overlay.querySelector('#bud-opt-ok').onclick = () => {
-            const includeCover = coverBtn.dataset.active === '1';
-            overlay.remove();
-            ExpensesExport.exportPDF({ includeCover, simple: selectedMode === 'simple' });
-        };
     },
     
     // Export PDF du budget [Phase C.2.2 refondu + Phase D : opts.simple / opts.includeCover]
@@ -76776,80 +76740,13 @@ const Synopsis = {
             Utils.toast('Aucun synopsis à exporter — remplissez au moins un champ', 'warning');
             return;
         }
-        Synopsis._openSynopsisOptionsModal();
+        Actions.openExportModal('synopsis');
+        document.querySelectorAll('#export-modal .exp-section-chk').forEach(cb => {
+            cb.checked = (cb.dataset.section === 'synopsis');
+        });
     },
     
     // Modale options avec toggles bouton bleu (style cohérent avec le scénario)
-    _openSynopsisOptionsModal: () => {
-        const overlay = document.createElement('div');
-        overlay.className = 'confirm-modal-overlay';
-        // Champs exportables : id du bouton, cle state.data, libelle, option synopsisToPDF.
-        const FIELD_DEFS = [
-            { id: 'main',     key: 'synopsis',       label: '📖 Synopsis',            opt: 'includeSynopsis' },
-            { id: 'short',    key: 'synopsisShort',  label: '⚡ Résumé court',        opt: 'includeShort' },
-            { id: 'long',     key: 'synopsisLong',   label: '📚 Résumé long',         opt: 'includeLong' },
-            { id: 'intent',   key: 'synopsisIntent', label: "✍️ Note d'intention",    opt: 'includeIntent' },
-            { id: 'director', key: 'directorNote',   label: '🎬 Note du réalisateur', opt: 'includeDirector' },
-            { id: 'producer', key: 'producerNote',   label: '💼 Note du producteur',  opt: 'includeProducer' }
-        ];
-        const state_ = FIELD_DEFS.map(f => ({ ...f, has: !!(state.data[f.key] && state.data[f.key].trim()) }));
-        
-        const fieldsHtml = state_.map(f => {
-            const active = f.has ? '1' : '0';
-            const style = f.has ? 'style="padding:10px 14px;font-size:0.85rem;text-align:left;"' : 'disabled style="padding:10px 14px;font-size:0.85rem;text-align:left;opacity:0.4;cursor:not-allowed;"';
-            return `<button type="button" class="fmt-btn ${f.has?'active':''}" id="synop-opt-${f.id}" data-active="${active}" ${style}>${f.label}${f.has?'':' (vide)'}</button>`;
-        }).join('\n                ');
-        
-        overlay.innerHTML = `<div class="confirm-modal-box" style="max-width:520px;padding:20px;">
-            <div style="font-size:1.05rem;font-weight:bold;margin-bottom:14px;">📖 Synopsis PDF — Options</div>
-            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Page de garde :</div>
-            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
-                <button type="button" class="fmt-btn active" id="synop-opt-cover" data-active="1" style="padding:10px 14px;font-size:0.85rem;text-align:left;">📋 Inclure la page de titre</button>
-            </div>
-            <div style="text-align:left;font-size:0.8rem;color:var(--text-sec);margin-bottom:10px;">Champs à inclure :</div>
-            <div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-bottom:14px;">
-                ${fieldsHtml}
-            </div>
-            <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <button class="confirm-modal-btn cancel" id="synop-opt-cancel" style="margin:0;">Annuler</button>
-                <button class="confirm-modal-btn confirm" id="synop-opt-ok" style="margin:0;">📄 Générer le PDF</button>
-            </div>
-        </div>`;
-        document.body.appendChild(overlay);
-        
-        // Toggle : clic sur un .fmt-btn bascule sa classe .active et son data-active (sauf si disabled)
-        ['synop-opt-cover', ...state_.map(f => 'synop-opt-' + f.id)].forEach(id => {
-            const btn = overlay.querySelector('#' + id);
-            if(btn && !btn.disabled) {
-                btn.onclick = (e) => {
-                    const b = e.currentTarget;
-                    const isActive = b.classList.toggle('active');
-                    b.dataset.active = isActive ? '1' : '0';
-                };
-            }
-        });
-        
-        overlay.querySelector('#synop-opt-cancel').onclick = () => overlay.remove();
-        overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
-        overlay.querySelector('#synop-opt-ok').onclick = async () => {
-            const includeCover = overlay.querySelector('#synop-opt-cover').dataset.active === '1';
-            const pdfOpts = { includeCover };
-            let anyIncluded = false;
-            state_.forEach(f => {
-                const on = overlay.querySelector('#synop-opt-' + f.id).dataset.active === '1';
-                pdfOpts[f.opt] = on;
-                if(on) anyIncluded = true;
-            });
-            
-            if(!anyIncluded) {
-                Utils.toast('Sélectionnez au moins un champ à inclure', 'warning');
-                return;
-            }
-            overlay.remove();
-            await Synopsis.synopsisToPDF(pdfOpts);
-        };
-    },
-    
     // === HELPER : Parse HTML enrichi en blocs typés pour jsPDF ===
     // Retourne un array de blocs : [{type, ...payload}]
     // types : heading, paragraph, list, blockquote, image, hr, table
@@ -77647,22 +77544,26 @@ const FichesPDF = {
             Utils.toast('Aucun personnage à exporter', 'warning');
             return;
         }
-        const isSeries = state.currentProjectType === 'series';
-        const continueToOptions = (episodeIds) => {
-            const modes = [
-                { value: 'detailed', label: 'Détaillé', desc: 'Photo + bio + sexe + comédien lié + scènes (1 par ligne)' },
-                { value: 'list',     label: 'Liste',    desc: '2 colonnes compactes : nom + nombre de scènes' },
-                { value: 'card',     label: 'Fiche',    desc: '1 page A4 par personnage (grande photo + tous les détails)' }
-            ];
-            FichesPDF._openOptionsModal('👥', 'Personnages PDF — Options', modes, (opts) => {
-                FichesPDF.exportCharacters({ ...opts, episodeIds });
-            });
-        };
-        if(isSeries) {
+        // Projet "série" : garde l'ancien chemin (choix de saison), que le hub
+        // ne sait pas encore faire pour cette section. Sinon, hub direct.
+        if(state.currentProjectType === 'series') {
+            const continueToOptions = (episodeIds) => {
+                const modes = [
+                    { value: 'detailed', label: 'Détaillé', desc: 'Photo + bio + sexe + comédien lié + scènes (1 par ligne)' },
+                    { value: 'list',     label: 'Liste',    desc: '2 colonnes compactes : nom + nombre de scènes' },
+                    { value: 'card',     label: 'Fiche',    desc: '1 page A4 par personnage (grande photo + tous les détails)' }
+                ];
+                FichesPDF._openOptionsModal('👥', 'Personnages PDF — Options', modes, (opts) => {
+                    FichesPDF.exportCharacters({ ...opts, episodeIds });
+                });
+            };
             FichesPDF._openSeasonChooser('chars', '👥', 'Personnages — Choix des saisons', continueToOptions);
-        } else {
-            continueToOptions(null);
+            return;
         }
+        Actions.openExportModal('chars');
+        document.querySelectorAll('#export-modal .exp-section-chk').forEach(cb => {
+            cb.checked = (cb.dataset.section === 'chars');
+        });
     },
     
     exportCharacters: async (opts = {}) => {
@@ -78023,22 +77924,24 @@ const FichesPDF = {
             Utils.toast('Aucun comédien à exporter', 'warning');
             return;
         }
-        const isSeries = state.currentProjectType === 'series';
-        const continueToOptions = (episodeIds) => {
-            const modes = [
-                { value: 'detailed', label: 'Détaillé', desc: 'Photo + contact + bio + physique + statut + compétences (1 par ligne)' },
-                { value: 'list',     label: 'Liste',    desc: '1 colonne dense : nom · personnage · email · tél' },
-                { value: 'card',     label: 'Fiche',    desc: '1 page A4 paysage par comédien (casting book : photo + tous les détails)' }
-            ];
-            FichesPDF._openOptionsModal('🎭', 'Comédiens PDF — Options', modes, (opts) => {
-                FichesPDF.exportActors({ ...opts, episodeIds });
-            });
-        };
-        if(isSeries) {
+        if(state.currentProjectType === 'series') {
+            const continueToOptions = (episodeIds) => {
+                const modes = [
+                    { value: 'detailed', label: 'Détaillé', desc: 'Photo + contact + bio + physique + statut + compétences (1 par ligne)' },
+                    { value: 'list',     label: 'Liste',    desc: '1 colonne dense : nom · personnage · email · tél' },
+                    { value: 'card',     label: 'Fiche',    desc: '1 page A4 paysage par comédien (casting book : photo + tous les détails)' }
+                ];
+                FichesPDF._openOptionsModal('🎭', 'Comédiens PDF — Options', modes, (opts) => {
+                    FichesPDF.exportActors({ ...opts, episodeIds });
+                });
+            };
             FichesPDF._openSeasonChooser('actors', '🎭', 'Comédiens — Choix des saisons', continueToOptions);
-        } else {
-            continueToOptions(null);
+            return;
         }
+        Actions.openExportModal('actors');
+        document.querySelectorAll('#export-modal .exp-section-chk').forEach(cb => {
+            cb.checked = (cb.dataset.section === 'actors');
+        });
     },
     
     exportActors: async (opts = {}) => {
@@ -78496,22 +78399,24 @@ const FichesPDF = {
             Utils.toast('Aucun décor à exporter', 'warning');
             return;
         }
-        const isSeries = state.currentProjectType === 'series';
-        const continueToOptions = (episodeIds) => {
-            const modes = [
-                { value: 'detailed', label: 'Détaillé', desc: '1 par ligne : vignette + adresse + contact + scènes' },
-                { value: 'list',     label: 'Liste',    desc: '1 colonne dense : nom · lieu réel · ville · nb scènes' },
-                { value: 'card',     label: 'Fiche',    desc: '1 page A4 paysage par décor + planche-contact des photos' }
-            ];
-            FichesPDF._openOptionsModal('🏠', 'Décors PDF — Options', modes, (opts) => {
-                FichesPDF.exportLocations({ ...opts, episodeIds });
-            });
-        };
-        if(isSeries) {
+        if(state.currentProjectType === 'series') {
+            const continueToOptions = (episodeIds) => {
+                const modes = [
+                    { value: 'detailed', label: 'Détaillé', desc: '1 par ligne : vignette + adresse + contact + scènes' },
+                    { value: 'list',     label: 'Liste',    desc: '1 colonne dense : nom · lieu réel · ville · nb scènes' },
+                    { value: 'card',     label: 'Fiche',    desc: '1 page A4 paysage par décor + planche-contact des photos' }
+                ];
+                FichesPDF._openOptionsModal('🏠', 'Décors PDF — Options', modes, (opts) => {
+                    FichesPDF.exportLocations({ ...opts, episodeIds });
+                });
+            };
             FichesPDF._openSeasonChooser('locs', '🏠', 'Décors — Choix des saisons', continueToOptions);
-        } else {
-            continueToOptions(null);
+            return;
         }
+        Actions.openExportModal('locs');
+        document.querySelectorAll('#export-modal .exp-section-chk').forEach(cb => {
+            cb.checked = (cb.dataset.section === 'locs');
+        });
     },
     
     exportLocations: async (opts = {}) => {
