@@ -21467,12 +21467,10 @@ initCategoriesDragDrop: () => {
         if(state.currentRole === 'viewer') return;
         const drag = document.querySelector(selector + '.dragging');
         if(!drag) return;
-        // v596 : la carte glissée ne bouge plus dans le DOM à chaque pixel de
-        // survol (c'était la cause du clignotement et des dépôts imprécis) —
-        // seul un emplacement fantôme, de la taille d'une carte, se déplace
-        // pour montrer où elle atterrira ; les autres cartes s'écartent
-        // naturellement puisque c'est une grille CSS normale. Le déplacement
-        // réel de la carte n'a lieu qu'au relâchement (voir dragend).
+        // v596bis : la carte glissée ne bouge plus dans le DOM à chaque pixel
+        // de survol — seul un emplacement fantôme se déplace, et les autres
+        // cartes glissent doucement (FLIP, voir _animateGridReflow) pour lui
+        // faire de la place. Le déplacement réel n'a lieu qu'au relâchement.
         let placeholder = container.querySelector('.seq-drop-placeholder');
         if(!placeholder) {
             placeholder = document.createElement('div');
@@ -21481,26 +21479,86 @@ initCategoriesDragDrop: () => {
             placeholder.style.width = r.width + 'px';
             placeholder.style.height = r.height + 'px';
         }
+        
         const others = [...container.querySelectorAll(selector + ':not(.dragging)')];
-        if(!others.length) { container.appendChild(placeholder); return; }
-        // Grille ou liste ? Deux cartes sur la meme ligne = grille.
-        const r0 = others[0].getBoundingClientRect();
-        const enGrille = others.some(el => Math.abs(el.getBoundingClientRect().top - r0.top) < 4 && el !== others[0]);
-        if(!enGrille) {
-            const after = Utils.getDragAfterElement(container, e.clientY, selector);
-            if(after) container.insertBefore(placeholder, after); else container.appendChild(placeholder);
-            return;
+        let targetEl = null;
+        if(others.length) {
+            const r0 = others[0].getBoundingClientRect();
+            const enGrille = others.some(el => Math.abs(el.getBoundingClientRect().top - r0.top) < 4 && el !== others[0]);
+            if(!enGrille) {
+                targetEl = Utils.getDragAfterElement(container, e.clientY, selector);
+            } else {
+                // Grille CSS multi-lignes : regrouper les cartes par ligne (même
+                // "top" à quelques px près), choisir la ligne la plus proche du
+                // curseur VERTICALEMENT, puis la carte selon la position
+                // horizontale DANS cette ligne. L'ancien calcul (plus proche en
+                // distance brute) mélangeait des cartes de lignes différentes
+                // près d'une frontière de ligne — décisions erratiques,
+                // décalage insuffisant en changeant de ligne.
+                const rows = [];
+                others.forEach(el => {
+                    const b = el.getBoundingClientRect();
+                    let row = rows.find(r => Math.abs(r.top - b.top) < 4);
+                    if(!row) { row = { top: b.top, bottom: b.bottom, cards: [] }; rows.push(row); }
+                    row.cards.push({ el, rect: b });
+                    row.bottom = Math.max(row.bottom, b.bottom);
+                });
+                let bestRow = rows[0], bestRowD = Infinity;
+                rows.forEach(row => {
+                    const d = Math.abs(e.clientY - (row.top + row.bottom) / 2);
+                    if(d < bestRowD) { bestRowD = d; bestRow = row; }
+                });
+                bestRow.cards.sort((a, b) => a.rect.left - b.rect.left);
+                const found = bestRow.cards.find(c => e.clientX < c.rect.left + c.rect.width / 2);
+                if(found) {
+                    targetEl = found.el;
+                } else {
+                    const lastCard = bestRow.cards[bestRow.cards.length - 1];
+                    let next = lastCard.el.nextElementSibling;
+                    if(next === placeholder) next = next.nextElementSibling;
+                    targetEl = next; // null = fin de grille
+                }
+            }
         }
-        let best = null, bestD = Infinity, avant = true;
-        others.forEach(el => {
-            const b = el.getBoundingClientRect();
-            const cx = b.left + b.width / 2, cy = b.top + b.height / 2;
-            const d = Math.hypot(e.clientX - cx, e.clientY - cy);
-            if(d < bestD) { bestD = d; best = el; avant = e.clientX < cx; }
+        
+        // Ne rien recalculer/animer si la cible n'a pas changé depuis le
+        // dernier survol (évite un travail inutile à chaque pixel)
+        if(container._seqDropTarget === targetEl && placeholder.parentElement) return;
+        container._seqDropTarget = targetEl;
+        
+        UIData._animateGridReflow(container, selector, () => {
+            if(targetEl) container.insertBefore(placeholder, targetEl); else container.appendChild(placeholder);
         });
-        if(!best) return;
-        if(avant) container.insertBefore(placeholder, best);
-        else container.insertBefore(placeholder, best.nextSibling);
+    },
+    
+    // v596bis : FLIP (First-Last-Invert-Play) — anime un décalage de grille
+    // CSS, qui n'est pas nativement animable (les positions de grid-item ne
+    // s'interpolent pas). On capture les positions avant le changement, on
+    // applique le changement, puis on rejoue la différence en transform CSS
+    // pour donner l'impression d'un glissement fluide au lieu d'un saut brut.
+    _animateGridReflow: (container, selector, mutateFn) => {
+        const els = Array.from(container.querySelectorAll(selector + ', .seq-drop-placeholder'));
+        const before = new Map();
+        els.forEach(el => before.set(el, el.getBoundingClientRect()));
+        
+        mutateFn();
+        
+        els.forEach(el => {
+            if(!el.isConnected) return;
+            const prev = before.get(el);
+            if(!prev) return;
+            const now = el.getBoundingClientRect();
+            const dx = prev.left - now.left;
+            const dy = prev.top - now.top;
+            if(Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+            el.style.transition = 'none';
+            el.style.transform = `translate(${dx}px, ${dy}px)`;
+            void el.offsetWidth; // force le rendu de l'etat "avant" avant d'animer vers "apres"
+            el.style.transition = 'transform 0.2s ease';
+            el.style.transform = '';
+            clearTimeout(el._seqFlipCleanup);
+            el._seqFlipCleanup = setTimeout(() => { el.style.transition = ''; }, 220);
+        });
     },
     goToStoryboard: (sceneId) => {
       UI.switchTab('storyboard');
@@ -23332,7 +23390,7 @@ initCategoriesDragDrop: () => {
               else el.style.cursor = 'default';
               if(!isView) { 
                   el.addEventListener('contextmenu', (e) => Actions.openTagMenu(e, s.id)); 
-                  el.addEventListener('dragstart', ()=>el.classList.add('dragging')); 
+                  el.addEventListener('dragstart', ()=>{ el.classList.add('dragging'); els.boardList._seqDropTarget = undefined; }); 
                   el.addEventListener('dragend', ()=>{
                       // v596 : la carte glissée n'a pas bougé pendant le survol —
                       // on la place maintenant réellement à l'emplacement du
