@@ -33411,6 +33411,13 @@ const DrawingEditor = {
         const container = document.getElementById('layersList');
         container.innerHTML = '';
         
+        // v595 : les objets vivent visuellement dans leur calque (voir redraw) —
+        // la vignette doit donc les inclure, sinon une image insérée n'apparaît
+        // jamais dans la miniature du calque où elle vit.
+        const shotForThumbs = (DrawingEditor.currentShotId) ? state.data.shots.find(s => s.id === DrawingEditor.currentShotId) : null;
+        const zoneForThumbs = (shotForThumbs && DrawingEditor.currentKind) ? (shotForThumbs.drawings && shotForThumbs.drawings[DrawingEditor.currentKind]) : null;
+        const allObjectsForThumbs = (zoneForThumbs && Array.isArray(zoneForThumbs.objects)) ? zoneForThumbs.objects : [];
+        
         DrawingEditor.layers.forEach((layer, idx) => {
             const item = document.createElement('div');
             item.className = 'layer-item' + (idx === DrawingEditor.currentLayerIndex ? ' active' : '');
@@ -33419,7 +33426,16 @@ const DrawingEditor = {
             item.dataset.layerIdx = idx;
             item.title = 'Glisser pour réordonner — haut de liste = arrière-plan, bas = premier plan';
             let thumbSrc = '';
-            try { thumbSrc = layer.canvas.toDataURL(); } catch(e) { thumbSrc = ''; }
+            try {
+                const tmp = document.createElement('canvas');
+                tmp.width = layer.canvas.width;
+                tmp.height = layer.canvas.height;
+                const tctx = tmp.getContext('2d');
+                tctx.drawImage(layer.canvas, 0, 0);
+                const layerObjects = allObjectsForThumbs.filter(o => o.layerId === layer.id);
+                if(layerObjects.length > 0) Storyboard.renderObjectsOnCanvas(tctx, layerObjects);
+                thumbSrc = tmp.toDataURL();
+            } catch(e) { thumbSrc = ''; }
             item.innerHTML = `
                 <div class="layer-item-header">
                     <span style="cursor: grab; opacity: 0.5; padding: 0 4px;" title="Glisser">⋮⋮</span>
@@ -33432,7 +33448,11 @@ const DrawingEditor = {
             item.onclick = (e) => {
                 if(!e.target.closest('button') && !e.target.closest('.layer-visibility')) {
                     DrawingEditor.currentLayerIndex = idx;
+                    // v595 : changer de calque désélectionne l'objet en cours
+                    // (sinon on pouvait encore le déplacer/transformer depuis un autre calque)
+                    DrawingEditor.selectedObjectIdx = -1;
                     DrawingEditor.renderLayers();
+                    DrawingEditor.redraw();
                 }
             };
             // Listeners drag-and-drop
@@ -34221,6 +34241,19 @@ const DrawingEditor = {
     
     // Phase 3C Storyboard : retourne l'index de l'objet (ou -1) sous le point (canvasX, canvasY) dans la zone courante
     // Parcourt à l'envers pour que les objets dessinés en dernier soient prioritaires (au-dessus)
+    // v595 : un objet n'est manipulable (clic, drag, poignées) que depuis le
+    // calque auquel il appartient. Un objet orphelin (calque d'origine
+    // supprimé, ou ancien projet sans layerId) reste manipulable partout,
+    // faute de calque à qui le rattacher.
+    _isObjectOnActiveLayer: (obj) => {
+        const activeLayer = DrawingEditor.layers[DrawingEditor.currentLayerIndex];
+        if(!activeLayer) return false;
+        if(!obj.layerId) return true;
+        if(obj.layerId === activeLayer.id) return true;
+        const stillExists = DrawingEditor.layers.some(l => l.id === obj.layerId);
+        return !stillExists;
+    },
+    
     findObjectAt: (canvasX, canvasY) => {
         const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
         if(!shot) return -1;
@@ -34229,6 +34262,7 @@ const DrawingEditor = {
         
         for(let i = zone.objects.length - 1; i >= 0; i--) {
             const obj = zone.objects[i];
+            if(!DrawingEditor._isObjectOnActiveLayer(obj)) continue;
             const x = obj.x || 0;
             const y = obj.y || 0;
             const scale = obj.scale || 1;
@@ -34325,6 +34359,7 @@ const DrawingEditor = {
         const newLayer = DrawingEditor.createNewLayer();
         DrawingEditor.layers.push(newLayer);
         DrawingEditor.currentLayerIndex = DrawingEditor.layers.length - 1;
+        DrawingEditor.selectedObjectIdx = -1;
         DrawingEditor.renderLayers();
         DrawingEditor.saveState();
     },
@@ -34340,6 +34375,7 @@ const DrawingEditor = {
             if(DrawingEditor.currentLayerIndex >= DrawingEditor.layers.length) {
                 DrawingEditor.currentLayerIndex = DrawingEditor.layers.length - 1;
             }
+            DrawingEditor.selectedObjectIdx = -1;
             DrawingEditor.renderLayers();
             DrawingEditor.redraw();
             DrawingEditor.saveState();
