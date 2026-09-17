@@ -3640,6 +3640,7 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .color-wheel-canvas-wrap { position: relative; width: 280px; height: 280px; }
   #colorWheelCanvas { border-radius: 50%; cursor: crosshair; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
   .color-wheel-marker { position: absolute; width: 20px; height: 20px; border: 3px solid white; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.4), inset 0 0 0 2px rgba(0,0,0,0.2); }
+  .color-wheel-marker.not-found { background: repeating-linear-gradient(45deg, #fff, #fff 3px, #e53935 3px, #e53935 5px); }
   .color-wheel-marker.main { width: 26px; height: 26px; border-width: 4px; z-index: 10; }
   .color-wheel-marker.draggable { pointer-events: auto; cursor: grab; }
   .harmony-selector { margin-top: 20px; width: 100%; }
@@ -3650,6 +3651,9 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .generated-color-item { display: flex; align-items: center; gap: 12px; padding: 10px; background: var(--bg); border-radius: 8px; cursor: pointer; transition: all 0.2s; }
   .generated-color-item:hover { transform: translateX(5px); box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
   .generated-color-swatch { width: 40px; height: 40px; border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1); flex-shrink: 0; }
+  .generated-color-swatch-empty { background: repeating-linear-gradient(45deg, transparent, transparent 4px, #e53935 4px, #e53935 6px); opacity: 0.5; }
+  .generated-color-missing { opacity: 0.6; cursor: default; }
+  .generated-color-missing-label { font-size: 0.8rem; color: var(--text-sec); font-style: italic; }
   .generated-color-info { flex: 1; min-width: 0; }
   .generated-color-hex { font-family: 'Courier New', monospace; font-weight: 600; font-size: 1rem; border: 1px solid transparent; background: transparent; color: var(--text-main); padding: 2px 4px; border-radius: 4px; width: 90px; }
   .generated-color-hex:hover, .generated-color-hex:focus { border-color: var(--border); background: var(--panel-bg); outline: none; }
@@ -27758,6 +27762,16 @@ const ColorWheel = {
         if(!container) return;
         
         container.innerHTML = ColorWheel.colors.map((c, i) => {
+            if(c.notFound) {
+                return `
+                    <div class="generated-color-item generated-color-missing" title="Aucune couleur assez proche dans la photo">
+                        <div class="generated-color-swatch generated-color-swatch-empty"></div>
+                        <div class="generated-color-info">
+                            <div class="generated-color-missing-label">Introuvable dans la photo</div>
+                        </div>
+                    </div>
+                `;
+            }
             const rgb = ColorWheel.hexToRgb(c.hex);
             return `
                 <div class="generated-color-item">
@@ -27817,7 +27831,7 @@ const ColorWheel = {
         
         ColorWheel.colors.forEach((c, i) => {
             const marker = document.createElement('div');
-            marker.className = 'color-wheel-marker' + (i === 0 ? ' main draggable' : '');
+            marker.className = 'color-wheel-marker' + (i === 0 ? ' main draggable' : '') + (c.notFound ? ' not-found' : '');
             
             const rad = (c.hue - 90) * Math.PI / 180;
             const dist = (c.saturation / 100) * ColorWheel.radius;
@@ -27826,16 +27840,19 @@ const ColorWheel = {
             
             marker.style.left = x + 'px';
             marker.style.top = y + 'px';
-            marker.style.backgroundColor = c.hex;
+            marker.style.backgroundColor = c.notFound ? 'transparent' : c.hex;
+            marker.title = c.notFound ? 'Aucune couleur assez proche dans la photo' : '';
             
             wrap.appendChild(marker);
         });
     },
     
     addToBoard: () => {
-        const hexColors = ColorWheel.colors.map(c => c.hex);
+        const hexColors = ColorWheel.colors.filter(c => !c.notFound).map(c => c.hex);
         const nameInput = document.getElementById('paletteNameInput');
         const paletteName = nameInput && nameInput.value.trim() ? nameInput.value.trim() : ColorWheel.harmonies[ColorWheel.harmony].name;
+        
+        if(!hexColors.length) { Utils.toast('Aucune couleur valide à ajouter.', 'warning'); return; }
         
         ColorWheel.close();
         
@@ -30233,14 +30250,22 @@ const MoodBoard = {
             if(lock && j === lock.idx && lock.exact) {
                 return { ...t, hex: lock.exact.hex, x: lock.exact.x, y: lock.exact.y };
             }
-            let best = null, bestScore = Infinity;
-            candidates.forEach(c => {
-                const score = hueDist(c.hue, t.hue) * 2 + Math.abs(c.light - t.lightness) * 0.5;
-                if(score < bestScore) { bestScore = score; best = c; }
+            // N'accepter qu'un pixel assez sature : un gris/presque-neutre a une
+            // teinte instable et pouvait sinon "gagner" par erreur au score.
+            const saturated = candidates.filter(c => c.sat > 15);
+            const pool = saturated.length ? saturated : candidates;
+            let best = null, bestHueDist = Infinity, bestScore = Infinity;
+            pool.forEach(c => {
+                const hd = hueDist(c.hue, t.hue);
+                const score = hd * 2 + Math.abs(c.light - t.lightness) * 0.5;
+                if(score < bestScore) { bestScore = score; bestHueDist = hd; best = c; }
             });
-            return best
-                ? { ...t, hex: best.hex, x: best.x, y: best.y }
-                : { ...t, hex: ColorWheel.hslToHex(t.hue, t.saturation, t.lightness), x: null, y: null };
+            // Au-dela de cet ecart de teinte, ce n'est plus vraiment "cette
+            // couleur" — mieux vaut le dire franchement que d'en inventer une.
+            if(!best || bestHueDist > 30) {
+                return { ...t, hex: null, x: null, y: null, notFound: true };
+            }
+            return { ...t, hex: best.hex, x: best.x, y: best.y };
         });
     },
 
