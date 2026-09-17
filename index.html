@@ -3854,6 +3854,8 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
 .drawing-workspace { flex: 1; display: flex; overflow: hidden; }
 .drawing-sidebar { width: 200px; background: var(--bg); border-right: 1px solid var(--border); padding: 15px; overflow-y: auto; }
 .drawing-canvas-area { flex: 1; display: flex; justify-content: center; align-items: center; background: #2a2a2a; position: relative; overflow: auto; }
+/* v595 : colonne dédiée aux calques, à droite de la photo/canvas */
+.drawing-layers-panel { width: 170px; background: var(--bg); border-left: 1px solid var(--border); padding: 12px; overflow-y: auto; flex-shrink: 0; }
 /* Phase 4B v2 : sidebar droite étroite pour la palette d'objets storyboard */
 .drawing-sidebar-right { width: 150px; background: var(--bg); border-left: 1px solid var(--border); padding: 12px; overflow-y: auto; flex-shrink: 0; }
 .drawing-canvas { background: white; cursor: crosshair; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
@@ -3884,8 +3886,11 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
 .sb-toggle-btn.active,
 .brush-btn.active,
 .sr-nav-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
-.layer-item { padding: 8px; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 5px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.layer-item { padding: 6px; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 8px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
 .layer-item.active { background: var(--primary); color: white; }
+.layer-item-header { display: flex; justify-content: space-between; align-items: center; opacity: 0.45; transition: opacity 0.15s ease; }
+.layer-item:hover .layer-item-header, .layer-item.active .layer-item-header { opacity: 1; }
+.layer-thumb { width: 100%; height: 70px; object-fit: contain; border-radius: 3px; border: 1px solid var(--border); background: repeating-conic-gradient(#ddd 0% 25%, #eee 0% 50%) 50% / 12px 12px; }
 .layer-visibility { cursor: pointer; font-size: 1.2rem; }
   
   .breakdown-layout { display: flex; gap: 14px; min-height: 100%; }
@@ -10308,14 +10313,15 @@ body.presentation-mode .presentation-bar {
                     <div class="brush-btn" onclick="app.DrawingEditor.setTool('airbrush')">💨 Aérographe</div>
                     <div class="brush-btn" onclick="app.DrawingEditor.setTool('eraser')">🧹 Gomme</div>
                 </div>
-                <div class="tool-group">
-                    <div class="tool-label">Calques</div>
-                    <button onclick="app.DrawingEditor.addLayer()" style="width: 100%; padding: 6px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 10px; font-size: 0.85rem;">+ Nouveau</button>
-                    <div id="layersList"></div>
-                </div>
                 </div>
             <div class="drawing-canvas-area">
                 <canvas id="drawingCanvas" class="drawing-canvas" width="800" height="600"></canvas>
+            </div>
+            <!-- v595 : troisième colonne dédiée aux calques, à droite de la photo -->
+            <div class="drawing-layers-panel">
+                <div class="tool-label">Calques</div>
+                <button onclick="app.DrawingEditor.addLayer()" style="width: 100%; padding: 6px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 10px; font-size: 0.85rem;">+ Nouveau</button>
+                <div id="layersList"></div>
             </div>
             <!-- Phase 4B v2 : sidebar droite — palette d'objets (visible uniquement pour les zones sémantiques) -->
             <div class="drawing-sidebar-right" id="objectsPaletteGroup" style="display: none;">
@@ -31569,12 +31575,34 @@ const Storyboard = {
         Storyboard.renderScenesList();
     },
     
+    // v595 : petit filet de rattrapage apres suppression d'un plan — le plan
+    // complet (calques, objets dessines) reste en memoire 8s, avec un toast
+    // "Annuler". Passe ce delai, seul le journal (recoverable, partiel) permet
+    // de recuperer manuellement le contenu.
+    _lastDeletedShot: null,
+    _lastDeletedShotTimer: null,
+    undoDeleteShot: () => {
+        const pending = Storyboard._lastDeletedShot;
+        if(!pending) return;
+        clearTimeout(Storyboard._lastDeletedShotTimer);
+        Storyboard._lastDeletedShot = null;
+        const idx = (pending.index >= 0 && pending.index <= state.data.shots.length) ? pending.index : state.data.shots.length;
+        state.data.shots.splice(idx, 0, pending.shot);
+        Store.save();
+        Storyboard.renderShots();
+        Storyboard.renderScenesList();
+        const toastEl = document.getElementById('shot-undo-toast');
+        if(toastEl) toastEl.remove();
+        Utils.toast('Plan restauré', 'success');
+    },
+    
     deleteShot: async (shotId, event) => {
         if(event) event.stopPropagation();
         if(state.currentRole === 'viewer' || !Permissions.canEdit('storyboard')) return;
         if(!await ConfirmModal.confirmDelete("Ce plan sera définitivement supprimé.")) return;
         
         const shot = state.data.shots.find(s => s.id === shotId);
+        const shotIndex = state.data.shots.findIndex(s => s.id === shotId);
         const scene = state.data.scenes.find(s => s.id === shot?.sceneId);
         
         // [Phase D] Capturer le contenu récupérable AVANT suppression (médias gardés dans le journal)
@@ -31595,6 +31623,32 @@ const Storyboard = {
         Store.save();
         Storyboard.renderShots();
         Storyboard.renderScenesList();
+        
+        // Petit toast "Annuler" (8s) — voir undoDeleteShot ci-dessus
+        Storyboard._lastDeletedShot = shot ? { shot: JSON.parse(JSON.stringify(shot)), index: shotIndex } : null;
+        clearTimeout(Storyboard._lastDeletedShotTimer);
+        const existingToast = document.getElementById('shot-undo-toast');
+        if(existingToast) existingToast.remove();
+        if(Storyboard._lastDeletedShot) {
+            const container = document.getElementById('toast-container');
+            if(container) {
+                const toast = document.createElement('div');
+                toast.id = 'shot-undo-toast';
+                toast.className = 'toast info';
+                toast.innerHTML = `
+                    <span class="toast-icon">🗑️</span>
+                    <span class="toast-message">Plan supprimé</span>
+                    <button onclick="app.Storyboard.undoDeleteShot()" style="padding:3px 10px; background:var(--primary); color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:0.85rem; margin-left:6px;">↩️ Annuler</button>
+                    <button class="toast-close" onclick="this.parentElement.remove()">✖</button>
+                `;
+                container.appendChild(toast);
+            }
+            Storyboard._lastDeletedShotTimer = setTimeout(() => {
+                Storyboard._lastDeletedShot = null;
+                const t = document.getElementById('shot-undo-toast');
+                if(t) t.remove();
+            }, 8000);
+        }
     },
     
     updateShot: (shotId, field, value) => {
@@ -33282,7 +33336,10 @@ const DrawingEditor = {
             scale: scale,
             rotation: 0,
             width: naturalWidth,
-            height: naturalHeight
+            height: naturalHeight,
+            // v595 : l'objet appartient au calque actif, pour se dessiner à sa place
+            // dans la pile (et non plus systématiquement par-dessus tous les calques)
+            layerId: (DrawingEditor.layers[DrawingEditor.currentLayerIndex] || {}).id || null
         });
         
         if(Storyboard.markAsDirty) Storyboard.markAsDirty();
@@ -33361,11 +33418,16 @@ const DrawingEditor = {
             item.draggable = true;
             item.dataset.layerIdx = idx;
             item.title = 'Glisser pour réordonner — haut de liste = arrière-plan, bas = premier plan';
+            let thumbSrc = '';
+            try { thumbSrc = layer.canvas.toDataURL(); } catch(e) { thumbSrc = ''; }
             item.innerHTML = `
-                <span style="cursor: grab; opacity: 0.5; padding: 0 4px;" title="Glisser">⋮⋮</span>
-                <span class="layer-visibility" onclick="app.DrawingEditor.toggleLayerVisibility(${idx})">${layer.visible ? '👁️' : '👁️‍🗨️'}</span>
-                <span class="flex-1">${Utils.escape(layer.name)}</span>
-                ${DrawingEditor.layers.length > 1 ? `<button onclick="app.DrawingEditor.deleteLayer(${idx})" style="background: none; border: none; color: var(--danger); cursor: pointer;">🗑️</button>` : ''}
+                <div class="layer-item-header">
+                    <span style="cursor: grab; opacity: 0.5; padding: 0 4px;" title="Glisser">⋮⋮</span>
+                    <span class="layer-visibility" onclick="app.DrawingEditor.toggleLayerVisibility(${idx})">${layer.visible ? '👁️' : '👁️‍🗨️'}</span>
+                    <span class="flex-1">${Utils.escape(layer.name)}</span>
+                    ${DrawingEditor.layers.length > 1 ? `<button onclick="app.DrawingEditor.deleteLayer(${idx})" style="background: none; border: none; color: var(--danger); cursor: pointer;">🗑️</button>` : ''}
+                </div>
+                ${thumbSrc ? `<img class="layer-thumb" src="${thumbSrc}" alt="">` : '<div class="layer-thumb"></div>'}
             `;
             item.onclick = (e) => {
                 if(!e.target.closest('button') && !e.target.closest('.layer-visibility')) {
@@ -33658,21 +33720,25 @@ const DrawingEditor = {
             DrawingEditor.ctx.restore();
         }
         
-        // Draw all visible layers
+        // v595 : les objets (images insérées, annotations) appartiennent désormais
+        // à un calque (layerId) et se dessinent intercalés avec les calques pixel,
+        // dans leur ordre — plus systématiquement par-dessus tout. Un objet sans
+        // calque correspondant (ancien projet, calque supprimé depuis) se dessine
+        // en dernier, par-dessus, comme avant.
+        const shotForObjects = (DrawingEditor.currentShotId) ? state.data.shots.find(s => s.id === DrawingEditor.currentShotId) : null;
+        const zoneForObjects = (shotForObjects && DrawingEditor.currentKind) ? (shotForObjects.drawings && shotForObjects.drawings[DrawingEditor.currentKind]) : null;
+        const allObjects = (zoneForObjects && Array.isArray(zoneForObjects.objects)) ? zoneForObjects.objects : [];
+        const layerIds = new Set(DrawingEditor.layers.map(l => l.id));
+        const orphanObjects = allObjects.filter(o => !o.layerId || !layerIds.has(o.layerId));
+        
         DrawingEditor.layers.forEach(layer => {
-            if(layer.visible) {
-                DrawingEditor.ctx.drawImage(layer.canvas, 0, 0);
-            }
+            if(!layer.visible) return;
+            DrawingEditor.ctx.drawImage(layer.canvas, 0, 0);
+            const layerObjects = allObjects.filter(o => o.layerId === layer.id);
+            if(layerObjects.length > 0) Storyboard.renderObjectsOnCanvas(DrawingEditor.ctx, layerObjects);
         });
         
-        // Phase 3 Storyboard : dessiner les objets vectoriels de la zone en cours d'édition
-        if(DrawingEditor.currentShotId && DrawingEditor.currentKind) {
-            const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
-            const zone = shot && shot.drawings && shot.drawings[DrawingEditor.currentKind];
-            if(zone && Array.isArray(zone.objects) && zone.objects.length > 0) {
-                Storyboard.renderObjectsOnCanvas(DrawingEditor.ctx, zone.objects);
-            }
-        }
+        if(orphanObjects.length > 0) Storyboard.renderObjectsOnCanvas(DrawingEditor.ctx, orphanObjects);
         
         // Phase 3C v3 Storyboard : poignées de sélection (mode transform via clic droit)
         DrawingEditor.drawSelectionHandles();
@@ -34117,7 +34183,8 @@ const DrawingEditor = {
             x: Math.round(canvasX),
             y: Math.round(canvasY),
             scale: 1,
-            rotation: 0
+            rotation: 0,
+            layerId: (DrawingEditor.layers[DrawingEditor.currentLayerIndex] || {}).id || null
         });
         
         if(Storyboard.markAsDirty) Storyboard.markAsDirty();
@@ -34319,6 +34386,9 @@ const DrawingEditor = {
             DrawingEditor.history.shift();
             DrawingEditor.historyStep--;
         }
+        
+        // v595 : rafraîchir les vignettes de la colonne calques
+        DrawingEditor.renderLayers();
     },
     
     undo: () => {
