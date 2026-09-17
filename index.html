@@ -3659,8 +3659,8 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .generated-color-hex:hover, .generated-color-hex:focus { border-color: var(--border); background: var(--panel-bg); outline: none; }
   .generated-color-rgb { font-size: 0.8rem; color: var(--text-sec); margin-top: 2px; }
   .color-wheel-photo { flex: 1.6; min-width: 220px; display: flex; flex-direction: column; align-items: center; position: relative; z-index: 1; }
-  .pe-photo-wrap { position: relative; width: 100%; max-width: 380px; margin: 0 auto; border-radius: 8px; overflow: visible; box-shadow: 0 0 0 1px var(--border); user-select: none; cursor: crosshair; }
-  .pe-photo-inner { position: relative; transition: transform 0.06s linear; border-radius: 8px; overflow: hidden; }
+  .pe-photo-wrap { position: relative; width: 100%; max-width: 380px; margin: 0 auto; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px var(--border); user-select: none; cursor: crosshair; }
+  .pe-photo-inner { position: absolute; top: 0; left: 0; width: 100%; }
   .pe-photo-inner img { width: 100%; display: block; pointer-events: none; }
   .pe-marker { position: absolute; width: 20px; height: 20px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 2px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.3); transform: translate(-50%, -50%); cursor: grab; }
   .pe-marker:active { cursor: grabbing; }
@@ -27465,32 +27465,67 @@ const ColorWheel = {
             ColorWheel.generateColors();
         }
         ColorWheel.updateMarkers();
-        if(photoOpts) ColorWheel.renderPhotoMarkers();
+        if(photoOpts) {
+            ColorWheel.renderPhotoMarkers();
+            // Le contenu de la photo est en position absolue (pour le
+            // panoramique) : sans hauteur fixee tout de suite, le cadre
+            // s'effondrerait a 0px au repos.
+            const wrap = document.getElementById('cwPhotoWrap');
+            if(wrap && photoOpts.canvasW && photoOpts.canvasH) {
+                wrap.style.height = (wrap.getBoundingClientRect().width * photoOpts.canvasH / photoOpts.canvasW) + 'px';
+                wrap.dataset.heightLocked = '1';
+            }
+        }
         ColorWheel.setupEvents();
     },
 
     // Agrandit la photo autour du curseur, pour placer un point avec
-    // precision. Gele pendant un glisser (le calcul de position reste simple
-    // avec une echelle/origine fixe au lieu de suivre un zoom qui bougerait).
-    _photoZoom: { ox: 0.5, oy: 0.5, scale: 1 },
+    // precision — mais dans un cadre qui reste FIXE (overflow:hidden) : la
+    // vue defile a l'interieur au lieu d'agrandir sur place et de deborder.
+    _photoZoom: { fx: 0.5, fy: 0.5, S: 1, offX: 0, offY: 0, w: 0, h: 0 },
     _draggingMarker: false,
-    magnifyPhoto: (e) => {
-        if(ColorWheel._draggingMarker) return;
+
+    // Fixe la hauteur du cadre une seule fois (a sa taille au repos) : sans
+    // ca, agrandir le contenu a l'interieur ferait aussi grandir le cadre.
+    _lockPhotoWrapHeight: () => {
+        const wrap = document.getElementById('cwPhotoWrap');
+        if(!wrap || wrap.dataset.heightLocked) return;
+        const rect = wrap.getBoundingClientRect();
+        if(rect.height > 0) { wrap.style.height = rect.height + 'px'; wrap.dataset.heightLocked = '1'; }
+    },
+
+    // Deplace/agrandit la photo pour que le point vise (fx,fy, fraction 0-1
+    // de la photo NON zoomee) reste exactement sous le curseur, sans jamais
+    // reveler de vide au-dela des bords — donc jamais deborder du cadre.
+    _applyPhotoZoom: (fx, fy, S) => {
         const wrap = document.getElementById('cwPhotoWrap');
         const inner = document.getElementById('cwPhotoInner');
         if(!wrap || !inner) return;
+        ColorWheel._lockPhotoWrapHeight();
         const rect = wrap.getBoundingClientRect();
-        const ox = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-        const oy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-        ColorWheel._photoZoom = { ox, oy, scale: 2 };
-        inner.style.transformOrigin = (ox * 100) + '% ' + (oy * 100) + '%';
-        inner.style.transform = 'scale(2)';
+        const w = rect.width, h = rect.height;
+        const offX = fx * w * (S - 1);
+        const offY = fy * h * (S - 1);
+        inner.style.width = (w * S) + 'px';
+        inner.style.left = (-offX) + 'px';
+        inner.style.top = (-offY) + 'px';
+        ColorWheel._photoZoom = { fx, fy, S, offX, offY, w, h };
+    },
+
+    magnifyPhoto: (e) => {
+        if(ColorWheel._draggingMarker) return; // le glisser gere son propre suivi
+        const wrap = document.getElementById('cwPhotoWrap');
+        if(!wrap) return;
+        const rect = wrap.getBoundingClientRect();
+        const fx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const fy = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+        ColorWheel._applyPhotoZoom(fx, fy, 2.2);
     },
     resetPhotoZoom: () => {
         if(ColorWheel._draggingMarker) return;
-        ColorWheel._photoZoom = { ox: 0.5, oy: 0.5, scale: 1 };
         const inner = document.getElementById('cwPhotoInner');
-        if(inner) inner.style.transform = 'scale(1)';
+        if(inner) { inner.style.width = '100%'; inner.style.left = '0'; inner.style.top = '0'; }
+        ColorWheel._photoZoom = { fx: 0.5, fy: 0.5, S: 1, offX: 0, offY: 0, w: 0, h: 0 };
     },
 
     // Pose les points colores sur la photo, a la position d'ou vient chaque
@@ -27521,17 +27556,28 @@ const ColorWheel = {
         const inner = document.getElementById('cwPhotoInner');
         if(!wrap || !inner || !ColorWheel.photoOpts) return;
         ColorWheel._draggingMarker = true;
-        const zoom = { ...ColorWheel._photoZoom }; // figee pour la duree du glisser
         const { canvasW, canvasH, sample, computePalette } = ColorWheel.photoOpts;
 
         const onMove = (ev) => {
             const rect = wrap.getBoundingClientRect();
-            const dispFx = (ev.clientX - rect.left) / rect.width;
-            const dispFy = (ev.clientY - rect.top) / rect.height;
-            let fx = zoom.scale !== 1 ? (zoom.ox + (dispFx - zoom.ox) / zoom.scale) : dispFx;
-            let fy = zoom.scale !== 1 ? (zoom.oy + (dispFy - zoom.oy) / zoom.scale) : dispFy;
+            const dispX = ev.clientX - rect.left;
+            const dispY = ev.clientY - rect.top;
+            const z = ColorWheel._photoZoom;
+            // Retrouve, avec le panoramique ACTUEL, le point de la photo
+            // reellement sous le curseur (avant de faire suivre la loupe).
+            let fx, fy;
+            if(z && z.S && z.S !== 1 && z.w) {
+                fx = (dispX + z.offX) / (z.w * z.S);
+                fy = (dispY + z.offY) / (z.h * z.S);
+            } else {
+                fx = dispX / rect.width;
+                fy = dispY / rect.height;
+            }
             fx = Math.max(0, Math.min(1, fx));
             fy = Math.max(0, Math.min(1, fy));
+            // La loupe recentre/defile sur ce point — c'est ce qui permet de
+            // continuer a glisser meme quand on approche un bord.
+            ColorWheel._applyPhotoZoom(fx, fy, 2.2);
             const x = fx * canvasW, y = fy * canvasH;
             const hex = sample(x, y);
             const hsl = ColorWheel.hexToHsl(hex);
@@ -27550,8 +27596,7 @@ const ColorWheel = {
         };
         const onUp = () => {
             ColorWheel._draggingMarker = false;
-            inner.style.transform = 'scale(1)';
-            ColorWheel._photoZoom = { ox: 0.5, oy: 0.5, scale: 1 };
+            ColorWheel.resetPhotoZoom();
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
         };
