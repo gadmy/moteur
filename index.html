@@ -16683,6 +16683,16 @@ const LockManager = {
       broadcastPatch: (patch) => {
           try {
               if(!state.dbListener) return;
+              // v616 : le canal broadcast est configuré self:false (on ne reçoit
+              // jamais son propre message), donc ce garde-fou ne se déclenchait
+              // JAMAIS pour sa propre sauvegarde — seulement pour celle reçue d'un
+              // autre onglet. Résultat : l'événement Postgres généré par NOTRE
+              // PROPRE écriture déclenchait quand même un rechargement complet du
+              // projet, qui pouvait arriver pendant qu'une sauvegarde suivante
+              // était encore en vol et ramener une version antérieure (v615). On
+              // se marque nous-mêmes ici : inutile de se relire, on sait déjà ce
+              // qu'on vient d'écrire.
+              StoreRealtime._lastBroadcastAt = Date.now();
               // v578 (cloisonnement) : ON N'ENVOIE PLUS LE CONTENU, seulement le
               // signal. Le canal rapide diffusait le patch tel quel a tous les
               // abonnes du projet : celui qui modifiait le budget l'envoyait donc
@@ -33924,16 +33934,28 @@ const DrawingEditor = {
                 // Mode MoodBoard : retourner l'image via callback
                 const dataUrl = DrawingEditor.getCompositeImage();
                 callback(dataUrl);
-            } else {
-                // Mode Storyboard classique. IMPORTANT : on attend la fin réelle de
-                // save() (un upload réseau par calque) avant d'effacer l'état de
-                // l'éditeur ci-dessous — sinon une fermeture rapide, ou une
-                // connexion un peu lente, pouvait couper la sauvegarde en plein
-                // vol et faire perdre les calques qu'on venait d'éditer.
-                await DrawingEditor.save();
+            } else if(insideEditModal) {
+                // v616 : depuis "Édition Plan", on n'appelle plus Store.save() ici.
+                // On committe le dessin (calques uploadés, shot.drawings à jour)
+                // et on laisse la fenêtre du plan faire l'UNIQUE sauvegarde réseau,
+                // comme pour ses autres champs. Deux sauvegardes indépendantes coup
+                // sur coup (celle du dessin, puis celle du plan) créaient une
+                // fenêtre de course avec le rechargement temps réel — cause
+                // probable du calque qui reparaissait tout seul (v615).
+                await DrawingEditor._commitDrawingData();
+                Storyboard.markAsDirty();
                 if(Storyboard.currentEditingShotId === shotId) {
                     setTimeout(() => Storyboard.refreshEditModal(shotId), 100);
                 }
+            } else {
+                // Mode Storyboard classique (dessin ouvert seul, hors fenêtre
+                // Édition Plan) : personne d'autre ne sauvegardera à notre place.
+                // IMPORTANT : on attend la fin réelle de save() (un upload réseau
+                // par calque) avant d'effacer l'état de l'éditeur ci-dessous —
+                // sinon une fermeture rapide, ou une connexion un peu lente,
+                // pouvait couper la sauvegarde en plein vol et faire perdre les
+                // calques qu'on venait d'éditer.
+                await DrawingEditor.save();
             }
         }
         document.getElementById('drawing-modal').style.display = 'none';
@@ -35420,11 +35442,15 @@ const DrawingEditor = {
     },
     
     // ===================== SAUVEGARDE & RENDU =====================
-    save: async () => {
-        if(!DrawingEditor.currentShotId) return;
+    // v616 : upload des calques + écriture dans shot.drawings, SANS toucher au
+    // réseau projet (Store.save()). Isolé de save() pour pouvoir committer le
+    // dessin en mémoire depuis la fenêtre "Édition Plan" sans déclencher une
+    // deuxième sauvegarde réseau indépendante de la sienne (cf close()).
+    _commitDrawingData: async () => {
+        if(!DrawingEditor.currentShotId) return false;
         
         const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
-        if(!shot) return;
+        if(!shot) return false;
         
         // Phase 2 Storyboard : garde-fou de permission au moment de la sauvegarde
         const kind = DrawingEditor.currentKind || 'original';
@@ -35433,12 +35459,11 @@ const DrawingEditor = {
         if(!isOwner && !Permissions.canEdit(permKey)) {
             const labels = { original: 'le dessin original', lighting: 'la zone Lumière', camera: 'la zone Caméra', actors: 'la zone Acteurs' };
             Utils.toast(`Permission insuffisante pour modifier ${labels[kind] || 'cette zone'}.`, 'error');
-            return;
+            return false;
         }
         
         // Convert layers to serializable format
         // Upload de chaque calque vers Storage (upsert : écrasement du même chemin)
-        Utils.toast('Sauvegarde en cours...', 'info', 2000);
         const shotId = DrawingEditor.currentShotId;
         const layerUploads = await Promise.all(DrawingEditor.layers.map(async (layer) => {
             const dataUrl = layer.canvas.toDataURL();
@@ -35478,6 +35503,16 @@ const DrawingEditor = {
             shot.drawingData = drawingData;
         }
         shot.lastModified = Date.now();
+        return true;
+    },
+
+    // Chemin autonome (dessin ouvert hors fenêtre "Édition Plan") : committer PUIS
+    // pousser au serveur soi-même, personne d'autre ne le fera.
+    save: async () => {
+        Utils.toast('Sauvegarde en cours...', 'info', 2000);
+        const kind = DrawingEditor.currentKind || 'original';
+        const ok = await DrawingEditor._commitDrawingData();
+        if(!ok) return;
         
         Store.save();
         Storyboard.renderShots();
