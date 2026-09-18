@@ -176,6 +176,20 @@ DETTE / À SAVOIR
 (Condensé par périodes le 15 septembre 2026, v593. Le détail des sessions vit
 dans l'historique git jusqu'à son vidage.)
 
+v611 (18 Septembre 2026) — CORRECTIF : LES CALQUES DU DESSIN STORYBOARD
+  DISPARAISSAIENT APRÈS RÉOUVERTURE. Trouvé une vraie course : close() (le
+  bouton "Fermer") lançait save() sans l'attendre — save() envoie un
+  upload réseau par calque avant d'écrire les calques sur le plan, mais
+  close() effaçait déjà l'état de l'éditeur juste après avoir lancé
+  l'upload, sans attendre qu'il finisse. Une fermeture suivie d'une
+  réouverture rapide (ou une connexion un peu lente) tombait donc sur les
+  données d'avant la modif, avec l'image "sans calque" décrite. close()
+  attend maintenant la fin réelle de save() avant de fermer. Reste
+  possible : si la connexion à Supabase est coupée au moment de fermer
+  (cf. les erreurs CORS/525 remontées juste avant), l'upload échoue et il
+  n'y a alors rien à sauvegarder, quel que soit ce correctif — à re-tester
+  une fois la connexion confirmée stable.
+
 v610 (18 Septembre 2026) — CORRECTIF : "DESSINER" PLANTAIT DANS STORYBOARD.
   Oubli du ménage de v607 (retrait de l'ancienne popup image-menu-modal,
   remplacée par les boutons à gauche de l'image) : chooseDrawing essayait
@@ -33834,8 +33848,12 @@ const DrawingEditor = {
                 const dataUrl = DrawingEditor.getCompositeImage();
                 callback(dataUrl);
             } else {
-                // Mode Storyboard classique
-                DrawingEditor.save();
+                // Mode Storyboard classique. IMPORTANT : on attend la fin réelle de
+                // save() (un upload réseau par calque) avant d'effacer l'état de
+                // l'éditeur ci-dessous — sinon une fermeture rapide, ou une
+                // connexion un peu lente, pouvait couper la sauvegarde en plein
+                // vol et faire perdre les calques qu'on venait d'éditer.
+                await DrawingEditor.save();
                 if(Storyboard.currentEditingShotId === shotId) {
                     setTimeout(() => Storyboard.refreshEditModal(shotId), 100);
                 }
