@@ -4096,6 +4096,8 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
 .shot-compact-footer { padding: 10px; background: var(--bg); text-align: center; font-weight: bold; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center; }
 .shot-compact-delete { background: none; border: none; color: var(--text-sec); cursor: pointer; font-size: 1.1rem; padding: 0; }
 .shot-compact-delete:hover { color: var(--danger); }
+.shot-compact-duplicate { background: none; border: none; color: var(--text-sec); cursor: pointer; font-size: 1.1rem; padding: 0; }
+.shot-compact-duplicate:hover { color: var(--primary); }
 .shot-compact-name { padding: 5px 10px; font-size: 0.85rem; color: var(--text-main); text-align: center; font-weight: 600; border-top: 1px solid var(--border); }
 .shot-compact-tech { padding: 5px 10px; font-size: 0.75rem; color: var(--text-sec); text-align: center; background: var(--bg); }
 
@@ -32258,7 +32260,11 @@ const Storyboard = {
             </div>
             <div class="shot-compact-footer">
                 <span>Plan ${sceneIndex}.${idx + 1}</span>
-                ${state.currentRole !== 'viewer' ? `<button class="shot-compact-delete" onclick="app.Storyboard.deleteShot('${shot.id}', event)">🗑️</button>` : ''}
+                ${state.currentRole !== 'viewer' ? `
+                <div style="display: flex; gap: 4px;">
+                    <button class="shot-compact-duplicate" onclick="event.stopPropagation(); app.Storyboard.duplicateShot('${shot.id}')" title="Dupliquer ce plan">📋</button>
+                    <button class="shot-compact-delete" onclick="app.Storyboard.deleteShot('${shot.id}', event)">🗑️</button>
+                </div>` : ''}
             </div>
             ${nameInfo}
             ${techInfo}
@@ -32464,7 +32470,6 @@ const Storyboard = {
                 <h3 class="m-0">Plan ${idx + 1}</h3>
                 ${!isView ? `
                 <div style="display: flex; gap: 6px;">
-                    ${Storyboard.currentEditingShotId !== shot.id ? `<button onclick="app.Storyboard.duplicateShot('${shot.id}')" style="background: var(--primary); color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">📋 Dupliquer</button>` : ''}
                     <button onclick="app.Storyboard.deleteShot('${shot.id}')" style="background: var(--danger); color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">🗑️ Supprimer</button>
                 </div>` : ''}
             </div>
@@ -32937,12 +32942,15 @@ const Storyboard = {
     chooseDrawing: (shotId) => {
         const menuEl = document.getElementById('image-menu-modal');
         if(menuEl) menuEl.remove();
-        DrawingEditor.open(shotId, () => {
-            // Callback après sauvegarde du dessin
-            if(Storyboard.currentEditingShotId === shotId) {
-                Storyboard.refreshEditModal(shotId);
-            }
-        }, 'original');
+        // v616 : plus de callback ici. Avec un callback, DrawingEditor.close()
+        // prenait la branche "retourner l'image via callback" (prévue pour le
+        // Mood Board) au lieu de committer le dessin par calques — le callback
+        // ne faisait qu'un rafraîchissement d'affichage, sans jamais écrire
+        // shot.drawings. Un calque supprimé n'était donc RÉELLEMENT retiré
+        // nulle part : à la réouverture, l'ancien dessin revenait toujours.
+        // Sans callback, close() reconnaît qu'on est dans "Édition Plan" (via
+        // Storyboard.currentEditingShotId) et committe correctement.
+        DrawingEditor.open(shotId, null, 'original');
     },
     
     // Phase 1 Storyboard : ouvre l'éditeur sur une zone sémantique (lumière/caméra/acteurs)
@@ -32971,11 +32979,8 @@ const Storyboard = {
             shot.drawingsVisibility[kind] = true;
         }
         
-        DrawingEditor.open(shotId, () => {
-            if(Storyboard.currentEditingShotId === shotId) {
-                Storyboard.refreshEditModal(shotId);
-            }
-        }, kind);
+        // v616 : voir le commentaire de chooseDrawing ci-dessus — plus de callback.
+        DrawingEditor.open(shotId, null, kind);
     },
     
     // ===================== MODALE D'ÉDITION DE PLAN =====================
