@@ -176,6 +176,18 @@ DETTE / À SAVOIR
 (Condensé par périodes le 15 septembre 2026, v593. Le détail des sessions vit
 dans l'historique git jusqu'à son vidage.)
 
+v614 (18 Septembre 2026) — ÉDITEUR DE DESSIN : TROIS CORRECTIFS. 1) Supprimer
+  un calque, ou faire "Effacer Tout" dessus, ne retirait pas les images
+  insérées (objets) qui vivaient sur ce calque — elles restaient affichées
+  toutes seules, sans calque. Les deux actions retirent maintenant aussi
+  les objets qui appartiennent au calque concerné. 2) Bouton "💾
+  Sauvegarder" retiré de l'en-tête — la sauvegarde ne se fait plus qu'à la
+  fermeture (silencieuse depuis "Édition Plan", confirmée sinon, cf v612).
+  3) Les vignettes des calques ne se rafraîchissaient qu'en changeant de
+  calque : un coup de pinceau les mettait déjà à jour, mais pas insérer,
+  déplacer, transformer ou supprimer un objet (image) — les quatre
+  rafraîchissent maintenant la vignette immédiatement.
+
 v613 (18 Septembre 2026) — STORYBOARD : RETRAIT DES VERSIONS, AJOUT DUPLIQUER
   PLAN. L'historique de versions du dessin (bouton "Sauvegarder Version",
   liste "Versions sauvegardées" + restauration dans la fiche du plan) est
@@ -10552,8 +10564,7 @@ body.presentation-mode .presentation-bar {
         <div class="drawing-header">
             <h3 class="m-0">Éditeur de Dessin</h3>
             <div class="flex-gap10">
-                <button onclick="app.DrawingEditor.save()" class="de-btn de-btn--success">💾 Sauvegarder</button>
-                <button onclick="app.DrawingEditor.close()" class="de-btn">✖ Fermer</button>
+                <button onclick="app.DrawingEditor.close()" class="de-btn de-btn--success">✖ Fermer</button>
             </div>
         </div>
         <div class="drawing-toolbar">
@@ -34232,6 +34243,7 @@ const DrawingEditor = {
         if(DrawingEditor.currentKind !== 'original') {
             DrawingEditor.renderObjectsPalette();  // Met à jour la liste "Placés"
         }
+        DrawingEditor.renderLayers();
         DrawingEditor.redraw();
         Utils.toast('Image insérée — clic droit pour la transformer', 'success', 2500);
     },
@@ -34589,6 +34601,7 @@ const DrawingEditor = {
             DrawingEditor.transformObjectCy = 0;
             DrawingEditor.canvas.style.cursor = '';
             if(Storyboard.markAsDirty) Storyboard.markAsDirty();
+            DrawingEditor.renderLayers();
             DrawingEditor.redraw();
             return;
         }
@@ -34603,6 +34616,7 @@ const DrawingEditor = {
             DrawingEditor.canvas.style.cursor = '';
             if(Storyboard.markAsDirty) Storyboard.markAsDirty();
             DrawingEditor.renderObjectsPalette();
+            DrawingEditor.renderLayers();
             DrawingEditor.redraw();
             return;
         }
@@ -34949,6 +34963,7 @@ const DrawingEditor = {
             DrawingEditor.selectedObjectIdx -= 1;
         }
         DrawingEditor.renderObjectsPalette();
+        DrawingEditor.renderLayers();
         DrawingEditor.redraw();
     },
     
@@ -35257,11 +35272,22 @@ const DrawingEditor = {
         }
         
         if(await ConfirmModal.confirmDelete("Ce calque sera supprimé.")) {
+            const removedLayerId = DrawingEditor.layers[idx].id;
             DrawingEditor.layers.splice(idx, 1);
+            
+            // Les objets (images insérées) qui appartenaient à ce calque doivent
+            // disparaître avec lui — sinon ils restent affichés sans calque.
+            const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
+            const zone = shot?.drawings?.[DrawingEditor.currentKind];
+            if(zone && Array.isArray(zone.objects)) {
+                zone.objects = zone.objects.filter(o => o.layerId !== removedLayerId);
+            }
+            
             if(DrawingEditor.currentLayerIndex >= DrawingEditor.layers.length) {
                 DrawingEditor.currentLayerIndex = DrawingEditor.layers.length - 1;
             }
             DrawingEditor.selectedObjectIdx = -1;
+            if(DrawingEditor.currentKind !== 'original') DrawingEditor.renderObjectsPalette();
             DrawingEditor.renderLayers();
             DrawingEditor.redraw();
             DrawingEditor.saveState();
@@ -35280,6 +35306,17 @@ const DrawingEditor = {
         const layer = DrawingEditor.layers[DrawingEditor.currentLayerIndex];
         const ctx = layer.canvas.getContext('2d');
         ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+        
+        // "Effacer tout" doit aussi retirer les objets (images insérées) posés
+        // sur ce calque — sinon ils restent affichés alors que le calque est vide.
+        const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
+        const zone = shot?.drawings?.[DrawingEditor.currentKind];
+        if(zone && Array.isArray(zone.objects)) {
+            zone.objects = zone.objects.filter(o => o.layerId !== layer.id);
+        }
+        DrawingEditor.selectedObjectIdx = -1;
+        if(DrawingEditor.currentKind !== 'original') DrawingEditor.renderObjectsPalette();
+        
         DrawingEditor.redraw();
         DrawingEditor.saveState();
     },
