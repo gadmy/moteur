@@ -12584,6 +12584,88 @@ crewRoles: {
           }
       },
 
+      // v616 : préchauffe en tâche de fond (rien à l'écran, pas de rendu) le
+      // cache HTTP du navigateur pour les images de calques du Storyboard,
+      // juste après l'ouverture du projet. But : quand l'utilisateur clique
+      // sur l'onglet Storyboard, les images sont déjà en cache navigateur au
+      // lieu de partir chercher chaque fichier sur le réseau à cet instant-là
+      // (ce qui donnait l'impression que ça ne commençait à charger qu'en
+      // ouvrant l'onglet). S'appuie sur le cache d'URLs signées déjà rempli
+      // par refreshSignedCache juste avant — ne resigne rien lui-même.
+      prefetchStoryboardImages: () => {
+          try {
+              if(!state.data || !Array.isArray(state.data.shots) || state.data.shots.length === 0) return;
+              const paths = new Set();
+              const collectZone = (zone) => {
+                  if(!zone) return;
+                  if(zone.drawingData && Array.isArray(zone.drawingData.layers)) {
+                      zone.drawingData.layers.forEach(l => {
+                          const p = Utils._projPathFrom(l && l.imageData);
+                          if(p) paths.add(p);
+                      });
+                  }
+                  if(zone.imageType === 'upload' && zone.imageUrl) {
+                      const p = Utils._projPathFrom(zone.imageUrl);
+                      if(p) paths.add(p);
+                  }
+              };
+              state.data.shots.forEach(shot => {
+                  if(shot.drawings) Object.values(shot.drawings).forEach(collectZone);
+                  if(shot.drawingData) collectZone({ drawingData: shot.drawingData }); // compat racine, ancien format
+                  if(shot.imageType === 'upload' && shot.imageUrl) {
+                      const p = Utils._projPathFrom(shot.imageUrl);
+                      if(p) paths.add(p);
+                  }
+              });
+              if(paths.size === 0) return;
+              // Priorité basse et hors du fil d'exécution courant : ne doit jamais
+              // ralentir l'affichage de l'onglet réellement ouvert (ex. Présentation).
+              const run = () => {
+                  paths.forEach(p => {
+                      const url = Utils.signedUrlFor(p);
+                      if(!url || url === p) return; // pas encore signé à cet instant : tant pis pour cette passe
+                      const img = new Image();
+                      img.decoding = 'async';
+                      img.fetchPriority = 'low';
+                      img.src = url;
+                  });
+              };
+              if('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 4000 });
+              else setTimeout(run, 1500);
+          } catch(e) { console.warn('[Storyboard] préchauffage images:', e); }
+      },
+
+      // v616 : même principe que prefetchStoryboardImages ci-dessus, pour les
+      // éléments image/dessin des planches du Mood Board (même architecture
+      // par calques, mêmes chemins de stockage privé).
+      prefetchMoodboardImages: () => {
+          try {
+              if(!state.data || !Array.isArray(state.data.moodboards) || state.data.moodboards.length === 0) return;
+              const paths = new Set();
+              state.data.moodboards.forEach(board => {
+                  (board.elements || []).forEach(el => {
+                      if((el.type === 'image' || el.type === 'drawing') && el.src) {
+                          const p = Utils._projPathFrom(el.src);
+                          if(p) paths.add(p);
+                      }
+                  });
+              });
+              if(paths.size === 0) return;
+              const run = () => {
+                  paths.forEach(p => {
+                      const url = Utils.signedUrlFor(p);
+                      if(!url || url === p) return;
+                      const img = new Image();
+                      img.decoding = 'async';
+                      img.fetchPriority = 'low';
+                      img.src = url;
+                  });
+              };
+              if('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 4000 });
+              else setTimeout(run, 1500);
+          } catch(e) { console.warn('[MoodBoard] préchauffage images:', e); }
+      },
+
       uploadProjectFile: async (file, opts) => {
           // opts = { category: 'actors'|'locations'|'crew', entityId: 'act_xxx', kind: 'photo'|'gallery', maxDimension, quality, maxKb }
           if(!state.currentProjectId) { Utils.toast('Aucun projet ouvert', 'error'); return null; }
@@ -17894,6 +17976,8 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               } catch(e) { console.warn('FicheLinks.migrate:', e); }
               await Utils.refreshSignedCache(state.data); // Lot D6 : pré-signe les médias 'projects' avant rendu
               Utils.startImgResolver(); // Lot D6 : résolveur DOM des <img> signées
+              Utils.prefetchStoryboardImages(); // v616 : préchauffage silencieux des images du Storyboard
+              Utils.prefetchMoodboardImages(); // v616 : idem pour le Mood Board
               state.currentProjectType = project.project_type || 'film'; // S3.4
               state.statsFilter = { scope: 'all', seasonId: null, episodeId: null }; // Stats: filtre de scope par défaut
               NavMemory.setProject(id); // Persistance pour F5
