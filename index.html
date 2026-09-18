@@ -176,6 +176,17 @@ DETTE / À SAVOIR
 (Condensé par périodes le 15 septembre 2026, v593. Le détail des sessions vit
 dans l'historique git jusqu'à son vidage.)
 
+v613 (18 Septembre 2026) — STORYBOARD : RETRAIT DES VERSIONS, AJOUT DUPLIQUER
+  PLAN. L'historique de versions du dessin (bouton "Sauvegarder Version",
+  liste "Versions sauvegardées" + restauration dans la fiche du plan) est
+  retiré — l'ancien bouton devient un "💾 Sauvegarder" simple, qui enregistre
+  sans garder d'historique. Les versions déjà enregistrées sur d'anciens
+  plans restent en base sans interface pour les consulter (décidé
+  ensemble : pas grave si on n'y a plus accès). En échange, un bouton "📋
+  Dupliquer" apparaît à côté de "🗑️ Supprimer" sur chaque fiche plan dans
+  la grille du Storyboard — copie le plan (calques, objets, textes) à la
+  fin de la même scène.
+
 v612 (18 Septembre 2026) — STORYBOARD : UNE SEULE CONFIRMATION DE SAUVEGARDE
   AU LIEU DE DEUX. Dessiner depuis la fenêtre "Édition Plan" demandait
   "Sauvegarder ?" en fermant l'éditeur de dessin, PUIS il fallait encore
@@ -10541,7 +10552,7 @@ body.presentation-mode .presentation-bar {
         <div class="drawing-header">
             <h3 class="m-0">Éditeur de Dessin</h3>
             <div class="flex-gap10">
-                <button onclick="app.DrawingEditor.saveVersion()" class="de-btn de-btn--success">💾 Sauvegarder Version</button>
+                <button onclick="app.DrawingEditor.save()" class="de-btn de-btn--success">💾 Sauvegarder</button>
                 <button onclick="app.DrawingEditor.close()" class="de-btn">✖ Fermer</button>
             </div>
         </div>
@@ -32404,7 +32415,11 @@ const Storyboard = {
         card.innerHTML = `
             <div class="shot-header">
                 <h3 class="m-0">Plan ${idx + 1}</h3>
-                ${!isView ? `<button onclick="app.Storyboard.deleteShot('${shot.id}')" style="background: var(--danger); color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">🗑️ Supprimer</button>` : ''}
+                ${!isView ? `
+                <div style="display: flex; gap: 6px;">
+                    <button onclick="app.Storyboard.duplicateShot('${shot.id}')" style="background: var(--primary); color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">📋 Dupliquer</button>
+                    <button onclick="app.Storyboard.deleteShot('${shot.id}')" style="background: var(--danger); color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">🗑️ Supprimer</button>
+                </div>` : ''}
             </div>
             
             ${togglesHtml}
@@ -32445,16 +32460,6 @@ const Storyboard = {
             
             <textarea class="shot-textarea" placeholder="Direction technique..." data-tooltip="Direction technique..." 
                 onchange="app.Storyboard.updateShot('${shot.id}', 'technicalDirection', this.value)" ${isView ? 'disabled' : ''}>${shot.technicalDirection || ''}</textarea>
-            
-            ${shot.versions && shot.versions.length > 0 ? `
-                <div style="margin-top: 15px; padding: 10px; background: var(--bg); border-radius: 6px;">
-                    <strong>Versions sauvegardées (${shot.versions.length})</strong>
-                    <select class="shot-input mt-5" onchange="app.Storyboard.restoreVersion('${shot.id}', this.value)">
-                        <option value="">Restaurer une version...</option>
-                        ${shot.versions.map((v, i) => `<option value="${i}">Version ${i + 1} - ${new Date(v.timestamp).toLocaleString()}</option>`).join('')}
-                    </select>
-                </div>
-            ` : ''}
         `;
         
         // Render drawing preview if exists
@@ -32565,7 +32570,6 @@ const Storyboard = {
             description: '',
             actorDirection: '',
             technicalDirection: '',
-            versions: [],
             isDirty: false,
             lastModified: Date.now()
         };
@@ -32576,6 +32580,31 @@ const Storyboard = {
         Store.save();
         Storyboard.renderShots();
         Storyboard.renderScenesList();
+    },
+    
+    // Duplique un plan existant (calques, objets, textes) — placé à la fin de
+    // la même scène plutôt qu'immédiatement après l'original, pour éviter de
+    // devoir décaler l'ordre de tous les plans suivants.
+    duplicateShot: (shotId) => {
+        if(state.currentRole === 'viewer' || !Permissions.canEdit('storyboard')) return;
+        const original = state.data.shots.find(s => s.id === shotId);
+        if(!original) return;
+        
+        const existingShots = state.data.shots.filter(s => s.sceneId === original.sceneId);
+        const maxOrder = existingShots.length > 0 ? Math.max(...existingShots.map(s => s.order)) : -1;
+        
+        const copy = JSON.parse(JSON.stringify(original));
+        copy.id = Utils.generateUniqueId();
+        copy.order = maxOrder + 1;
+        copy.lastModified = Date.now();
+        
+        state.data.shots.push(copy);
+        const scene = state.data.scenes.find(s => s.id === original.sceneId);
+        History.log('ADD', `Duplication plan storyboard : ${scene?.title || 'Scène inconnue'}`, { target: { kind: 'shot', id: copy.id, label: scene?.title || 'Plan' }, link: { kind: 'shot', id: copy.id, sceneId: original.sceneId } });
+        Store.save();
+        Storyboard.renderShots();
+        Storyboard.renderScenesList();
+        Utils.toast('Plan dupliqué', 'success');
     },
     
     // v595 : petit filet de rattrapage apres suppression d'un plan — le plan
@@ -33005,17 +33034,6 @@ const Storyboard = {
         Storyboard.closeEditModal();
     },
 	
-    restoreVersion: (shotId, versionIdx) => {
-        if(!versionIdx) return;
-        
-        const shot = state.data.shots.find(s => s.id === shotId);
-        if(shot && shot.versions && shot.versions[versionIdx]) {
-            shot.drawingData = JSON.parse(JSON.stringify(shot.versions[versionIdx].data));
-            shot.lastModified = Date.now();
-            Store.save();
-            Storyboard.renderShots();
-        }
-    },
 	// ===================== VUES & CONFIG D'IMPRESSION =====================
 	currentView: 'edit',
     printConfig: {
@@ -35402,88 +35420,6 @@ const DrawingEditor = {
         Storyboard.renderShots();
         const zoneLabel = { original: 'Dessin', lighting: 'Lumière', camera: 'Caméra', actors: 'Acteurs' }[kind] || 'Dessin';
         Utils.toast(zoneLabel + ' sauvegardé !', 'success');
-    },
-    
-    saveVersion: async () => {
-        if(!DrawingEditor.currentShotId) return;
-        
-        const shot = state.data.shots.find(s => s.id === DrawingEditor.currentShotId);
-        if(!shot) return;
-        
-        // Phase 1 Storyboard : versionner avec le kind, pour pouvoir restaurer dans la bonne zone
-        const kind = DrawingEditor.currentKind || 'original';
-        const shotId = DrawingEditor.currentShotId;
-        const versionTs = Date.now();
-        
-        // Upload de chaque calque vers Storage avec timestamp dans le nom (version historique)
-        Utils.toast('Sauvegarde de la version...', 'info', 2000);
-        const versionLayerUploads = await Promise.all(DrawingEditor.layers.map(async (layer) => {
-            const dataUrl = layer.canvas.toDataURL();
-            const versionPath = `${state.currentProjectId}/storyboard/${shotId}_${kind}_layer_${layer.id}_v${versionTs}.png`;
-            const url = await Utils.uploadDataUrl(dataUrl, versionPath, false);
-            return {
-                id: layer.id,
-                visible: layer.visible,
-                name: layer.name,
-                imageData: url || dataUrl  // fallback base64 si upload échoue
-            };
-        }));
-        // Version sauvegardée (avec URLs Storage timestampées)
-        const versionDrawingData = {
-            layers: versionLayerUploads,
-            currentLayer: DrawingEditor.currentLayerIndex
-        };
-        
-        // Pour la version courante du shot, on upload aussi avec upsert (même chemin que save())
-        const currentLayerUploads = await Promise.all(DrawingEditor.layers.map(async (layer) => {
-            const dataUrl = layer.canvas.toDataURL();
-            const currentPath = `${state.currentProjectId}/storyboard/${shotId}_${kind}_layer_${layer.id}.png`;
-            const url = await Utils.uploadDataUrl(dataUrl, currentPath, true);
-            return {
-                id: layer.id,
-                visible: layer.visible,
-                name: layer.name,
-                imageData: url || dataUrl
-            };
-        }));
-        const drawingData = {
-            layers: currentLayerUploads,
-            currentLayer: DrawingEditor.currentLayerIndex
-        };
-        
-        if(!shot.versions) shot.versions = [];
-        
-        shot.versions.push({
-            timestamp: versionTs,
-            kind: kind,
-            data: versionDrawingData
-        });
-        
-        // Phase 1 Storyboard : écrire dans la zone correspondante
-        if(!shot.drawings) {
-            shot.drawings = { original: null, lighting: null, camera: null, actors: null };
-        }
-        // Phase 3 Storyboard : préserver les objets vectoriels existants dans la zone
-        const existingObjects = (shot.drawings[kind] && Array.isArray(shot.drawings[kind].objects))
-            ? shot.drawings[kind].objects
-            : [];
-        shot.drawings[kind] = {
-            imageType: 'drawing',
-            imageUrl: null,
-            drawingData: drawingData,
-            objects: existingObjects  // Phase 3 : préserver les objets vectoriels
-        };
-        
-        // Compat backwards pour 'original'
-        if(kind === 'original') {
-            shot.imageType = 'drawing';
-            shot.drawingData = drawingData;
-        }
-        shot.lastModified = Date.now();
-        
-        Store.save();
-        Storyboard.renderShots();
-        Utils.toast('Version sauvegardée ! (' + shot.versions.length + ' versions au total)', 'success');
     },
     
     renderDrawingData: (ctx, drawingData) => {
