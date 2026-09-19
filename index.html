@@ -299,6 +299,23 @@ vv598 (en cours)
   convocations automatiques (comédiens de scène, comédien, technicien)
   passent désormais par model.ensure et non plus par un push direct.
 
+  PROFIL PUBLIC, deux correctifs decouverts en testant. 1) L'identite saisie
+  dans la fiche unifiee (nom, telephone, ville, sexe) ne rejoignait jamais les
+  champs PLATS du profil : saveCurrentProfile les y valide, et la base les range
+  en COLONNES (celles que fouille l'Univers). Un profil rempli entierement depuis
+  la fiche restait donc bloque sur « Veuillez remplir les champs obligatoires »
+  — champs pourtant remplis — et serait parti en base avec un nom vide. Ces
+  quatre champs sont la PERSONNE, pas la casquette : ils sont desormais recopies
+  vers le profil, sans jamais ecraser une valeur connue par du vide. 2)
+  _engineDoSave annoncait « Casquette enregistree » meme quand la sauvegarde
+  venait d'etre refusee, d'ou deux messages contradictoires a l'ecran ;
+  saveCurrentProfile renvoie maintenant vrai/faux et le message suit. La
+  duplication de fiche technicien s'abstient aussi quand le save a echoue.
+  RESTE OUVERT : l'ancien formulaire de profil (deja liste plus haut comme
+  doublon a retirer) n'est pas rafraichi apres un enregistrement depuis la
+  fiche — cliquer ensuite sur le gros « Sauvegarder » sans recharger la page
+  repart de champs a l'ecran perimes.
+
   Au passage, deux blocages du MODE LOCAL (file://), invisibles en ligne
   puisque le code concerné ne s'y exécute jamais : le réglage d'auto-refresh
   touchait supabase.auth une trentaine de lignes AVANT l'attente de
@@ -41209,21 +41226,41 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         delete d.email;
         // Champs COMMUNS -> profil (partages entre casquettes), retires de la casquette.
         (PublicProfile._engineCommonKeys || []).forEach(k => { if(d[k] !== undefined) { profile[k] = d[k]; delete d[k]; } });
+        // IDENTITE DU CORPS -> profil (v598). Nom, telephone, ville et sexe sont
+        // la PERSONNE, pas la casquette. Ils vivaient uniquement dans la fiche,
+        // alors que saveCurrentProfile les valide sur les champs PLATS et que la
+        // base range ces quatre-la en COLONNES (recherche de l'Univers). Un profil
+        // rempli entierement depuis la fiche restait donc bloque sur « Veuillez
+        // remplir les champs obligatoires » — champs pourtant remplis — et serait
+        // parti en base avec un nom vide. On RECOPIE sans jamais effacer : une
+        // valeur vide dans la fiche ne chasse pas celle deja connue du profil, et
+        // la casquette garde la sienne (aucune fiche existante ne perd rien).
+        ['name', 'phone', 'city', 'gender'].forEach(k => {
+            if(d[k] !== undefined && String(d[k]).trim() !== '') profile[k] = d[k];
+        });
         if(kind === 'crew') {
             d.department = d.group_id || d.department || ''; // pont group_id -> department (profil/sync)
             profile.facets.crew[PublicProfile._engineCrewIndex] = d;
         } else {
             profile.facets[kind] = d;
         }
-        await PublicProfile.saveCurrentProfile();
+        // v598 : saveCurrentProfile peut REFUSER (validation, limite de profils,
+        // erreur reseau). On annoncait « Casquette enregistree » dans tous les cas,
+        // d'ou deux messages contradictoires a l'ecran et un utilisateur persuade
+        // d'avoir sauvegarde alors que rien n'etait parti.
+        const saved = await PublicProfile.saveCurrentProfile();
+        if(saved === false) return false;
         if(showToast) Utils.toast((kind === 'crew' ? 'Casquette technicien' : 'Casquette comédien') + ' enregistrée.', 'success');
+        return true;
     },
     // Duplique la fiche technicien affichee : enregistre d'abord les modifs en cours, copie la
     // fiche a la fin du tableau, puis rouvre le moteur sur cette copie (v598).
     _engineDuplicateCrew: async () => {
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
         if(!profile || PublicProfile._engineKind !== 'crew') return;
-        await PublicProfile._engineDoSave(false);
+        // v598 : si l'enregistrement a ete refuse, on ne duplique pas — sinon on
+        // creerait une deuxieme fiche a partir de modifications jamais parties.
+        if(await PublicProfile._engineDoSave(false) === false) return;
         const copy = JSON.parse(JSON.stringify(profile.facets.crew[PublicProfile._engineCrewIndex] || { enabled: true, visible: true }));
         copy.enabled = true;
         profile.facets.crew.push(copy);
@@ -42041,7 +42078,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     saveCurrentProfile: async () => {
         if(PublicProfile.currentProfileIndex < 0) {
             Utils.toast('Aucun profil à sauvegarder. Créez d\'abord un profil.', 'warning');
-            return;
+            return false;
         }
         
         // Sauvegarder le formulaire dans l'objet profil.
@@ -42057,24 +42094,24 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         
         if(!profile.type) {
             Utils.toast('Veuillez choisir un type de profil.', 'warning');
-            return;
+            return false;
         }
         
         // Validation selon le type
         if(profile.type === 'actor' || profile.type === 'crew') {
             if(!profile.name || !profile.phone || !profile.city || !profile.gender) {
                 Utils.toast('Veuillez remplir les champs obligatoires (Nom, Sexe, Téléphone, Ville).', 'warning');
-                return;
+                return false;
             }
         } else if(profile.type === 'association') {
             if(!profile.assoName || !profile.assoType || !profile.assoMission) {
                 Utils.toast('Veuillez remplir les champs obligatoires (Nom, Type, Mission).', 'warning');
-                return;
+                return false;
             }
         } else if(profile.type === 'enterprise') {
             if(!profile.entName || !profile.entType || !profile.entDescription) {
                 Utils.toast('Veuillez remplir les champs obligatoires (Nom, Type, Description).', 'warning');
-                return;
+                return false;
             }
         }
         
@@ -42244,7 +42281,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                 }
                 console.error('Profil upsert:', upErr);
                 if(btn) { btn.innerHTML = originalText; btn.classList.remove('btn-loading'); }
-                return;
+                return false;
             }
             
             // Mettre à jour state.userProfile pour le bouton du dashboard
@@ -42257,9 +42294,11 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             PublicProfile.updateStatus();
             if(btn) { btn.innerHTML = originalText; btn.classList.remove('btn-loading'); }
             Utils.toast('Profil sauvegardé !', 'success');
+            return true;
         } catch(e) {
             if(btn) { btn.innerHTML = originalText; btn.classList.remove('btn-loading'); }
             Utils.toast('Erreur lors de la sauvegarde', 'error');
+            return false;
         }
     },
     
