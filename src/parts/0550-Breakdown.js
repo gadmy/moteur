@@ -5405,6 +5405,11 @@ const Storyboard = {
                 img_en_cours: img.filter(o => { const e = cache['uploaded|' + o.id]; return e && !e.ready; }).length,
                 img_echouees: img.filter(o => { const e = cache['uploaded|' + o.id]; return e && e.failed; }).length,
                 img_non_signees: img.filter(o => { const u = Utils.signedUrlFor(o.imageData); return !(typeof u === 'string' && /^(https?|data|blob):/.test(u)); }).length,
+                // v599 : la valeur BRUTE et ce qu'en fait signedUrlFor — c'est
+                // ce qui manquait pour trancher sans deviner.
+                exemple_valeur: img.length ? String(img[0].imageData || '').slice(0, 70) : '',
+                exemple_url: img.length ? String(Utils.signedUrlFor(img[0].imageData) || '').slice(0, 70) : '',
+                exemple_chemin: img.length ? String(Utils._projPathFrom(img[0].imageData) || '(aucun)') : '',
                 canvas_present: !!c,
                 canvas_dans_le_document: !!(c && document.body.contains(c))
             };
@@ -6133,14 +6138,26 @@ const Storyboard = {
         // s'affichait plus jamais, meme une fois la signature disponible. On
         // s'abstient donc, sans rien mettre en cache : le rendu suivant
         // reessaiera, cette fois avec une vraie URL.
+        // v599 — DEUX CHEMINS, car le diagnostic a montre que l'URL signee
+        // n'etait PAS disponible pour ces images : aucune entree n'apparaissait
+        // dans le cache, et la liste n'etait jamais repeinte.
+        //  1. URL directement utilisable (http, data:, blob:) -> on la pose ;
+        //  2. sinon, si c'est un chemin de projet, on TELECHARGE le fichier par
+        //     le SDK (authentifie, sans passer par une signature) et on dessine
+        //     depuis une URL blob locale. C'est le meme chemin que celui des
+        //     calques de dessin, qui eux s'affichaient correctement — d'ou
+        //     l'idee de ne plus dependre de la signature ici non plus.
+        // Rien d'exploitable du tout -> on rend null SANS mettre en cache, le
+        // rendu suivant reessaiera (ne jamais bruler l'unique tentative).
         const url = Utils.signedUrlFor(imageData);
         const utilisable = typeof url === 'string'
             && (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:'));
-        if(!utilisable) return null;
+        const chemin = Utils._projPathFrom(imageData);
+        if(!utilisable && !chemin) return null;
 
         const img = new Image();
         // Si l'image vient de Storage (URL https), activer CORS pour permettre le drawImage dans canvas (exports PDF)
-        if(typeof imageData === 'string' && imageData.startsWith('http')) {
+        if(utilisable && typeof imageData === 'string' && imageData.startsWith('http')) {
             img.crossOrigin = 'anonymous';
         }
         Storyboard._svgImageCache[cacheKey] = { img: img, ready: false };
@@ -6157,7 +6174,19 @@ const Storyboard = {
             Storyboard._svgImageCache[cacheKey].ready = true;
             Storyboard._svgImageCache[cacheKey].failed = true;
         };
-        img.src = url;
+        if(utilisable) {
+            img.src = url;
+        } else {
+            // Pas d'URL signee : on telecharge le fichier par le SDK et on
+            // dessine depuis une URL blob locale — le chemin qui fonctionne
+            // deja pour les calques de dessin.
+            StoryboardExport._resolveBlobUrl(imageData).then(blobUrl => {
+                if(blobUrl) { img.src = blobUrl; return; }
+                // Telechargement impossible : on RETIRE l'entree plutot que de
+                // la marquer ratee, pour laisser sa chance au rendu suivant.
+                delete Storyboard._svgImageCache[cacheKey];
+            }).catch(() => { delete Storyboard._svgImageCache[cacheKey]; });
+        }
         
         return null;
     },
