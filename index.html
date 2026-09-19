@@ -619,7 +619,7 @@ vv600 (en cours)
   accolade fermante du fichier — or 0730-PublicProfile.js contient TROIS modules
   a la suite (PublicProfile, Permissions, GlobalSearch). Il a donc vu un seul
   module geant, et la suppression du dernier membre de PublicProfile a avale, du
-  meme coup, la fermeture du module, la ligne « const Permissions = { » et le
+  meme coup, la fermeture du module, la ligne qui DECLARE Permissions, et le
   debut du suivant. Resultat : le corps de Permissions se retrouvait a
   l'interieur de PublicProfile, et le nom « Permissions » ne designait plus
   qu'un objet du NAVIGATEUR qui porte le meme nom (l'API des permissions web).
@@ -704,6 +704,72 @@ vv600 (en cours)
   au-dessus du nouveau, deux fonctions differentes a l'ecran. Elle ne sert que
   lorsque les selecteurs sont absents, donc en LECTURE SEULE : elle n'est plus
   affichee qu'a ce moment-la.
+
+  LES ERREURS DES UTILISATEURS REMONTENT ENFIN. Jusqu'ici, un plantage chez
+  quelqu'un d'autre restait dans SON navigateur : le capteur ErrorLogger le
+  gardait en memoire locale, et il fallait que la personne tape une commande en
+  console pour qu'on en sache quelque chose — autant dire jamais. Le capteur
+  depose desormais chaque erreur dans une table (client_errors,
+  sql/remontee_erreurs.sql), et l'onglet « 🐞 Erreurs » du tableau de bord
+  admin les affiche REGROUPEES par erreur identique : « 47 × », pas 47 lignes.
+  Bouton pour copier le detail, bouton pour marquer traite, pastille de compte
+  sur l'onglet.
+  CE QU'ON ENVOIE, ET RIEN D'AUTRE : message, fichier, ligne, pile d'appel,
+  page en cours, version affichee, navigateur abrege. NI compte, NI projet.
+  Choix assume : on repare le bug sans avoir a traiter ces traces comme de la
+  donnee personnelle.
+  ENVOI SANS LE SDK, par un simple appel reseau, et c'est le point de
+  conception : les erreurs les plus precieuses sont celles du DEMARRAGE, quand
+  le SDK n'est pas encore charge — ou quand c'est lui qui a echoue. Pour la
+  meme raison l'adresse et la cle publique de la base sont declarees AVANT
+  l'application (MOTEUR_SUPABASE), qui les reprend : une seule source.
+  LA TABLE EST EN ECRITURE SEULE pour le public : on peut y deposer, jamais y
+  lire ni y modifier. L'insertion est ouverte meme aux visiteurs non connectes,
+  sans quoi on ne verrait jamais les pannes d'ouverture de session — justement
+  les plus graves. Garde-fous contre l'inondation : longueurs bornees cote
+  base, et cote navigateur une meme erreur n'est envoyee qu'UNE fois par
+  session, dix erreurs au plus par session.
+  ECARTE DU FLUX : les extensions du navigateur (ce n'est pas notre code),
+  « Script error. » (un script d'un autre domaine, sans message ni ligne :
+  il n'apprend rien) et la boucle ResizeObserver. Rien n'est envoye non plus
+  en ouverture locale du fichier (file://) : c'est qu'on est en train de
+  tester. MENAGE : purge_client_errors() efface au-dela de 60 jours.
+
+  LES RETOURS UTILISATEURS AUSSI, ET UNE SEANCE DE TRI. Les remarques ecrites
+  depuis « Vos remarques » partaient en MAIL une fois par jour, et la file
+  locale etait videe ensuite : la seule trace vivait dans une boite mail — qui
+  ne se trie pas, ne se compte pas et ne se relit pas a deux. Elles sont
+  desormais deposees dans une table (client_feedback,
+  sql/remontee_retours.sql), lue par l'onglet « Retours » du tableau de bord.
+  LE MAIL QUOTIDIEN EST SUPPRIME (decide dans la foulee) : il faisait doublon
+  avec cette table. Deux consequences assumees, a ne pas defaire l'une sans
+  l'autre : les retours sont ANONYMES — l'adresse de la personne n'est pas
+  enregistree, et elle n'est plus nulle part ailleurs, donc PLUS MOYEN de
+  recontacter quelqu'un depuis un retour ; qui a vraiment besoin d'une reponse
+  ecrit directement a l'editeur. Et il n'y a plus de filet hors base : si le
+  depot echoue, la file locale n'est PAS videe et repart le lendemain, comme
+  le faisait deja le mail en cas d'echec.
+  LE RYTHME NE CHANGE PAS : on depose a minuit ce qui date d'un jour
+  ANTERIEUR, jamais ce qui vient d'etre ecrit — c'est ce qui laisse a la
+  personne le temps de relire, corriger ou retirer sa remarque.
+  NOUVEL ONGLET « 💬 Retours » cote admin : filtre par type, urgence en trois
+  crans (urgent / normal / plus tard), marquage traite, tri automatique des
+  urgents en tete. Et surtout le bouton « Copier pour analyse », qui reunit en
+  UN seul texte les retours ET les erreurs encore en attente — c'est la
+  matiere d'une seance de tri : classer par urgence, puis reparer.
+  PAS DE PURGE pour les retours, contrairement aux erreurs : une erreur de
+  l'an dernier n'apprend plus rien, une idee d'utilisateur si.
+
+  LA PASTILLE COMPTE TOUT, ET SANS QU'ON AIT A CHERCHER. Premiere version
+  ratee, corrigee aussitot : les pastilles des deux nouveaux onglets ne se
+  posaient qu'une fois l'onglet OUVERT — autrement dit elles ne prevenaient de
+  rien, alors que c'est leur seule raison d'etre. Le compte est desormais fait
+  au chargement du tableau de bord, puis toutes les deux minutes, par la
+  fonction qui servait deja aux signalements. Celle-ci ne comptait que les
+  signalements ; elle additionne maintenant signalements + erreurs + retours
+  sur le bouton « 🛡️ Admin », et pose au passage le compte propre a chaque
+  onglet. Les ERREURS sont comptees DISTINCTES, comme l'onglet les affiche :
+  une pastille a « 200 » pour un seul bug qui boucle ne dirait rien d'utile.
 
   A RETENIR : quand deux ecrans decrivent la meme chose, chercher s'ils lisent
   la MEME table. Ici trois listes de postes coexistaient — le referentiel, une
@@ -6313,7 +6379,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv600</p>
+      <p id="app-version">vv600</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -6511,6 +6577,8 @@ body.presentation-mode .presentation-bar {
                 <button class="admin-tab tab-btn-panel" data-tab="emailing" onclick="app.Admin.switchTab('emailing')">📧 Emailing</button>
                 <button class="admin-tab tab-btn-panel" data-tab="config" onclick="app.Admin.switchTab('config')">⚙️ Configuration</button>
                 <button class="admin-tab tab-btn-panel" data-tab="analytics" onclick="app.Admin.switchTab('analytics')">📈 Connexions</button>
+                <button class="admin-tab tab-btn-panel" data-tab="errors" onclick="app.Admin.switchTab('errors')">🐞 Erreurs<span id="admin-errors-badge" style="display:none; margin-left:6px; background:#dc2626; color:white; font-size:0.7rem; font-weight:bold; padding:1px 6px; border-radius:9px;">0</span></button>
+                <button class="admin-tab tab-btn-panel" data-tab="feedback" onclick="app.Admin.switchTab('feedback')">💬 Retours<span id="admin-feedback-badge" style="display:none; margin-left:6px; background:#dc2626; color:white; font-size:0.7rem; font-weight:bold; padding:1px 6px; border-radius:9px;">0</span></button>
             </div>
             
             <!-- Contenu onglet Signalements -->
@@ -6610,6 +6678,43 @@ body.presentation-mode .presentation-bar {
                 </div>
             </div>
             
+            <!-- Contenu onglet Erreurs -->
+            <div id="admin-tab-errors" class="admin-tab-content d-none-panel">
+                <div class="section-header-20">
+                    <h3 class="m-0">🐞 Erreurs remontées</h3>
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem; color:var(--text-sec); cursor:pointer;">
+                            <input type="checkbox" id="admin-errors-show-done" onchange="app.Admin.renderErrors()"> Montrer les traitées
+                        </label>
+                        <button onclick="app.Admin.loadErrors()" class="btn btn--primary btn--sm">🔄 Actualiser</button>
+                    </div>
+                </div>
+                <p class="text-sec-sm-mb15">Chaque plantage survenu chez un utilisateur, regroupé par erreur identique. Aucun identifiant de compte n'est envoyé : on voit le bug, pas qui l'a eu.</p>
+                <div id="admin-errors-list"><p class="text-sec-sm2">Clique sur « Actualiser » pour charger.</p></div>
+            </div>
+
+            <!-- Contenu onglet Retours -->
+            <div id="admin-tab-feedback" class="admin-tab-content d-none-panel">
+                <div class="section-header-20">
+                    <h3 class="m-0">💬 Retours utilisateurs</h3>
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <select id="admin-feedback-type" onchange="app.Admin.renderFeedback()" class="form-input-sm">
+                            <option value="">Tous les types</option>
+                            <option value="bug">Un problème</option>
+                            <option value="idee">Une idée</option>
+                            <option value="autre">Autre</option>
+                        </select>
+                        <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem; color:var(--text-sec); cursor:pointer;">
+                            <input type="checkbox" id="admin-feedback-show-done" onchange="app.Admin.renderFeedback()"> Montrer les traités
+                        </label>
+                        <button onclick="app.Admin.copyTriage()" class="btn btn--sm">📋 Copier pour analyse</button>
+                        <button onclick="app.Admin.loadFeedback()" class="btn btn--primary btn--sm">🔄 Actualiser</button>
+                    </div>
+                </div>
+                <p class="text-sec-sm-mb15">Ce que les gens ont écrit depuis « Vos remarques ». L'adresse de la personne n'est pas enregistrée ici — elle reste dans l'e-mail quotidien, pour répondre.</p>
+                <div id="admin-feedback-list"><p class="text-sec-sm2">Clique sur « Actualiser » pour charger.</p></div>
+            </div>
+
             <!-- Contenu onglet Emailing -->
             <div id="admin-tab-emailing" class="admin-tab-content d-none-panel">
                 <h3 style="margin: 0 0 20px 0;">📧 Emailing ciblé</h3>
@@ -10079,6 +10184,18 @@ body.presentation-mode .presentation-bar {
   
   <script>
 // =====================================================================
+// Adresse et cle PUBLIQUE de la base. Declarees ici, en dehors de
+// l'application, parce que le capteur d'erreurs ci-dessous doit pouvoir
+// envoyer AVANT que l'application n'ait demarre — et surtout quand c'est
+// justement son demarrage qui a echoue. L'application les reprend telles
+// quelles : une seule source, pas de copie a tenir a jour.
+// =====================================================================
+const MOTEUR_SUPABASE = {
+    url: 'https://txjuniuzqxpxghubluxm.supabase.co',
+    anon: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4anVuaXV6cXhweGdodWJsdXhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0MDk1MjMsImV4cCI6MjA4NDk4NTUyM30.QcuA9EdDFBSuzLvUVPiB9a3lPZLFzYBccw99pI71AhQ'
+};
+
+// =====================================================================
 // ErrorLogger — capteur global d'erreurs JS pour diagnostic des bugs
 // =====================================================================
 const ErrorLogger = {
@@ -10161,6 +10278,97 @@ const ErrorLogger = {
         }
     },
     
+    // =================================================================
+    // REMONTEE VERS LA BASE (v600)
+    // =================================================================
+    // Sans ca, une erreur survenue chez quelqu'un d'autre reste dans SON
+    // navigateur et personne ne la voit jamais. On la depose donc dans la
+    // table client_errors (voir sql/remontee_erreurs.sql).
+    // CE QU'ON ENVOIE : le message, le fichier, la ligne, la pile, la page,
+    // la version affichee et un navigateur abrege. NI compte, NI projet :
+    // on veut reparer le bug, pas savoir qui l'a eu.
+    // ENVOI DIRECT, sans le SDK Supabase, et c'est le point important : les
+    // erreurs les plus utiles sont justement celles du demarrage, quand le
+    // SDK n'est pas encore la — ou quand c'est lui qui a echoue.
+    REMONTEE: {
+        MAX_PAR_SESSION: 10,   // plafond dur : une boucle d'erreurs ne doit pas inonder la base
+        _envoyees: 0,
+        _vues: {},             // empreintes deja envoyees pendant cette session
+        // Bruit connu, sans valeur de diagnostic :
+        // - les extensions du navigateur ne sont pas notre code ;
+        // - « Script error. » est ce que rend un script d'un autre domaine,
+        //   sans message ni ligne : il n'apprend rien ;
+        // - la boucle ResizeObserver est un avertissement sans consequence.
+        IGNORER: [/^chrome-extension:/, /^moz-extension:/, /^safari-web-extension:/],
+        MESSAGES_IGNORES: [/^Script error\.?$/i, /ResizeObserver loop/i]
+    },
+
+    // Empreinte de regroupement : meme erreur, meme endroit. Les nombres sont
+    // remplaces par # pour que deux occurrences ne differant que par un
+    // identifiant ou un index se regroupent au lieu de compter pour deux.
+    _empreinte: (e) => (e.type + '|' + String(e.message).replace(/\d+/g, '#') + '|'
+        + String(e.source || '').split('/').pop() + '|' + (e.line || 0)).substring(0, 120),
+
+    _version: () => {
+        try { return (document.getElementById('app-version') || {}).textContent || ''; }
+        catch (err) { return ''; }
+    },
+    // Navigateur en clair et court. L'agent complet n'apprend rien de plus et
+    // sert surtout a pister les gens.
+    _navigateur: () => {
+        const ua = navigator.userAgent || '';
+        const nom = /Edg\//.test(ua) ? 'Edge'
+            : /OPR\//.test(ua) ? 'Opera'
+            : /Chrome\//.test(ua) ? 'Chrome'
+            : /Firefox\//.test(ua) ? 'Firefox'
+            : /Safari\//.test(ua) ? 'Safari' : 'Autre';
+        const os = /Windows/.test(ua) ? 'Windows'
+            : /Android/.test(ua) ? 'Android'
+            : /iPhone|iPad/.test(ua) ? 'iOS'
+            : /Mac OS X/.test(ua) ? 'macOS'
+            : /Linux/.test(ua) ? 'Linux' : '';
+        return (nom + (os ? ' / ' + os : '')).substring(0, 120);
+    },
+
+    envoyer: (e) => {
+        try {
+            if(!e) return;
+            const R = ErrorLogger.REMONTEE;
+            // En local (double-clic sur le fichier), on est en train de tester :
+            // rien a remonter, ca ne ferait que brouiller le tableau.
+            if(location.protocol === 'file:') return;
+            if(R._envoyees >= R.MAX_PAR_SESSION) return;
+            if(R.IGNORER.some(rx => rx.test(e.source || ''))) return;
+            if(R.MESSAGES_IGNORES.some(rx => rx.test(e.message || ''))) return;
+            const empreinte = ErrorLogger._empreinte(e);
+            if(R._vues[empreinte]) return;   // une fois par session suffit
+            R._vues[empreinte] = true;
+            R._envoyees++;
+            fetch(MOTEUR_SUPABASE.url + '/rest/v1/client_errors', {
+                method: 'POST',
+                keepalive: true,             // survit a la fermeture de l'onglet
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': MOTEUR_SUPABASE.anon,
+                    'Authorization': 'Bearer ' + MOTEUR_SUPABASE.anon,
+                    'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify({
+                    empreinte: empreinte,
+                    type: String(e.type || '').substring(0, 40),
+                    message: String(e.message || '').substring(0, 500),
+                    source: String(e.source || '').substring(0, 300),
+                    ligne: e.line || 0,
+                    colonne: e.col || 0,
+                    pile: String(e.stack || '').substring(0, 2000),
+                    page: String(e.url || '').substring(0, 300),
+                    version: ErrorLogger._version().substring(0, 20),
+                    navigateur: ErrorLogger._navigateur()
+                })
+            }).catch(() => {});   // un envoi rate ne doit JAMAIS relancer une erreur
+        } catch (err) { /* le capteur ne plante pas l'application */ }
+    },
+
     // Affiche un toast d'alerte visible dans l'UI
     showToast: (message) => {
         const now = Date.now();
@@ -10194,7 +10402,7 @@ window.addEventListener('error', function(event) {
         event.colno,
         event.error && event.error.stack ? event.error.stack : null
     );
-    if(entry) ErrorLogger.showToast();
+    if(entry) { ErrorLogger.envoyer(entry); ErrorLogger.showToast(); }
 });
 
 // Installer le capteur des promesses rejetées non gérées
@@ -10203,7 +10411,7 @@ window.addEventListener('unhandledrejection', function(event) {
     const msg = reason && reason.message ? reason.message : String(reason);
     const stack = reason && reason.stack ? reason.stack : null;
     const entry = ErrorLogger.addError('Promise rejetée', msg, '', 0, 0, stack);
-    if(entry) ErrorLogger.showToast();
+    if(entry) { ErrorLogger.envoyer(entry); ErrorLogger.showToast(); }
 });
 
 // Exposer en global pour usage console
@@ -10213,8 +10421,10 @@ console.log('%c[ErrorLogger] ✅ Capteur d\'erreurs actif - tape ErrorLogger.sho
 const app = (function(){
 
   // --- CONFIGURATION SUPABASE ---
-  const SUPABASE_URL = 'https://txjuniuzqxpxghubluxm.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4anVuaXV6cXhweGdodWJsdXhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0MDk1MjMsImV4cCI6MjA4NDk4NTUyM30.QcuA9EdDFBSuzLvUVPiB9a3lPZLFzYBccw99pI71AhQ';
+  // Reprises de MOTEUR_SUPABASE, declare en tete de fichier (le capteur
+  // d'erreurs en a besoin avant le demarrage de l'application).
+  const SUPABASE_URL = MOTEUR_SUPABASE.url;
+  const SUPABASE_ANON_KEY = MOTEUR_SUPABASE.anon;
   
   var supabase;
   function initSupabase() {
@@ -61447,6 +61657,235 @@ const Admin = {
     // ===================== ÉTAT & INITIALISATION =====================
     allUsers: [],
     allReports: [],
+    allErrors: [],
+    allFeedback: [],
+
+    // ===================== RETOURS UTILISATEURS (v600) =====================
+    // Ce que les gens ECRIVENT depuis « Vos remarques ». Le mail quotidien
+    // reste la notification ; cette table est le PLAN DE TRAVAIL : on y trie
+    // par urgence, on marque ce qui est traite, et on croise avec les erreurs
+    // de l'onglet voisin. L'adresse de la personne n'y figure pas (choix du
+    // 19 septembre) — elle reste dans le mail, ce qui suffit pour repondre.
+    URGENCES: { 1: '🔴 Urgent', 2: '🟠 Normal', 3: '🔵 Plus tard' },
+
+    loadFeedback: async () => {
+        if(!Admin.isAdmin()) return;
+        const bac = document.getElementById('admin-feedback-list');
+        if(bac) bac.innerHTML = '<p class="text-sec-sm2">Chargement…</p>';
+        try {
+            const { data, error } = await supabase
+                .from('client_feedback')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(500);
+            if(error) throw error;
+            Admin.allFeedback = data || [];
+            Admin.renderFeedback();
+        } catch(e) {
+            console.error('[Admin] Retours:', e);
+            if(bac) bac.innerHTML = '<p class="text-sec-sm2">Impossible de charger les retours : ' + Utils.escape(e.message || 'erreur inconnue') + '</p>';
+        }
+    },
+
+    _feedbackFiltres: () => {
+        const type = document.getElementById('admin-feedback-type')?.value || '';
+        const montrerTraites = document.getElementById('admin-feedback-show-done')?.checked;
+        return Admin.allFeedback
+            .filter(f => (!type || f.type === type) && (montrerTraites || !f.traite))
+            // Les urgents d'abord, puis les non classes, puis par date.
+            .sort((a, b) => (a.urgence || 9) - (b.urgence || 9) || (a.created_at < b.created_at ? 1 : -1));
+    },
+
+    renderFeedback: () => {
+        const bac = document.getElementById('admin-feedback-list');
+        if(!bac) return;
+        const liste = Admin._feedbackFiltres();
+        const enAttente = Admin.allFeedback.filter(f => !f.traite).length;
+        const badge = document.getElementById('admin-feedback-badge');
+        if(badge) { badge.textContent = enAttente; badge.style.display = enAttente ? 'inline-block' : 'none'; }
+        if(liste.length === 0) { bac.innerHTML = '<p class="text-sec-sm2">✅ Aucun retour à traiter.</p>'; return; }
+        const TYPES = { bug: '🐞 Un problème', idee: '💡 Une idée', autre: '💬 Autre' };
+        bac.innerHTML = liste.map(f => {
+            const date = new Date(f.created_at).toLocaleString('fr-FR');
+            const urg = Object.keys(Admin.URGENCES).map(n =>
+                '<option value="' + n + '"' + (String(f.urgence) === n ? ' selected' : '') + '>' + Admin.URGENCES[n] + '</option>').join('');
+            return '<div style="border:1px solid var(--border); border-left:4px solid ' + (f.urgence === 1 ? 'var(--danger)' : f.urgence === 2 ? '#f59e0b' : 'var(--border)') + '; border-radius:8px; padding:12px 14px; margin-bottom:10px; background:var(--panel-bg);' + (f.traite ? ' opacity:.55;' : '') + '">'
+                + '<div style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; margin-bottom:6px;">'
+                +   '<strong>' + (TYPES[f.type] || Utils.escape(f.type || '')) + '</strong>'
+                +   '<span class="text-sec-sm2">' + Utils.escape(date) + (f.version ? ' · ' + Utils.escape(f.version) : '') + '</span>'
+                + '</div>'
+                + '<div style="white-space:pre-wrap; margin-bottom:8px;">' + Utils.escape(f.texte || '') + '</div>'
+                + (f.contexte ? '<div class="text-sec-sm2" style="margin-bottom:8px;">' + Utils.escape(f.contexte) + '</div>' : '')
+                + '<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">'
+                +   '<select class="form-input-sm" onchange="app.Admin.setFeedbackUrgence(' + f.id + ', this.value)"><option value="">— Urgence —</option>' + urg + '</select>'
+                +   '<button class="btn btn--sm" onclick="app.Admin.markFeedbackDone(' + f.id + ', ' + (f.traite ? 'false' : 'true') + ')">' + (f.traite ? '↩️ À retraiter' : '✔️ Traité') + '</button>'
+                + '</div>'
+            + '</div>';
+        }).join('');
+    },
+
+    setFeedbackUrgence: async (id, valeur) => {
+        const urgence = valeur ? parseInt(valeur, 10) : null;
+        try {
+            const { error } = await supabase.from('client_feedback').update({ urgence: urgence }).eq('id', id);
+            if(error) throw error;
+            const f = Admin.allFeedback.find(x => x.id === id);
+            if(f) f.urgence = urgence;
+            Admin.renderFeedback();
+        } catch(e) { console.error('[Admin] setFeedbackUrgence:', e); Utils.toast('Impossible d\'enregistrer l\'urgence.', 'error'); }
+    },
+
+    markFeedbackDone: async (id, traite) => {
+        try {
+            const { error } = await supabase.from('client_feedback').update({ traite: traite }).eq('id', id);
+            if(error) throw error;
+            const f = Admin.allFeedback.find(x => x.id === id);
+            if(f) f.traite = traite;
+            Admin.renderFeedback();
+        } catch(e) { console.error('[Admin] markFeedbackDone:', e); Utils.toast('Impossible de marquer ce retour.', 'error'); }
+    },
+
+    // SEANCE DE TRI : un seul bloc de texte réunissant les retours ET les
+    // erreurs en attente, prêt à coller dans une conversation pour les classer
+    // et les réparer. C'est le point de tout ce dispositif.
+    copyTriage: async () => {
+        if(Admin.allFeedback.length === 0) await Admin.loadFeedback();
+        if(Admin.allErrors.length === 0) await Admin.loadErrors();
+        const retours = Admin.allFeedback.filter(f => !f.traite);
+        const groupes = Admin._groupesErreurs().filter(g => !g.traite);
+        const lignes = [];
+        lignes.push('=== RETOURS UTILISATEURS EN ATTENTE (' + retours.length + ') ===');
+        retours.forEach(f => {
+            lignes.push('');
+            lignes.push('[' + (f.type || 'autre') + '] ' + new Date(f.created_at).toLocaleString('fr-FR')
+                + (f.version ? ' — ' + f.version : '') + (f.urgence ? ' — urgence ' + f.urgence : ''));
+            lignes.push(f.texte || '');
+            if(f.contexte) lignes.push('(' + f.contexte + ')');
+        });
+        lignes.push('');
+        lignes.push('=== ERREURS EN ATTENTE (' + groupes.length + ' distinctes) ===');
+        groupes.forEach(g => {
+            const e = g.modele;
+            lignes.push('');
+            lignes.push(g.nb + '× [' + e.type + '] ' + e.message);
+            lignes.push('   ' + (e.source || '?') + ':' + (e.ligne || 0) + ' — page ' + (e.page || '?')
+                + ' — ' + (e.version || '?') + ' — ' + (e.navigateur || '?'));
+        });
+        const texte = lignes.join('\n');
+        try { await navigator.clipboard.writeText(texte); Utils.toast('Tout est copié — colle-le dans la conversation.', 'success', 5000); }
+        catch(err) { console.log(texte); Utils.toast('Copie impossible — le texte est dans la console.', 'warning'); }
+    },
+
+    // ===================== ERREURS REMONTEES (v600) =====================
+    // Les plantages survenus chez les utilisateurs, deposes par ErrorLogger
+    // dans la table client_errors (voir sql/remontee_erreurs.sql). Aucun
+    // identifiant de compte ni de projet n'y figure : c'est voulu.
+    // REGROUPEMENT PAR EMPREINTE : une meme erreur qui arrive cent fois est
+    // UNE ligne « 100 fois », pas cent lignes. Sans ca la liste serait
+    // illisible des le premier bug un peu bavard.
+    loadErrors: async () => {
+        if(!Admin.isAdmin()) return;
+        const bac = document.getElementById('admin-errors-list');
+        if(bac) bac.innerHTML = '<p class="text-sec-sm2">Chargement…</p>';
+        try {
+            const { data, error } = await supabase
+                .from('client_errors')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(500);
+            if(error) throw error;
+            Admin.allErrors = data || [];
+            Admin.renderErrors();
+        } catch(e) {
+            console.error('[Admin] Erreurs remontées:', e);
+            if(bac) bac.innerHTML = '<p class="text-sec-sm2">Impossible de charger les erreurs : ' + Utils.escape(e.message || 'erreur inconnue') + '</p>';
+        }
+    },
+
+    // Regroupe par empreinte : la plus recente porte le detail, les autres
+    // ne servent qu'a compter.
+    _groupesErreurs: () => {
+        const groupes = {};
+        Admin.allErrors.forEach(e => {
+            const g = groupes[e.empreinte];
+            if(!g) { groupes[e.empreinte] = { modele: e, nb: 1, premier: e.created_at, traite: !!e.traite, ids: [e.id] }; return; }
+            g.nb++;
+            g.ids.push(e.id);
+            if(e.created_at < g.premier) g.premier = e.created_at;
+            if(!e.traite) g.traite = false;
+        });
+        return Object.values(groupes).sort((a, b) => (a.traite === b.traite)
+            ? (b.modele.created_at < a.modele.created_at ? -1 : 1)
+            : (a.traite ? 1 : -1));
+    },
+
+    renderErrors: () => {
+        const bac = document.getElementById('admin-errors-list');
+        if(!bac) return;
+        const montrerTraitees = document.getElementById('admin-errors-show-done')?.checked;
+        const groupes = Admin._groupesErreurs().filter(g => montrerTraitees || !g.traite);
+        const enAttente = Admin._groupesErreurs().filter(g => !g.traite).length;
+        const badge = document.getElementById('admin-errors-badge');
+        if(badge) { badge.textContent = enAttente; badge.style.display = enAttente ? 'inline-block' : 'none'; }
+        if(groupes.length === 0) {
+            bac.innerHTML = '<p class="text-sec-sm2">✅ Aucune erreur' + (montrerTraitees ? '' : ' à traiter') + '.</p>';
+            return;
+        }
+        bac.innerHTML = groupes.map(g => {
+            const e = g.modele;
+            const date = new Date(e.created_at).toLocaleString('fr-FR');
+            const lieu = [e.source ? String(e.source).split('/').pop() : '', e.ligne ? ('ligne ' + e.ligne) : ''].filter(Boolean).join(' — ');
+            return '<details style="border:1px solid var(--border); border-radius:8px; margin-bottom:10px; background:var(--panel-bg);' + (g.traite ? ' opacity:.55;' : '') + '">'
+                + '<summary style="padding:10px 14px; cursor:pointer; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;">'
+                +   '<span style="background:' + (g.traite ? 'var(--border)' : 'var(--danger)') + '; color:' + (g.traite ? 'var(--text-sec)' : '#fff') + '; border-radius:10px; padding:1px 8px; font-size:0.75rem; font-weight:bold;">' + g.nb + '×</span>'
+                +   '<strong style="flex:1; min-width:200px;">' + Utils.escape(e.message || '') + '</strong>'
+                +   '<span class="text-sec-sm2">' + Utils.escape(date) + '</span>'
+                + '</summary>'
+                + '<div style="padding:0 14px 14px;">'
+                +   '<div class="text-sec-sm2" style="margin-bottom:8px;">'
+                +     Utils.escape(e.type || '') + (lieu ? ' · ' + Utils.escape(lieu) : '')
+                +     (e.page ? ' · page ' + Utils.escape(e.page) : '')
+                +     (e.version ? ' · ' + Utils.escape(e.version) : '')
+                +     (e.navigateur ? ' · ' + Utils.escape(e.navigateur) : '')
+                +   '</div>'
+                +   (e.pile ? '<pre style="background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:10px; overflow:auto; font-size:0.75rem; max-height:260px;">' + Utils.escape(e.pile) + '</pre>' : '')
+                +   '<div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">'
+                +     '<button class="btn btn--sm" onclick="app.Admin.copyError(\'' + Utils.escape(e.empreinte) + '\')">📋 Copier</button>'
+                +     '<button class="btn btn--sm" onclick="app.Admin.markErrorDone(\'' + Utils.escape(e.empreinte) + '\', ' + (g.traite ? 'false' : 'true') + ')">' + (g.traite ? '↩️ À retraiter' : '✔️ Traitée') + '</button>'
+                +   '</div>'
+                + '</div>'
+            + '</details>';
+        }).join('');
+    },
+
+    // Copie le detail au presse-papier, pret a coller dans une conversation.
+    copyError: async (empreinte) => {
+        const g = Admin._groupesErreurs().find(x => x.modele.empreinte === empreinte);
+        if(!g) return;
+        const e = g.modele;
+        const texte = [
+            '[' + e.type + '] ' + e.message,
+            'Vu ' + g.nb + ' fois — dernière : ' + new Date(e.created_at).toLocaleString('fr-FR'),
+            'Endroit : ' + (e.source || '?') + ':' + (e.ligne || 0) + ':' + (e.colonne || 0),
+            'Page : ' + (e.page || '?') + ' — ' + (e.version || '?') + ' — ' + (e.navigateur || '?'),
+            e.pile ? '\nPile :\n' + e.pile : ''
+        ].join('\n');
+        try { await navigator.clipboard.writeText(texte); Utils.toast('Erreur copiée.', 'success'); }
+        catch(err) { console.log(texte); Utils.toast('Copie impossible — le détail est dans la console.', 'warning'); }
+    },
+
+    // Marque toutes les lignes d'une meme erreur comme traitees (ou l'inverse).
+    markErrorDone: async (empreinte, traite) => {
+        try {
+            const { error } = await supabase.from('client_errors').update({ traite: traite }).eq('empreinte', empreinte);
+            if(error) throw error;
+            Admin.allErrors.forEach(e => { if(e.empreinte === empreinte) e.traite = traite; });
+            Admin.renderErrors();
+        } catch(e) {
+            console.error('[Admin] markErrorDone:', e);
+            Utils.toast('Impossible de marquer cette erreur.', 'error');
+        }
+    },
     
     isAdmin: () => {
         return state.currentUser && CONFIG.adminEmails.includes(state.currentUser.email.toLowerCase());
@@ -61474,28 +61913,50 @@ const Admin = {
         }
     },
     
-    // Met à jour la pastille rouge avec le nombre de signalements 'pending'
+    // Met a jour la pastille rouge du bouton « 🛡️ Admin » ET celles des onglets.
+    // v600 : elle ne comptait que les signalements. Elle compte desormais TOUT
+    // ce qui attend : signalements + erreurs remontees + retours utilisateurs.
+    // POURQUOI ICI : une pastille ne sert a rien si elle n'apparait qu'une fois
+    // l'onglet ouvert — c'est justement ce qu'elle est censee t'epargner. Elle
+    // est donc posee au chargement du tableau de bord, puis toutes les deux
+    // minutes, sans attendre que tu cliques quoi que ce soit.
     refreshPendingBadge: async () => {
         if(!Admin.isAdmin()) return;
-        const badge = document.getElementById('admin-pending-badge');
-        if(!badge) return;
-        
+        const poser = (id, n) => {
+            const el = document.getElementById(id);
+            if(!el) return;
+            el.textContent = n > 99 ? '99+' : String(n);
+            el.style.display = n > 0 ? 'inline-block' : 'none';
+        };
+        let signalements = 0, erreurs = 0, retours = 0;
         try {
             const { count, error } = await supabase
                 .from('reports')
                 .select('id', { count: 'exact', head: true })
                 .eq('status', 'pending');
-            
-            if(!error && count !== null && count > 0) {
-                badge.textContent = count > 99 ? '99+' : String(count);
-                badge.style.display = 'inline-block';
-            } else {
-                badge.style.display = 'none';
-            }
-        } catch(e) {
-            console.warn('Impossible de rafraîchir la pastille admin:', e);
-            badge.style.display = 'none';
-        }
+            if(!error && count) signalements = count;
+        } catch(e) { console.warn('[Admin] pastille signalements:', e); }
+        try {
+            // On compte les erreurs DISTINCTES, comme l'onglet les affiche :
+            // une pastille a « 200 » pour un seul bug qui boucle ne dirait rien
+            // d'utile. Une seule colonne suffit pour ca.
+            const { data, error } = await supabase
+                .from('client_errors')
+                .select('empreinte')
+                .eq('traite', false)
+                .limit(1000);
+            if(!error && data) erreurs = new Set(data.map(x => x.empreinte)).size;
+        } catch(e) { console.warn('[Admin] pastille erreurs:', e); }
+        try {
+            const { count, error } = await supabase
+                .from('client_feedback')
+                .select('id', { count: 'exact', head: true })
+                .eq('traite', false);
+            if(!error && count) retours = count;
+        } catch(e) { console.warn('[Admin] pastille retours:', e); }
+        poser('admin-errors-badge', erreurs);
+        poser('admin-feedback-badge', retours);
+        poser('admin-pending-badge', signalements + erreurs + retours);
     },
     
     // B5 : re-clic sur le bouton Admin = retour à l'accueil
@@ -62465,6 +62926,12 @@ const Admin = {
         // Charger les données si nécessaire
         if(tabName === 'users' && Admin.allUsers.length === 0) {
             Admin.loadUsers();
+        }
+        if(tabName === 'errors' && Admin.allErrors.length === 0) {
+            Admin.loadErrors();
+        }
+        if(tabName === 'feedback' && Admin.allFeedback.length === 0) {
+            Admin.loadFeedback();
         }
         if(tabName === 'analytics') {
             Admin.loadConnectionStats();
@@ -66528,8 +66995,6 @@ ${window.location.origin}${window.location.pathname}
   // et une migration.
   // ============================================================
   const Feedback = {
-    // Adresse de reception des retours. Une seule ligne a changer si besoin.
-    TO: 'contact@moteur.studio',
     QUEUE_KEY: 'moteur_feedback_queue',
     LAST_KEY: 'moteur_feedback_lastsend',
     LABELS: { bug: 'Un probleme', idee: 'Une idee', autre: 'Autre' },
@@ -66616,38 +67081,42 @@ ${window.location.origin}${window.location.pathname}
       await Feedback.flush();
     },
 
+    // DEPOT EN BASE (v600). Les remarques partaient en MAIL une fois par jour,
+    // et la file locale etait videe ensuite : la seule trace vivait dans une
+    // boite mail — qui ne se trie pas, ne se compte pas, et ne se relit pas a
+    // deux. Elles vont desormais dans la table client_feedback, lue par
+    // l'onglet « Retours » du tableau de bord admin.
+    // PLUS AUCUN MAIL (decision du 19 septembre) : le recapitulatif quotidien
+    // faisait doublon avec cette table. Consequence assumee — la table est
+    // ANONYME, donc plus moyen de recontacter qui que ce soit depuis un
+    // retour. Qui a vraiment besoin d'une reponse ecrit directement a
+    // l'editeur. Ne pas remettre l'un sans rediscuter l'autre.
+    // LE RYTHME NE CHANGE PAS : on depose a minuit ce qui date d'un jour
+    // ANTERIEUR, jamais ce qui vient d'etre ecrit. C'est ce qui laisse a la
+    // personne le temps de relire, corriger ou retirer sa remarque avant
+    // qu'elle ne parte.
     flush: async () => {
       const q = Feedback.queue();
       if (!q.length || Feedback._sending) return;
       Feedback._sending = true;
-      const from = (state.currentUser && state.currentUser.email) || 'inconnu';
-      const clean = (s, max) => String(s || '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, max);
-      const corps = q.map((it, i) =>
-        '--- Remarque ' + (i + 1) + '/' + q.length + ' — ' + (Feedback.LABELS[it.type] || 'Autre') + ' — ' + (it.day || '') + ' ---\n' +
-        clean(it.text, 4000) + '\n' +
-        (it.ctx ? '(' + clean(it.ctx, 600) + ')\n' : '')
-      ).join('\n');
       try {
-        const { error } = await supabase.functions.invoke('super-action', {
-          body: {
-            to: Feedback.TO,
-            toName: 'moteur.studio',
-            type: 'generic',
-            data: {
-              subject: '[RETOURS x' + q.length + '] ' + clean(from, 120),
-              title: 'Retours utilisateur (' + q.length + ')',
-              message: 'De : ' + clean(from, 120) + '\n\n' + corps
-            }
-          }
-        });
+        const version = (document.getElementById('app-version') || {}).textContent || '';
+        const clean = (v, max) => String(v || '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, max);
+        const lignes = q.map(it => ({
+          type: clean(it.type || 'autre', 20),
+          texte: clean(it.text, 4000),
+          contexte: clean(it.ctx, 600),
+          version: clean(version, 20)
+        }));
+        const { error } = await supabase.from('client_feedback').insert(lignes);
         if (error) throw error;
-        // Envoye : la file disparait, comme convenu.
+        // Depose : la file disparait, comme convenu.
         Feedback._saveQueue([]);
         try { localStorage.setItem(Feedback.LAST_KEY, Feedback._today()); } catch (e) {}
         Feedback._refreshBadge();
       } catch (e) {
         // On NE VIDE PAS en cas d'echec : les remarques repartiront demain.
-        console.warn('[Feedback] envoi differe impossible, on reessaiera', e);
+        console.warn('[Feedback] depot differe impossible, on reessaiera', e);
       }
       Feedback._sending = false;
     },

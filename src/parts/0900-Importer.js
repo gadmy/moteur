@@ -8400,6 +8400,235 @@ const Admin = {
     // ===================== ÉTAT & INITIALISATION =====================
     allUsers: [],
     allReports: [],
+    allErrors: [],
+    allFeedback: [],
+
+    // ===================== RETOURS UTILISATEURS (v600) =====================
+    // Ce que les gens ECRIVENT depuis « Vos remarques ». Le mail quotidien
+    // reste la notification ; cette table est le PLAN DE TRAVAIL : on y trie
+    // par urgence, on marque ce qui est traite, et on croise avec les erreurs
+    // de l'onglet voisin. L'adresse de la personne n'y figure pas (choix du
+    // 19 septembre) — elle reste dans le mail, ce qui suffit pour repondre.
+    URGENCES: { 1: '🔴 Urgent', 2: '🟠 Normal', 3: '🔵 Plus tard' },
+
+    loadFeedback: async () => {
+        if(!Admin.isAdmin()) return;
+        const bac = document.getElementById('admin-feedback-list');
+        if(bac) bac.innerHTML = '<p class="text-sec-sm2">Chargement…</p>';
+        try {
+            const { data, error } = await supabase
+                .from('client_feedback')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(500);
+            if(error) throw error;
+            Admin.allFeedback = data || [];
+            Admin.renderFeedback();
+        } catch(e) {
+            console.error('[Admin] Retours:', e);
+            if(bac) bac.innerHTML = '<p class="text-sec-sm2">Impossible de charger les retours : ' + Utils.escape(e.message || 'erreur inconnue') + '</p>';
+        }
+    },
+
+    _feedbackFiltres: () => {
+        const type = document.getElementById('admin-feedback-type')?.value || '';
+        const montrerTraites = document.getElementById('admin-feedback-show-done')?.checked;
+        return Admin.allFeedback
+            .filter(f => (!type || f.type === type) && (montrerTraites || !f.traite))
+            // Les urgents d'abord, puis les non classes, puis par date.
+            .sort((a, b) => (a.urgence || 9) - (b.urgence || 9) || (a.created_at < b.created_at ? 1 : -1));
+    },
+
+    renderFeedback: () => {
+        const bac = document.getElementById('admin-feedback-list');
+        if(!bac) return;
+        const liste = Admin._feedbackFiltres();
+        const enAttente = Admin.allFeedback.filter(f => !f.traite).length;
+        const badge = document.getElementById('admin-feedback-badge');
+        if(badge) { badge.textContent = enAttente; badge.style.display = enAttente ? 'inline-block' : 'none'; }
+        if(liste.length === 0) { bac.innerHTML = '<p class="text-sec-sm2">✅ Aucun retour à traiter.</p>'; return; }
+        const TYPES = { bug: '🐞 Un problème', idee: '💡 Une idée', autre: '💬 Autre' };
+        bac.innerHTML = liste.map(f => {
+            const date = new Date(f.created_at).toLocaleString('fr-FR');
+            const urg = Object.keys(Admin.URGENCES).map(n =>
+                '<option value="' + n + '"' + (String(f.urgence) === n ? ' selected' : '') + '>' + Admin.URGENCES[n] + '</option>').join('');
+            return '<div style="border:1px solid var(--border); border-left:4px solid ' + (f.urgence === 1 ? 'var(--danger)' : f.urgence === 2 ? '#f59e0b' : 'var(--border)') + '; border-radius:8px; padding:12px 14px; margin-bottom:10px; background:var(--panel-bg);' + (f.traite ? ' opacity:.55;' : '') + '">'
+                + '<div style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; margin-bottom:6px;">'
+                +   '<strong>' + (TYPES[f.type] || Utils.escape(f.type || '')) + '</strong>'
+                +   '<span class="text-sec-sm2">' + Utils.escape(date) + (f.version ? ' · ' + Utils.escape(f.version) : '') + '</span>'
+                + '</div>'
+                + '<div style="white-space:pre-wrap; margin-bottom:8px;">' + Utils.escape(f.texte || '') + '</div>'
+                + (f.contexte ? '<div class="text-sec-sm2" style="margin-bottom:8px;">' + Utils.escape(f.contexte) + '</div>' : '')
+                + '<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">'
+                +   '<select class="form-input-sm" onchange="app.Admin.setFeedbackUrgence(' + f.id + ', this.value)"><option value="">— Urgence —</option>' + urg + '</select>'
+                +   '<button class="btn btn--sm" onclick="app.Admin.markFeedbackDone(' + f.id + ', ' + (f.traite ? 'false' : 'true') + ')">' + (f.traite ? '↩️ À retraiter' : '✔️ Traité') + '</button>'
+                + '</div>'
+            + '</div>';
+        }).join('');
+    },
+
+    setFeedbackUrgence: async (id, valeur) => {
+        const urgence = valeur ? parseInt(valeur, 10) : null;
+        try {
+            const { error } = await supabase.from('client_feedback').update({ urgence: urgence }).eq('id', id);
+            if(error) throw error;
+            const f = Admin.allFeedback.find(x => x.id === id);
+            if(f) f.urgence = urgence;
+            Admin.renderFeedback();
+        } catch(e) { console.error('[Admin] setFeedbackUrgence:', e); Utils.toast('Impossible d\'enregistrer l\'urgence.', 'error'); }
+    },
+
+    markFeedbackDone: async (id, traite) => {
+        try {
+            const { error } = await supabase.from('client_feedback').update({ traite: traite }).eq('id', id);
+            if(error) throw error;
+            const f = Admin.allFeedback.find(x => x.id === id);
+            if(f) f.traite = traite;
+            Admin.renderFeedback();
+        } catch(e) { console.error('[Admin] markFeedbackDone:', e); Utils.toast('Impossible de marquer ce retour.', 'error'); }
+    },
+
+    // SEANCE DE TRI : un seul bloc de texte réunissant les retours ET les
+    // erreurs en attente, prêt à coller dans une conversation pour les classer
+    // et les réparer. C'est le point de tout ce dispositif.
+    copyTriage: async () => {
+        if(Admin.allFeedback.length === 0) await Admin.loadFeedback();
+        if(Admin.allErrors.length === 0) await Admin.loadErrors();
+        const retours = Admin.allFeedback.filter(f => !f.traite);
+        const groupes = Admin._groupesErreurs().filter(g => !g.traite);
+        const lignes = [];
+        lignes.push('=== RETOURS UTILISATEURS EN ATTENTE (' + retours.length + ') ===');
+        retours.forEach(f => {
+            lignes.push('');
+            lignes.push('[' + (f.type || 'autre') + '] ' + new Date(f.created_at).toLocaleString('fr-FR')
+                + (f.version ? ' — ' + f.version : '') + (f.urgence ? ' — urgence ' + f.urgence : ''));
+            lignes.push(f.texte || '');
+            if(f.contexte) lignes.push('(' + f.contexte + ')');
+        });
+        lignes.push('');
+        lignes.push('=== ERREURS EN ATTENTE (' + groupes.length + ' distinctes) ===');
+        groupes.forEach(g => {
+            const e = g.modele;
+            lignes.push('');
+            lignes.push(g.nb + '× [' + e.type + '] ' + e.message);
+            lignes.push('   ' + (e.source || '?') + ':' + (e.ligne || 0) + ' — page ' + (e.page || '?')
+                + ' — ' + (e.version || '?') + ' — ' + (e.navigateur || '?'));
+        });
+        const texte = lignes.join('\n');
+        try { await navigator.clipboard.writeText(texte); Utils.toast('Tout est copié — colle-le dans la conversation.', 'success', 5000); }
+        catch(err) { console.log(texte); Utils.toast('Copie impossible — le texte est dans la console.', 'warning'); }
+    },
+
+    // ===================== ERREURS REMONTEES (v600) =====================
+    // Les plantages survenus chez les utilisateurs, deposes par ErrorLogger
+    // dans la table client_errors (voir sql/remontee_erreurs.sql). Aucun
+    // identifiant de compte ni de projet n'y figure : c'est voulu.
+    // REGROUPEMENT PAR EMPREINTE : une meme erreur qui arrive cent fois est
+    // UNE ligne « 100 fois », pas cent lignes. Sans ca la liste serait
+    // illisible des le premier bug un peu bavard.
+    loadErrors: async () => {
+        if(!Admin.isAdmin()) return;
+        const bac = document.getElementById('admin-errors-list');
+        if(bac) bac.innerHTML = '<p class="text-sec-sm2">Chargement…</p>';
+        try {
+            const { data, error } = await supabase
+                .from('client_errors')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(500);
+            if(error) throw error;
+            Admin.allErrors = data || [];
+            Admin.renderErrors();
+        } catch(e) {
+            console.error('[Admin] Erreurs remontées:', e);
+            if(bac) bac.innerHTML = '<p class="text-sec-sm2">Impossible de charger les erreurs : ' + Utils.escape(e.message || 'erreur inconnue') + '</p>';
+        }
+    },
+
+    // Regroupe par empreinte : la plus recente porte le detail, les autres
+    // ne servent qu'a compter.
+    _groupesErreurs: () => {
+        const groupes = {};
+        Admin.allErrors.forEach(e => {
+            const g = groupes[e.empreinte];
+            if(!g) { groupes[e.empreinte] = { modele: e, nb: 1, premier: e.created_at, traite: !!e.traite, ids: [e.id] }; return; }
+            g.nb++;
+            g.ids.push(e.id);
+            if(e.created_at < g.premier) g.premier = e.created_at;
+            if(!e.traite) g.traite = false;
+        });
+        return Object.values(groupes).sort((a, b) => (a.traite === b.traite)
+            ? (b.modele.created_at < a.modele.created_at ? -1 : 1)
+            : (a.traite ? 1 : -1));
+    },
+
+    renderErrors: () => {
+        const bac = document.getElementById('admin-errors-list');
+        if(!bac) return;
+        const montrerTraitees = document.getElementById('admin-errors-show-done')?.checked;
+        const groupes = Admin._groupesErreurs().filter(g => montrerTraitees || !g.traite);
+        const enAttente = Admin._groupesErreurs().filter(g => !g.traite).length;
+        const badge = document.getElementById('admin-errors-badge');
+        if(badge) { badge.textContent = enAttente; badge.style.display = enAttente ? 'inline-block' : 'none'; }
+        if(groupes.length === 0) {
+            bac.innerHTML = '<p class="text-sec-sm2">✅ Aucune erreur' + (montrerTraitees ? '' : ' à traiter') + '.</p>';
+            return;
+        }
+        bac.innerHTML = groupes.map(g => {
+            const e = g.modele;
+            const date = new Date(e.created_at).toLocaleString('fr-FR');
+            const lieu = [e.source ? String(e.source).split('/').pop() : '', e.ligne ? ('ligne ' + e.ligne) : ''].filter(Boolean).join(' — ');
+            return '<details style="border:1px solid var(--border); border-radius:8px; margin-bottom:10px; background:var(--panel-bg);' + (g.traite ? ' opacity:.55;' : '') + '">'
+                + '<summary style="padding:10px 14px; cursor:pointer; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;">'
+                +   '<span style="background:' + (g.traite ? 'var(--border)' : 'var(--danger)') + '; color:' + (g.traite ? 'var(--text-sec)' : '#fff') + '; border-radius:10px; padding:1px 8px; font-size:0.75rem; font-weight:bold;">' + g.nb + '×</span>'
+                +   '<strong style="flex:1; min-width:200px;">' + Utils.escape(e.message || '') + '</strong>'
+                +   '<span class="text-sec-sm2">' + Utils.escape(date) + '</span>'
+                + '</summary>'
+                + '<div style="padding:0 14px 14px;">'
+                +   '<div class="text-sec-sm2" style="margin-bottom:8px;">'
+                +     Utils.escape(e.type || '') + (lieu ? ' · ' + Utils.escape(lieu) : '')
+                +     (e.page ? ' · page ' + Utils.escape(e.page) : '')
+                +     (e.version ? ' · ' + Utils.escape(e.version) : '')
+                +     (e.navigateur ? ' · ' + Utils.escape(e.navigateur) : '')
+                +   '</div>'
+                +   (e.pile ? '<pre style="background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:10px; overflow:auto; font-size:0.75rem; max-height:260px;">' + Utils.escape(e.pile) + '</pre>' : '')
+                +   '<div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">'
+                +     '<button class="btn btn--sm" onclick="app.Admin.copyError(\'' + Utils.escape(e.empreinte) + '\')">📋 Copier</button>'
+                +     '<button class="btn btn--sm" onclick="app.Admin.markErrorDone(\'' + Utils.escape(e.empreinte) + '\', ' + (g.traite ? 'false' : 'true') + ')">' + (g.traite ? '↩️ À retraiter' : '✔️ Traitée') + '</button>'
+                +   '</div>'
+                + '</div>'
+            + '</details>';
+        }).join('');
+    },
+
+    // Copie le detail au presse-papier, pret a coller dans une conversation.
+    copyError: async (empreinte) => {
+        const g = Admin._groupesErreurs().find(x => x.modele.empreinte === empreinte);
+        if(!g) return;
+        const e = g.modele;
+        const texte = [
+            '[' + e.type + '] ' + e.message,
+            'Vu ' + g.nb + ' fois — dernière : ' + new Date(e.created_at).toLocaleString('fr-FR'),
+            'Endroit : ' + (e.source || '?') + ':' + (e.ligne || 0) + ':' + (e.colonne || 0),
+            'Page : ' + (e.page || '?') + ' — ' + (e.version || '?') + ' — ' + (e.navigateur || '?'),
+            e.pile ? '\nPile :\n' + e.pile : ''
+        ].join('\n');
+        try { await navigator.clipboard.writeText(texte); Utils.toast('Erreur copiée.', 'success'); }
+        catch(err) { console.log(texte); Utils.toast('Copie impossible — le détail est dans la console.', 'warning'); }
+    },
+
+    // Marque toutes les lignes d'une meme erreur comme traitees (ou l'inverse).
+    markErrorDone: async (empreinte, traite) => {
+        try {
+            const { error } = await supabase.from('client_errors').update({ traite: traite }).eq('empreinte', empreinte);
+            if(error) throw error;
+            Admin.allErrors.forEach(e => { if(e.empreinte === empreinte) e.traite = traite; });
+            Admin.renderErrors();
+        } catch(e) {
+            console.error('[Admin] markErrorDone:', e);
+            Utils.toast('Impossible de marquer cette erreur.', 'error');
+        }
+    },
     
     isAdmin: () => {
         return state.currentUser && CONFIG.adminEmails.includes(state.currentUser.email.toLowerCase());
@@ -8427,28 +8656,50 @@ const Admin = {
         }
     },
     
-    // Met à jour la pastille rouge avec le nombre de signalements 'pending'
+    // Met a jour la pastille rouge du bouton « 🛡️ Admin » ET celles des onglets.
+    // v600 : elle ne comptait que les signalements. Elle compte desormais TOUT
+    // ce qui attend : signalements + erreurs remontees + retours utilisateurs.
+    // POURQUOI ICI : une pastille ne sert a rien si elle n'apparait qu'une fois
+    // l'onglet ouvert — c'est justement ce qu'elle est censee t'epargner. Elle
+    // est donc posee au chargement du tableau de bord, puis toutes les deux
+    // minutes, sans attendre que tu cliques quoi que ce soit.
     refreshPendingBadge: async () => {
         if(!Admin.isAdmin()) return;
-        const badge = document.getElementById('admin-pending-badge');
-        if(!badge) return;
-        
+        const poser = (id, n) => {
+            const el = document.getElementById(id);
+            if(!el) return;
+            el.textContent = n > 99 ? '99+' : String(n);
+            el.style.display = n > 0 ? 'inline-block' : 'none';
+        };
+        let signalements = 0, erreurs = 0, retours = 0;
         try {
             const { count, error } = await supabase
                 .from('reports')
                 .select('id', { count: 'exact', head: true })
                 .eq('status', 'pending');
-            
-            if(!error && count !== null && count > 0) {
-                badge.textContent = count > 99 ? '99+' : String(count);
-                badge.style.display = 'inline-block';
-            } else {
-                badge.style.display = 'none';
-            }
-        } catch(e) {
-            console.warn('Impossible de rafraîchir la pastille admin:', e);
-            badge.style.display = 'none';
-        }
+            if(!error && count) signalements = count;
+        } catch(e) { console.warn('[Admin] pastille signalements:', e); }
+        try {
+            // On compte les erreurs DISTINCTES, comme l'onglet les affiche :
+            // une pastille a « 200 » pour un seul bug qui boucle ne dirait rien
+            // d'utile. Une seule colonne suffit pour ca.
+            const { data, error } = await supabase
+                .from('client_errors')
+                .select('empreinte')
+                .eq('traite', false)
+                .limit(1000);
+            if(!error && data) erreurs = new Set(data.map(x => x.empreinte)).size;
+        } catch(e) { console.warn('[Admin] pastille erreurs:', e); }
+        try {
+            const { count, error } = await supabase
+                .from('client_feedback')
+                .select('id', { count: 'exact', head: true })
+                .eq('traite', false);
+            if(!error && count) retours = count;
+        } catch(e) { console.warn('[Admin] pastille retours:', e); }
+        poser('admin-errors-badge', erreurs);
+        poser('admin-feedback-badge', retours);
+        poser('admin-pending-badge', signalements + erreurs + retours);
     },
     
     // B5 : re-clic sur le bouton Admin = retour à l'accueil
@@ -9418,6 +9669,12 @@ const Admin = {
         // Charger les données si nécessaire
         if(tabName === 'users' && Admin.allUsers.length === 0) {
             Admin.loadUsers();
+        }
+        if(tabName === 'errors' && Admin.allErrors.length === 0) {
+            Admin.loadErrors();
+        }
+        if(tabName === 'feedback' && Admin.allFeedback.length === 0) {
+            Admin.loadFeedback();
         }
         if(tabName === 'analytics') {
             Admin.loadConnectionStats();
