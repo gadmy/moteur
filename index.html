@@ -472,6 +472,32 @@ vv599 (en cours)
   Livre avec vv598 mais pousse APRES la fusion, donc absent de la version
   publiee : le correctif du CHAMP EFFACE QUI REVENAIT, repris ici.
 
+  VIGNETTES DU STORYBOARD — LA CAUSE, TROUVEE EN BASE. Quatre correctifs
+  successifs avaient echoue parce qu'ils cherchaient dans le RENDU. La reponse
+  etait dans la DONNEE, et il a fallu ouvrir la base pour la voir :
+    - bucket 'projects' : PRIVE (storage.buckets.public = false) ;
+    - les 32 objets image du projet testes stockent une URL de forme
+      /object/public/projects/... — zero signee, zero chemin brut ;
+    - une adresse publique sur un bucket prive est TOUJOURS refusee par le
+      serveur : ces images ne pouvaient donc jamais se charger.
+  POURQUOI CET ETAT : Utils.migrateProjPathsInData convertit justement ces URLs
+  en chemins bruts, mais son appel dans Store etait garde par un drapeau
+  BOOLEEN (_mediaPathsMigrated). Une fois pose, la migration ne repassait plus
+  jamais — les medias ajoutes APRES ce passage restaient donc en forme publique
+  pour toujours. Constate : drapeau deja a true sur le projet, 7 projets sur 38
+  marques migres. Le drapeau devient VERSIONNE (valeur 2) : la migration rejoue
+  une fois pour tout le monde, elle est idempotente, et le resultat part au
+  prochain enregistrement.
+  DEFENSE AJOUTEE, car la donnee peut toujours redevenir sale : une URL de
+  media projet n'est PLUS JAMAIS posee telle quelle. signedUrlFor rend la
+  valeur stockee inchangee quand la signature n'est pas en cache — un repli
+  presente comme sur, mais garanti de rater sur un bucket prive. Desormais,
+  media projet = URL signee si le cache a repondu, sinon telechargement par le
+  SDK ; les adresses data:, blob: et externes restent posees directement.
+  LECON DE METHODE, a garder : quatre hypotheses de suite sur le mecanisme de
+  rendu, toutes fausses, alors que la reponse tenait dans une requete SQL. Pour
+  une image qui ne s'affiche pas, REGARDER D'ABORD CE QUI EST STOCKE.
+
   VIGNETTES, QUATRIEME PASSE : NE PLUS DEPENDRE DE LA SIGNATURE. Le diagnostic
   a tranche : « repeintes : 0 » et AUCUNE entree dans le cache d'images
   (pretes, en cours et echouees toutes a zero). Donc aucun chargement n'etait
@@ -17968,11 +17994,22 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               state.data = safeData; state.currentProjectId = id;
               state.savedBaseline = JSON.parse(JSON.stringify(safeData)); // Phase 0 : état de référence pour sauvegarde partielle / merge sélectif
               // Lot 4 : migration hygiène URLs publiques 'projects' -> paths (one-shot, idempotent, gated par flag). APRÈS la baseline => la diff URL->path est réelle et sera persistée au prochain save.
-              if(!state.data._mediaPathsMigrated) {
+              // v599 — LE DRAPEAU DEVIENT VERSIONNE. Il valait true/false : une
+              // fois pose, la migration ne repassait PLUS JAMAIS. Les medias
+              // ajoutes APRES ce passage gardaient donc une URL de forme
+              // /object/public/ sur le bucket 'projects', qui est PRIVE —
+              // c'est-a-dire une adresse systematiquement refusee par le
+              // serveur. C'est ce qui empechait les images inserees dans le
+              // storyboard de s'afficher (constate en base : 32 objets image
+              // d'un projet, tous en forme publique, drapeau deja a true).
+              // Passer a 2 rejoue la migration UNE fois pour tout le monde ;
+              // elle est idempotente et ne touche que les URLs 'projects'.
+              if(state.data._mediaPathsMigrated !== 2) {
                   try {
+                      const _ancien = state.data._mediaPathsMigrated;
                       const _migN = Utils.migrateProjPathsInData(state.data);
-                      state.data._mediaPathsMigrated = true;
-                      if(_migN > 0) needsMigrationSave = true;
+                      state.data._mediaPathsMigrated = 2;
+                      if(_migN > 0 || _ancien !== 2) needsMigrationSave = true;
                   } catch(e) { console.warn('migrateProjPathsInData:', e); }
               }
               // 7d : passage du depouillement a la forme { t, k, id }. Non gardee
@@ -32955,10 +32992,21 @@ const Storyboard = {
         //     l'idee de ne plus dependre de la signature ici non plus.
         // Rien d'exploitable du tout -> on rend null SANS mettre en cache, le
         // rendu suivant reessaiera (ne jamais bruler l'unique tentative).
-        const url = Utils.signedUrlFor(imageData);
-        const utilisable = typeof url === 'string'
-            && (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:'));
         const chemin = Utils._projPathFrom(imageData);
+        const url = Utils.signedUrlFor(imageData);
+        // v599 — UNE URL DE MEDIA PROJET N'EST JAMAIS POSEE TELLE QUELLE.
+        // Le bucket 'projects' est PRIVE : une adresse de forme
+        // /object/public/ y est toujours refusee. Or signedUrlFor rend la
+        // valeur stockee inchangee quand la signature n'est pas en cache — un
+        // repli qui, ici, est garanti de rater. On brulait l'unique tentative
+        // dessus, et l'image etait marquee ratee DEFINITIVEMENT.
+        // Donc : media projet -> URL signee si le cache a repondu, sinon
+        // telechargement par le SDK. Les autres adresses (data:, blob:, site
+        // externe) restent posees directement.
+        const signeeDisponible = !!chemin && url !== imageData;
+        const utilisable = chemin
+            ? signeeDisponible
+            : (typeof url === 'string' && (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:')));
         if(!utilisable && !chemin) return null;
 
         const img = new Image();

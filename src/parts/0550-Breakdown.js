@@ -6149,10 +6149,21 @@ const Storyboard = {
         //     l'idee de ne plus dependre de la signature ici non plus.
         // Rien d'exploitable du tout -> on rend null SANS mettre en cache, le
         // rendu suivant reessaiera (ne jamais bruler l'unique tentative).
-        const url = Utils.signedUrlFor(imageData);
-        const utilisable = typeof url === 'string'
-            && (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:'));
         const chemin = Utils._projPathFrom(imageData);
+        const url = Utils.signedUrlFor(imageData);
+        // v599 — UNE URL DE MEDIA PROJET N'EST JAMAIS POSEE TELLE QUELLE.
+        // Le bucket 'projects' est PRIVE : une adresse de forme
+        // /object/public/ y est toujours refusee. Or signedUrlFor rend la
+        // valeur stockee inchangee quand la signature n'est pas en cache — un
+        // repli qui, ici, est garanti de rater. On brulait l'unique tentative
+        // dessus, et l'image etait marquee ratee DEFINITIVEMENT.
+        // Donc : media projet -> URL signee si le cache a repondu, sinon
+        // telechargement par le SDK. Les autres adresses (data:, blob:, site
+        // externe) restent posees directement.
+        const signeeDisponible = !!chemin && url !== imageData;
+        const utilisable = chemin
+            ? signeeDisponible
+            : (typeof url === 'string' && (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:')));
         if(!utilisable && !chemin) return null;
 
         const img = new Image();

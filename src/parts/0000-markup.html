@@ -472,6 +472,32 @@ vv599 (en cours)
   Livre avec vv598 mais pousse APRES la fusion, donc absent de la version
   publiee : le correctif du CHAMP EFFACE QUI REVENAIT, repris ici.
 
+  VIGNETTES DU STORYBOARD — LA CAUSE, TROUVEE EN BASE. Quatre correctifs
+  successifs avaient echoue parce qu'ils cherchaient dans le RENDU. La reponse
+  etait dans la DONNEE, et il a fallu ouvrir la base pour la voir :
+    - bucket 'projects' : PRIVE (storage.buckets.public = false) ;
+    - les 32 objets image du projet testes stockent une URL de forme
+      /object/public/projects/... — zero signee, zero chemin brut ;
+    - une adresse publique sur un bucket prive est TOUJOURS refusee par le
+      serveur : ces images ne pouvaient donc jamais se charger.
+  POURQUOI CET ETAT : Utils.migrateProjPathsInData convertit justement ces URLs
+  en chemins bruts, mais son appel dans Store etait garde par un drapeau
+  BOOLEEN (_mediaPathsMigrated). Une fois pose, la migration ne repassait plus
+  jamais — les medias ajoutes APRES ce passage restaient donc en forme publique
+  pour toujours. Constate : drapeau deja a true sur le projet, 7 projets sur 38
+  marques migres. Le drapeau devient VERSIONNE (valeur 2) : la migration rejoue
+  une fois pour tout le monde, elle est idempotente, et le resultat part au
+  prochain enregistrement.
+  DEFENSE AJOUTEE, car la donnee peut toujours redevenir sale : une URL de
+  media projet n'est PLUS JAMAIS posee telle quelle. signedUrlFor rend la
+  valeur stockee inchangee quand la signature n'est pas en cache — un repli
+  presente comme sur, mais garanti de rater sur un bucket prive. Desormais,
+  media projet = URL signee si le cache a repondu, sinon telechargement par le
+  SDK ; les adresses data:, blob: et externes restent posees directement.
+  LECON DE METHODE, a garder : quatre hypotheses de suite sur le mecanisme de
+  rendu, toutes fausses, alors que la reponse tenait dans une requete SQL. Pour
+  une image qui ne s'affiche pas, REGARDER D'ABORD CE QUI EST STOCKE.
+
   VIGNETTES, QUATRIEME PASSE : NE PLUS DEPENDRE DE LA SIGNATURE. Le diagnostic
   a tranche : « repeintes : 0 » et AUCUNE entree dans le cache d'images
   (pretes, en cours et echouees toutes a zero). Donc aucun chargement n'etait
