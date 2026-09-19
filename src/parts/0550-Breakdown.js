@@ -5565,6 +5565,9 @@ const Storyboard = {
                     const originalZone = shot.drawings && shot.drawings.original;
                     if(originalZone && Array.isArray(originalZone.objects) && originalZone.objects.length > 0) {
                         Storyboard.renderObjectsOnCanvas(pctx, originalZone.objects);
+                        // v599 : les objets IMAGE par le chemin de l'apercu, seul
+                        // a savoir atteindre un media du bucket prive.
+                        Storyboard.dessinerObjetsImage('compact-preview-' + shot.id, originalZone.objects);
                     }
                 }
             }, 150);
@@ -5809,6 +5812,9 @@ const Storyboard = {
                     const originalZone = shot.drawings && shot.drawings.original;
                     if(originalZone && Array.isArray(originalZone.objects) && originalZone.objects.length > 0) {
                         Storyboard.renderObjectsOnCanvas(pctx, originalZone.objects);
+                        // v599 : les objets IMAGE par le chemin de l'apercu, seul
+                        // a savoir atteindre un media du bucket prive.
+                        Storyboard.dessinerObjetsImage('preview-' + shot.id, originalZone.objects);
                     }
                 }
             }, 150);
@@ -6204,6 +6210,39 @@ const Storyboard = {
     
     // Phase 4B : rendu canvas des objets via SVG (avec fallback emoji si SVG pas encore chargé)
     // Chaque objet : { type, x, y, scale?, rotation? } — type doit correspondre à un CONFIG.annotationObjects[].type
+    // v599 — DESSIN DES OBJETS IMAGE PAR LE CHEMIN EPROUVE.
+    // Constat de l'utilisateur, decisif : « Mini Apercu » et « Apercu Plein
+    // Ecran » affichent bien ces images. Or l'apercu passe par
+    // StoryboardExport._loadPrintImg, qui telecharge les medias du bucket PRIVE
+    // en blob via le SDK. Les vignettes, elles, passaient par
+    // getOrCreateUploadedImage et son cache, qui dependait d'une URL signee —
+    // et echouaient. Plutot que de continuer a reparer ce second chemin, on
+    // reprend ici EXACTEMENT celui de l'apercu.
+    // Le canvas est retrouve au moment de peindre (et non capture avant), pour
+    // survivre a un redessin de la liste entre le depart du telechargement et
+    // son arrivee. La transformation reproduit celle de renderObjectsOnCanvas :
+    // translation au centre de l'objet, rotation, puis dessin centre.
+    dessinerObjetsImage: (canvasId, objects) => {
+        const images = (objects || []).filter(o => o && o.type === 'image' && o.imageData);
+        if(!images.length || typeof StoryboardExport === 'undefined' || !StoryboardExport._loadPrintImg) return;
+        images.forEach(obj => {
+            const img = new Image();
+            StoryboardExport._loadPrintImg(img, obj.imageData, () => {
+                const c = document.getElementById(canvasId);
+                if(!c) return;
+                const ctx = c.getContext('2d');
+                const scale = obj.scale || 1;
+                const w = (obj.width || 100) * scale;
+                const h = (obj.height || 100) * scale;
+                ctx.save();
+                ctx.translate(obj.x || 0, obj.y || 0);
+                if(obj.rotation) ctx.rotate(obj.rotation * Math.PI / 180);
+                ctx.drawImage(img, -w / 2, -h / 2, w, h);
+                ctx.restore();
+            });
+        });
+    },
+
     renderObjectsOnCanvas: (ctx, objects) => {
         if(!ctx || !Array.isArray(objects) || objects.length === 0) return;
         const catalog = CONFIG.annotationObjects || [];
