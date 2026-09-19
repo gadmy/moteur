@@ -515,7 +515,11 @@
         blocks.push(FicheUI.block('crew', 'projet', '🎬 Dans le projet', projHtml, { pin: 'right' }));
 
         // Brique « Identité » : fonction, departement, poste, sexe, photo.
-        let idHtml = FicheUI.field('Fonction', `<div style="color:var(--text-sec);">${Utils.escape(member.role || 'Fonction non définie')}</div>`);
+        // v600 : la ligne « Fonction » n'apparait plus qu'en LECTURE SEULE. En
+        // edition, le selecteur « Poste » juste en dessous porte exactement la
+        // meme valeur — et ce doublon etait fige : change le poste, la ligne
+        // gardait l'ancien, d'ou deux fonctions differentes a l'ecran.
+        let idHtml = isView ? FicheUI.field('Fonction', `<div style="color:var(--text-sec);">${Utils.escape(member.role || 'Fonction non définie')}</div>`) : '';
         if(!isView) {
             idHtml += FicheUI.field('Département', `<select class="crew-input" onchange="app.Crew.updateMember(${idx}, 'group_id', this.value)" ${isLocked ? 'disabled' : ''}>${groupOptions}</select>`);
             idHtml += FicheUI.field('Poste', `<select class="crew-input" id="role-select-${idx}" onchange="app.UIData.handleRoleChange(${idx}, this.value)" ${isLocked ? 'disabled' : ''}>${rolesOptions}</select>`);
