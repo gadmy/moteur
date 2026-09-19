@@ -166,7 +166,7 @@
             ProfileClaims.renderPendingClaims();
             PublicProfile.renderProfileTabs();
             PublicProfile.currentProfileIndex = PublicProfile.profiles.length - 1;
-            PublicProfile.loadProfileToForm(newProfile);
+            PublicProfile.refreshProfileScreen(newProfile);
             document.getElementById('no-profile-message').style.display = 'none';
             document.getElementById('profile-all-sections').style.display = 'block';
             
