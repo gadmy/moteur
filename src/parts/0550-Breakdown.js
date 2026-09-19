@@ -5383,6 +5383,9 @@ const Storyboard = {
                 ? s.drawingData.layers.filter(l => l && l.visible) : [];
             const stockees = couches.filter(l => Utils._projPathFrom(l.imageData));
             const zone = s.drawings && s.drawings.original;
+            const objets = (zone && Array.isArray(zone.objects)) ? zone.objects : [];
+            const img = objets.filter(o => o && o.type === 'image');
+            const cache = Storyboard._svgImageCache || {};
             const c = document.getElementById('compact-preview-' + s.id);
             return {
                 plan: i + 1,
@@ -5392,11 +5395,21 @@ const Storyboard = {
                 calques_stockes: stockees.length,
                 blobs_deja_en_cache: stockees.filter(l => StoryboardExport._blobCache.has(Utils._projPathFrom(l.imageData))).length,
                 zone_original: !!(zone && zone.drawingData),
-                objets_vectoriels: (zone && Array.isArray(zone.objects)) ? zone.objects.length : 0,
+                objets_vectoriels: objets.length,
+                // v599 : etat des OBJETS IMAGE inseres — c'est eux, et non les
+                // calques, qui manquaient a l'appel. « non_signee » veut dire
+                // que l'URL n'etait pas prete : l'image sera retentee au rendu
+                // suivant. « echouee » veut dire que le chargement a echoue.
+                objets_image: img.length,
+                img_pretes: img.filter(o => { const e = cache['uploaded|' + o.id]; return e && e.ready && !e.failed; }).length,
+                img_en_cours: img.filter(o => { const e = cache['uploaded|' + o.id]; return e && !e.ready; }).length,
+                img_echouees: img.filter(o => { const e = cache['uploaded|' + o.id]; return e && e.failed; }).length,
+                img_non_signees: img.filter(o => { const u = Utils.signedUrlFor(o.imageData); return !(typeof u === 'string' && /^(https?|data|blob):/.test(u)); }).length,
                 canvas_present: !!c,
                 canvas_dans_le_document: !!(c && document.body.contains(c))
             };
         });
+        console.log('repeintes de la liste depuis le chargement :', Storyboard._repeintes);
         try { console.table(lignes); } catch(e) { console.log(lignes); }
         return lignes;
     },
@@ -6088,12 +6101,19 @@ const Storyboard = {
     // un plan. Et on coalesce, sinon dix images arrivant ensemble
     // provoqueraient dix redessins complets.
     _repeinteTimer: null,
+    _repeintes: 0,
     planifierRepeinteVignettes: () => {
-        if(typeof DrawingEditor !== 'undefined' && DrawingEditor.currentShotId) return;
+        // v599 : la condition « pas pendant l'edition d'un plan », ajoutee au
+        // passage precedent, est retiree. Redessiner la liste pendant qu'une
+        // fenetre de dessin est ouverte est sans consequence — elle vit dans
+        // une autre partie de la page — alors qu'une condition de trop est un
+        // frein possible de plus, et c'est exactement ce genre de garde qui
+        // avait deja desactive cette repeinte en silence.
         if(!document.getElementById('sbShotsList')) return;
         if(Storyboard._repeinteTimer) return;
         Storyboard._repeinteTimer = setTimeout(() => {
             Storyboard._repeinteTimer = null;
+            Storyboard._repeintes++;
             try { Storyboard.renderShots(); } catch(e) {}
         }, 120);
     },
@@ -6105,7 +6125,19 @@ const Storyboard = {
         if(entry && !entry.ready) return null;
         
         if(!imageData) return null;
-        
+
+        // v599 — NE PAS BRULER L'UNIQUE TENTATIVE. signedUrlFor rend le CHEMIN
+        // BRUT tant que l'URL n'est pas signee. Le poser en src depuis une page
+        // ouverte en local donne une adresse relative, qui echoue — et l'echec
+        // etait memorise DEFINITIVEMENT (failed: true), si bien que l'image ne
+        // s'affichait plus jamais, meme une fois la signature disponible. On
+        // s'abstient donc, sans rien mettre en cache : le rendu suivant
+        // reessaiera, cette fois avec une vraie URL.
+        const url = Utils.signedUrlFor(imageData);
+        const utilisable = typeof url === 'string'
+            && (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:'));
+        if(!utilisable) return null;
+
         const img = new Image();
         // Si l'image vient de Storage (URL https), activer CORS pour permettre le drawImage dans canvas (exports PDF)
         if(typeof imageData === 'string' && imageData.startsWith('http')) {
@@ -6125,7 +6157,7 @@ const Storyboard = {
             Storyboard._svgImageCache[cacheKey].ready = true;
             Storyboard._svgImageCache[cacheKey].failed = true;
         };
-        img.src = Utils.signedUrlFor(imageData);
+        img.src = url;
         
         return null;
     },
