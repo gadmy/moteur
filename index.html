@@ -299,6 +299,28 @@ vv598 (en cours)
   convocations automatiques (comédiens de scène, comédien, technicien)
   passent désormais par model.ensure et non plus par un push direct.
 
+  LE CORPS EST COMMUN A TOUTES LES CASQUETTES (etape 3). Telephone, vehicule,
+  permis et agenda (dispos / indispos) vivaient dans CHAQUE casquette :
+  dupliquer une fiche technicien dupliquait l'agenda, et corriger ses indispos
+  sur une fiche laissait les autres perimees. Ces champs quittent
+  FACET_SWAP_KEYS pour une nouvelle liste FACET_COMMON_KEYS et habitent le
+  PROFIL, en un seul exemplaire. Consequences voulues : changer de casquette ne
+  les bascule plus, et « Effacer » une carte ne les touche plus — vider sa carte
+  comedien n'a pas a supprimer son numero de telephone. RESTENT PAR CASQUETTE a
+  dessein : hidePhone (choix d'affichage public, carte par carte) et agentPhone
+  (l'agent ne concerne que le comedien). La fiche unifiee lit et reecrit ces
+  champs sur le profil, sur un CLONE : les editeurs mutent les tableaux en place,
+  sans clone une modification du calendrier touchait le profil meme en refermant
+  sans enregistrer. MIGRATION DOUCE (_liftCommonToProfile, jouee au chargement de
+  ses propres profils) : la premiere valeur trouvee dans les casquettes remonte
+  au profil quand celui-ci n'a rien, puis la cle est EFFACEE de toutes les
+  casquettes. Cet effacement est le coeur de la migration : partout la lecture
+  est « casquette, sinon profil », et une copie oubliee continuerait de gagner —
+  y compris un TABLEAU VIDE, vrai en JavaScript, qui aurait masque l'agenda
+  remonte. Les profils des autres ne sont pas touches : tant que leur
+  proprietaire n'a pas sauvegarde, leurs casquettes font foi et le repli sur le
+  profil joue tout seul.
+
   AJOUT D'UNE FICHE TECHNICIEN — LA TUILE « + ». Le bouton « Dupliquer » quitte
   l'interieur de la fiche : on ajoute une fiche la ou on les voit toutes, pas
   depuis l'une d'elles. La grille de Mon Profil porte desormais une tuile
@@ -40985,7 +41007,42 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     _engineProfile: null,
 
     // Champs qui appartiennent à la FICHE (comédien/technicien), plus au profil commun
-    FACET_SWAP_KEYS: ['name','photo','gender','phone','hidePhone','agentPhone','bio','address','city','latitude','longitude','hideAddress','hideAddressInProjects','contactEmail','dailyRate','rateCurrency','rateNegotiable','collabTypes','availabilityText','availabilityDates','unavailabilityDates','hasVehicle','vehicleType','vehiclePlate','vehicleSeats','vehicleTrunk','vehicleNotes','licenses','vehicleUsage','role','demoreel','demoreels','experience','languages','languagesWithLevels'],
+    FACET_SWAP_KEYS: ['name','photo','gender','hidePhone','agentPhone','bio','address','city','latitude','longitude','hideAddress','hideAddressInProjects','contactEmail','dailyRate','rateCurrency','rateNegotiable','collabTypes','role','demoreel','demoreels','experience','languages','languagesWithLevels'],
+
+    // ===== CHAMPS DU CORPS, COMMUNS A TOUTES LES CASQUETTES (v598) =====
+    // Une personne n'a qu'un telephone, qu'un vehicule et qu'un agenda. Ces
+    // champs vivaient dans CHAQUE casquette : dupliquer une fiche technicien
+    // dupliquait l'agenda, et corriger ses indispos sur une fiche laissait les
+    // autres perimees. Ils habitent desormais le PROFIL, en un seul exemplaire,
+    // et ne sont donc plus dans FACET_SWAP_KEYS — ni bascules d'une fiche a
+    // l'autre, ni effaces par le bouton « Effacer » d'une carte : vider sa carte
+    // comedien n'a pas a supprimer son numero de telephone.
+    // RESTENT PAR CASQUETTE a dessein : hidePhone (choix d'affichage public,
+    // carte par carte) et agentPhone (un agent ne concerne que le comedien).
+    FACET_COMMON_KEYS: ['phone','availabilityText','availabilityDates','unavailabilityDates','hasVehicle','vehicleType','vehiclePlate','vehicleSeats','vehicleTrunk','vehicleNotes','licenses','vehicleUsage'],
+
+    // MIGRATION DOUCE des profils d'avant, qui portent ces champs dans leurs
+    // casquettes : on remonte au profil la premiere valeur trouvee quand le
+    // profil n'a rien, puis on EFFACE la cle de toutes les casquettes. Cet
+    // effacement n'est pas un detail : partout, la lecture est « casquette,
+    // sinon profil » ; une copie oubliee continuerait de gagner — y compris un
+    // TABLEAU VIDE, qui est vrai en JavaScript et masquerait l'agenda remonte.
+    _liftCommonToProfile: (profile) => {
+        if(!profile || !profile.facets) return profile;
+        const plein = (v) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0);
+        const cartes = [];
+        if(profile.facets.actor) cartes.push(profile.facets.actor);
+        PublicProfile.crewArr(profile.facets).forEach(c => { if(c) cartes.push(c); });
+        ['asso', 'ent'].forEach(k => { if(profile.facets[k]) cartes.push(profile.facets[k]); });
+        PublicProfile.FACET_COMMON_KEYS.forEach(k => {
+            if(!plein(profile[k])) {
+                const source = cartes.find(c => plein(c[k]));
+                if(source) profile[k] = PublicProfile._cloneFacetVal(source[k]);
+            }
+            cartes.forEach(c => { delete c[k]; });
+        });
+        return profile;
+    },
 
     // Clés basculées par fiche : tout pour comédien/technicien, la collaboration seule pour asso/entreprise
     _facetKeysFor: (facet) => (facet === 'actor' || facet === 'crew') ? PublicProfile.FACET_SWAP_KEYS : ['collabTypes'],
@@ -41194,10 +41251,17 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         if(!draft.email) draft.email = draft.contactEmail || '';
         // Champs COMMUNS (partages entre casquettes) lus depuis le profil : physique (comedien
         // seulement, le technicien n'a pas d'onglet physique) + site web.
-        const commonKeys = (kind === 'actor')
+        // v598 : les champs de CORPS (telephone, vehicule, agenda) rejoignent les
+        // champs communs — la fiche les lit sur le profil et les y réécrit, au
+        // lieu d'en garder un exemplaire par casquette.
+        const commonKeys = ((kind === 'actor')
             ? ['website','height','weight','eyeColor','hairColor','hairLength','ethnicity','corpulence','sports','sportsWithLevels']
-            : ['website'];
-        commonKeys.forEach(k => { draft[k] = profile[k]; });
+            : ['website']).concat(PublicProfile.FACET_COMMON_KEYS);
+        // v598 : CLONE et non prêt de reference. Les champs communs comptent
+        // desormais des tableaux (agenda des dispos, permis) que les editeurs
+        // mutent en place : sans clone, modifier le calendrier dans la fiche
+        // touchait deja le profil, meme en refermant sans enregistrer.
+        commonKeys.forEach(k => { if(profile[k] !== undefined) draft[k] = PublicProfile._cloneFacetVal(profile[k]); });
         PublicProfile._engineCommonKeys = commonKeys;
         // Technicien : le profil range le departement dans 'department' (gcX), la fiche projet
         // dans 'group_id'. On fait le pont pour que le selecteur Departement se preselectionne.
@@ -41635,7 +41699,11 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     // demo, tarif), pas l'email de CONTACT — il est propre a chaque fiche. L'age
     // et la date de naissance ne sont pas listes : ils vivent deja sur le profil,
     // communs a toutes les casquettes, donc rien a recopier.
-    CREW_NEW_INHERIT: ['name','photo','gender','phone','hidePhone','agentPhone','city','address','latitude','longitude','hideAddress','hideAddressInProjects','hasVehicle','vehicleType','vehiclePlate','vehicleSeats','vehicleTrunk','vehicleNotes','licenses','vehicleUsage'],
+    // v598 : telephone, vehicule, permis et agenda ont QUITTE cette liste — ils
+    // sont desormais communs au profil (FACET_COMMON_KEYS), donc deja presents
+    // sur une fiche neuve. Les recopier ici en refabriquerait des exemplaires
+    // par casquette, exactement ce qu'on vient de supprimer.
+    CREW_NEW_INHERIT: ['name','photo','gender','hidePhone','agentPhone','city','address','latitude','longitude','hideAddress','hideAddressInProjects'],
 
     // Une fiche technicien porte-t-elle autre chose que ses deux interrupteurs ?
     // Sert a distinguer un emplacement JAMAIS rempli d'une fiche simplement
@@ -42109,7 +42177,12 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                         entDemoreels: extraData.entDemoreels || []
                     };
                 });
-            
+
+            // v598 : remontee des champs de corps (telephone, vehicule, agenda)
+            // des casquettes vers le profil, pour les profils d'avant. Ce qui est
+            // remonte ici repart en base a la prochaine sauvegarde.
+            PublicProfile.profiles.forEach(p => PublicProfile._liftCommonToProfile(p));
+
             // S'assurer que currentProfileIndex est valide
             if(PublicProfile.currentProfileIndex >= PublicProfile.profiles.length) {
                 PublicProfile.currentProfileIndex = PublicProfile.profiles.length > 0 ? 0 : -1;
