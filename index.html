@@ -299,6 +299,16 @@ vv598 (en cours)
   convocations automatiques (comédiens de scène, comédien, technicien)
   passent désormais par model.ensure et non plus par un push direct.
 
+  Au passage, deux blocages du MODE LOCAL (file://), invisibles en ligne
+  puisque le code concerné ne s'y exécute jamais : le réglage d'auto-refresh
+  touchait supabase.auth une trentaine de lignes AVANT l'attente de
+  initSupabase(), donc avant l'existence du client — page blanche et
+  « supabase is undefined » dès l'ouverture du fichier en local. Réglage
+  déplacé après l'attente, et gardé. Le Router, lui, tentait un pushState
+  vers une URL applicative depuis un document d'origine « null » : refus du
+  navigateur et console inondée de SecurityError. L'historique est désormais
+  sauté en file://, le titre de page reste posé.
+
   Reste à faire sur ce chantier : agenda du Planning (la personne apparaît
   deux fois dans la liste des disponibilités) ; tableau transport écran et
   PDF (elle y figure deux fois) ; profil public, où « Dupliquer » recopie
@@ -14365,12 +14375,6 @@ crewRoles: {
           // Initialiser le gestionnaire de session
           SessionManager.init();
           
-          // Fix file:// : limiter les refresh tokens pour éviter les boucles
-          if(window.location.protocol === 'file:') {
-              supabase.auth.startAutoRefresh = () => {};
-              // Mode fichier local - auto-refresh désactivé
-          }
-          
           // 🎬 SECRET: Triple-clic sur l'indicateur sync (☁️) pour tester le loader !
           let moteurClicks = 0;
           let moteurClickTimer = null;
@@ -14399,6 +14403,18 @@ crewRoles: {
               await initSupabase();
               if(!supabase || !supabase.auth) supabase = window.supabaseInitialized;
               if(!supabase?.auth) console.error('Supabase client: FAIL');
+          }
+
+          // Fix file:// : limiter les refresh tokens pour eviter les boucles.
+          // v598 — CE REGLAGE VIVAIT UNE TRENTAINE DE LIGNES PLUS HAUT, donc
+          // AVANT l'attente de initSupabase() ci-dessus : il touchait
+          // supabase.auth alors que le client n'existait pas encore. Le bloc
+          // n'etant joue qu'en protocole file:, le site en ligne ne voyait
+          // jamais rien ; mais ouvrir le fichier en local finissait sur une
+          // PAGE BLANCHE et un « supabase is undefined ». On configure le
+          // client une fois qu'il est la, et seulement s'il est la.
+          if(window.location.protocol === 'file:' && supabase && supabase.auth) {
+              supabase.auth.startAutoRefresh = () => {};
           }
 		  
 		  
@@ -82397,6 +82413,11 @@ const Weather = {
               const r = Router.current();
               if(r) { try { document.title = Router._title(r); } catch(e) {} }
               if(!r || r === Router.path()) return;
+              // v598 : en protocole file:, l'origine du document est « null » et
+              // le navigateur refuse toute URL applicative dans l'historique. La
+              // synchro ne pouvait pas aboutir et n'inondait la console que de
+              // SecurityError. Le titre de la page, lui, vient d'etre pose.
+              if(window.location.protocol === 'file:') return;
               if(replace) window.history.replaceState({ r: r }, '', r);
               else window.history.pushState({ r: r }, '', r);
           } catch(e) { console.warn('[Router] sync:', e); }
