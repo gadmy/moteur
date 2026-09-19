@@ -6390,14 +6390,52 @@ const StoryboardExport = {
     // (deja autorise cote CORS) et renvoie une URL blob locale (same-origin).
     // Utilise seulement pour les images STOCKEES (chemin projet). Les images en
     // data: URL (cas courant du storyboard) sont dessinees directement.
+    // ===== CACHE DES BLOBS DE DESSIN (v599) =====
+    // Les dessins du storyboard ne passent PAS par le cache d'images du
+    // navigateur : ils sont telecharges en blob par le SDK. Or l'URL blob
+    // etait revoquee juste apres avoir ete dessinee — chaque rendu de la liste
+    // des plans retelechargeait donc TOUT, et les vignettes restaient vides le
+    // temps des telechargements. C'est ce qui donnait l'impression que les
+    // images n'apparaissaient qu'apres avoir ouvert puis referme une fiche :
+    // le second rendu, lui, retrouvait la reponse dans le cache HTTP.
+    // On garde donc les URL blob, bornees et videes au changement de projet.
+    _blobCache: new Map(),
+    _blobEnCours: new Map(),
+    BLOB_CACHE_MAX: 150,
+    videBlobCache: () => {
+        StoryboardExport._blobCache.forEach(u => { try { URL.revokeObjectURL(u); } catch(e) {} });
+        StoryboardExport._blobCache.clear();
+        StoryboardExport._blobEnCours.clear();
+    },
     _resolveBlobUrl: async (storedUrl) => {
         try {
             const path = Utils._projPathFrom(storedUrl);
             if(!path) return null;
-            const { data, error } = await supabase.storage.from('projects').download(path);
-            if(error || !data) return null;
-            return URL.createObjectURL(data);
-        } catch(e) { return null; }
+            const cache = StoryboardExport._blobCache;
+            const dejaLa = cache.get(path);
+            if(dejaLa) return dejaLa;
+            // Deux vignettes peuvent demander le meme dessin en meme temps :
+            // sans cela, on le telechargerait deux fois.
+            const enCours = StoryboardExport._blobEnCours.get(path);
+            if(enCours) return enCours;
+            const p = (async () => {
+                const { data, error } = await supabase.storage.from('projects').download(path);
+                if(error || !data) return null;
+                const url = URL.createObjectURL(data);
+                if(cache.size >= StoryboardExport.BLOB_CACHE_MAX) {
+                    const plusAncien = cache.keys().next().value;
+                    const u = cache.get(plusAncien);
+                    cache.delete(plusAncien);
+                    try { URL.revokeObjectURL(u); } catch(e) {}
+                }
+                cache.set(path, url);
+                return url;
+            })();
+            StoryboardExport._blobEnCours.set(path, p);
+            const r = await p;
+            StoryboardExport._blobEnCours.delete(path);
+            return r;
+        } catch(e) { StoryboardExport._blobEnCours.delete(Utils._projPathFrom(storedUrl)); return null; }
     },
 
     // Charge une image de print puis appelle draw(). Regles :
@@ -6411,8 +6449,11 @@ const StoryboardExport = {
         const isData = typeof storedUrl === 'string' && (storedUrl.startsWith('data:') || storedUrl.startsWith('blob:'));
         const resolve = isData ? Promise.resolve(null) : StoryboardExport._resolveBlobUrl(storedUrl);
         const p = resolve.then(objUrl => new Promise(res => {
-            img.onload = () => { try { draw(); } catch(e) {} if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
-            img.onerror = () => { if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
+            // v599 : plus de revocation ici. L'URL blob vient desormais du cache
+            // ci-dessus et sert a tous les rendus suivants ; la detruire apres le
+            // premier dessin etait la cause du retelechargement systematique.
+            img.onload = () => { try { draw(); } catch(e) {} res(); };
+            img.onerror = () => { res(); };
             img.src = objUrl || (isData ? storedUrl : Utils.signedUrlFor(storedUrl));
             setTimeout(res, 8000);
         }));

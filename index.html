@@ -129,8 +129,13 @@ Rien d'ouvert côté code au 17 septembre en dehors des chantiers ci-dessous.
     Il n'y a donc pas de gain facile a aller chercher : ce chantier demande un
     mecanisme de passage de portee, a concevoir avant d'etre chiffre.
 
-[ ] PRECHARGER LES IMAGES STORYBOARD / MOODBOARD — REVU (v599), a confirmer
-    a l'usage. CONSTAT : un prechauffage EXISTAIT DEJA
+[ ] PRECHARGER LES IMAGES STORYBOARD / MOODBOARD — REVU DEUX FOIS (v599).
+    Deuxieme passe apres signalement precis : le vrai defaut n'etait pas le
+    prechauffage mais la REVOCATION des URL blob des dessins apres dessin (voir
+    l'historique). Corrige. Si une attente subsiste, elle ne peut plus venir que
+    du VOLUME : s'attaquer alors au poids des images (vignettes), pas au moment
+    du telechargement. PREMIERE PASSE, toujours valable : un prechauffage
+    EXISTAIT DEJA
     (Utils.prefetchStoryboardImages / prefetchMoodboardImages, appeles par
     Store a l'ouverture du projet) et son principe est juste — les URL signees
     sont pretes (refreshSignedCache, lots de 100, 1 h), et l'affichage reutilise
@@ -466,6 +471,24 @@ vv599 (en cours)
 
   Livre avec vv598 mais pousse APRES la fusion, donc absent de la version
   publiee : le correctif du CHAMP EFFACE QUI REVENAIT, repris ici.
+
+  VIGNETTES DU STORYBOARD : LA VRAIE CAUSE. Signalement precis : dans la liste
+  des plans, les images n'apparaissaient qu'apres avoir ouvert PUIS referme la
+  fiche d'un plan — et alors toutes d'un coup. Trouve : les DESSINS ne passent
+  pas par le cache d'images du navigateur. Ils sont telecharges en blob par le
+  SDK (StoryboardExport._resolveBlobUrl), et _loadPrintImg REVOQUAIT l'URL blob
+  juste apres l'avoir dessinee. Chaque rendu de la liste retelechargeait donc
+  tout, d'ou des vignettes vides le temps des telechargements ; le second rendu,
+  lui, retrouvait les reponses dans le cache HTTP et affichait tout d'un coup.
+  Corrige : les URL blob sont gardees dans un cache borne (150 entrees, la plus
+  ancienne liberee), les demandes simultanees sur le meme dessin sont mutualisees,
+  et le cache est vide au changement de projet. La revocation apres dessin est
+  supprimee.
+  CONSEQUENCE SUR LE PRECHAUFFAGE : il visait le mauvais canal. Un calque de
+  dessin ne se rechauffe pas avec une balise image mais en remplissant le cache
+  de blobs (Utils._warmBlobs). Le collecteur du storyboard separe desormais les
+  DESSINS (blobs) des images TELEVERSEES (balises) ; le mood board, dont les
+  elements sont de vraies balises, reste sur le canal image.
 
   ANCIEN FORMULAIRE DE PROFIL : LA CAUSE, ET PLUS LES SYMPTOMES. Constat fait
   en ouvrant le chantier : ce formulaire est deja INATTEIGNABLE — openFicheCard
@@ -12476,6 +12499,31 @@ crewRoles: {
               else setTimeout(servir, 300);
           } catch(e) { /* confort : jamais bruyant */ }
       },
+      // Les DESSINS du storyboard ne passent pas par le cache d'images du
+      // navigateur : ils sont telecharges en blob par le SDK. Les rechauffer
+      // veut donc dire remplir le cache de blobs, pas lancer des <img>.
+      _warmBlobs: (paths) => {
+          try {
+              const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+              if(conn && conn.saveData) { Utils._prefetchBilan.ignorees += paths.length; return; }
+              if(typeof StoryboardExport === 'undefined' || !StoryboardExport._resolveBlobUrl) return;
+              Utils._prefetchBilan.demandees += paths.length;
+              const file = paths.slice();
+              let actifs = 0;
+              const servir = () => {
+                  while(actifs < 3 && file.length) {
+                      const p = file.shift();
+                      actifs++;
+                      StoryboardExport._resolveBlobUrl(p)
+                          .then(u => { Utils._prefetchBilan[u ? 'chargees' : 'echouees']++; })
+                          .catch(() => { Utils._prefetchBilan.echouees++; })
+                          .then(() => { actifs--; servir(); });
+                  }
+              };
+              if('requestIdleCallback' in window) requestIdleCallback(servir, { timeout: 1000 });
+              else setTimeout(servir, 300);
+          } catch(e) { /* confort : jamais bruyant */ }
+      },
       // Diagnostic a taper dans la console du navigateur.
       prefetchInfo: () => Object.assign(
           { enAttente: Utils._prefetchFile.length, enCours: Utils._prefetchActifs },
@@ -12484,18 +12532,24 @@ crewRoles: {
       prefetchStoryboardImages: () => {
           try {
               if(!state.data || !Array.isArray(state.data.shots) || state.data.shots.length === 0) return;
-              const paths = new Set();
+              // v599 : DEUX canaux distincts. Les calques de dessin se
+              // telechargent en blob par le SDK ; les images televersees
+              // s'affichent dans une balise et passent, elles, par le cache
+              // d'images du navigateur. Les rechauffer de la meme facon
+              // revenait a ne rechauffer NI l'un NI l'autre correctement.
+              const dessins = new Set();
+              const photos = new Set();
               const collectZone = (zone) => {
                   if(!zone) return;
                   if(zone.drawingData && Array.isArray(zone.drawingData.layers)) {
                       zone.drawingData.layers.forEach(l => {
                           const p = Utils._projPathFrom(l && l.imageData);
-                          if(p) paths.add(p);
+                          if(p) dessins.add(p);
                       });
                   }
                   if(zone.imageType === 'upload' && zone.imageUrl) {
                       const p = Utils._projPathFrom(zone.imageUrl);
-                      if(p) paths.add(p);
+                      if(p) photos.add(p);
                   }
               };
               state.data.shots.forEach(shot => {
@@ -12503,11 +12557,11 @@ crewRoles: {
                   if(shot.drawingData) collectZone({ drawingData: shot.drawingData }); // compat racine, ancien format
                   if(shot.imageType === 'upload' && shot.imageUrl) {
                       const p = Utils._projPathFrom(shot.imageUrl);
-                      if(p) paths.add(p);
+                      if(p) photos.add(p);
                   }
               });
-              if(paths.size === 0) return;
-              Utils._warmImages([...paths], 'storyboard');
+              if(photos.size) Utils._warmImages([...photos], 'storyboard');
+              if(dessins.size) Utils._warmBlobs([...dessins]);
           } catch(e) { /* confort : jamais bruyant */ }
       },
 
@@ -17863,6 +17917,9 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                   const _flN = FicheLinks.migrate();
                   if(_flN > 0) needsMigrationSave = true;
               } catch(e) { console.warn('FicheLinks.migrate:', e); }
+              // v599 : les blobs de dessin gardes en memoire appartiennent au
+              // projet qu'on quitte — on repart propre.
+              if(typeof StoryboardExport !== 'undefined' && StoryboardExport.videBlobCache) StoryboardExport.videBlobCache();
               await Utils.refreshSignedCache(state.data); // Lot D6 : pré-signe les médias 'projects' avant rendu
               Utils.startImgResolver(); // Lot D6 : résolveur DOM des <img> signées
               Utils.prefetchStoryboardImages(); // v616 : préchauffage silencieux des images du Storyboard
@@ -33066,14 +33123,52 @@ const StoryboardExport = {
     // (deja autorise cote CORS) et renvoie une URL blob locale (same-origin).
     // Utilise seulement pour les images STOCKEES (chemin projet). Les images en
     // data: URL (cas courant du storyboard) sont dessinees directement.
+    // ===== CACHE DES BLOBS DE DESSIN (v599) =====
+    // Les dessins du storyboard ne passent PAS par le cache d'images du
+    // navigateur : ils sont telecharges en blob par le SDK. Or l'URL blob
+    // etait revoquee juste apres avoir ete dessinee — chaque rendu de la liste
+    // des plans retelechargeait donc TOUT, et les vignettes restaient vides le
+    // temps des telechargements. C'est ce qui donnait l'impression que les
+    // images n'apparaissaient qu'apres avoir ouvert puis referme une fiche :
+    // le second rendu, lui, retrouvait la reponse dans le cache HTTP.
+    // On garde donc les URL blob, bornees et videes au changement de projet.
+    _blobCache: new Map(),
+    _blobEnCours: new Map(),
+    BLOB_CACHE_MAX: 150,
+    videBlobCache: () => {
+        StoryboardExport._blobCache.forEach(u => { try { URL.revokeObjectURL(u); } catch(e) {} });
+        StoryboardExport._blobCache.clear();
+        StoryboardExport._blobEnCours.clear();
+    },
     _resolveBlobUrl: async (storedUrl) => {
         try {
             const path = Utils._projPathFrom(storedUrl);
             if(!path) return null;
-            const { data, error } = await supabase.storage.from('projects').download(path);
-            if(error || !data) return null;
-            return URL.createObjectURL(data);
-        } catch(e) { return null; }
+            const cache = StoryboardExport._blobCache;
+            const dejaLa = cache.get(path);
+            if(dejaLa) return dejaLa;
+            // Deux vignettes peuvent demander le meme dessin en meme temps :
+            // sans cela, on le telechargerait deux fois.
+            const enCours = StoryboardExport._blobEnCours.get(path);
+            if(enCours) return enCours;
+            const p = (async () => {
+                const { data, error } = await supabase.storage.from('projects').download(path);
+                if(error || !data) return null;
+                const url = URL.createObjectURL(data);
+                if(cache.size >= StoryboardExport.BLOB_CACHE_MAX) {
+                    const plusAncien = cache.keys().next().value;
+                    const u = cache.get(plusAncien);
+                    cache.delete(plusAncien);
+                    try { URL.revokeObjectURL(u); } catch(e) {}
+                }
+                cache.set(path, url);
+                return url;
+            })();
+            StoryboardExport._blobEnCours.set(path, p);
+            const r = await p;
+            StoryboardExport._blobEnCours.delete(path);
+            return r;
+        } catch(e) { StoryboardExport._blobEnCours.delete(Utils._projPathFrom(storedUrl)); return null; }
     },
 
     // Charge une image de print puis appelle draw(). Regles :
@@ -33087,8 +33182,11 @@ const StoryboardExport = {
         const isData = typeof storedUrl === 'string' && (storedUrl.startsWith('data:') || storedUrl.startsWith('blob:'));
         const resolve = isData ? Promise.resolve(null) : StoryboardExport._resolveBlobUrl(storedUrl);
         const p = resolve.then(objUrl => new Promise(res => {
-            img.onload = () => { try { draw(); } catch(e) {} if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
-            img.onerror = () => { if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
+            // v599 : plus de revocation ici. L'URL blob vient desormais du cache
+            // ci-dessus et sert a tous les rendus suivants ; la detruire apres le
+            // premier dessin etait la cause du retelechargement systematique.
+            img.onload = () => { try { draw(); } catch(e) {} res(); };
+            img.onerror = () => { res(); };
             img.src = objUrl || (isData ? storedUrl : Utils.signedUrlFor(storedUrl));
             setTimeout(res, 8000);
         }));

@@ -812,6 +812,9 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                   const _flN = FicheLinks.migrate();
                   if(_flN > 0) needsMigrationSave = true;
               } catch(e) { console.warn('FicheLinks.migrate:', e); }
+              // v599 : les blobs de dessin gardes en memoire appartiennent au
+              // projet qu'on quitte — on repart propre.
+              if(typeof StoryboardExport !== 'undefined' && StoryboardExport.videBlobCache) StoryboardExport.videBlobCache();
               await Utils.refreshSignedCache(state.data); // Lot D6 : pré-signe les médias 'projects' avant rendu
               Utils.startImgResolver(); // Lot D6 : résolveur DOM des <img> signées
               Utils.prefetchStoryboardImages(); // v616 : préchauffage silencieux des images du Storyboard

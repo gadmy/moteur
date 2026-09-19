@@ -502,6 +502,31 @@
               else setTimeout(servir, 300);
           } catch(e) { /* confort : jamais bruyant */ }
       },
+      // Les DESSINS du storyboard ne passent pas par le cache d'images du
+      // navigateur : ils sont telecharges en blob par le SDK. Les rechauffer
+      // veut donc dire remplir le cache de blobs, pas lancer des <img>.
+      _warmBlobs: (paths) => {
+          try {
+              const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+              if(conn && conn.saveData) { Utils._prefetchBilan.ignorees += paths.length; return; }
+              if(typeof StoryboardExport === 'undefined' || !StoryboardExport._resolveBlobUrl) return;
+              Utils._prefetchBilan.demandees += paths.length;
+              const file = paths.slice();
+              let actifs = 0;
+              const servir = () => {
+                  while(actifs < 3 && file.length) {
+                      const p = file.shift();
+                      actifs++;
+                      StoryboardExport._resolveBlobUrl(p)
+                          .then(u => { Utils._prefetchBilan[u ? 'chargees' : 'echouees']++; })
+                          .catch(() => { Utils._prefetchBilan.echouees++; })
+                          .then(() => { actifs--; servir(); });
+                  }
+              };
+              if('requestIdleCallback' in window) requestIdleCallback(servir, { timeout: 1000 });
+              else setTimeout(servir, 300);
+          } catch(e) { /* confort : jamais bruyant */ }
+      },
       // Diagnostic a taper dans la console du navigateur.
       prefetchInfo: () => Object.assign(
           { enAttente: Utils._prefetchFile.length, enCours: Utils._prefetchActifs },
@@ -510,18 +535,24 @@
       prefetchStoryboardImages: () => {
           try {
               if(!state.data || !Array.isArray(state.data.shots) || state.data.shots.length === 0) return;
-              const paths = new Set();
+              // v599 : DEUX canaux distincts. Les calques de dessin se
+              // telechargent en blob par le SDK ; les images televersees
+              // s'affichent dans une balise et passent, elles, par le cache
+              // d'images du navigateur. Les rechauffer de la meme facon
+              // revenait a ne rechauffer NI l'un NI l'autre correctement.
+              const dessins = new Set();
+              const photos = new Set();
               const collectZone = (zone) => {
                   if(!zone) return;
                   if(zone.drawingData && Array.isArray(zone.drawingData.layers)) {
                       zone.drawingData.layers.forEach(l => {
                           const p = Utils._projPathFrom(l && l.imageData);
-                          if(p) paths.add(p);
+                          if(p) dessins.add(p);
                       });
                   }
                   if(zone.imageType === 'upload' && zone.imageUrl) {
                       const p = Utils._projPathFrom(zone.imageUrl);
-                      if(p) paths.add(p);
+                      if(p) photos.add(p);
                   }
               };
               state.data.shots.forEach(shot => {
@@ -529,11 +560,11 @@
                   if(shot.drawingData) collectZone({ drawingData: shot.drawingData }); // compat racine, ancien format
                   if(shot.imageType === 'upload' && shot.imageUrl) {
                       const p = Utils._projPathFrom(shot.imageUrl);
-                      if(p) paths.add(p);
+                      if(p) photos.add(p);
                   }
               });
-              if(paths.size === 0) return;
-              Utils._warmImages([...paths], 'storyboard');
+              if(photos.size) Utils._warmImages([...photos], 'storyboard');
+              if(dessins.size) Utils._warmBlobs([...dessins]);
           } catch(e) { /* confort : jamais bruyant */ }
       },
 
