@@ -437,10 +437,10 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     switchToProfile: (index) => {
         if(index < 0 || index >= PublicProfile.profiles.length) return;
         
-        // Sauvegarder le profil actuel avant de changer
-        if(PublicProfile.currentProfileIndex >= 0) {
-            PublicProfile.saveFormToCurrentProfile();
-        }
+        // v599 : plus de relecture du formulaire avant de changer de profil.
+        // Il n'y a rien en attente — chaque fiche enregistre elle-meme, et
+        // relire un formulaire perime ecrivait des valeurs d'un autre profil
+        // par-dessus celui qu'on quitte.
         
         PublicProfile.currentProfileIndex = index;
         PublicProfile.renderProfileTabs();
@@ -1982,7 +1982,13 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     // Première facette active (compatibilité avec l'ancien profile_type)
     firstEnabledFacet: (profile) => {
         const f = (profile && profile.facets) || {};
-        return PublicProfile.FACET_KEYS.find(k => f[k] && f[k].enabled) || null;
+        // v599 : facets.crew est un TABLEAU depuis v597. Tester f.crew.enabled
+        // interrogeait le tableau lui-meme, jamais les fiches qu'il contient :
+        // un compte purement technicien n'avait donc AUCUNE casquette active
+        // aux yeux de cette fonction, et le type du profil s'en trouvait fausse.
+        return PublicProfile.FACET_KEYS.find(k => k === 'crew'
+            ? PublicProfile.crewAnyEnabled(f)
+            : (f[k] && f[k].enabled)) || null;
     },
 
     loadProfiles: async () => {
@@ -2153,16 +2159,20 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             return false;
         }
         
-        // Sauvegarder le formulaire dans l'objet profil.
-        // FUSION : en mode « fiche moteur », les modifs sont deja dans facets.actor ;
-        // on NE relit PAS l'ancien formulaire et on NE recommite PAS le plat -> les
-        // champs communs (top-level) restent inchanges, seule facets.actor evolue.
-        if(!PublicProfile._engineMode) {
-            PublicProfile.saveFormToCurrentProfile();
-            PublicProfile._commitFlatToFacet(PublicProfile.profiles[PublicProfile.currentProfileIndex], PublicProfile.currentFacetTab);
-        }
-        
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+
+        // v599 — ON NE RELIT PLUS L'ANCIEN FORMULAIRE. Les QUATRE casquettes
+        // s'editent desormais chacune dans sa propre fiche : openFicheCard les
+        // intercepte toutes (actor, crew, asso, ent) et chaque fiche ecrit
+        // directement dans l'objet profil. Le vieux formulaire n'est donc plus
+        // affiche nulle part — le relire ici ne pouvait plus qu'ecraser ce que la
+        // fiche venait d'enregistrer. C'est la cause commune des DEUX bugs du
+        // 19 septembre : « champs obligatoires » refuses alors qu'ils etaient
+        // remplis, et champ efface qui revenait apres enregistrement. Les deux
+        // avaient ete rustines ; la cause part ici.
+        // Seul le type courant restait a en tirer : il se deduit des casquettes
+        // actives, donc du PROFIL, sans passer par le DOM.
+        if(profile) profile.type = PublicProfile._facetToType(PublicProfile.firstEnabledFacet(profile)) || profile.type || '';
         
         if(!profile.type) {
             Utils.toast('Veuillez choisir un type de profil.', 'warning');

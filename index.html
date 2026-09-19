@@ -97,41 +97,56 @@ Rien d'ouvert côté code au 17 septembre en dehors des chantiers ci-dessous.
     doublon du modèle unifié depuis la fusion des fiches (v590/v591). À retirer
     si souhaité un jour.
 
-[ ] RETIRER L'ANCIEN FORMULAIRE DE PROFIL — chantier decide le 19 septembre
-    (v599), a faire SANS RIEN CASSER. C'est le doublon deja decrit plus bas ;
-    il a produit DEUX bugs reels dans la seule journee du 19 : creation de
-    profil bloquee (« champs obligatoires » alors qu'ils etaient remplis,
-    l'identite de la fiche ne rejoignait pas les champs plats) et champ efface
-    qui revenait (formulaire perime reecrit par-dessus la fiche au
-    « Sauvegarder »). Les deux sont rustines, la cause tient. Points durs
-    repertories : saveFormToCurrentProfile relit 54 champs du DOM et
-    _commitFlatToFacet les repousse dans la casquette ; la garde _loadedFor ;
-    le fait que ce formulaire ne sait representer QUE la casquette comedien et
-    la PREMIERE fiche technicien ; et, dans ce meme formulaire,
-    profile.facets.crew est un TABLEAU depuis v597 alors que la boucle
-    FACET_KEYS lui pose un .enabled d'objet — inerte aujourd'hui (les tuiles
-    ont pris le relais), a ne pas reanimer par megarde.
+[ ] RETIRER L'ANCIEN FORMULAIRE DE PROFIL — MOITIE FAITE (v599). CONSTAT :
+    il est deja INATTEIGNABLE. openFicheCard intercepte les QUATRE casquettes
+    (actor, crew, asso, ent), chacune ouvre sa propre fiche, et plus aucun
+    onclick du HTML n'ouvre l'ancienne modale ; selectFacetTab, selectFicheTab
+    et showFacetSections ne sont plus appeles que depuis ce chemin mort.
+    FAIT : les deux seules lectures VIVANTES du formulaire sont coupees —
+    saveCurrentProfile et switchToProfile ne le relisent plus. C'etait la
+    CAUSE COMMUNE des deux bugs du 19 septembre, jusque-la seulement rustines.
+    Le type du profil, seul element legitime qu'on en tirait, se deduit
+    desormais des casquettes actives sans passer par le DOM.
+    RESTE : la SUPPRESSION du code mort — la modale #profile-fiche-modal, les
+    sections profile-*-section, FACET_SECTIONS, FICHE_TABS, _bindFicheFold,
+    selectFacetTab / selectFicheTab / showFacetSections, et la partie de
+    loadProfileToForm qui remplit les 54 champs (ATTENTION : cette fonction
+    fait AUSSI le rendu des tuiles et le statut — ne pas la supprimer en bloc,
+    la scinder). Risque devenu faible maintenant que plus rien ne LIT ce
+    formulaire, mais loadProfileToForm attaque beaucoup de getElementById sans
+    garde : retirer le HTML sans la reecrire ferait planter le profil.
 
-[ ] CHARGER LES GROS MODULES A LA DEMANDE — decide le 19 septembre (v599),
-    rendu simple par le decoupage en src/parts. ~1 Mo compresse part a chaque
-    visiteur sur un cache vide ; 5 morceaux passent 200 Ko. Attention : les
-    modules partagent UNE portee commune, un chargement differe doit donc
-    preserver ce fonctionnement (pas de passage a import / export, voir
-    DECISIONS CLOSES).
+[ ] CHARGER LES GROS MODULES A LA DEMANDE — PAS FAIT, et l'estimation notee
+    plus tot dans la journee etait FAUSSE : le decoupage en src/parts ne rend
+    pas ce chantier simple. Il decoupe la SOURCE ; le fichier publie reste un
+    seul bloc de script, et c'est lui que le navigateur telecharge.
+    Differer vraiment un module imposerait de le sortir de la portee commune
+    aux 95 modules — donc de declarer, un par un, qui a besoin de qui. C'est
+    exactement le cout qu'on a refuse en ecartant import / export (voir
+    DECISIONS CLOSES). Verifie le 19 septembre : aucune image encodee en dur
+    dans le fichier (0 Ko de base64), les gros morceaux sont du VRAI code
+    (Importer ~717 Ko, StoryboardPreview ~563 Ko, dont ~10 % de commentaires).
+    Il n'y a donc pas de gain facile a aller chercher : ce chantier demande un
+    mecanisme de passage de portee, a concevoir avant d'etre chiffre.
 
-[ ] PRECHARGER LES IMAGES STORYBOARD / MOODBOARD EN ARRIERE-PLAN — demande du
-    19 septembre (v599) : elles ne commencent a se telecharger qu'au clic sur
-    l'onglet, d'ou une attente visible. VERIFIE AVANT D'ECRIRE CETTE NOTE : ce
-    n'est PAS un probleme de signature. Utils.refreshSignedCache pre-signe deja
-    TOUS les medias 'projects' au chargement du projet, par lots de 100 et pour
-    1 h (Utils.STORAGE_TTL), appelee depuis Store. Les URL sont donc pretes ;
-    ce qui manque, c'est que le navigateur ne demande l'image qu'au moment ou
-    la balise apparait. Il faut donc un prechargement DISCRET apres l'ouverture
-    du projet (new Image() sur les URL deja signees). Contraintes a tenir : ne
-    pas concurrencer ce que l'utilisateur regarde a cet instant (priorite
-    basse, apres le rendu) ; BORNER le lot, un moodboard peut porter des
-    centaines d'images ; s'abstenir en connexion econome
-    (navigator.connection.saveData).
+[ ] PRECHARGER LES IMAGES STORYBOARD / MOODBOARD — REVU (v599), a confirmer
+    a l'usage. CONSTAT : un prechauffage EXISTAIT DEJA
+    (Utils.prefetchStoryboardImages / prefetchMoodboardImages, appeles par
+    Store a l'ouverture du projet) et son principe est juste — les URL signees
+    sont pretes (refreshSignedCache, lots de 100, 1 h), et l'affichage reutilise
+    la MEME url depuis _signedCache, donc le cache du navigateur tombe juste.
+    Ses trois defauts, corriges : depart jusqu'a 4 s apres le chargement
+    (ramene a 1 s) ; aucune limite, des centaines d'images lancees d'un coup et
+    mises en file par le navigateur (desormais une file commune servie 4 a la
+    fois, dans l'ordre) ; et surtout AUCUN MOYEN DE SAVOIR s'il travaillait.
+    Taper Utils.prefetchInfo() (ou app.Utils.prefetchInfo()) dans la console
+    donne maintenant demandees / chargees / echouees / ignorees / en attente.
+    S'abstient entierement en connexion econome (navigator.connection.saveData).
+    SI L'ATTENTE PERSISTE : lire ce bilan avant de recoder quoi que ce soit.
+    « ignorees » eleve = images pas encore signees au moment de la passe ;
+    « chargees » eleve mais attente quand meme = le volume est simplement trop
+    gros et il faut s'attaquer au POIDS des images (vignettes), pas au moment
+    de leur telechargement.
 
 [ ] STRIPE / FEATURE GATING — EN PAUSE, ne pas ouvrir sans demande explicite.
     Prérequis juridique : domicile de l'éditeur dans les mentions légales (LCEN).
@@ -451,6 +466,31 @@ vv599 (en cours)
 
   Livre avec vv598 mais pousse APRES la fusion, donc absent de la version
   publiee : le correctif du CHAMP EFFACE QUI REVENAIT, repris ici.
+
+  ANCIEN FORMULAIRE DE PROFIL : LA CAUSE, ET PLUS LES SYMPTOMES. Constat fait
+  en ouvrant le chantier : ce formulaire est deja INATTEIGNABLE — openFicheCard
+  intercepte les quatre casquettes, chacune ouvre sa propre fiche, et plus
+  aucun onclick n'ouvre l'ancienne modale. Il restait pourtant LU a deux
+  endroits vivants, saveCurrentProfile et switchToProfile, qui rejouaient
+  par-dessus la fiche des valeurs d'un formulaire que personne ne voyait : la
+  cause commune des deux bugs du 19 septembre, jusque-la seulement rustines.
+  Ces deux lectures sont coupees. Le type du profil, seul element legitime
+  qu'on en tirait, se deduit desormais des casquettes actives sans passer par
+  le DOM. Au passage, firstEnabledFacet corrigee : elle testait
+  facets.crew.enabled, or facets.crew est un TABLEAU depuis v597 — un compte
+  purement technicien n'avait donc aucune casquette active a ses yeux.
+  Reste la suppression du code mort, decrite au RESTE A FAIRE.
+
+  PRECHAUFFAGE DES IMAGES revu. Un prechauffage existait deja et son principe
+  etait bon ; il partait jusqu'a 4 s trop tard, lancait des centaines d'images
+  d'un coup, et ne disait jamais s'il avait travaille. File commune servie 4 a
+  la fois, depart a 1 s, abstention en connexion econome, et Utils.prefetchInfo()
+  pour lire le bilan dans la console.
+
+  CHARGEMENT DIFFERE DES GROS MODULES : non fait, et l'estimation « rendu
+  simple par le decoupage », notee plus tot dans la journee, etait FAUSSE —
+  corrigee au RESTE A FAIRE. Le decoupage porte sur la SOURCE ; le fichier
+  publie reste un seul bloc de script.
 
   DECISIONS DE FIN DE CHANTIER (19 septembre) : garage personnel ECARTE, les
   vehicules en plus passent par le parc de regie ; retrait de l'ancien
@@ -12387,6 +12427,60 @@ crewRoles: {
       // (ce qui donnait l'impression que ça ne commençait à charger qu'en
       // ouvrant l'onglet). S'appuie sur le cache d'URLs signées déjà rempli
       // par refreshSignedCache juste avant — ne resigne rien lui-même.
+      // ===== RECHAUFFAGE DU CACHE IMAGES (v599) =====
+      // Commun au Storyboard et au Mood Board. Les deux collecteurs ci-dessous
+      // lancaient TOUTES leurs images d'un coup, parfois plusieurs centaines.
+      // Trois defauts, tous corriges ici :
+      //  - depart tardif : jusqu'a 4 s d'attente d'un moment de repos ;
+      //  - aucune limite : le navigateur mettait tout en file d'attente, et les
+      //    dernieres images arrivaient bien apres le clic sur l'onglet ;
+      //  - aucun moyen de SAVOIR si le prechauffage faisait son travail —
+      //    d'ou l'impression qu'il ne servait a rien. Utils.prefetchInfo(),
+      //    a taper dans la console, le dit maintenant.
+      // Le prechauffage reste un CONFORT : il n'affiche jamais d'erreur, et
+      // s'abstient entierement en connexion econome (forfait limite).
+      PREFETCH_CONC: 4,
+      _prefetchFile: [],
+      _prefetchActifs: 0,
+      _prefetchBilan: { demandees: 0, chargees: 0, echouees: 0, ignorees: 0 },
+      _warmImages: (paths, source) => {
+          try {
+              const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+              if(conn && conn.saveData) { Utils._prefetchBilan.ignorees += paths.length; return; }
+              paths.forEach(p => {
+                  const url = Utils.signedUrlFor(p);
+                  // Pas encore signee a cet instant : on n'insiste pas, la passe
+                  // suivante (re-signature horaire) la reprendra.
+                  if(!url || url === p) { Utils._prefetchBilan.ignorees++; return; }
+                  Utils._prefetchFile.push({ url: url, source: source });
+                  Utils._prefetchBilan.demandees++;
+              });
+              const servir = () => {
+                  while(Utils._prefetchActifs < Utils.PREFETCH_CONC && Utils._prefetchFile.length) {
+                      const item = Utils._prefetchFile.shift();
+                      Utils._prefetchActifs++;
+                      const img = new Image();
+                      img.decoding = 'async';
+                      if('fetchPriority' in img) img.fetchPriority = 'low';
+                      const fini = (ok) => {
+                          Utils._prefetchBilan[ok ? 'chargees' : 'echouees']++;
+                          Utils._prefetchActifs--;
+                          servir();
+                      };
+                      img.onload = () => fini(true);
+                      img.onerror = () => fini(false);
+                      img.src = item.url;
+                  }
+              };
+              if('requestIdleCallback' in window) requestIdleCallback(servir, { timeout: 1000 });
+              else setTimeout(servir, 300);
+          } catch(e) { /* confort : jamais bruyant */ }
+      },
+      // Diagnostic a taper dans la console du navigateur.
+      prefetchInfo: () => Object.assign(
+          { enAttente: Utils._prefetchFile.length, enCours: Utils._prefetchActifs },
+          Utils._prefetchBilan),
+
       prefetchStoryboardImages: () => {
           try {
               if(!state.data || !Array.isArray(state.data.shots) || state.data.shots.length === 0) return;
@@ -12413,21 +12507,8 @@ crewRoles: {
                   }
               });
               if(paths.size === 0) return;
-              // Priorité basse et hors du fil d'exécution courant : ne doit jamais
-              // ralentir l'affichage de l'onglet réellement ouvert (ex. Présentation).
-              const run = () => {
-                  paths.forEach(p => {
-                      const url = Utils.signedUrlFor(p);
-                      if(!url || url === p) return; // pas encore signé à cet instant : tant pis pour cette passe
-                      const img = new Image();
-                      img.decoding = 'async';
-                      img.fetchPriority = 'low';
-                      img.src = url;
-                  });
-              };
-              if('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 4000 });
-              else setTimeout(run, 1500);
-          } catch(e) { console.warn('[Storyboard] préchauffage images:', e); }
+              Utils._warmImages([...paths], 'storyboard');
+          } catch(e) { /* confort : jamais bruyant */ }
       },
 
       // v616 : même principe que prefetchStoryboardImages ci-dessus, pour les
@@ -12446,19 +12527,8 @@ crewRoles: {
                   });
               });
               if(paths.size === 0) return;
-              const run = () => {
-                  paths.forEach(p => {
-                      const url = Utils.signedUrlFor(p);
-                      if(!url || url === p) return;
-                      const img = new Image();
-                      img.decoding = 'async';
-                      img.fetchPriority = 'low';
-                      img.src = url;
-                  });
-              };
-              if('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 4000 });
-              else setTimeout(run, 1500);
-          } catch(e) { console.warn('[MoodBoard] préchauffage images:', e); }
+              Utils._warmImages([...paths], 'moodboard');
+          } catch(e) { /* confort : jamais bruyant */ }
       },
 
       uploadProjectFile: async (file, opts) => {
@@ -40633,10 +40703,10 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     switchToProfile: (index) => {
         if(index < 0 || index >= PublicProfile.profiles.length) return;
         
-        // Sauvegarder le profil actuel avant de changer
-        if(PublicProfile.currentProfileIndex >= 0) {
-            PublicProfile.saveFormToCurrentProfile();
-        }
+        // v599 : plus de relecture du formulaire avant de changer de profil.
+        // Il n'y a rien en attente — chaque fiche enregistre elle-meme, et
+        // relire un formulaire perime ecrivait des valeurs d'un autre profil
+        // par-dessus celui qu'on quitte.
         
         PublicProfile.currentProfileIndex = index;
         PublicProfile.renderProfileTabs();
@@ -42178,7 +42248,13 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     // Première facette active (compatibilité avec l'ancien profile_type)
     firstEnabledFacet: (profile) => {
         const f = (profile && profile.facets) || {};
-        return PublicProfile.FACET_KEYS.find(k => f[k] && f[k].enabled) || null;
+        // v599 : facets.crew est un TABLEAU depuis v597. Tester f.crew.enabled
+        // interrogeait le tableau lui-meme, jamais les fiches qu'il contient :
+        // un compte purement technicien n'avait donc AUCUNE casquette active
+        // aux yeux de cette fonction, et le type du profil s'en trouvait fausse.
+        return PublicProfile.FACET_KEYS.find(k => k === 'crew'
+            ? PublicProfile.crewAnyEnabled(f)
+            : (f[k] && f[k].enabled)) || null;
     },
 
     loadProfiles: async () => {
@@ -42349,16 +42425,20 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             return false;
         }
         
-        // Sauvegarder le formulaire dans l'objet profil.
-        // FUSION : en mode « fiche moteur », les modifs sont deja dans facets.actor ;
-        // on NE relit PAS l'ancien formulaire et on NE recommite PAS le plat -> les
-        // champs communs (top-level) restent inchanges, seule facets.actor evolue.
-        if(!PublicProfile._engineMode) {
-            PublicProfile.saveFormToCurrentProfile();
-            PublicProfile._commitFlatToFacet(PublicProfile.profiles[PublicProfile.currentProfileIndex], PublicProfile.currentFacetTab);
-        }
-        
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+
+        // v599 — ON NE RELIT PLUS L'ANCIEN FORMULAIRE. Les QUATRE casquettes
+        // s'editent desormais chacune dans sa propre fiche : openFicheCard les
+        // intercepte toutes (actor, crew, asso, ent) et chaque fiche ecrit
+        // directement dans l'objet profil. Le vieux formulaire n'est donc plus
+        // affiche nulle part — le relire ici ne pouvait plus qu'ecraser ce que la
+        // fiche venait d'enregistrer. C'est la cause commune des DEUX bugs du
+        // 19 septembre : « champs obligatoires » refuses alors qu'ils etaient
+        // remplis, et champ efface qui revenait apres enregistrement. Les deux
+        // avaient ete rustines ; la cause part ici.
+        // Seul le type courant restait a en tirer : il se deduit des casquettes
+        // actives, donc du PROFIL, sans passer par le DOM.
+        if(profile) profile.type = PublicProfile._facetToType(PublicProfile.firstEnabledFacet(profile)) || profile.type || '';
         
         if(!profile.type) {
             Utils.toast('Veuillez choisir un type de profil.', 'warning');

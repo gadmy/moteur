@@ -453,6 +453,60 @@
       // (ce qui donnait l'impression que ça ne commençait à charger qu'en
       // ouvrant l'onglet). S'appuie sur le cache d'URLs signées déjà rempli
       // par refreshSignedCache juste avant — ne resigne rien lui-même.
+      // ===== RECHAUFFAGE DU CACHE IMAGES (v599) =====
+      // Commun au Storyboard et au Mood Board. Les deux collecteurs ci-dessous
+      // lancaient TOUTES leurs images d'un coup, parfois plusieurs centaines.
+      // Trois defauts, tous corriges ici :
+      //  - depart tardif : jusqu'a 4 s d'attente d'un moment de repos ;
+      //  - aucune limite : le navigateur mettait tout en file d'attente, et les
+      //    dernieres images arrivaient bien apres le clic sur l'onglet ;
+      //  - aucun moyen de SAVOIR si le prechauffage faisait son travail —
+      //    d'ou l'impression qu'il ne servait a rien. Utils.prefetchInfo(),
+      //    a taper dans la console, le dit maintenant.
+      // Le prechauffage reste un CONFORT : il n'affiche jamais d'erreur, et
+      // s'abstient entierement en connexion econome (forfait limite).
+      PREFETCH_CONC: 4,
+      _prefetchFile: [],
+      _prefetchActifs: 0,
+      _prefetchBilan: { demandees: 0, chargees: 0, echouees: 0, ignorees: 0 },
+      _warmImages: (paths, source) => {
+          try {
+              const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+              if(conn && conn.saveData) { Utils._prefetchBilan.ignorees += paths.length; return; }
+              paths.forEach(p => {
+                  const url = Utils.signedUrlFor(p);
+                  // Pas encore signee a cet instant : on n'insiste pas, la passe
+                  // suivante (re-signature horaire) la reprendra.
+                  if(!url || url === p) { Utils._prefetchBilan.ignorees++; return; }
+                  Utils._prefetchFile.push({ url: url, source: source });
+                  Utils._prefetchBilan.demandees++;
+              });
+              const servir = () => {
+                  while(Utils._prefetchActifs < Utils.PREFETCH_CONC && Utils._prefetchFile.length) {
+                      const item = Utils._prefetchFile.shift();
+                      Utils._prefetchActifs++;
+                      const img = new Image();
+                      img.decoding = 'async';
+                      if('fetchPriority' in img) img.fetchPriority = 'low';
+                      const fini = (ok) => {
+                          Utils._prefetchBilan[ok ? 'chargees' : 'echouees']++;
+                          Utils._prefetchActifs--;
+                          servir();
+                      };
+                      img.onload = () => fini(true);
+                      img.onerror = () => fini(false);
+                      img.src = item.url;
+                  }
+              };
+              if('requestIdleCallback' in window) requestIdleCallback(servir, { timeout: 1000 });
+              else setTimeout(servir, 300);
+          } catch(e) { /* confort : jamais bruyant */ }
+      },
+      // Diagnostic a taper dans la console du navigateur.
+      prefetchInfo: () => Object.assign(
+          { enAttente: Utils._prefetchFile.length, enCours: Utils._prefetchActifs },
+          Utils._prefetchBilan),
+
       prefetchStoryboardImages: () => {
           try {
               if(!state.data || !Array.isArray(state.data.shots) || state.data.shots.length === 0) return;
@@ -479,21 +533,8 @@
                   }
               });
               if(paths.size === 0) return;
-              // Priorité basse et hors du fil d'exécution courant : ne doit jamais
-              // ralentir l'affichage de l'onglet réellement ouvert (ex. Présentation).
-              const run = () => {
-                  paths.forEach(p => {
-                      const url = Utils.signedUrlFor(p);
-                      if(!url || url === p) return; // pas encore signé à cet instant : tant pis pour cette passe
-                      const img = new Image();
-                      img.decoding = 'async';
-                      img.fetchPriority = 'low';
-                      img.src = url;
-                  });
-              };
-              if('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 4000 });
-              else setTimeout(run, 1500);
-          } catch(e) { console.warn('[Storyboard] préchauffage images:', e); }
+              Utils._warmImages([...paths], 'storyboard');
+          } catch(e) { /* confort : jamais bruyant */ }
       },
 
       // v616 : même principe que prefetchStoryboardImages ci-dessus, pour les
@@ -512,19 +553,8 @@
                   });
               });
               if(paths.size === 0) return;
-              const run = () => {
-                  paths.forEach(p => {
-                      const url = Utils.signedUrlFor(p);
-                      if(!url || url === p) return;
-                      const img = new Image();
-                      img.decoding = 'async';
-                      img.fetchPriority = 'low';
-                      img.src = url;
-                  });
-              };
-              if('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 4000 });
-              else setTimeout(run, 1500);
-          } catch(e) { console.warn('[MoodBoard] préchauffage images:', e); }
+              Utils._warmImages([...paths], 'moodboard');
+          } catch(e) { /* confort : jamais bruyant */ }
       },
 
       uploadProjectFile: async (file, opts) => {
