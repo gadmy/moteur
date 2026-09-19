@@ -580,6 +580,10 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         // Technicien : le profil range le departement dans 'department' (gcX), la fiche projet
         // dans 'group_id'. On fait le pont pour que le selecteur Departement se preselectionne.
         if(kind === 'crew' && !draft.group_id && draft.department) draft.group_id = draft.department;
+        // Langues / sports : un profil qui n'a que du texte libre retrouve des
+        // entrees avec un niveau par defaut, sinon la liste s'afficherait vide
+        // au-dessus d'un texte pourtant rempli.
+        ProfileSkills.migrer(draft);
         PublicProfile._engineMode = true;
         PublicProfile._engineProfile = draft;
         // Le moteur suppose un projet ouvert (state.data + role). Sur la page profil il n'y en
@@ -644,6 +648,15 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         });
         if(kind === 'crew') {
             d.department = d.group_id || d.department || ''; // pont group_id -> department (profil/sync)
+            // v600 : le DEPARTEMENT remonte aussi au profil PLAT. La base le range
+            // dans sa colonne de donnees, et c'est celle-la que l'Univers filtre.
+            // Il n'est pas dans FACET_SWAP_KEYS (l'y mettre donnerait un
+            // departement a la casquette comedien, qui l'effacerait en passant),
+            // donc rien ne le recopiait : un technicien qui choisissait son
+            // departement dans sa fiche restait introuvable par departement.
+            // Meme regle que pour le nom : on n'ecrase jamais par du vide.
+            if(d.department) profile.department = d.department;
+            if(d.role) profile.role = d.role;
             profile.facets.crew[PublicProfile._engineCrewIndex] = d;
         } else {
             profile.facets[kind] = d;
@@ -691,9 +704,13 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         let card = null;
         try {
             if(kind === 'crew') {
-                // Departements predefinis : lus depuis le selecteur du profil deja present dans la page.
-                const deptSel = document.getElementById('profile-department');
-                const groups = deptSel ? Array.from(deptSel.options).filter(o => o.value).map(o => ({ id: o.value, name: o.textContent.trim() })) : [];
+                // DEPARTEMENTS : lus dans le REFERENTIEL (CONFIG.crewGroups), jamais dans le
+                // DOM. Ils etaient pris dans un selecteur de l'ancien formulaire ; celui-ci
+                // supprime (v600), la liste revenait VIDE et la fiche technicien n'offrait plus
+                // aucun departement — donc plus aucune fonction, et un profil introuvable dans
+                // l'Univers. Corrige aussitot. Les fonctions, elles, viennent deja du meme
+                // referentiel (Crew.getRolesForGroup -> CONFIG.crewRoles).
+                const groups = (CONFIG.crewGroups || []).filter(g => g.type === 'crew').map(g => ({ id: g.id, name: g.name }));
                 card = UI.createCrewCard(draft, 0, groups, false);
             } else {
                 const temp = document.createElement('div');
@@ -721,6 +738,25 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         // mais statut/paie (intermittent, Sécu, SIRET) + mode de collaboration restent éditables par la personne.
         // « Notes générales » (crew) : note interne, sans objet dans une casquette publique.
         card.querySelectorAll('.fid-block[data-block-id="notes"]').forEach(el => el.remove());
+        // LANGUES ET SPORTS AVEC NIVEAUX (v600). Greffes sur une brique existante
+        // plutot qu'ajoutes comme brique a part : la carte est deja rendue et
+        // equilibree ici, y inserer un bloc de plus derangerait la disposition.
+        // Comedien : dans « Description physique », a la place des deux champs
+        // texte libre — deux sources pour la meme donnee finiraient par diverger.
+        // Technicien : dans « Bio & expérience », et sans les sports, qui sont du
+        // comedien.
+        const pskCible = card.querySelector('.fid-block[data-block-id="' + (kind === 'crew' ? 'bio' : 'physique') + '"] .fid-block-body');
+        if(pskCible) {
+            if(kind !== 'crew') {
+                const champSports = pskCible.querySelector('input[onchange*="\'sports\'"]');
+                const rang = champSports ? champSports.closest('.actor-input-row') : null;
+                if(rang) rang.remove();
+            }
+            const bloc = document.createElement('div');
+            bloc.innerHTML = ProfileSkills.blocHtml(kind !== 'crew');
+            pskCible.appendChild(bloc);
+            setTimeout(() => ProfileSkills.render(), 0);
+        }
         const contactBody = card.querySelector('.fid-block[data-block-id="contact"] .fid-block-body');
         if(contactBody) {
             const extra = document.createElement('div');
@@ -1766,6 +1802,10 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             statusDiv.innerHTML = `⚠️ Profil incomplet. Champs manquants : ${missing.join(', ')}`;
         }
     },
+    
+};
+
+const Permissions = {
     // ============================================================
     // ===== LOGIQUE D'ACCÈS (calcul des droits) =====
     // ============================================================
