@@ -735,6 +735,26 @@ vv600 (en cours)
   en ouverture locale du fichier (file://) : c'est qu'on est en train de
   tester. MENAGE : purge_client_errors() efface au-dela de 60 jours.
 
+  LES RETOURS UTILISATEURS AUSSI, ET UNE SEANCE DE TRI. Les remarques ecrites
+  depuis « Vos remarques » partaient en MAIL une fois par jour, et la file
+  locale etait videe ensuite : la seule trace vivait dans une boite mail — qui
+  ne se trie pas, ne se compte pas et ne se relit pas a deux. Elles sont
+  desormais deposees AUSSI dans une table (client_feedback,
+  sql/remontee_retours.sql) ; le mail reste, comme notification.
+  RETOURS ANONYMES : l'adresse de la personne n'est pas enregistree en base.
+  Elle figure toujours dans le mail, donc repondre reste possible ; la base ne
+  sert qu'a trier et a reparer, elle n'a pas besoin de savoir qui a ecrit.
+  DEPOT AVANT L'ENVOI DU MAIL, et chaque remarque porte un marqueur _enBase :
+  le mail peut echouer (la file n'est alors PAS videe, a dessein), et sans ce
+  marqueur les memes remarques seraient redeposees le lendemain.
+  NOUVEL ONGLET « 💬 Retours » cote admin : filtre par type, urgence en trois
+  crans (urgent / normal / plus tard), marquage traite, tri automatique des
+  urgents en tete. Et surtout le bouton « Copier pour analyse », qui reunit en
+  UN seul texte les retours ET les erreurs encore en attente — c'est la
+  matiere d'une seance de tri : classer par urgence, puis reparer.
+  PAS DE PURGE pour les retours, contrairement aux erreurs : une erreur de
+  l'an dernier n'apprend plus rien, une idee d'utilisateur si.
+
   A RETENIR : quand deux ecrans decrivent la meme chose, chercher s'ils lisent
   la MEME table. Ici trois listes de postes coexistaient — le referentiel, une
   copie figee dans le formulaire supprime, et celle de l'Univers — et la
@@ -6542,6 +6562,7 @@ body.presentation-mode .presentation-bar {
                 <button class="admin-tab tab-btn-panel" data-tab="config" onclick="app.Admin.switchTab('config')">⚙️ Configuration</button>
                 <button class="admin-tab tab-btn-panel" data-tab="analytics" onclick="app.Admin.switchTab('analytics')">📈 Connexions</button>
                 <button class="admin-tab tab-btn-panel" data-tab="errors" onclick="app.Admin.switchTab('errors')">🐞 Erreurs<span id="admin-errors-badge" style="display:none; margin-left:6px; background:#dc2626; color:white; font-size:0.7rem; font-weight:bold; padding:1px 6px; border-radius:9px;">0</span></button>
+                <button class="admin-tab tab-btn-panel" data-tab="feedback" onclick="app.Admin.switchTab('feedback')">💬 Retours<span id="admin-feedback-badge" style="display:none; margin-left:6px; background:#dc2626; color:white; font-size:0.7rem; font-weight:bold; padding:1px 6px; border-radius:9px;">0</span></button>
             </div>
             
             <!-- Contenu onglet Signalements -->
@@ -6654,6 +6675,28 @@ body.presentation-mode .presentation-bar {
                 </div>
                 <p class="text-sec-sm-mb15">Chaque plantage survenu chez un utilisateur, regroupé par erreur identique. Aucun identifiant de compte n'est envoyé : on voit le bug, pas qui l'a eu.</p>
                 <div id="admin-errors-list"><p class="text-sec-sm2">Clique sur « Actualiser » pour charger.</p></div>
+            </div>
+
+            <!-- Contenu onglet Retours -->
+            <div id="admin-tab-feedback" class="admin-tab-content d-none-panel">
+                <div class="section-header-20">
+                    <h3 class="m-0">💬 Retours utilisateurs</h3>
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <select id="admin-feedback-type" onchange="app.Admin.renderFeedback()" class="form-input-sm">
+                            <option value="">Tous les types</option>
+                            <option value="bug">Un problème</option>
+                            <option value="idee">Une idée</option>
+                            <option value="autre">Autre</option>
+                        </select>
+                        <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem; color:var(--text-sec); cursor:pointer;">
+                            <input type="checkbox" id="admin-feedback-show-done" onchange="app.Admin.renderFeedback()"> Montrer les traités
+                        </label>
+                        <button onclick="app.Admin.copyTriage()" class="btn btn--sm">📋 Copier pour analyse</button>
+                        <button onclick="app.Admin.loadFeedback()" class="btn btn--primary btn--sm">🔄 Actualiser</button>
+                    </div>
+                </div>
+                <p class="text-sec-sm-mb15">Ce que les gens ont écrit depuis « Vos remarques ». L'adresse de la personne n'est pas enregistrée ici — elle reste dans l'e-mail quotidien, pour répondre.</p>
+                <div id="admin-feedback-list"><p class="text-sec-sm2">Clique sur « Actualiser » pour charger.</p></div>
             </div>
 
             <!-- Contenu onglet Emailing -->
@@ -61599,6 +61642,123 @@ const Admin = {
     allUsers: [],
     allReports: [],
     allErrors: [],
+    allFeedback: [],
+
+    // ===================== RETOURS UTILISATEURS (v600) =====================
+    // Ce que les gens ECRIVENT depuis « Vos remarques ». Le mail quotidien
+    // reste la notification ; cette table est le PLAN DE TRAVAIL : on y trie
+    // par urgence, on marque ce qui est traite, et on croise avec les erreurs
+    // de l'onglet voisin. L'adresse de la personne n'y figure pas (choix du
+    // 19 septembre) — elle reste dans le mail, ce qui suffit pour repondre.
+    URGENCES: { 1: '🔴 Urgent', 2: '🟠 Normal', 3: '🔵 Plus tard' },
+
+    loadFeedback: async () => {
+        if(!Admin.isAdmin()) return;
+        const bac = document.getElementById('admin-feedback-list');
+        if(bac) bac.innerHTML = '<p class="text-sec-sm2">Chargement…</p>';
+        try {
+            const { data, error } = await supabase
+                .from('client_feedback')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(500);
+            if(error) throw error;
+            Admin.allFeedback = data || [];
+            Admin.renderFeedback();
+        } catch(e) {
+            console.error('[Admin] Retours:', e);
+            if(bac) bac.innerHTML = '<p class="text-sec-sm2">Impossible de charger les retours : ' + Utils.escape(e.message || 'erreur inconnue') + '</p>';
+        }
+    },
+
+    _feedbackFiltres: () => {
+        const type = document.getElementById('admin-feedback-type')?.value || '';
+        const montrerTraites = document.getElementById('admin-feedback-show-done')?.checked;
+        return Admin.allFeedback
+            .filter(f => (!type || f.type === type) && (montrerTraites || !f.traite))
+            // Les urgents d'abord, puis les non classes, puis par date.
+            .sort((a, b) => (a.urgence || 9) - (b.urgence || 9) || (a.created_at < b.created_at ? 1 : -1));
+    },
+
+    renderFeedback: () => {
+        const bac = document.getElementById('admin-feedback-list');
+        if(!bac) return;
+        const liste = Admin._feedbackFiltres();
+        const enAttente = Admin.allFeedback.filter(f => !f.traite).length;
+        const badge = document.getElementById('admin-feedback-badge');
+        if(badge) { badge.textContent = enAttente; badge.style.display = enAttente ? 'inline-block' : 'none'; }
+        if(liste.length === 0) { bac.innerHTML = '<p class="text-sec-sm2">✅ Aucun retour à traiter.</p>'; return; }
+        const TYPES = { bug: '🐞 Un problème', idee: '💡 Une idée', autre: '💬 Autre' };
+        bac.innerHTML = liste.map(f => {
+            const date = new Date(f.created_at).toLocaleString('fr-FR');
+            const urg = Object.keys(Admin.URGENCES).map(n =>
+                '<option value="' + n + '"' + (String(f.urgence) === n ? ' selected' : '') + '>' + Admin.URGENCES[n] + '</option>').join('');
+            return '<div style="border:1px solid var(--border); border-left:4px solid ' + (f.urgence === 1 ? 'var(--danger)' : f.urgence === 2 ? '#f59e0b' : 'var(--border)') + '; border-radius:8px; padding:12px 14px; margin-bottom:10px; background:var(--panel-bg);' + (f.traite ? ' opacity:.55;' : '') + '">'
+                + '<div style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; margin-bottom:6px;">'
+                +   '<strong>' + (TYPES[f.type] || Utils.escape(f.type || '')) + '</strong>'
+                +   '<span class="text-sec-sm2">' + Utils.escape(date) + (f.version ? ' · ' + Utils.escape(f.version) : '') + '</span>'
+                + '</div>'
+                + '<div style="white-space:pre-wrap; margin-bottom:8px;">' + Utils.escape(f.texte || '') + '</div>'
+                + (f.contexte ? '<div class="text-sec-sm2" style="margin-bottom:8px;">' + Utils.escape(f.contexte) + '</div>' : '')
+                + '<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">'
+                +   '<select class="form-input-sm" onchange="app.Admin.setFeedbackUrgence(' + f.id + ', this.value)"><option value="">— Urgence —</option>' + urg + '</select>'
+                +   '<button class="btn btn--sm" onclick="app.Admin.markFeedbackDone(' + f.id + ', ' + (f.traite ? 'false' : 'true') + ')">' + (f.traite ? '↩️ À retraiter' : '✔️ Traité') + '</button>'
+                + '</div>'
+            + '</div>';
+        }).join('');
+    },
+
+    setFeedbackUrgence: async (id, valeur) => {
+        const urgence = valeur ? parseInt(valeur, 10) : null;
+        try {
+            const { error } = await supabase.from('client_feedback').update({ urgence: urgence }).eq('id', id);
+            if(error) throw error;
+            const f = Admin.allFeedback.find(x => x.id === id);
+            if(f) f.urgence = urgence;
+            Admin.renderFeedback();
+        } catch(e) { console.error('[Admin] setFeedbackUrgence:', e); Utils.toast('Impossible d\'enregistrer l\'urgence.', 'error'); }
+    },
+
+    markFeedbackDone: async (id, traite) => {
+        try {
+            const { error } = await supabase.from('client_feedback').update({ traite: traite }).eq('id', id);
+            if(error) throw error;
+            const f = Admin.allFeedback.find(x => x.id === id);
+            if(f) f.traite = traite;
+            Admin.renderFeedback();
+        } catch(e) { console.error('[Admin] markFeedbackDone:', e); Utils.toast('Impossible de marquer ce retour.', 'error'); }
+    },
+
+    // SEANCE DE TRI : un seul bloc de texte réunissant les retours ET les
+    // erreurs en attente, prêt à coller dans une conversation pour les classer
+    // et les réparer. C'est le point de tout ce dispositif.
+    copyTriage: async () => {
+        if(Admin.allFeedback.length === 0) await Admin.loadFeedback();
+        if(Admin.allErrors.length === 0) await Admin.loadErrors();
+        const retours = Admin.allFeedback.filter(f => !f.traite);
+        const groupes = Admin._groupesErreurs().filter(g => !g.traite);
+        const lignes = [];
+        lignes.push('=== RETOURS UTILISATEURS EN ATTENTE (' + retours.length + ') ===');
+        retours.forEach(f => {
+            lignes.push('');
+            lignes.push('[' + (f.type || 'autre') + '] ' + new Date(f.created_at).toLocaleString('fr-FR')
+                + (f.version ? ' — ' + f.version : '') + (f.urgence ? ' — urgence ' + f.urgence : ''));
+            lignes.push(f.texte || '');
+            if(f.contexte) lignes.push('(' + f.contexte + ')');
+        });
+        lignes.push('');
+        lignes.push('=== ERREURS EN ATTENTE (' + groupes.length + ' distinctes) ===');
+        groupes.forEach(g => {
+            const e = g.modele;
+            lignes.push('');
+            lignes.push(g.nb + '× [' + e.type + '] ' + e.message);
+            lignes.push('   ' + (e.source || '?') + ':' + (e.ligne || 0) + ' — page ' + (e.page || '?')
+                + ' — ' + (e.version || '?') + ' — ' + (e.navigateur || '?'));
+        });
+        const texte = lignes.join('\n');
+        try { await navigator.clipboard.writeText(texte); Utils.toast('Tout est copié — colle-le dans la conversation.', 'success', 5000); }
+        catch(err) { console.log(texte); Utils.toast('Copie impossible — le texte est dans la console.', 'warning'); }
+    },
 
     // ===================== ERREURS REMONTEES (v600) =====================
     // Les plantages survenus chez les utilisateurs, deposes par ErrorLogger
@@ -62731,6 +62891,9 @@ const Admin = {
         }
         if(tabName === 'errors' && Admin.allErrors.length === 0) {
             Admin.loadErrors();
+        }
+        if(tabName === 'feedback' && Admin.allFeedback.length === 0) {
+            Admin.loadFeedback();
         }
         if(tabName === 'analytics') {
             Admin.loadConnectionStats();
@@ -66882,10 +67045,43 @@ ${window.location.origin}${window.location.pathname}
       await Feedback.flush();
     },
 
+    // DEPOT EN BASE (v600). Le mail quotidien reste — c'est la notification —
+    // mais une boite mail ne se trie pas et ne se compte pas. Les retours vont
+    // donc AUSSI dans la table client_feedback, ou on peut les classer par
+    // urgence et les croiser avec les erreurs remontees.
+    // ANONYME : l'adresse de la personne n'est PAS enregistree. Elle reste
+    // dans le mail, ce qui suffit pour repondre.
+    // MARQUAGE _enBase : le depot est tente AVANT l'envoi du mail, et une
+    // remarque deja deposee ne repart pas. Sans ce marqueur, un mail en echec
+    // (la file n'est alors PAS videe, a dessein) ferait redeposer les memes
+    // remarques le lendemain.
+    _deposer: async (q) => {
+      const aDeposer = q.filter(it => !it._enBase);
+      if (!aDeposer.length) return;
+      try {
+        const version = (document.getElementById('app-version') || {}).textContent || '';
+        const lignes = aDeposer.map(it => ({
+          type: String(it.type || 'autre').substring(0, 20),
+          texte: String(it.text || '').substring(0, 4000),
+          contexte: String(it.ctx || '').substring(0, 600),
+          version: String(version).substring(0, 20)
+        }));
+        const { error } = await supabase.from('client_feedback').insert(lignes);
+        if (error) throw error;
+        aDeposer.forEach(it => { it._enBase = true; });
+        Feedback._saveQueue(q);
+      } catch (e) {
+        // Un depot rate ne doit rien bloquer : le mail part quand meme, et la
+        // remarque sera redeposee au prochain passage.
+        console.warn('[Feedback] depot en base impossible, on reessaiera', e);
+      }
+    },
+
     flush: async () => {
       const q = Feedback.queue();
       if (!q.length || Feedback._sending) return;
       Feedback._sending = true;
+      await Feedback._deposer(q);
       const from = (state.currentUser && state.currentUser.email) || 'inconnu';
       const clean = (s, max) => String(s || '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, max);
       const corps = q.map((it, i) =>

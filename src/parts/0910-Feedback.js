@@ -88,10 +88,43 @@
       await Feedback.flush();
     },
 
+    // DEPOT EN BASE (v600). Le mail quotidien reste — c'est la notification —
+    // mais une boite mail ne se trie pas et ne se compte pas. Les retours vont
+    // donc AUSSI dans la table client_feedback, ou on peut les classer par
+    // urgence et les croiser avec les erreurs remontees.
+    // ANONYME : l'adresse de la personne n'est PAS enregistree. Elle reste
+    // dans le mail, ce qui suffit pour repondre.
+    // MARQUAGE _enBase : le depot est tente AVANT l'envoi du mail, et une
+    // remarque deja deposee ne repart pas. Sans ce marqueur, un mail en echec
+    // (la file n'est alors PAS videe, a dessein) ferait redeposer les memes
+    // remarques le lendemain.
+    _deposer: async (q) => {
+      const aDeposer = q.filter(it => !it._enBase);
+      if (!aDeposer.length) return;
+      try {
+        const version = (document.getElementById('app-version') || {}).textContent || '';
+        const lignes = aDeposer.map(it => ({
+          type: String(it.type || 'autre').substring(0, 20),
+          texte: String(it.text || '').substring(0, 4000),
+          contexte: String(it.ctx || '').substring(0, 600),
+          version: String(version).substring(0, 20)
+        }));
+        const { error } = await supabase.from('client_feedback').insert(lignes);
+        if (error) throw error;
+        aDeposer.forEach(it => { it._enBase = true; });
+        Feedback._saveQueue(q);
+      } catch (e) {
+        // Un depot rate ne doit rien bloquer : le mail part quand meme, et la
+        // remarque sera redeposee au prochain passage.
+        console.warn('[Feedback] depot en base impossible, on reessaiera', e);
+      }
+    },
+
     flush: async () => {
       const q = Feedback.queue();
       if (!q.length || Feedback._sending) return;
       Feedback._sending = true;
+      await Feedback._deposer(q);
       const from = (state.currentUser && state.currentUser.email) || 'inconnu';
       const clean = (s, max) => String(s || '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, max);
       const corps = q.map((it, i) =>

@@ -8401,6 +8401,123 @@ const Admin = {
     allUsers: [],
     allReports: [],
     allErrors: [],
+    allFeedback: [],
+
+    // ===================== RETOURS UTILISATEURS (v600) =====================
+    // Ce que les gens ECRIVENT depuis « Vos remarques ». Le mail quotidien
+    // reste la notification ; cette table est le PLAN DE TRAVAIL : on y trie
+    // par urgence, on marque ce qui est traite, et on croise avec les erreurs
+    // de l'onglet voisin. L'adresse de la personne n'y figure pas (choix du
+    // 19 septembre) — elle reste dans le mail, ce qui suffit pour repondre.
+    URGENCES: { 1: '🔴 Urgent', 2: '🟠 Normal', 3: '🔵 Plus tard' },
+
+    loadFeedback: async () => {
+        if(!Admin.isAdmin()) return;
+        const bac = document.getElementById('admin-feedback-list');
+        if(bac) bac.innerHTML = '<p class="text-sec-sm2">Chargement…</p>';
+        try {
+            const { data, error } = await supabase
+                .from('client_feedback')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(500);
+            if(error) throw error;
+            Admin.allFeedback = data || [];
+            Admin.renderFeedback();
+        } catch(e) {
+            console.error('[Admin] Retours:', e);
+            if(bac) bac.innerHTML = '<p class="text-sec-sm2">Impossible de charger les retours : ' + Utils.escape(e.message || 'erreur inconnue') + '</p>';
+        }
+    },
+
+    _feedbackFiltres: () => {
+        const type = document.getElementById('admin-feedback-type')?.value || '';
+        const montrerTraites = document.getElementById('admin-feedback-show-done')?.checked;
+        return Admin.allFeedback
+            .filter(f => (!type || f.type === type) && (montrerTraites || !f.traite))
+            // Les urgents d'abord, puis les non classes, puis par date.
+            .sort((a, b) => (a.urgence || 9) - (b.urgence || 9) || (a.created_at < b.created_at ? 1 : -1));
+    },
+
+    renderFeedback: () => {
+        const bac = document.getElementById('admin-feedback-list');
+        if(!bac) return;
+        const liste = Admin._feedbackFiltres();
+        const enAttente = Admin.allFeedback.filter(f => !f.traite).length;
+        const badge = document.getElementById('admin-feedback-badge');
+        if(badge) { badge.textContent = enAttente; badge.style.display = enAttente ? 'inline-block' : 'none'; }
+        if(liste.length === 0) { bac.innerHTML = '<p class="text-sec-sm2">✅ Aucun retour à traiter.</p>'; return; }
+        const TYPES = { bug: '🐞 Un problème', idee: '💡 Une idée', autre: '💬 Autre' };
+        bac.innerHTML = liste.map(f => {
+            const date = new Date(f.created_at).toLocaleString('fr-FR');
+            const urg = Object.keys(Admin.URGENCES).map(n =>
+                '<option value="' + n + '"' + (String(f.urgence) === n ? ' selected' : '') + '>' + Admin.URGENCES[n] + '</option>').join('');
+            return '<div style="border:1px solid var(--border); border-left:4px solid ' + (f.urgence === 1 ? 'var(--danger)' : f.urgence === 2 ? '#f59e0b' : 'var(--border)') + '; border-radius:8px; padding:12px 14px; margin-bottom:10px; background:var(--panel-bg);' + (f.traite ? ' opacity:.55;' : '') + '">'
+                + '<div style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; margin-bottom:6px;">'
+                +   '<strong>' + (TYPES[f.type] || Utils.escape(f.type || '')) + '</strong>'
+                +   '<span class="text-sec-sm2">' + Utils.escape(date) + (f.version ? ' · ' + Utils.escape(f.version) : '') + '</span>'
+                + '</div>'
+                + '<div style="white-space:pre-wrap; margin-bottom:8px;">' + Utils.escape(f.texte || '') + '</div>'
+                + (f.contexte ? '<div class="text-sec-sm2" style="margin-bottom:8px;">' + Utils.escape(f.contexte) + '</div>' : '')
+                + '<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">'
+                +   '<select class="form-input-sm" onchange="app.Admin.setFeedbackUrgence(' + f.id + ', this.value)"><option value="">— Urgence —</option>' + urg + '</select>'
+                +   '<button class="btn btn--sm" onclick="app.Admin.markFeedbackDone(' + f.id + ', ' + (f.traite ? 'false' : 'true') + ')">' + (f.traite ? '↩️ À retraiter' : '✔️ Traité') + '</button>'
+                + '</div>'
+            + '</div>';
+        }).join('');
+    },
+
+    setFeedbackUrgence: async (id, valeur) => {
+        const urgence = valeur ? parseInt(valeur, 10) : null;
+        try {
+            const { error } = await supabase.from('client_feedback').update({ urgence: urgence }).eq('id', id);
+            if(error) throw error;
+            const f = Admin.allFeedback.find(x => x.id === id);
+            if(f) f.urgence = urgence;
+            Admin.renderFeedback();
+        } catch(e) { console.error('[Admin] setFeedbackUrgence:', e); Utils.toast('Impossible d\'enregistrer l\'urgence.', 'error'); }
+    },
+
+    markFeedbackDone: async (id, traite) => {
+        try {
+            const { error } = await supabase.from('client_feedback').update({ traite: traite }).eq('id', id);
+            if(error) throw error;
+            const f = Admin.allFeedback.find(x => x.id === id);
+            if(f) f.traite = traite;
+            Admin.renderFeedback();
+        } catch(e) { console.error('[Admin] markFeedbackDone:', e); Utils.toast('Impossible de marquer ce retour.', 'error'); }
+    },
+
+    // SEANCE DE TRI : un seul bloc de texte réunissant les retours ET les
+    // erreurs en attente, prêt à coller dans une conversation pour les classer
+    // et les réparer. C'est le point de tout ce dispositif.
+    copyTriage: async () => {
+        if(Admin.allFeedback.length === 0) await Admin.loadFeedback();
+        if(Admin.allErrors.length === 0) await Admin.loadErrors();
+        const retours = Admin.allFeedback.filter(f => !f.traite);
+        const groupes = Admin._groupesErreurs().filter(g => !g.traite);
+        const lignes = [];
+        lignes.push('=== RETOURS UTILISATEURS EN ATTENTE (' + retours.length + ') ===');
+        retours.forEach(f => {
+            lignes.push('');
+            lignes.push('[' + (f.type || 'autre') + '] ' + new Date(f.created_at).toLocaleString('fr-FR')
+                + (f.version ? ' — ' + f.version : '') + (f.urgence ? ' — urgence ' + f.urgence : ''));
+            lignes.push(f.texte || '');
+            if(f.contexte) lignes.push('(' + f.contexte + ')');
+        });
+        lignes.push('');
+        lignes.push('=== ERREURS EN ATTENTE (' + groupes.length + ' distinctes) ===');
+        groupes.forEach(g => {
+            const e = g.modele;
+            lignes.push('');
+            lignes.push(g.nb + '× [' + e.type + '] ' + e.message);
+            lignes.push('   ' + (e.source || '?') + ':' + (e.ligne || 0) + ' — page ' + (e.page || '?')
+                + ' — ' + (e.version || '?') + ' — ' + (e.navigateur || '?'));
+        });
+        const texte = lignes.join('\n');
+        try { await navigator.clipboard.writeText(texte); Utils.toast('Tout est copié — colle-le dans la conversation.', 'success', 5000); }
+        catch(err) { console.log(texte); Utils.toast('Copie impossible — le texte est dans la console.', 'warning'); }
+    },
 
     // ===================== ERREURS REMONTEES (v600) =====================
     // Les plantages survenus chez les utilisateurs, deposes par ErrorLogger
@@ -9533,6 +9650,9 @@ const Admin = {
         }
         if(tabName === 'errors' && Admin.allErrors.length === 0) {
             Admin.loadErrors();
+        }
+        if(tabName === 'feedback' && Admin.allFeedback.length === 0) {
+            Admin.loadFeedback();
         }
         if(tabName === 'analytics') {
             Admin.loadConnectionStats();
