@@ -6055,7 +6055,7 @@ const Storyboard = {
             // (DrawingEditor + Storyboard listings)
             try {
                 if(typeof DrawingEditor !== 'undefined' && DrawingEditor.redraw) DrawingEditor.redraw();
-                if(typeof Storyboard.renderShots === 'function' && state.currentShotId === null) Storyboard.renderShots();
+                Storyboard.planifierRepeinteVignettes();
             } catch(_) { /* silent */ }
         };
         img.onerror = () => {
@@ -6073,6 +6073,31 @@ const Storyboard = {
     // Phase 4B v2 : retourne l'image d'un objet de type 'image' (lazy-loaded)
     // Identique à getOrCreateSvgImage mais utilise imageData (data URL base64) au lieu d'un type SVG.
     // La clé du cache est l'ID de l'objet pour éviter d'utiliser le data URL géant comme clé.
+    // v599 — REPEINTE DIFFEREE DES VIGNETTES. Une image-objet qui finit de
+    // charger doit faire redessiner la liste des plans : sans cela, le
+    // remplacant en pointilles dessine a sa place y reste POUR TOUJOURS.
+    // Le declencheur existait, mais il etait garde par
+    // « state.currentShotId === null ». Or state.currentShotId N'EXISTE PAS :
+    // seuls DrawingEditor.currentShotId et ScriptReport.currentShotId sont
+    // poses quelque part dans le code. La condition valait donc
+    // undefined === null, soit FAUX en permanence, et la repeinte ne partait
+    // JAMAIS. D'ou des miniatures vides jusqu'a ce qu'un autre evenement
+    // redessine la liste — typiquement l'ouverture puis la fermeture d'une
+    // fiche de plan, apres quoi toutes les images apparaissaient d'un coup.
+    // La bonne condition est : ne pas redessiner la liste pendant qu'on EDITE
+    // un plan. Et on coalesce, sinon dix images arrivant ensemble
+    // provoqueraient dix redessins complets.
+    _repeinteTimer: null,
+    planifierRepeinteVignettes: () => {
+        if(typeof DrawingEditor !== 'undefined' && DrawingEditor.currentShotId) return;
+        if(!document.getElementById('sbShotsList')) return;
+        if(Storyboard._repeinteTimer) return;
+        Storyboard._repeinteTimer = setTimeout(() => {
+            Storyboard._repeinteTimer = null;
+            try { Storyboard.renderShots(); } catch(e) {}
+        }, 120);
+    },
+
     getOrCreateUploadedImage: (objectId, imageData) => {
         const cacheKey = 'uploaded|' + objectId;
         let entry = Storyboard._svgImageCache[cacheKey];
@@ -6092,7 +6117,7 @@ const Storyboard = {
             Storyboard._svgImageCache[cacheKey].ready = true;
             try {
                 if(typeof DrawingEditor !== 'undefined' && DrawingEditor.redraw) DrawingEditor.redraw();
-                if(typeof Storyboard.renderShots === 'function' && state.currentShotId === null) Storyboard.renderShots();
+                Storyboard.planifierRepeinteVignettes();
             } catch(_) { /* silent */ }
         };
         img.onerror = () => {
