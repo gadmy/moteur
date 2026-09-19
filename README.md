@@ -4,7 +4,7 @@
 
 ![Moteur - Audiovisual Production Management](og-image.png)
 
-[![Version](https://img.shields.io/badge/version-v537-blue.svg)](https://moteur.studio)
+[![Version](https://img.shields.io/badge/version-v598-blue.svg)](https://moteur.studio)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Made in France](https://img.shields.io/badge/Made%20in-France-red.svg)](https://moteur.studio)
 
