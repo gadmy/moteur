@@ -299,6 +299,23 @@ vv598 (en cours)
   convocations automatiques (comédiens de scène, comédien, technicien)
   passent désormais par model.ensure et non plus par un push direct.
 
+  AGENDA ET TRANSPORTS : UNE SEULE FOIS PAR PERSONNE (etape 2). Outil commun
+  PersonIdentity.dedupe, qui ne garde qu'une entree par corps dans une liste.
+  Agenda du Planning : la liste des disponibilites ne propose la personne qu'une
+  fois (son etiquette porte toutes ses fonctions, « Bob - Cadreur, Electro »),
+  l'ecarte des que l'UN de ses postes est choisi, et le calendrier ne pose plus
+  qu'une barre par personne et par jour au lieu de deux identiques. Tableaux
+  TRANSPORTS, a l'ecran comme au PDF : une ligne par personne — c'est de la
+  logistique, et deux lignes laissaient croire a deux vehicules ou deux pick-up
+  a prevoir. Liste « part avec » : la personne ne se propose plus a elle-meme
+  (elle ne monte pas dans sa propre voiture) et chaque autre n'y figure qu'une
+  fois. DISTINCTION A GARDER : les tableaux de CONVOCATION gardent une ligne PAR
+  POSTE — le chef de chaque departement doit y retrouver sa personne ; seuls les
+  tableaux de LOGISTIQUE sont regroupes. PIEGE TRAITE : une cle de covoiturage
+  enregistree peut viser un AUTRE poste que celui retenu par le regroupement ;
+  les comparaisons portent donc sur le corps, sinon un passager disparaissait de
+  l'affichage.
+
   LE CORPS EST COMMUN A TOUTES LES CASQUETTES (etape 3). Telephone, vehicule,
   permis et agenda (dispos / indispos) vivaient dans CHAQUE casquette :
   dupliquer une fiche technicien dupliquait l'agenda, et corriger ses indispos
@@ -45784,7 +45801,8 @@ doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
                     { header: true, height: 4.6, fontSize: 6.6 });
                 afarRow(trCols, ['', '', 'Horaire', 'Lieu', 'Lieu', 'Horaire'],
                     { header: true, height: 4.4, fontSize: 6.2 });
-                calls.forEach(cl => {
+                // v598 : une ligne par PERSONNE, comme a l'ecran.
+                PersonIdentity.dedupe(calls, (cl) => ({ type: cl.type, id: cl.personId })).forEach(cl => {
                     const person = resolvePerson(cl);
                     if(!person) return;
                     const moyen = transportLabel(cl);
@@ -47081,6 +47099,23 @@ END:VEVENT
       // Les AUTRES lignes de la meme personne (celle de depart exclue).
       others: (type, personId) => PersonIdentity.peers(type, personId)
           .filter(p => !(p.type === type && p.personId === String(personId))),
+      // Ne garde qu'UNE entree par corps dans une liste ; `ref` rend le couple
+      // { type, id } d'un element. Sert aux tableaux de LOGISTIQUE (transports),
+      // ou une personne convoquee sur deux postes n'a qu'un trajet : deux lignes
+      // identiques y feraient croire a deux vehicules ou deux pick-up a prevoir.
+      // Les tableaux de CONVOCATION, eux, gardent bien une ligne PAR POSTE — le
+      // chef de chaque departement doit y retrouver sa personne.
+      dedupe: (liste, ref) => {
+          const vus = new Set();
+          return (liste || []).filter(x => {
+              const r = ref(x);
+              if(!r) return false;
+              const k = PersonIdentity.fingerprint(PersonIdentity.recordOf(r.type, r.id)) || (r.type + '_' + r.id);
+              if(vus.has(k)) return false;
+              vus.add(k);
+              return true;
+          });
+      },
       // Vrai si les deux references designent le meme corps.
       same: (typeA, idA, typeB, idB) => {
           if(typeA === typeB && String(idA) === String(idB)) return true;
@@ -48437,8 +48472,21 @@ END:VEVENT
             const isDriver = (mode === 'own-brings' || mode === 'own-brings-regie');
             if(!isDriver && mode !== 'with') return `<span class="fdsw-ro" style="color:#888">—</span>`;
             const picked = FDSLive.withWhoOf(type, id);
-            const others = calls.filter(o => !(o.type === type && o.id === id));
+            // v598 : un CORPS par entree. On retire toutes les lignes de la
+            // personne elle-meme — elle ne monte pas dans sa propre voiture — et
+            // chaque autre n'est proposee qu'une fois, quel que soit le nombre de
+            // postes qu'elle tient.
+            const others = PersonIdentity.dedupe(
+                calls.filter(o => !PersonIdentity.same(o.type, o.id, type, id)),
+                (o) => ({ type: o.type, id: o.id }));
             if(!others.length) return `<span class="fdsw-empty">personne d'autre n'est convoqué</span>`;
+            // Une cle de covoiturage enregistree peut viser un AUTRE poste de la
+            // meme personne que celui retenu ci-dessus : la comparaison porte donc
+            // sur le corps, sinon le passager disparaitrait de l'affichage.
+            const memeQue = (o, v) => {
+                const p = PlanningTransport.model.parse(v);
+                return !!p && PersonIdentity.same(o.type, o.id, p.type, p.personId);
+            };
             const nameFor = (o) => { const p = o.type === 'actor' ? actorOf(o.id) : crewOf(o.id); return p ? (p.name || '') : ''; };
             const optFor = (o) => `<option value="${esc(o.type + '_' + o.id)}">${esc(nameFor(o))}</option>`;
             if(mode === 'with') {
@@ -48448,17 +48496,17 @@ END:VEVENT
                     onchange="app.FDSLive.setWith('${type}','${esc(id)}', this.value)">
                     <option value="">-- qui conduit ? --</option>
                     ${others.map(o => { const v = o.type + '_' + o.id;
-                        return `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(nameFor(o))}</option>`; }).join('')}
+                        return `<option value="${esc(v)}"${(cur && memeQue(o, cur)) ? ' selected' : ''}>${esc(nameFor(o))}</option>`; }).join('')}
                 </select>`;
             }
             // « Amène » : plusieurs passagers, ajoutés un par un et retirables
             const chips = picked.map(v => {
-                const o = others.find(x => (x.type + '_' + x.id) === v);
+                const o = others.find(x => memeQue(x, v));
                 if(!o) return '';
                 return `<span style="display:inline-block; background:#eee; border:1px solid #999; border-radius:3px; padding:0 4px; margin:1px 3px 1px 0; white-space:nowrap;">${esc(nameFor(o))}
                     <button type="button" class="fdsw-link" title="Retirer" onclick="app.FDSLive.toggleWith('${type}','${esc(id)}','${esc(v)}', false)">✖</button></span>`;
             }).join('');
-            const free = others.filter(o => !picked.includes(o.type + '_' + o.id)
+            const free = others.filter(o => !picked.some(v => memeQue(o, v))
                 && PlanningTransport.model.canBePassenger(o.type, o.id));
             const adder = free.length ? `<select class="fdsw-in" style="width:100%; border:1px solid #999; margin-top:2px;"
                 onchange="app.FDSLive.toggleWith('${type}','${esc(id)}', this.value, true)">
@@ -48542,7 +48590,10 @@ END:VEVENT
         if(!calls.length) {
             h += `<tr><td colspan="5" style="text-align:center"><span class="fdsw-empty">Personne n'est convoqué sur ce jour.</span></td></tr>`;
         } else {
-            calls.forEach(p => {
+            // v598 : une ligne par PERSONNE — c'est un tableau de logistique, pas
+            // de convocation. Les tableaux de convocation ci-dessus gardent, eux,
+            // une ligne par poste.
+            PersonIdentity.dedupe(calls, (p) => ({ type: p.type, id: p.id })).forEach(p => {
                 const pers = p.type === 'actor' ? actorOf(p.id) : crewOf(p.id);
                 if(!pers) return;
                 h += `<tr><td>${esc(pers.name || '')}</td>
@@ -50357,6 +50408,24 @@ closeModal: () => {
   // que le code existant continue de lire et d'ecrire au meme endroit.
   const PlanningAvailPicker = {
     selectedAvailability: { actors: [], crew: [] },
+
+    // v598 — UNE PERSONNE, UN AGENDA. Une meme personne peut tenir plusieurs
+    // postes sur un projet : elle a donc plusieurs lignes d'equipe, mais un seul
+    // calendrier de disponibilites. Sans regroupement, elle apparaissait deux
+    // fois dans la liste et posait deux barres identiques sur chaque journee.
+    // Cle du CORPS ; a defaut d'empreinte, la ligne n'est qu'elle-meme.
+    _corps: (type, id) => PersonIdentity.fingerprint(PersonIdentity.recordOf(type, id)) || (type + '_' + id),
+
+    // Les fonctions tenues par une personne sur ce projet, pour l'etiquette de
+    // la liste : « Bob - Cadreur, Electro » plutot que deux lignes « Bob ».
+    _fonctions: (id) => {
+        const noms = PersonIdentity.peers('crew', id)
+            .filter(p => p.type === 'crew')
+            .map(p => (state.data.crew || []).find(c => String(c.id) === p.personId))
+            .map(c => (c && c.role) ? String(c.role) : '')
+            .filter(Boolean);
+        return noms.filter((r, i, a) => a.indexOf(r) === i);
+    },
     
     renderAvailabilitySelectors: () => {
         Planning.renderAvailabilityTags('actors');
@@ -50390,10 +50459,17 @@ closeModal: () => {
             return;
         }
         
+        // v598 : une etiquette par personne, meme si plusieurs de ses postes
+        // ont ete choisis (selection heritee d'avant le regroupement).
+        const personType = (type === 'actors') ? 'actor' : 'crew';
+        const vus = new Set();
         let html = '';
         selectedIds.forEach(id => {
             const person = dataArray?.find(p => p.id === id);
+            const corps = PlanningAvailPicker._corps(personType, id);
+            if(vus.has(corps)) return;
             if(person) {
+                vus.add(corps);
                 if(!person.color) person.color = CONFIG.availabilityColors[dataArray.indexOf(person) % CONFIG.availabilityColors.length];
                 html += `<span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: linear-gradient(135deg, ${person.color}22, ${person.color}11); border: 1px solid ${person.color}; border-radius: 20px; font-size: 0.85rem;">
                     <span style="width: 8px; height: 8px; border-radius: 50%; background: ${person.color};"></span>
@@ -50433,10 +50509,19 @@ closeModal: () => {
             return;
         }
         
+        // v598 : une personne, une entree. Elle est ecartee si l'un QUELCONQUE de
+        // ses postes est deja choisi, et n'est proposee qu'une fois meme si elle
+        // en tient plusieurs — c'est le meme agenda.
+        const personType = (type === 'actors') ? 'actor' : 'crew';
+        const dejaChoisis = new Set(selectedIds.map(id => PlanningAvailPicker._corps(personType, id)));
+        const dejaProposes = new Set();
         const filtered = dataArray.filter(person => {
-            const matchesQuery = !query || person.name.toLowerCase().includes(query);
-            const notSelected = !selectedIds.includes(person.id);
-            return matchesQuery && notSelected;
+            if(!person) return false;
+            if(query && !String(person.name || '').toLowerCase().includes(query)) return false;
+            const corps = PlanningAvailPicker._corps(personType, person.id);
+            if(dejaChoisis.has(corps) || dejaProposes.has(corps)) return false;
+            dejaProposes.add(corps);
+            return true;
         });
         
         if(filtered.length === 0) {
@@ -50448,7 +50533,8 @@ closeModal: () => {
         let html = '';
         filtered.forEach((person, idx) => {
             if(!person.color) person.color = CONFIG.availabilityColors[dataArray.indexOf(person) % CONFIG.availabilityColors.length];
-            const role = type === 'actors' ? '' : (person.role ? ` - ${Utils.escape(person.role)}` : '');
+            const fonctions = (type === 'actors') ? [] : PlanningAvailPicker._fonctions(person.id);
+            const role = fonctions.length ? ` - ${Utils.escape(fonctions.join(', '))}` : '';
             html += `<div onclick="app.Planning.selectFromDropdown('${type}', '${person.id}')" 
                          style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--border); transition: background 0.15s;"
                          onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background='transparent'">
@@ -50485,6 +50571,9 @@ closeModal: () => {
     
     getAvailabilityBarsForDate: (dateStr) => {
         let bars = [];
+        // v598 : une barre par PERSONNE. Quelqu'un qui tient deux postes en
+        // posait deux, identiques, sur chaque journee.
+        const poses = new Set();
         
         // Vérifier les acteurs sélectionnés
         Planning.selectedAvailability.actors.forEach(actorId => {
@@ -50496,7 +50585,9 @@ closeModal: () => {
                     const check = new Date(dateStr);
                     return check >= from && check <= to;
                 });
-                if(isAvailable) {
+                const corps = PlanningAvailPicker._corps('actor', actor.id);
+                if(isAvailable && !poses.has(corps)) {
+                    poses.add(corps);
                     bars.push({ name: actor.name, color: actor.color, type: 'actor', hasVehicle: actor.hasVehicle, vehicleSeats: actor.vehicleSeats, vehicleTrunk: actor.vehicleTrunk });
                 }
             }
@@ -50512,7 +50603,9 @@ closeModal: () => {
                     const check = new Date(dateStr);
                     return check >= from && check <= to;
                 });
-                if(isAvailable) {
+                const corps = PlanningAvailPicker._corps('crew', member.id);
+                if(isAvailable && !poses.has(corps)) {
+                    poses.add(corps);
                     bars.push({ name: member.name, color: member.color, type: 'crew', hasVehicle: member.hasVehicle, vehicleSeats: member.vehicleSeats, vehicleTrunk: member.vehicleTrunk });
                 }
             }
