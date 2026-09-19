@@ -65,65 +65,6 @@
         }
     },
     
-    // Gestion de la visibilité des sections
-    toggleVisibility: (section, scope) => {
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!profile) {
-            Utils.toast('Veuillez d\'abord sélectionner un profil', 'warning');
-            return;
-        }
-        
-        // Initialiser les tableaux si nécessaire
-        if(!profile.hiddenPublic) profile.hiddenPublic = [];
-        if(!profile.hiddenProject) profile.hiddenProject = [];
-        
-        const hiddenArray = scope === 'public' ? profile.hiddenPublic : profile.hiddenProject;
-        const index = hiddenArray.indexOf(section);
-        
-        if(index > -1) {
-            // Section cachée -> la rendre visible
-            hiddenArray.splice(index, 1);
-        } else {
-            // Section visible -> la cacher
-            hiddenArray.push(section);
-        }
-        
-        // Mettre à jour l'affichage des boutons
-        PublicProfile.updateVisibilityButtons();
-        
-        // Sauvegarder automatiquement
-        PublicProfile.save();
-    },
-    
-    updateVisibilityButtons: () => {
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!profile) return;
-        
-        const hiddenPublic = profile.hiddenPublic || [];
-        const hiddenProject = profile.hiddenProject || [];
-        
-        // Mettre à jour tous les boutons
-        document.querySelectorAll('.visibility-btn').forEach(btn => {
-            const section = btn.dataset.section;
-            const scope = btn.dataset.scope;
-            
-            const hiddenArray = scope === 'public' ? hiddenPublic : hiddenProject;
-            const isHidden = hiddenArray.includes(section);
-            
-            btn.classList.toggle('hidden-section', isHidden);
-            
-            // Mettre à jour l'icône
-            const icon = btn.querySelector('.vis-icon');
-            if(icon) {
-                icon.textContent = isHidden ? '👁️‍🗨️' : '👁️';
-            }
-            
-            // Mettre à jour le title
-            const scopeLabel = scope === 'public' ? 'public (Univers)' : 'projet (équipe)';
-            btn.title = isHidden ? `Section cachée en ${scopeLabel} - Cliquer pour afficher` : `Section visible en ${scopeLabel} - Cliquer pour cacher`;
-        });
-    },
-    
     open: async () => {
         UI.hideAllViews();
         els.publicProfileView.classList.add('active');
@@ -367,7 +308,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         PublicProfile.profiles.push(newProfile);
         PublicProfile.currentProfileIndex = PublicProfile.profiles.length - 1;
         PublicProfile.renderProfileTabs();
-        PublicProfile.loadProfileToForm(newProfile);
+        PublicProfile.refreshProfileScreen(newProfile);
         
         // Afficher le formulaire
         document.getElementById('no-profile-message').style.display = 'none';
@@ -444,483 +385,36 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         
         PublicProfile.currentProfileIndex = index;
         PublicProfile.renderProfileTabs();
-        PublicProfile.loadProfileToForm(PublicProfile.profiles[index]);
+        PublicProfile.refreshProfileScreen(PublicProfile.profiles[index]);
         
         document.getElementById('no-profile-message').style.display = 'none';
         document.getElementById('profile-all-sections').style.display = 'block';
     },
     
     // ============================================================
-    // ===== FORMULAIRE PROFIL (chargement / sauvegarde) =====
+    // ===== ECRAN « MON PROFIL » (rafraichissement) =====
     // ============================================================
-    // Charge un profil dans le formulaire
-    loadProfileToForm: (profile) => {
-        // Marque le formulaire comme peuple POUR CE PROFIL : saveFormToCurrentProfile
-        // reconstruit le profil entier depuis le DOM et n'a de sens qu'apres ce
-        // remplissage. Voir la garde posee en tete de cette fonction.
-        PublicProfile._loadedFor = profile?.id || null;
-        // Casquettes (facettes) : cocher depuis profile.facets (migration douce si absent)
+    // v600 : ne remplit plus aucun formulaire. L'ancien formulaire a 54 champs
+    // est SUPPRIME — chaque casquette s'edite dans sa propre fiche. Il ne reste
+    // ici que ce qui est VIVANT : les tuiles de casquettes et le bandeau de
+    // statut. Ancien nom : loadProfileToForm.
+    refreshProfileScreen: (profile) => {
+        if(!profile) return;
         profile.facets = PublicProfile._normalizeFacets(profile.facets, { profile_type: profile.type, is_public: profile.is_public });
-        document.getElementById('profile-type-actor').checked = profile.facets.actor.enabled;
-        document.getElementById('profile-type-crew').checked = PublicProfile.crewAnyEnabled(profile.facets);
-        document.getElementById('profile-type-association').checked = profile.facets.asso.enabled;
-        document.getElementById('profile-type-enterprise').checked = profile.facets.ent.enabled;
-        PublicProfile.FACET_KEYS.forEach(k => {
-            if(k === 'crew') return; // v598 : visibilité par fiche technicien, gérée dans les tuiles dédiées
-            const el = document.getElementById('facet-visible-' + k);
-            if(el) el.checked = profile.facets[k].visible !== false;
-        });
-        // Onglet courant : on le garde s'il est valide, sinon première fiche active (crew exclu : géré par le moteur)
-        const fEnabled = PublicProfile.FACET_KEYS.filter(k => k !== 'crew' && profile.facets[k].enabled);
-        if(!fEnabled.includes(PublicProfile.currentFacetTab)) PublicProfile.currentFacetTab = fEnabled[0] || null;
-        // Les champs plats reflètent la fiche affichée (héritage si la fiche est vierge)
-        PublicProfile._loadFacetToFlat(profile, PublicProfile.currentFacetTab);
-        PublicProfile.onProfileTypeChange();
-        
-        // Identité
-        document.getElementById('profile-photo').value = profile.photo || '';
-        PublicProfile.updatePhotoPreview();
-        document.getElementById('profile-name').value = profile.name || '';
-        document.getElementById('profile-gender').value = profile.gender || '';
-        document.getElementById('profile-email').value = state.currentUser?.email || '';
-        document.getElementById('profile-phone').value = profile.phone || '';
-        // v578 (audit) : confidentialite du telephone
-        const agentPhoneEl = document.getElementById('profile-agent-phone');
-        if(agentPhoneEl) agentPhoneEl.value = profile.agentPhone || '';
-        const hidePhoneEl = document.getElementById('profile-hide-phone');
-        if(hidePhoneEl) hidePhoneEl.checked = profile.hidePhone === true;
-        const ceEl = document.getElementById('profile-contact-email');
-        if(ceEl) ceEl.value = profile.contactEmail || '';
-        document.getElementById('profile-city').value = profile.city || '';
-        document.getElementById('profile-address').value = profile.address || '';
-        document.getElementById('profile-hide-address').checked = profile.hideAddress || false;
-        document.getElementById('profile-hide-address-projects').checked = profile.hideAddressInProjects || false;
-        document.getElementById('profile-website').value = profile.website || '';
-        document.getElementById('profile-bio').value = profile.bio || '';
-        { const _ex = document.getElementById('profile-experience'); if(_ex) _ex.value = profile.experience || ''; }
-        
-        // Mettre à jour les options de confidentialité
-        setTimeout(() => PublicProfile.updateAddressPrivacyOptions(), 100);
-        
-        // Langues parlées : section commune comédien / technicien (valeurs par fiche)
-        if(profile.facets.actor.enabled || PublicProfile.crewAnyEnabled(profile.facets)) {
-            PublicProfile.migrateSkillsData(profile);
-            PublicProfile.renderLanguagesList();
+        const enabled = PublicProfile._enabledFacets(profile);
+        // Onglet courant : celui affiche s'il est encore actif, sinon la premiere
+        // casquette active hors technicien (le technicien se choisit par tuile).
+        if(!enabled.includes(PublicProfile.currentFacetTab)) {
+            PublicProfile.currentFacetTab = enabled.find(k => k !== 'crew') || null;
         }
-        
-        // Comédien
-        if(profile.facets.actor.enabled) {
-            PublicProfile.loadGallery(profile.galleryPhotos || []);
-            document.getElementById('profile-height').value = profile.height || '';
-            document.getElementById('profile-weight').value = profile.weight || '';
-            document.getElementById('profile-age').value = profile.age || '';
-            document.getElementById('profile-eyes').value = profile.eyeColor || '';
-            document.getElementById('profile-hair-color').value = profile.hairColor || '';
-            document.getElementById('profile-hair-length').value = profile.hairLength || '';
-            document.getElementById('profile-ethnicity').value = profile.ethnicity || '';
-            document.getElementById('profile-corpulence').value = profile.corpulence || '';
-            // Sports avec niveaux (les langues sont gérées dans la section partagée)
-            PublicProfile.renderSportsList();
-            PublicProfile._writeDemoreels('actor', (profile.demoreels && profile.demoreels.length) ? profile.demoreels : profile.demoreel);
-        }
-        
-        // Technicien
-        if(PublicProfile.crewAnyEnabled(profile.facets)) {
-            document.getElementById('profile-department').value = profile.department || '';
-            PublicProfile.updateRoleOptions();
-            
-            const roleSelect = document.getElementById('profile-role');
-            const roleCustom = document.getElementById('profile-role-custom');
-            const savedRole = profile.role || '';
-            
-            let roleFound = false;
-            for(let i = 0; i < roleSelect.options.length; i++) {
-                if(roleSelect.options[i].value === savedRole) {
-                    roleSelect.value = savedRole;
-                    roleFound = true;
-                    break;
-                }
-            }
-            
-            if(!roleFound && savedRole) {
-                roleSelect.value = 'Autre';
-                roleCustom.style.display = 'block';
-                roleCustom.value = savedRole;
-            }
-            
-            PublicProfile.equipment = {
-                cameras: profile.cameras || [],
-                lenses: profile.lenses || [],
-                lights: profile.lights || [],
-                sounds: profile.sounds || [],
-                grips: profile.grips || [],
-                makeups: profile.makeups || [],
-                other: profile.otherEquipment || []
-            };
-            PublicProfile.renderEquipment();
-            PublicProfile._writeDemoreels('crew', (profile.demoreels && profile.demoreels.length) ? profile.demoreels : profile.demoreel);
-            PublicProfile.loadCrewGallery(profile.crewGalleryPhotos || []);
-        }
-        
-        // Association
-        if(profile.facets.asso.enabled) {
-            document.getElementById('profile-asso-name').value = profile.assoName || '';
-            const hqAsso = document.getElementById('profile-asso-hq');
-            if(hqAsso) hqAsso.value = (profile.facets && profile.facets.asso && profile.facets.asso.hqAddress) || '';
-            document.getElementById('profile-asso-type').value = profile.assoType || '';
-            document.getElementById('profile-asso-siret').value = profile.assoSiret || '';
-            document.getElementById('profile-asso-members').value = profile.assoMembers || '';
-            document.getElementById('profile-asso-year').value = profile.assoYear || '';
-            document.getElementById('profile-asso-president').value = profile.assoPresident || '';
-            document.getElementById('profile-asso-mission').value = profile.assoMission || '';
-            document.getElementById('profile-asso-activities').value = profile.assoActivities || '';
-            const services = profile.assoServices || {};
-            document.getElementById('asso-service-formation').checked = services.formation || false;
-            document.getElementById('asso-service-ateliers').checked = services.ateliers || false;
-            document.getElementById('asso-service-networking').checked = services.networking || false;
-            document.getElementById('asso-service-casting').checked = services.casting || false;
-            document.getElementById('asso-service-materiel').checked = services.materiel || false;
-            document.getElementById('asso-service-production').checked = services.production || false;
-            document.getElementById('asso-service-diffusion').checked = services.diffusion || false;
-            document.getElementById('profile-asso-facebook').value = profile.assoFacebook || '';
-            const aE = document.getElementById('profile-asso-email'); if(aE) aE.value = profile.assoEmail || '';
-            const aP = document.getElementById('profile-asso-phone'); if(aP) aP.value = profile.assoPhone || '';
-            const aW = document.getElementById('profile-asso-website'); if(aW) aW.value = profile.assoWebsite || '';
-            const aL = document.getElementById('profile-asso-logo'); if(aL) aL.value = profile.assoLogo || '';
-            PublicProfile._setLogoPreview('asso', profile.assoLogo || '');
-            document.getElementById('profile-asso-instagram').value = profile.assoInstagram || '';
-            document.getElementById('profile-asso-youtube').value = profile.assoYoutube || '';
-            document.getElementById('profile-asso-linkedin').value = profile.assoLinkedin || '';
-            PublicProfile._writeDemoreels('asso', (profile.assoDemoreels && profile.assoDemoreels.length) ? profile.assoDemoreels : profile.assoDemoreel);
-        }
-        
-        // Entreprise
-        if(profile.facets.ent.enabled) {
-            document.getElementById('profile-ent-name').value = profile.entName || '';
-            const hqEnt = document.getElementById('profile-ent-hq');
-            if(hqEnt) hqEnt.value = (profile.facets && profile.facets.ent && profile.facets.ent.hqAddress) || '';
-            document.getElementById('profile-ent-type').value = profile.entType || '';
-            document.getElementById('profile-ent-siret').value = profile.entSiret || '';
-            document.getElementById('profile-ent-legal').value = profile.entLegal || '';
-            document.getElementById('profile-ent-year').value = profile.entYear || '';
-            document.getElementById('profile-ent-employees').value = profile.entEmployees || '';
-            document.getElementById('profile-ent-director').value = profile.entDirector || '';
-            const eE = document.getElementById('profile-ent-email'); if(eE) eE.value = profile.entEmail || '';
-            const eP = document.getElementById('profile-ent-phone'); if(eP) eP.value = profile.entPhone || '';
-            const eW = document.getElementById('profile-ent-website'); if(eW) eW.value = profile.entWebsite || '';
-            const eL = document.getElementById('profile-ent-logo'); if(eL) eL.value = profile.entLogo || '';
-            PublicProfile._setLogoPreview('ent', profile.entLogo || '');
-            document.getElementById('profile-ent-contact').value = profile.entContact || '';
-            document.getElementById('profile-ent-description').value = profile.entDescription || '';
-            document.getElementById('profile-ent-services').value = profile.entServices || '';
-            const specs = profile.entSpecialties || {};
-            document.getElementById('ent-spec-fiction').checked = specs.fiction || false;
-            document.getElementById('ent-spec-doc').checked = specs.doc || false;
-            document.getElementById('ent-spec-pub').checked = specs.pub || false;
-            document.getElementById('ent-spec-corporate').checked = specs.corporate || false;
-            document.getElementById('ent-spec-clip').checked = specs.clip || false;
-            document.getElementById('ent-spec-event').checked = specs.event || false;
-            document.getElementById('ent-spec-web').checked = specs.web || false;
-            document.getElementById('profile-ent-facebook').value = profile.entFacebook || '';
-            document.getElementById('profile-ent-instagram').value = profile.entInstagram || '';
-            document.getElementById('profile-ent-youtube').value = profile.entYoutube || '';
-            document.getElementById('profile-ent-linkedin').value = profile.entLinkedin || '';
-            document.getElementById('profile-ent-vimeo').value = profile.entVimeo || '';
-            document.getElementById('profile-ent-imdb').value = profile.entImdb || '';
-            PublicProfile._writeDemoreels('ent', (profile.entDemoreels && profile.entDemoreels.length) ? profile.entDemoreels : profile.entDemoreel);
-        }   
-        // Tarif & Dispo
-        document.getElementById('profile-rate').value = profile.dailyRate || '';
-        document.getElementById('profile-currency').value = profile.rateCurrency || '€';
-        document.getElementById('profile-rate-negotiable').checked = profile.rateNegotiable || false;
-        document.getElementById('profile-availability').value = profile.availabilityText || '';
-        
-        // Calendrier disponibilités
-        PublicProfile.renderProfileCalendar();
-        PublicProfile.renderProfileDatesList();
-        
-        // Types de collaboration
-        PublicProfile.loadCollabTypes(profile);
-        
-        // Véhicule
-        document.getElementById('profile-has-vehicle').checked = profile.hasVehicle || false;
-        document.getElementById('profile-vehicle-details').style.display = profile.hasVehicle ? 'block' : 'none';
-        document.getElementById('profile-vehicle-type').value = profile.vehicleType || '';
-        document.getElementById('profile-vehicle-plate').value = profile.vehiclePlate || '';
-        document.getElementById('profile-vehicle-seats').value = profile.vehicleSeats || '';
-        document.getElementById('profile-vehicle-trunk').checked = profile.vehicleTrunk || false;
-        document.getElementById('profile-vehicle-notes').value = profile.vehicleNotes || '';
-        const vu = document.getElementById('profile-vehicle-usage'); if(vu) vu.value = profile.vehicleUsage || '';
-        ['moto','vl','pl','spl','tc'].forEach(k => { const el = document.getElementById('profile-license-' + k); if(el) el.checked = (profile.licenses || []).includes(k); });
-        
-        PublicProfile.updatePhotoPreview();
+        PublicProfile.renderFacetTabs(enabled);
         PublicProfile.updateStatus();
-        PublicProfile.updateVisibilityButtons();
-    },
-    
-    // Sauvegarde le formulaire dans le profil actuel
-    saveFormToCurrentProfile: () => {
-        if(PublicProfile.currentProfileIndex < 0) return;
-        
-        // GARDE : cette fonction reconstruit le profil depuis les 54 champs du
-        // formulaire de l'onglet Profil. Appelee avant que loadProfileToForm ne
-        // l'ait rempli — ou apres un changement de profil —, elle ecrirait des
-        // champs vides ou ceux du profil precedent par-dessus les donnees
-        // reelles. Pour ecrire un champ isole depuis ailleurs : ecriture ciblee
-        // sur l'objet profil, puis PublicProfile.saveCurrentProfile().
-        if(PublicProfile._loadedFor !== PublicProfile.profiles[PublicProfile.currentProfileIndex]?.id) {
-            console.warn('[PublicProfile] saveFormToCurrentProfile() ignoré : formulaire non chargé pour ce profil.');
-            return;
-        }
-        
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        
-        // Casquettes (facettes) : état des cases + visibilité Univers par facette
-        profile.facets = PublicProfile._normalizeFacets(profile.facets, { profile_type: profile.type, is_public: true });
-        PublicProfile.FACET_KEYS.forEach(k => {
-            profile.facets[k].enabled = document.getElementById(PublicProfile.FACET_INPUT_IDS[k])?.checked || false;
-            const vis = document.getElementById('facet-visible-' + k);
-            if(vis) profile.facets[k].visible = vis.checked;
-        });
-        // Type (compatibilité historique) = première casquette active
-        profile.type = PublicProfile._facetToType(PublicProfile.firstEnabledFacet(profile)) || '';
-        
-        // Identité
-        profile.photo = document.getElementById('profile-photo').value.trim();
-        profile.name = document.getElementById('profile-name').value.trim();
-        profile.gender = document.getElementById('profile-gender').value;
-        profile.phone = document.getElementById('profile-phone').value.trim();
-        // v578 (audit) : confidentialite du telephone
-        profile.agentPhone = document.getElementById('profile-agent-phone')?.value.trim() || '';
-        profile.hidePhone = document.getElementById('profile-hide-phone')?.checked || false;
-        profile.contactEmail = document.getElementById('profile-contact-email')?.value.trim() || '';
-        profile.city = document.getElementById('profile-city').value.trim();
-        const addressInput = document.getElementById('profile-address');
-        const previousAddress = profile.address || '';
-        profile.address = addressInput?.value.trim() || '';
-        // Récupérer les coords fournies par BAN via selectAddress (stockées dans dataset)
-        if(addressInput?.dataset.lat && addressInput?.dataset.lng) {
-            profile.latitude = parseFloat(addressInput.dataset.lat);
-            profile.longitude = parseFloat(addressInput.dataset.lng);
-        } else if(profile.address !== previousAddress) {
-            // Si l'adresse a changé à la main sans passer par l'autocomplétion, on invalide les anciennes coords
-            profile.latitude = null;
-            profile.longitude = null;
-        }
-        profile.hideAddress = document.getElementById('profile-hide-address')?.checked || false;
-        profile.hideAddressInProjects = document.getElementById('profile-hide-address-projects')?.checked || false;
-        profile.website = document.getElementById('profile-website').value.trim();
-        profile.bio = document.getElementById('profile-bio').value.trim();
-        { const _ex = document.getElementById('profile-experience'); if(_ex) profile.experience = _ex.value.trim(); }
-        
-        // Comédien (les champs à l'écran appartiennent à la fiche affichée)
-        if(PublicProfile.currentFacetTab === 'actor') {
-            profile.galleryPhotos = [
-                document.getElementById('gallery-input-0')?.value.trim() || '',
-                document.getElementById('gallery-input-1')?.value.trim() || '',
-                document.getElementById('gallery-input-2')?.value.trim() || ''
-            ].filter(url => url);
-            profile.height = document.getElementById('profile-height')?.value || '';
-            profile.weight = document.getElementById('profile-weight')?.value || '';
-            profile.age = document.getElementById('profile-age')?.value || '';
-            profile.eyeColor = document.getElementById('profile-eyes')?.value || '';
-            profile.hairColor = document.getElementById('profile-hair-color')?.value || '';
-            profile.hairLength = document.getElementById('profile-hair-length')?.value || '';
-            profile.ethnicity = document.getElementById('profile-ethnicity')?.value || '';
-            profile.corpulence = document.getElementById('profile-corpulence')?.value || '';
-            // Sports et langues avec niveaux (le champ caché est mis à jour automatiquement)
-            profile.sports = document.getElementById('profile-sports')?.value.trim() || '';
-            profile.languages = document.getElementById('profile-languages')?.value.trim() || '';
-            // Note: languagesWithLevels et sportsWithLevels sont déjà dans l'objet profile
-            profile.demoreels = PublicProfile._readDemoreels('actor');
-            profile.demoreel = profile.demoreels[0] || '';
-        }
-        
-        // Technicien (les champs à l'écran appartiennent à la fiche affichée)
-        if(PublicProfile.currentFacetTab === 'crew') {
-            profile.department = document.getElementById('profile-department')?.value || '';
-            // Langues parlées (champ caché mis à jour automatiquement, valeur propre à la fiche)
-            profile.languages = document.getElementById('profile-languages')?.value.trim() || '';
-            const roleSelect = document.getElementById('profile-role')?.value || '';
-            const roleCustom = document.getElementById('profile-role-custom')?.value.trim() || '';
-            profile.role = (roleSelect === 'Autre' && roleCustom) ? roleCustom : roleSelect;
-            profile.cameras = PublicProfile.equipment.cameras;
-            profile.lenses = PublicProfile.equipment.lenses;
-            profile.lights = PublicProfile.equipment.lights;
-            profile.sounds = PublicProfile.equipment.sounds;
-            profile.grips = PublicProfile.equipment.grips;
-            profile.makeups = PublicProfile.equipment.makeups;
-            profile.otherEquipment = PublicProfile.equipment.other;
-            profile.demoreels = PublicProfile._readDemoreels('crew');
-            profile.demoreel = profile.demoreels[0] || '';
-            profile.crewGalleryPhotos = [
-                document.getElementById('crew-gallery-input-0')?.value.trim() || '',
-                document.getElementById('crew-gallery-input-1')?.value.trim() || '',
-                document.getElementById('crew-gallery-input-2')?.value.trim() || ''
-            ].filter(url => url);
-        }
-        
-        // Association (champs dédiés : lisibles même masqués)
-        if(profile.facets && profile.facets.asso && profile.facets.asso.enabled) {
-            profile.assoName = document.getElementById('profile-asso-name')?.value.trim() || '';
-            if(profile.facets && profile.facets.asso) {
-                const hqEl = document.getElementById('profile-asso-hq');
-                const hq = hqEl?.value.trim() || '';
-                if(hq !== (profile.facets.asso.hqAddress || '')) { profile.facets.asso.hqLatitude = null; profile.facets.asso.hqLongitude = null; }
-                profile.facets.asso.hqAddress = hq;
-                if(hq && hqEl && hqEl.dataset.lat && hqEl.dataset.lng) {
-                    profile.facets.asso.hqLatitude = parseFloat(hqEl.dataset.lat);
-                    profile.facets.asso.hqLongitude = parseFloat(hqEl.dataset.lng);
-                }
-            }
-            profile.assoType = document.getElementById('profile-asso-type')?.value || '';
-            profile.assoSiret = document.getElementById('profile-asso-siret')?.value.trim() || '';
-            profile.assoMembers = document.getElementById('profile-asso-members')?.value || '';
-            profile.assoYear = document.getElementById('profile-asso-year')?.value || '';
-            profile.assoPresident = document.getElementById('profile-asso-president')?.value.trim() || '';
-            profile.assoMission = document.getElementById('profile-asso-mission')?.value.trim() || '';
-            profile.assoActivities = document.getElementById('profile-asso-activities')?.value.trim() || '';
-            profile.assoServices = {
-                formation: document.getElementById('asso-service-formation')?.checked || false,
-                ateliers: document.getElementById('asso-service-ateliers')?.checked || false,
-                networking: document.getElementById('asso-service-networking')?.checked || false,
-                casting: document.getElementById('asso-service-casting')?.checked || false,
-                materiel: document.getElementById('asso-service-materiel')?.checked || false,
-                production: document.getElementById('asso-service-production')?.checked || false,
-                diffusion: document.getElementById('asso-service-diffusion')?.checked || false
-            };
-            profile.assoFacebook = document.getElementById('profile-asso-facebook')?.value.trim() || '';
-            profile.assoEmail = document.getElementById('profile-asso-email')?.value.trim() || '';
-            profile.assoPhone = document.getElementById('profile-asso-phone')?.value.trim() || '';
-            profile.assoWebsite = document.getElementById('profile-asso-website')?.value.trim() || '';
-            profile.assoLogo = document.getElementById('profile-asso-logo')?.value.trim() || '';
-            profile.assoInstagram = document.getElementById('profile-asso-instagram')?.value.trim() || '';
-            profile.assoYoutube = document.getElementById('profile-asso-youtube')?.value.trim() || '';
-            profile.assoLinkedin = document.getElementById('profile-asso-linkedin')?.value.trim() || '';
-            profile.assoDemoreels = PublicProfile._readDemoreels('asso');
-            profile.assoDemoreel = profile.assoDemoreels[0] || '';
-            // Utiliser le nom de l'asso comme nom du profil
-            profile.name = profile.assoName || profile.name;
-        }
-        
-        // Entreprise (champs dédiés : lisibles même masqués)
-        if(profile.facets && profile.facets.ent && profile.facets.ent.enabled) {
-            profile.entName = document.getElementById('profile-ent-name')?.value.trim() || '';
-            if(profile.facets && profile.facets.ent) {
-                const hqEl = document.getElementById('profile-ent-hq');
-                const hq = hqEl?.value.trim() || '';
-                if(hq !== (profile.facets.ent.hqAddress || '')) { profile.facets.ent.hqLatitude = null; profile.facets.ent.hqLongitude = null; }
-                profile.facets.ent.hqAddress = hq;
-                if(hq && hqEl && hqEl.dataset.lat && hqEl.dataset.lng) {
-                    profile.facets.ent.hqLatitude = parseFloat(hqEl.dataset.lat);
-                    profile.facets.ent.hqLongitude = parseFloat(hqEl.dataset.lng);
-                }
-            }
-            profile.entType = document.getElementById('profile-ent-type')?.value || '';
-            profile.entSiret = document.getElementById('profile-ent-siret')?.value.trim() || '';
-            profile.entLegal = document.getElementById('profile-ent-legal')?.value || '';
-            profile.entYear = document.getElementById('profile-ent-year')?.value || '';
-            profile.entEmployees = document.getElementById('profile-ent-employees')?.value || '';
-            profile.entDirector = document.getElementById('profile-ent-director')?.value.trim() || '';
-            profile.entEmail = document.getElementById('profile-ent-email')?.value.trim() || '';
-            profile.entPhone = document.getElementById('profile-ent-phone')?.value.trim() || '';
-            profile.entWebsite = document.getElementById('profile-ent-website')?.value.trim() || '';
-            profile.entLogo = document.getElementById('profile-ent-logo')?.value.trim() || '';
-            profile.entContact = document.getElementById('profile-ent-contact')?.value.trim() || '';
-            profile.entDescription = document.getElementById('profile-ent-description')?.value.trim() || '';
-            profile.entServices = document.getElementById('profile-ent-services')?.value.trim() || '';
-            profile.entSpecialties = {
-                fiction: document.getElementById('ent-spec-fiction')?.checked || false,
-                doc: document.getElementById('ent-spec-doc')?.checked || false,
-                pub: document.getElementById('ent-spec-pub')?.checked || false,
-                corporate: document.getElementById('ent-spec-corporate')?.checked || false,
-                clip: document.getElementById('ent-spec-clip')?.checked || false,
-                event: document.getElementById('ent-spec-event')?.checked || false,
-                web: document.getElementById('ent-spec-web')?.checked || false
-            };
-            profile.entFacebook = document.getElementById('profile-ent-facebook')?.value.trim() || '';
-            profile.entInstagram = document.getElementById('profile-ent-instagram')?.value.trim() || '';
-            profile.entYoutube = document.getElementById('profile-ent-youtube')?.value.trim() || '';
-            profile.entLinkedin = document.getElementById('profile-ent-linkedin')?.value.trim() || '';
-            profile.entVimeo = document.getElementById('profile-ent-vimeo')?.value.trim() || '';
-            profile.entImdb = document.getElementById('profile-ent-imdb')?.value.trim() || '';
-            profile.entDemoreels = PublicProfile._readDemoreels('ent');
-            profile.entDemoreel = profile.entDemoreels[0] || '';
-            // Utiliser le nom de l'entreprise comme nom du profil
-            profile.name = profile.entName || profile.name;
-        }     
-        // Tarif & Dispo
-        profile.dailyRate = document.getElementById('profile-rate')?.value || '';
-        profile.rateCurrency = document.getElementById('profile-currency')?.value || '€';
-        profile.rateNegotiable = document.getElementById('profile-rate-negotiable')?.checked || false;
-        profile.availabilityText = document.getElementById('profile-availability')?.value.trim() || '';
-        
-        // Types de collaboration
-        PublicProfile.saveCollabTypes(profile);
-        
-        // Permis de conduire
-        profile.licenses = ['moto','vl','pl','spl','tc'].filter(k => document.getElementById('profile-license-' + k)?.checked);
-        
-        // Véhicule
-        profile.hasVehicle = document.getElementById('profile-has-vehicle')?.checked || false;
-        profile.vehicleType = document.getElementById('profile-vehicle-type')?.value.trim() || '';
-        profile.vehiclePlate = document.getElementById('profile-vehicle-plate')?.value.trim() || '';
-        profile.vehicleSeats = document.getElementById('profile-vehicle-seats')?.value || '';
-        profile.vehicleTrunk = document.getElementById('profile-vehicle-trunk')?.checked || false;
-        profile.vehicleNotes = document.getElementById('profile-vehicle-notes')?.value.trim() || '';
-        profile.vehicleUsage = document.getElementById('profile-vehicle-usage')?.value || '';
-        
-        // Statut
-        profile.profileComplete = !!(profile.type && (
-            profile.type === 'association' ? (profile.assoName && profile.assoType && profile.assoMission)
-            : profile.type === 'enterprise' ? (profile.entName && profile.entType && profile.entDescription)
-            : (profile.name && profile.phone && profile.city && profile.gender)
-        ));
-        profile.updatedAt = new Date().toISOString();
     },
     
     // Change le type de profil (comédien/technicien)
     // ===== Casquettes : sections par facette + barre d'onglets =====
     currentFacetTab: null,
-    FACET_INPUT_IDS: { actor: 'profile-type-actor', crew: 'profile-type-crew', asso: 'profile-type-association', ent: 'profile-type-enterprise' },
-    FACET_LABEL_IDS: { actor: 'profile-type-actor-label', crew: 'profile-type-crew-label', asso: 'profile-type-association-label', ent: 'profile-type-enterprise-label' },
     FACET_LABELS: { actor: '🎭 Comédien·ne', crew: '🎥 Technicien·ne', asso: '🏛️ Association', ent: '🏢 Entreprise' },
-    FACET_SECTIONS: {
-        actor: ['profile-identity-section', 'profile-actor-section', 'profile-actor-physical-section', 'profile-languages-section', 'profile-actor-demoreel-section', 'profile-tarif-section', 'profile-collab-section', 'profile-vehicle-section', 'profile-bio-section'],
-        crew:  ['profile-identity-section', 'profile-crew-section', 'profile-languages-section', 'profile-crew-gallery-section', 'profile-crew-demoreel-section', 'profile-tarif-section', 'profile-collab-section', 'profile-vehicle-section', 'profile-bio-section'],
-        asso:  ['profile-association-section', 'profile-collab-section'],
-        ent:   ['profile-enterprise-section', 'profile-collab-section']
-    },
-
-    // Presentation "fiche de projet" du contenu d'une casquette : onglets + briques.
-    // Lot 1 : comedien seulement. Les autres casquettes gardent l'empilement
-    // classique tant qu'elles n'ont pas leur propre entree ici.
-    FICHE_TABS: {
-        actor: [
-            { id: 'profil',     label: '🪪 Profil',                sections: ['profile-identity-section'] },
-            { id: 'photos',     label: '📸 Photos & démo',         sections: ['profile-actor-section', 'profile-actor-demoreel-section'] },
-            { id: 'physique',   label: '📏 Physique',              sections: ['profile-actor-physical-section', 'profile-languages-section'] },
-            { id: 'parcours',   label: '📝 Parcours',              sections: ['profile-bio-section'] },
-            { id: 'logistique', label: '📅 Planning & logistique', sections: ['profile-tarif-section', 'profile-collab-section', 'profile-vehicle-section'] }
-        ],
-        crew: [
-            { id: 'profil',      label: '🪪 Profil',                sections: ['profile-identity-section'] },
-            { id: 'photos',      label: '📸 Photos & démo',         sections: ['profile-crew-gallery-section', 'profile-crew-demoreel-section'] },
-            { id: 'competences', label: '🛠️ Compétences',          sections: ['profile-crew-section', 'profile-languages-section'] },
-            { id: 'parcours',    label: '📝 Parcours',              sections: ['profile-bio-section'] },
-            { id: 'logistique',  label: '📅 Planning & logistique', sections: ['profile-tarif-section', 'profile-collab-section', 'profile-vehicle-section'] }
-        ],
-        asso: [
-            { id: 'fiche',  label: '🏛️ Fiche',         sections: ['profile-association-section'] },
-            { id: 'collab', label: '🤝 Collaboration', sections: ['profile-collab-section'] }
-        ],
-        ent: [
-            { id: 'fiche',  label: '🏢 Fiche',         sections: ['profile-enterprise-section'] },
-            { id: 'collab', label: '🤝 Collaboration', sections: ['profile-collab-section'] }
-        ]
-    },
-    currentFicheTab: null,
-
     // FUSION : mode « fiche moteur » pour la creation de profil. Actif, la fiche
     // comedien affichee via le moteur du projet lit/ecrit DIRECTEMENT la casquette
     // comedien (objet facets.actor), sur une COPIE ; rien n'est ecrit sur les champs
@@ -989,43 +483,23 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         });
     },
 
-    _enabledFacetsFromForm: () => PublicProfile.FACET_KEYS.filter(k => document.getElementById(PublicProfile.FACET_INPUT_IDS[k])?.checked),
-
-    onProfileTypeChange: () => {
-        const enabled = PublicProfile._enabledFacetsFromForm();
-        // Surbrillance des cartes + interrupteurs de visibilité
-        PublicProfile.FACET_KEYS.forEach(k => {
-            const on = enabled.includes(k);
-            const lab = document.getElementById(PublicProfile.FACET_LABEL_IDS[k]);
-            if(lab) lab.style.borderColor = on ? 'var(--primary)' : 'var(--border)';
-            const vis = document.getElementById('facet-visible-' + k + '-label');
-            if(vis) vis.style.display = on ? 'inline-flex' : 'none';
-        });
-        // Onglet courant valide
-        if(!enabled.includes(PublicProfile.currentFacetTab)) PublicProfile.currentFacetTab = enabled[0] || null;
-        PublicProfile.renderFacetTabs(enabled);
-        PublicProfile.showFacetSections();
-        // Mettre à jour le matériel si technicien
-        if(enabled.includes('crew')) {
-            const dept = document.getElementById('profile-department')?.value || '';
-            PublicProfile.updateEquipmentForDepartment(dept);
-        }
-        // Peupler les selects pour association/entreprise
-        if(enabled.includes('asso')) PublicProfile.populateAssoTypes();
-        if(enabled.includes('ent')) PublicProfile.populateEntTypes();
-        // Mettre à jour les options de confidentialité d'adresse
-        PublicProfile.updateAddressPrivacyOptions();
+    // Casquettes actives, lues sur le PROFIL (et non plus sur des cases cachees
+    // du formulaire supprime). Le technicien compte des qu'UNE de ses fiches
+    // est active.
+    _enabledFacets: (profile) => {
+        const f = (profile && profile.facets) || {};
+        return PublicProfile.FACET_KEYS.filter(k => k === 'crew'
+            ? PublicProfile.crewAnyEnabled(f)
+            : !!(f[k] && f[k].enabled));
     },
 
     renderFacetTabs: (enabled) => {
         const bar = document.getElementById('facet-tabs');
         if(!bar) return;
-        enabled = enabled || PublicProfile._enabledFacetsFromForm();
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex] || {};
-        const nameEl = document.getElementById('profile-name');
-        const photoEl = document.getElementById('profile-photo');
-        const name = profile.name || (nameEl ? nameEl.value : '') || 'Mon profil';
-        const photo = profile.photo || (photoEl ? photoEl.value : '') || '';
+        enabled = enabled || PublicProfile._enabledFacets(profile);
+        const name = profile.name || 'Mon profil';
+        const photo = profile.photo || '';
         const ICONS = { actor: '🎭', crew: '🎥', asso: '🏛️', ent: '🏢' };
         // En-tete du hub : photo + nom + projets ou le profil apparait.
         const hub = document.getElementById('profile-hub-header');
@@ -1097,49 +571,15 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         }).join('') + '</div>';
     },
 
-    selectFacetTab: (k) => {
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        const prev = PublicProfile.currentFacetTab;
-        if(profile && prev && prev !== k) {
-            PublicProfile.saveFormToCurrentProfile();        // champs -> profil plat
-            PublicProfile._commitFlatToFacet(profile, prev); // plat -> fiche quittée
-        }
-        PublicProfile.currentFacetTab = k;
-        if(profile) {
-            PublicProfile._loadFacetToFlat(profile, k);      // fiche ouverte -> plat (avec héritage)
-            PublicProfile.loadProfileToForm(profile);        // plat -> champs (rafraîchit tout + onglets)
-            return;
-        }
-        PublicProfile.renderFacetTabs(PublicProfile._enabledFacetsFromForm());
-        PublicProfile.showFacetSections();
-    },
-
-    // Changement d'onglet DANS une fiche (Profil / Physique / ...). Ne touche ni
-    // aux champs ni a la sauvegarde : on montre juste les sections de l'onglet.
-    selectFicheTab: (id) => {
-        PublicProfile.currentFicheTab = id;
-        PublicProfile.showFacetSections();
-    },
-
-    // Clic sur une carte de casquette : charge la facette puis ouvre sa fiche
-    // dans une fenetre (comme l'ouverture d'une carte dans un projet).
+    // Clic sur une carte de casquette : ouvre SA fiche. Les quatre casquettes
+    // passent par le moteur de fiche du projet ; l'ancienne modale, doublon
+    // inatteignable depuis la fusion des fiches, a ete supprimee (v600).
     openFicheCard: (facet, crewIdx) => {
-        // BASCULE : la casquette comedien ouvre la FICHE UNIVERSELLE (moteur du projet).
-        // Les autres casquettes gardent l'ancien formulaire tant qu'elles ne sont pas fusionnees.
+        PublicProfile.currentFacetTab = facet;
         if(facet === 'actor') { PublicProfile.openComedienEngine(); return; }
         if(facet === 'crew') { PublicProfile.openTechnicienEngine(crewIdx || 0); return; }
         if(facet === 'asso') { PublicProfile.openAssoEngine(); return; }
         if(facet === 'ent') { PublicProfile.openEntrepriseEngine(); return; }
-        PublicProfile._bindFicheFold();
-        PublicProfile.selectFacetTab(facet);
-        const title = document.getElementById('profile-fiche-modal-title');
-        if(title) title.textContent = PublicProfile.FACET_LABELS[facet] || 'Fiche';
-        const modal = document.getElementById('profile-fiche-modal');
-        if(modal) modal.classList.add('visible');
-    },
-    closeFicheCard: () => {
-        const modal = document.getElementById('profile-fiche-modal');
-        if(modal) modal.classList.remove('visible');
     },
 
     // ===== FUSION : fiche comedien via le MOTEUR DU PROJET =====
@@ -1272,13 +712,12 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         if('_engineSavedRole' in PublicProfile) { state.currentRole = PublicProfile._engineSavedRole; delete PublicProfile._engineSavedRole; }
         const ov = document.getElementById('comedien-engine-overlay');
         if(ov) ov.remove();
-        // v598 — LE CHAMP QUI REVIENT. L'ANCIEN formulaire de profil, toujours en
-        // place derriere la fiche, n'etait pas rafraichi en sortant d'ici : il
-        // gardait a l'ecran les valeurs d'AVANT l'edition. Or « Sauvegarder »
-        // reconstruit le profil depuis ses 54 champs, puis recopie le resultat
-        // dans la casquette (_commitFlatToFacet). Un champ vide dans la fiche se
-        // voyait donc repeupler par l'ancienne valeur, dans le profil ET dans la
-        // casquette. On realigne le formulaire sur ce qui vient d'etre edite.
+        // v600 — l'ancien formulaire est SUPPRIME : il n'y a plus de champs a
+        // l'ecran a realigner en sortant de la fiche, et le pansement qui le
+        // declarait « non charge » pour la deuxieme fiche technicien n'a plus
+        // d'objet. Reste utile : aligner les champs PLATS du profil sur la fiche
+        // qui vient d'etre editee — ils alimentent les tuiles et les colonnes de
+        // la base —, puis rafraichir l'ecran.
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
         if(profile) {
             const kind = PublicProfile._engineKind || 'actor';
@@ -1286,15 +725,8 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             if(kind !== 'crew' || idx === 0) {
                 PublicProfile.currentFacetTab = kind;
                 PublicProfile._loadFacetToFlat(profile, kind);
-                PublicProfile.loadProfileToForm(profile);
-            } else {
-                // Cet ancien formulaire ne sait representer QUE la casquette
-                // comedien et la PREMIERE fiche technicien. Pour les suivantes,
-                // on le declare non charge : sa garde interne empeche alors
-                // « Sauvegarder » d'aller y relire des valeurs qui ne sont pas
-                // celles de la fiche editee.
-                PublicProfile._loadedFor = null;
             }
+            PublicProfile.refreshProfileScreen(profile);
         }
     },
 
@@ -1611,25 +1043,28 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         return card;
     },
 
-    // Activer une casquette depuis sa carte grisee : coche l'etat cache, met a
-    // jour l'affichage, puis ouvre la fiche pour la remplir.
+    // Activer une casquette depuis sa carte grisee, puis ouvrir sa fiche.
+    // v600 : l'etat s'ecrit sur le PROFIL. Avant, il n'etait pose que sur une
+    // case cachee du formulaire, et seul ce formulaire — devenu mort — le
+    // recopiait vers le profil : activer ou refermer une casquette ne
+    // survivait donc plus a un enregistrement.
     activateFacetCard: (k) => {
-        const cb = document.getElementById(PublicProfile.FACET_INPUT_IDS[k]);
-        if(cb) cb.checked = true;
-        PublicProfile.onProfileTypeChange();
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile) { Utils.toast('Aucun profil chargé.', 'warning'); return; }
+        profile.facets = PublicProfile._normalizeFacets(profile.facets, { profile_type: profile.type, is_public: profile.is_public });
+        if(profile.facets[k]) profile.facets[k].enabled = true;
+        PublicProfile.renderFacetTabs(PublicProfile._enabledFacets(profile));
         PublicProfile.openFicheCard(k);
     },
     // Refermer une casquette : la carte redevient grisee (donnees gardees).
     deactivateFacetCard: (k) => {
-        const cb = document.getElementById(PublicProfile.FACET_INPUT_IDS[k]);
-        if(cb) cb.checked = false;
-        PublicProfile.onProfileTypeChange();
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile || !profile.facets || !profile.facets[k]) return;
+        profile.facets[k].enabled = false;
+        PublicProfile.renderFacetTabs(PublicProfile._enabledFacets(profile));
     },
-    // Bascule « Visible dans l'Univers » d'une casquette (la case cachee fait
-    // foi a la sauvegarde).
+    // Bascule « Visible dans l'Univers » d'une casquette.
     toggleFacetVisible: (k, checked) => {
-        const cb = document.getElementById('facet-visible-' + k);
-        if(cb) cb.checked = checked;
         const p = PublicProfile.profiles[PublicProfile.currentProfileIndex];
         if(p && p.facets && p.facets[k]) p.facets[k].visible = checked;
     },
@@ -1733,60 +1168,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         await PublicProfile.saveCurrentProfile();
     },
 
-    // Replier une brique au clic sur son titre (sans declencher les boutons de
-    // visibilite ni un champ). Delegue une seule fois au document.
-    _ficheFoldBound: false,
-    _bindFicheFold: () => {
-        if(PublicProfile._ficheFoldBound) return;
-        PublicProfile._ficheFoldBound = true;
-        document.addEventListener('click', (e) => {
-            const h3 = e.target.closest('.profile-section.fiche-brique > h3');
-            if(!h3) return;
-            if(e.target.closest('button, input, select, textarea, a, label, .visibility-toggles, .visibility-btn')) return;
-            h3.parentElement.classList.toggle('is-folded');
-        });
-    },
-
-    showFacetSections: () => {
-        // Visibilité calculée PAR SECTION : une section partagée entre plusieurs fiches
-        // (identité, tarif, collaboration, véhicule) est visible dès qu'elle appartient
-        // à la fiche affichée — sans être re-masquée par le passage des autres casquettes.
-        const facet = PublicProfile.currentFacetTab;
-        const current = PublicProfile.FACET_SECTIONS[facet] || [];
-        const all = new Set();
-        PublicProfile.FACET_KEYS.forEach(k => (PublicProfile.FACET_SECTIONS[k] || []).forEach(id => all.add(id)));
-        const ficheTabs = PublicProfile.FICHE_TABS[facet] || null;
-        const container = document.getElementById('profile-all-sections');
-        const bar = document.getElementById('profile-fiche-tabs');
-        if(ficheTabs) {
-            // Presentation "fiche" : une barre d'onglets, et seules les sections de
-            // l'onglet actif s'affichent, habillees en briques grises.
-            if(!ficheTabs.some(t => t.id === PublicProfile.currentFicheTab)) PublicProfile.currentFicheTab = ficheTabs[0].id;
-            const activeTab = ficheTabs.find(t => t.id === PublicProfile.currentFicheTab) || ficheTabs[0];
-            const shown = new Set(activeTab.sections);
-            if(container) container.classList.add('fiche-mode');
-            if(bar) {
-                bar.classList.remove('d-none');
-                bar.innerHTML = ficheTabs.map(t => '<button type="button" class="fid-tab' + (t.id === activeTab.id ? ' is-active' : '') + '" onclick="app.PublicProfile.selectFicheTab(\'' + t.id + '\')">' + t.label + '</button>').join('');
-            }
-            all.forEach(id => {
-                const el = document.getElementById(id);
-                if(!el) return;
-                const inFacet = current.includes(id);
-                el.style.display = (inFacet && shown.has(id)) ? 'block' : 'none';
-                el.classList.toggle('fiche-brique', inFacet);
-            });
-        } else {
-            // Empilement classique (casquette pas encore convertie en fiche).
-            if(container) container.classList.remove('fiche-mode');
-            if(bar) { bar.classList.add('d-none'); bar.innerHTML = ''; }
-            all.forEach(id => {
-                const el = document.getElementById(id);
-                if(el) { el.style.display = current.includes(id) ? 'block' : 'none'; el.classList.remove('fiche-brique'); }
-            });
-        }
-    },
-    
     // ===== ADRESSE / GÉOLOCALISATION — délégué à ProfileAddress =====
     geocodeAddressInternational: (...a) => ProfileAddress.geocodeAddressInternational(...a),
     searchAddress: (...a) => ProfileAddress.searchAddress(...a),
@@ -2197,6 +1578,17 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             }
         }
         
+        // v600 — STATUT « profil complet ». Il n'etait recalcule que par
+        // saveFormToCurrentProfile, mort depuis la fusion des fiches : le bouton
+        // du tableau de bord restait donc fige sur « Compléter mon profil ». Le
+        // calcul revient ici, ou les memes champs viennent d'etre valides.
+        profile.profileComplete = !!(profile.type && (
+            profile.type === 'association' ? (profile.assoName && profile.assoType && profile.assoMission)
+            : profile.type === 'enterprise' ? (profile.entName && profile.entType && profile.entDescription)
+            : (profile.name && profile.phone && profile.city && profile.gender)
+        ));
+        profile.updatedAt = new Date().toISOString();
+
         const btn = document.querySelector('button[onclick="app.PublicProfile.saveCurrentProfile()"]');
         const originalText = btn ? btn.innerHTML : '';
         if(btn) { btn.innerHTML = '<span class="spinner"></span>Sauvegarde...'; btn.classList.add('btn-loading'); }
@@ -2413,7 +1805,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             profile.facets[facet].hqLatitude = null;
             profile.facets[facet].hqLongitude = null;
         }
-        PublicProfile.loadProfileToForm(profile);
+        PublicProfile.refreshProfileScreen(profile);
         Utils.toast('Carte ' + label + ' remise à zéro — pensez à Sauvegarder pour confirmer.', 'success', 5000);
     },
     
@@ -2651,14 +2043,17 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         });
     },
     
+    // v600 : lit le PROFIL et non plus les champs du formulaire supprime.
     updateStatus: () => {
-        const name = document.getElementById('profile-name').value.trim();
-        const phone = document.getElementById('profile-phone').value.trim();
-        const city = document.getElementById('profile-city').value.trim();
-        const gender = document.getElementById('profile-gender').value;
+        const p = PublicProfile.profiles[PublicProfile.currentProfileIndex] || {};
+        const name = (p.name || '').trim();
+        const phone = (p.phone || '').trim();
+        const city = (p.city || '').trim();
+        const gender = p.gender || '';
         
         const isComplete = name && phone && city && gender;
         const statusDiv = document.getElementById('profile-status');
+        if(!statusDiv) return;
         
         if(isComplete) {
             statusDiv.className = 'profile-status complete';

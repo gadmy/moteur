@@ -119,7 +119,7 @@
     selectAddress: (address, city, lat, lng) => {
         const addressInput = document.getElementById('profile-address');
         addressInput.value = address;
-        // Stocker les coordonnées dans le dataset de l'input pour que saveFormToCurrentProfile les récupère
+        // Stocker les coordonnées dans le dataset de l'input (lu a la sauvegarde)
         if(lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
             addressInput.dataset.lat = lat;
             addressInput.dataset.lng = lng;

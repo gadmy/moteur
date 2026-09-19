@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- ===========================================================================
-     FICHIER GENERE — NE PAS MODIFIER A LA MAIN (v599)
+     FICHIER GENERE — NE PAS MODIFIER A LA MAIN (v600)
      Il est reconstruit par concatenation des morceaux de src/parts/.
      Toute modification se fait LA-BAS, puis : node tools/build.mjs
      Une modification faite ici serait perdue a la prochaine reconstruction,
@@ -93,28 +93,24 @@ Rien d'ouvert côté code au 17 septembre en dehors des chantiers ci-dessous.
     un gain nul), Utils.escape rendue simplement increvable à la place
     (String(...) ajouté, ne plante plus sur un nombre/objet).
 
-[ ] ANCIEN FORMULAIRE DE PROFIL (filet FICHE_TABS + sections profile-*-section),
-    doublon du modèle unifié depuis la fusion des fiches (v590/v591). À retirer
-    si souhaité un jour.
-
-[ ] RETIRER L'ANCIEN FORMULAIRE DE PROFIL — MOITIE FAITE (v599). CONSTAT :
-    il est deja INATTEIGNABLE. openFicheCard intercepte les QUATRE casquettes
-    (actor, crew, asso, ent), chacune ouvre sa propre fiche, et plus aucun
-    onclick du HTML n'ouvre l'ancienne modale ; selectFacetTab, selectFicheTab
-    et showFacetSections ne sont plus appeles que depuis ce chemin mort.
-    FAIT : les deux seules lectures VIVANTES du formulaire sont coupees —
-    saveCurrentProfile et switchToProfile ne le relisent plus. C'etait la
-    CAUSE COMMUNE des deux bugs du 19 septembre, jusque-la seulement rustines.
-    Le type du profil, seul element legitime qu'on en tirait, se deduit
-    desormais des casquettes actives sans passer par le DOM.
-    RESTE : la SUPPRESSION du code mort — la modale #profile-fiche-modal, les
-    sections profile-*-section, FACET_SECTIONS, FICHE_TABS, _bindFicheFold,
-    selectFacetTab / selectFicheTab / showFacetSections, et la partie de
-    loadProfileToForm qui remplit les 54 champs (ATTENTION : cette fonction
-    fait AUSSI le rendu des tuiles et le statut — ne pas la supprimer en bloc,
-    la scinder). Risque devenu faible maintenant que plus rien ne LIT ce
-    formulaire, mais loadProfileToForm attaque beaucoup de getElementById sans
-    garde : retirer le HTML sans la reecrire ferait planter le profil.
+[ ] AIDES DEVENUES ORPHELINES APRES LE RETRAIT DE L'ANCIEN FORMULAIRE (v600).
+    Le formulaire lui-meme est SUPPRIME (voir le journal v600). Restent en
+    place, mais plus appelees par personne, les fonctions qui le REMPLISSAIENT
+    et qui visent toutes des champs qui n'existent plus :
+      - ProfileCalendar en entier (0690) — la fiche a son propre calendrier ;
+      - ProfileSkills (langues / sports), ProfileGallery (galeries comedien et
+        technicien), ProfileAddress sauf geocodeAddressInternational (la seule
+        encore utilisee, a la sauvegarde) ;
+      - dans PublicProfile : updatePhotoPreview, addEquipment /
+        toggleEquipmentSection / renderEquipment / updateEquipmentForDepartment,
+        addDemoreelLine / _writeDemoreels, _setLogoPreview / handleLogoUpload,
+        handlePhotoUpload, onRoleChange / updateRoleOptions, loadCollabTypes /
+        saveCollabTypes / updateCollabLabel, populateAssoTypes /
+        populateEntTypes, uploadGalleryPhoto / uploadCrewGalleryPhoto.
+    Aucune ne plante puisque aucune n'est atteinte — c'est du poids mort, a
+    retirer en un second lot, module par module, en verifiant a chaque fois
+    qu'aucune brique de FICHE ne s'en sert (leur repere : elles ecrivent dans
+    des identifiants 'profile-...' qui ne sont plus dans la page).
 
 [ ] CHARGER LES GROS MODULES A LA DEMANDE — PAS FAIT, et l'estimation notee
     plus tot dans la journee etait FAUSSE : le decoupage en src/parts ne rend
@@ -460,178 +456,7 @@ vv598 (19 septembre 2026) — PUBLIE.
   navigateur et console inondée de SecurityError. L'historique est désormais
   sauté en file://, le titre de page reste posé.
 
-  Reste à faire sur ce chantier : agenda du Planning (la personne apparaît
-  deux fois dans la liste des disponibilités) ; tableau transport écran et
-  PDF (elle y figure deux fois) ; profil public, où « Dupliquer » recopie
-  aussi le calendrier de disponibilités, le véhicule et le téléphone alors
-  que ces trois-là tiennent au corps et doivent devenir COMMUNS aux fiches
-  technicien.
-
-vv599 (en cours)
-
-  Livre avec vv598 mais pousse APRES la fusion, donc absent de la version
-  publiee : le correctif du CHAMP EFFACE QUI REVENAIT, repris ici.
-
-  VIGNETTES : ON PREND LE CHEMIN QUI MARCHE. Indice decisif donne par
-  l'utilisateur : « Mini Apercu » et « Apercu Plein Ecran » affichent bien ces
-  images. L'apercu passe par StoryboardExport._loadPrintImg, qui telecharge les
-  medias du bucket PRIVE en blob via le SDK ; les vignettes passaient par
-  getOrCreateUploadedImage et son cache, qui dependait d'une URL signee.
-  Nouvelle fonction Storyboard.dessinerObjetsImage : elle reprend EXACTEMENT le
-  chemin de l'apercu, retrouve le canvas au moment de peindre, et reproduit la
-  transformation de renderObjectsOnCanvas (translation, rotation, dessin
-  centre). Les deux vignettes — compacte et fiche de plan — l'appellent apres
-  renderObjectsOnCanvas, qui continue de gerer les annotations non-images.
-  REGLE GENERALE A RETENIR : quand un ecran affiche un media et qu'un autre ne
-  l'affiche pas, ne pas reparer le second — lui faire emprunter le chemin du
-  premier.
-
-  VIGNETTES DU STORYBOARD — LA CAUSE, TROUVEE EN BASE. Quatre correctifs
-  successifs avaient echoue parce qu'ils cherchaient dans le RENDU. La reponse
-  etait dans la DONNEE, et il a fallu ouvrir la base pour la voir :
-    - bucket 'projects' : PRIVE (storage.buckets.public = false) ;
-    - les 32 objets image du projet testes stockent une URL de forme
-      /object/public/projects/... — zero signee, zero chemin brut ;
-    - une adresse publique sur un bucket prive est TOUJOURS refusee par le
-      serveur : ces images ne pouvaient donc jamais se charger.
-  POURQUOI CET ETAT : Utils.migrateProjPathsInData convertit justement ces URLs
-  en chemins bruts, mais son appel dans Store etait garde par un drapeau
-  BOOLEEN (_mediaPathsMigrated). Une fois pose, la migration ne repassait plus
-  jamais — les medias ajoutes APRES ce passage restaient donc en forme publique
-  pour toujours. Constate : drapeau deja a true sur le projet, 7 projets sur 38
-  marques migres. Le drapeau devient VERSIONNE (valeur 2) : la migration rejoue
-  une fois pour tout le monde, elle est idempotente, et le resultat part au
-  prochain enregistrement.
-  DEFENSE AJOUTEE, car la donnee peut toujours redevenir sale : une URL de
-  media projet n'est PLUS JAMAIS posee telle quelle. signedUrlFor rend la
-  valeur stockee inchangee quand la signature n'est pas en cache — un repli
-  presente comme sur, mais garanti de rater sur un bucket prive. Desormais,
-  media projet = URL signee si le cache a repondu, sinon telechargement par le
-  SDK ; les adresses data:, blob: et externes restent posees directement.
-  LECON DE METHODE, a garder : quatre hypotheses de suite sur le mecanisme de
-  rendu, toutes fausses, alors que la reponse tenait dans une requete SQL. Pour
-  une image qui ne s'affiche pas, REGARDER D'ABORD CE QUI EST STOCKE.
-
-  VIGNETTES, QUATRIEME PASSE : NE PLUS DEPENDRE DE LA SIGNATURE. Le diagnostic
-  a tranche : « repeintes : 0 » et AUCUNE entree dans le cache d'images
-  (pretes, en cours et echouees toutes a zero). Donc aucun chargement n'etait
-  meme tente — l'URL signee n'est pas disponible pour ces objets image, alors
-  qu'elle l'est pour les calques de dessin du meme plan (blobs_deja_en_cache a
-  1). La difference tient au CHEMIN EMPRUNTE : les calques passent par
-  StoryboardExport._resolveBlobUrl, qui telecharge le fichier par le SDK,
-  authentifie, SANS signature ; les objets image, eux, dependaient de
-  Utils.signedUrlFor. getOrCreateUploadedImage a donc desormais DEUX chemins :
-  URL directement utilisable (http, data:, blob:), sinon telechargement par le
-  SDK comme les calques. Et quand rien n'aboutit, l'entree est RETIREE du cache
-  au lieu d'etre marquee ratee, pour ne jamais bruler l'unique tentative.
-  A RETENIR : dans ce fichier, deux mecanismes coexistent pour atteindre un
-  media prive — l'URL signee et le telechargement SDK. Quand l'un affiche et
-  l'autre pas sur la MEME donnee, c'est le premier endroit ou regarder.
-
-  VIGNETTES, TROISIEME PASSE : L'UNIQUE TENTATIVE BRULEE. La garde corrigee
-  ci-dessous a debloque l'affichage sans clic sur une fiche, mais il fallait
-  encore quitter la scene et y revenir. Piste suivie :
-  getOrCreateUploadedImage posait « img.src = Utils.signedUrlFor(imageData) »
-  SANS verifier ce que signedUrlFor avait rendu. Or cette fonction rend le
-  CHEMIN BRUT tant que l'URL n'est pas signee — une adresse relative, qui
-  echoue, et dont l'echec etait memorise DEFINITIVEMENT (failed: true). L'unique
-  tentative etait donc brulee, et l'image ne s'affichait plus jamais meme une
-  fois la signature disponible. On s'abstient desormais quand l'URL n'est pas
-  utilisable, SANS rien mettre en cache : le rendu suivant reessaie. Retiree
-  aussi la condition « pas pendant l'edition d'un plan » ajoutee a la passe
-  precedente — sans consequence, et une condition de trop est un frein possible
-  de plus. Ajoutes au diagnostic : l'etat des OBJETS IMAGE (pretes, en cours,
-  echouees, non signees) et le nombre de repeintes depuis le chargement.
-
-  VIGNETTES DU STORYBOARD, LA CAUSE REELLE — UNE GARDE QUI NE PASSAIT JAMAIS.
-  Trouvee grace au diagnostic pose a l'etape precedente : il a montre que TOUT
-  etait en place (calques presents, blobs deja en cache, canvas bien dans le
-  document) et que l'image n'etait pas un calque mais un OBJET IMAGE insere.
-  Quand un tel objet n'est pas encore charge, renderObjectsOnCanvas dessine un
-  remplacant en pointilles — le rectangle vide qu'on voyait. Sa repeinte etait
-  bien prevue a la fin du chargement, mais gardee par
-  « state.currentShotId === null ». Or state.currentShotId N'EXISTE PAS dans le
-  code : seuls DrawingEditor.currentShotId et ScriptReport.currentShotId sont
-  poses quelque part. La condition valait donc undefined === null, soit FAUX
-  EN PERMANENCE, et la repeinte ne partait jamais — jusqu'a ce qu'un autre
-  evenement redessine la liste, typiquement l'ouverture puis la fermeture d'une
-  fiche de plan, d'ou « toutes les images apparaissent d'un coup apres avoir
-  clique ». Le defaut etait present DEUX FOIS (objets image et icones SVG).
-  Remplace par la bonne condition — ne pas redessiner la liste pendant qu'on
-  EDITE un plan — et par une repeinte coalescee (Storyboard.
-  planifierRepeinteVignettes), sans quoi dix images arrivant ensemble
-  provoqueraient dix redessins complets.
-  A RETENIR POUR TOUT AUDIT : chercher les gardes qui comparent une propriete
-  jamais ecrite. Elles ne levent aucune erreur, ne laissent aucune trace, et
-  desactivent silencieusement le code qu'elles protegent.
-
-  VIGNETTES DU STORYBOARD, DEUXIEME CAUSE — LE CANVAS ORPHELIN. La premiere
-  correction (cache des blobs, ci-dessous) n'a pas suffi : les miniatures
-  restaient vides tant qu'on n'avait pas ouvert une fiche au moins une fois.
-  Trouve dans renderDrawingData : le CONTEXTE du canvas etait capture a
-  l'appel, alors que les calques se dessinent APRES leur telechargement. Si la
-  liste des plans est redessinee entre-temps — changement de scene, retour
-  d'onglet, simple second rendu — la peinture atterrit dans un canvas retire du
-  document, et la vignette reste vide jusqu'au rendu suivant. La fonction
-  accepte desormais un IDENTIFIANT de canvas et le retrouve au moment de
-  peindre, jamais avant ; les deux vignettes (compacte et fiche) le lui passent.
-  Corrige au passage : les calques partaient tous en parallele et se dessinaient
-  dans leur ordre d'ARRIVEE, si bien qu'un calque lourd place dessous pouvait
-  recouvrir ceux du dessus. Ils sont dessines l'un apres l'autre, dans l'ordre
-  du dessin.
-  OUTIL : app.Storyboard.diagVignettes() dans la console liste, plan par plan,
-  ce que la vignette a de quoi dessiner (calques visibles, calques stockes,
-  blobs deja en cache, objets vectoriels, canvas present et dans le document).
-  Il tranche entre les trois causes qui donnent le meme symptome : le dessin
-  n'est pas la / il ne se telecharge pas / il n'arrive pas jusqu'au canvas.
-
-  VIGNETTES DU STORYBOARD : LA VRAIE CAUSE. Signalement precis : dans la liste
-  des plans, les images n'apparaissaient qu'apres avoir ouvert PUIS referme la
-  fiche d'un plan — et alors toutes d'un coup. Trouve : les DESSINS ne passent
-  pas par le cache d'images du navigateur. Ils sont telecharges en blob par le
-  SDK (StoryboardExport._resolveBlobUrl), et _loadPrintImg REVOQUAIT l'URL blob
-  juste apres l'avoir dessinee. Chaque rendu de la liste retelechargeait donc
-  tout, d'ou des vignettes vides le temps des telechargements ; le second rendu,
-  lui, retrouvait les reponses dans le cache HTTP et affichait tout d'un coup.
-  Corrige : les URL blob sont gardees dans un cache borne (150 entrees, la plus
-  ancienne liberee), les demandes simultanees sur le meme dessin sont mutualisees,
-  et le cache est vide au changement de projet. La revocation apres dessin est
-  supprimee.
-  CONSEQUENCE SUR LE PRECHAUFFAGE : il visait le mauvais canal. Un calque de
-  dessin ne se rechauffe pas avec une balise image mais en remplissant le cache
-  de blobs (Utils._warmBlobs). Le collecteur du storyboard separe desormais les
-  DESSINS (blobs) des images TELEVERSEES (balises) ; le mood board, dont les
-  elements sont de vraies balises, reste sur le canal image.
-
-  ANCIEN FORMULAIRE DE PROFIL : LA CAUSE, ET PLUS LES SYMPTOMES. Constat fait
-  en ouvrant le chantier : ce formulaire est deja INATTEIGNABLE — openFicheCard
-  intercepte les quatre casquettes, chacune ouvre sa propre fiche, et plus
-  aucun onclick n'ouvre l'ancienne modale. Il restait pourtant LU a deux
-  endroits vivants, saveCurrentProfile et switchToProfile, qui rejouaient
-  par-dessus la fiche des valeurs d'un formulaire que personne ne voyait : la
-  cause commune des deux bugs du 19 septembre, jusque-la seulement rustines.
-  Ces deux lectures sont coupees. Le type du profil, seul element legitime
-  qu'on en tirait, se deduit desormais des casquettes actives sans passer par
-  le DOM. Au passage, firstEnabledFacet corrigee : elle testait
-  facets.crew.enabled, or facets.crew est un TABLEAU depuis v597 — un compte
-  purement technicien n'avait donc aucune casquette active a ses yeux.
-  Reste la suppression du code mort, decrite au RESTE A FAIRE.
-
-  PRECHAUFFAGE DES IMAGES revu. Un prechauffage existait deja et son principe
-  etait bon ; il partait jusqu'a 4 s trop tard, lancait des centaines d'images
-  d'un coup, et ne disait jamais s'il avait travaille. File commune servie 4 a
-  la fois, depart a 1 s, abstention en connexion econome, et Utils.prefetchInfo()
-  pour lire le bilan dans la console.
-
-  CHARGEMENT DIFFERE DES GROS MODULES : non fait, et l'estimation « rendu
-  simple par le decoupage », notee plus tot dans la journee, etait FAUSSE —
-  corrigee au RESTE A FAIRE. Le decoupage porte sur la SOURCE ; le fichier
-  publie reste un seul bloc de script.
-
-  DECISIONS DE FIN DE CHANTIER (19 septembre) : garage personnel ECARTE, les
-  vehicules en plus passent par le parc de regie ; retrait de l'ancien
-  formulaire de profil, chargement des gros modules a la demande et
-  prechargement des images storyboard / moodboard ouverts au RESTE A FAIRE.
+vv599 (19 septembre 2026) — PUBLIE.
 
   DECOUPAGE DU FICHIER UNIQUE. index.html (4,62 Mo, 83 800 lignes) devient un
   fichier GENERE, reconstruit par tools/build.mjs a partir de 106 morceaux
@@ -652,20 +477,143 @@ vv599 (en cours)
   REGLE : ne JAMAIS editer index.html a la main. L'action GitHub
   « verifier-build » relance la reconstruction a chaque push et echoue si le
   fichier publie ne correspond plus a src/parts/.
-  LE CHAMP EFFACE QUI REVENAIT. L'ANCIEN formulaire de profil — le doublon
-  signale plus haut comme « a retirer » — n'etait pas rafraichi a la fermeture
-  de la fiche unifiee : il gardait a l'ecran les valeurs d'AVANT l'edition. Or
-  « Sauvegarder » reconstruit le profil depuis ses 54 champs puis recopie le
-  resultat dans la casquette (_commitFlatToFacet). Un champ vide dans la fiche
-  se voyait donc repeupler par l'ancienne valeur, dans le profil ET dans la
-  casquette. A la fermeture, le formulaire est desormais realigne sur la fiche
-  qui vient d'etre editee (_loadFacetToFlat puis loadProfileToForm). LIMITE
-  ASSUMEE : cet ancien formulaire ne sait representer que la casquette comedien
-  et la PREMIERE fiche technicien ; pour les fiches technicien suivantes il est
-  declare non charge (_loadedFor a null), ce qui suffit a neutraliser sa garde
-  interne et empeche « Sauvegarder » d'y relire des valeurs qui ne sont pas
-  celles de la fiche editee. C'est un pansement : le vrai remede reste le
-  retrait de ce formulaire.
+
+  VIGNETTES DU STORYBOARD — CINQ PASSES, ET LA CAUSE ETAIT EN BASE. Symptome :
+  dans la liste des plans, les images n'apparaissaient qu'apres avoir ouvert
+  PUIS referme la fiche d'un plan, et alors toutes d'un coup. Quatre hypotheses
+  successives sur le RENDU, toutes vraies mais toutes partielles, avant qu'une
+  requete SQL ne donne la reponse. Dans l'ordre ou elles ont ete fermees :
+    1) LES BLOBS REVOQUES. Les dessins ne passent pas par le cache d'images du
+       navigateur : ils sont telecharges en blob par le SDK
+       (StoryboardExport._resolveBlobUrl), et _loadPrintImg REVOQUAIT l'URL
+       juste apres l'avoir dessinee — chaque rendu retelechargeait donc tout.
+       Cache borne (150 entrees), demandes simultanees mutualisees, vide au
+       changement de projet, plus de revocation apres dessin.
+    2) LE CANVAS ORPHELIN. renderDrawingData capturait le CONTEXTE du canvas a
+       l'appel, alors que les calques se dessinent APRES telechargement : un
+       second rendu entre-temps et la peinture atterrissait dans un canvas
+       retire du document. La fonction recoit desormais un IDENTIFIANT et
+       retrouve le canvas au moment de peindre. Les calques sont aussi dessines
+       l'un apres l'autre, dans l'ordre du dessin, et non plus dans leur ordre
+       d'arrivee (un calque lourd du dessous recouvrait ceux du dessus).
+    3) UNE GARDE QUI NE PASSAIT JAMAIS. La repeinte de fin de chargement etait
+       gardee par « state.currentShotId === null ». Or state.currentShotId
+       N'EXISTE PAS dans le code : la condition valait undefined === null, soit
+       FAUX EN PERMANENCE. Defaut present DEUX FOIS (objets image et icones
+       SVG). Remplacee par la bonne condition — ne pas redessiner la liste
+       pendant qu'on EDITE un plan — avec repeinte coalescee
+       (Storyboard.planifierRepeinteVignettes).
+    4) L'UNIQUE TENTATIVE BRULEE. getOrCreateUploadedImage posait
+       « img.src = Utils.signedUrlFor(...) » sans verifier le resultat ; cette
+       fonction rend le CHEMIN BRUT tant que l'URL n'est pas signee, l'echec
+       etait memorise DEFINITIVEMENT et l'image ne reessayait jamais. On
+       s'abstient desormais sans rien mettre en cache. Puis, le diagnostic
+       montrant « repeintes : 0 » et un cache vide, deuxieme chemin ajoute :
+       URL directement utilisable (http, data:, blob:), sinon telechargement
+       par le SDK comme les calques.
+    5) LA VRAIE CAUSE, EN BASE. Le bucket 'projects' est PRIVE, et les 32
+       objets image du projet teste stockaient une URL de forme
+       /object/public/projects/... : une adresse publique sur un bucket prive
+       est TOUJOURS refusee, ces images ne pouvaient jamais se charger.
+       Utils.migrateProjPathsInData convertit justement ces URLs en chemins
+       bruts, mais son appel dans Store etait garde par un drapeau BOOLEEN
+       (_mediaPathsMigrated) : une fois pose, la migration ne repassait plus
+       jamais, et les medias ajoutes APRES restaient en forme publique pour
+       toujours (drapeau deja a true sur le projet, 7 projets sur 38 marques).
+       Le drapeau devient VERSIONNE (valeur 2) : la migration, idempotente,
+       rejoue une fois pour tout le monde.
+  DEFENSE AJOUTEE, car la donnee peut redevenir sale : une URL de media projet
+  n'est PLUS JAMAIS posee telle quelle — URL signee si le cache a repondu,
+  sinon telechargement par le SDK ; data:, blob: et externes restent directes.
+  Et les vignettes empruntent desormais le chemin de l'apercu plein ecran, seul
+  a avoir toujours marche (Storyboard.dessinerObjetsImage, calquee sur
+  StoryboardExport._loadPrintImg).
+  TROIS REGLES A GARDER : pour une image qui ne s'affiche pas, REGARDER D'ABORD
+  CE QUI EST STOCKE ; quand un ecran affiche un media et qu'un autre ne
+  l'affiche pas sur la MEME donnee, faire emprunter au second le chemin du
+  premier plutot que de le reparer ; et chercher, dans tout audit, les gardes
+  qui comparent une propriete jamais ecrite — elles ne levent aucune erreur et
+  desactivent silencieusement le code qu'elles protegent.
+  OUTILS DE DIAGNOSTIC laisses en place : app.Storyboard.diagVignettes() liste
+  plan par plan ce que la vignette a de quoi dessiner (calques visibles,
+  calques stockes, blobs en cache, objets vectoriels, canvas present et dans le
+  document, objets image prets / en cours / echoues / non signes, repeintes).
+
+  ANCIEN FORMULAIRE DE PROFIL : LA CAUSE, ET PLUS LES SYMPTOMES. Constat fait
+  en ouvrant le chantier : ce formulaire est deja INATTEIGNABLE — openFicheCard
+  intercepte les quatre casquettes, chacune ouvre sa propre fiche, et plus
+  aucun onclick n'ouvre l'ancienne modale. Il restait pourtant LU a deux
+  endroits vivants, saveCurrentProfile et switchToProfile, qui rejouaient
+  par-dessus la fiche les valeurs d'un formulaire que personne ne voyait : la
+  CAUSE COMMUNE des deux bugs du 19 septembre, jusque-la seulement rustines
+  (dont « le champ efface qui revenait », ou un champ vide dans la fiche se
+  voyait repeupler par l'ancienne valeur au moment d'enregistrer). Ces deux
+  lectures sont coupees ; le type du profil, seul element legitime qu'on en
+  tirait, se deduit desormais des casquettes actives sans passer par le DOM.
+  Au passage, firstEnabledFacet corrigee : elle testait facets.crew.enabled, or
+  facets.crew est un TABLEAU depuis v597 — un compte purement technicien
+  n'avait donc aucune casquette active a ses yeux. Reste la suppression du code
+  mort, decrite au RESTE A FAIRE.
+
+  PRECHAUFFAGE DES IMAGES revu deux fois. Un prechauffage existait deja
+  (Utils.prefetchStoryboardImages / prefetchMoodboardImages) et son principe
+  etait bon ; il partait jusqu'a 4 s trop tard, lancait des centaines d'images
+  d'un coup, et ne disait jamais s'il avait travaille. Desormais : file commune
+  servie 4 a la fois dans l'ordre, depart a 1 s, abstention totale en connexion
+  econome (navigator.connection.saveData), et Utils.prefetchInfo() pour lire le
+  bilan dans la console. Il visait aussi le mauvais canal : un calque de dessin
+  ne se rechauffe pas avec une balise image mais en remplissant le cache de
+  blobs (Utils._warmBlobs). Le collecteur du storyboard separe donc les DESSINS
+  (blobs) des images TELEVERSEES (balises) ; le mood board, fait de vraies
+  balises, reste sur le canal image.
+
+  CHARGEMENT DIFFERE DES GROS MODULES : non fait, et l'estimation « rendu
+  simple par le decoupage », notee plus tot dans la journee, etait FAUSSE —
+  corrigee au RESTE A FAIRE. Le decoupage porte sur la SOURCE ; le fichier
+  publie reste un seul bloc de script.
+
+  DECISIONS DE FIN DE CHANTIER : garage personnel ECARTE (les vehicules en plus
+  passent par le parc de regie) ; retrait de l'ancien formulaire de profil,
+  chargement des gros modules a la demande et prechargement des images
+  storyboard / moodboard ouverts au RESTE A FAIRE.
+
+vv600 (en cours)
+
+  RETRAIT DE L'ANCIEN FORMULAIRE DE PROFIL — LOT PRINCIPAL. Le doublon signale
+  depuis la fusion des fiches (v590/v591) est supprime : la modale
+  #profile-fiche-modal et ses onze sections profile-*-section (54 champs), la
+  barre d'onglets de fiche, et cote code FACET_SECTIONS, FICHE_TABS,
+  currentFicheTab, FACET_INPUT_IDS, FACET_LABEL_IDS, selectFacetTab,
+  selectFicheTab, showFacetSections, _bindFicheFold, onProfileTypeChange,
+  _enabledFacetsFromForm, saveFormToCurrentProfile et le CSS devenu orphelin.
+  loadProfileToForm a ete SCINDEE comme prevu : la partie qui remplissait les
+  54 champs part, ce qui etait vivant reste sous un nom honnete —
+  refreshProfileScreen (tuiles de casquettes, en-tete du hub, statut).
+  TROIS DEFAUTS REELS FERMES AU PASSAGE, tous de la meme famille : un etat qui
+  ne vivait que dans le formulaire mort.
+    - ACTIVER ou REFERMER une casquette ne tenait pas. Les cartes ecrivaient
+      l'etat dans une case cachee du formulaire, et seul saveFormToCurrentProfile
+      — mort — le recopiait vers le profil. activateFacetCard et
+      deactivateFacetCard ecrivent desormais sur profile.facets, seul endroit
+      que la sauvegarde regarde.
+    - Le STATUT « profil complet » n'etait plus jamais recalcule, d'ou un bouton
+      de tableau de bord fige sur « Compléter mon profil ». Le calcul revient
+      dans saveCurrentProfile, la ou les memes champs sont valides ; et le
+      bandeau de statut lit le PROFIL au lieu de champs qui n'existent plus.
+    - Le pansement de v599 (« deuxieme fiche technicien : formulaire declare non
+      charge ») n'a plus d'objet et disparait avec lui.
+  RETIRE AUSSI, car sans lecteur : les boutons de visibilite PAR SECTION
+  (toggleVisibility / updateVisibilityButtons). Ils ecrivaient hiddenPublic /
+  hiddenProject, que plus rien ne relit ni n'enregistre depuis le passage aux
+  casquettes — la visibilite se regle desormais par CARTE (👁 Univers).
+  RESTE : les aides de remplissage devenues orphelines, listees au RESTE A FAIRE.
+
+  UN CORPS, PLUSIEURS POSTES : les trois « restes » notes en fin de v598
+  (agenda du Planning, tableaux transport ecran et PDF, « Dupliquer » du profil
+  public) etaient en realite DEJA traites par les etapes 2 et 3 de cette meme
+  version — PersonIdentity.dedupe pour l'agenda et les transports,
+  FACET_COMMON_KEYS et CREW_NEW_INHERIT pour la duplication. Ce paragraphe,
+  ecrit avant ces etapes, est retire de l'historique.
 
 
 -->
@@ -1750,11 +1698,6 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
      la carte live et la météo passent par le système WYSIWYG .fdsw* (#fdsw-map,
      FDSLive.mountMapWeather) et que Weather.renderCard n'est plus appelée. */
 
-  .profile-type-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 8px 10px; background: var(--bg); border: 2px solid var(--border); border-radius: 10px; cursor: pointer; transition: all 0.2s ease; }
-  .profile-type-card:hover { border-color: var(--primary); background: rgba(99, 102, 241, 0.05); transform: translateY(-2px); }
-  .profile-type-card:has(input:checked) { border-color: var(--primary); background: rgba(99, 102, 241, 0.1); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2); }
-  .profile-type-icon { font-size: 2.5rem; }
-  .profile-type-name { font-weight: 600; font-size: 0.95rem; text-align: center; }
   .profile-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px; }
   .profile-row > * { width: 100%; }
   .profile-input { padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; background: var(--input-bg); color: var(--text-main); width: 100%; }
@@ -3553,9 +3496,6 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .fid-tab:hover { color: var(--primary); background: var(--bg); }
   .fid-tab.is-active { color: var(--primary); background: var(--panel-bg); border-color: var(--border); border-bottom-color: var(--panel-bg); margin-bottom: -1px; }
   .fid-tabpanel { display: none; padding: 16px; flex-direction: column; gap: 14px; }
-  /* Profil affiche comme une fiche de projet (onglets + briques) — chantier casquettes */
-  .profile-fiche-tabbar { margin-top: 6px; }
-  #profile-all-sections.fiche-mode .profile-section.fiche-brique { background: var(--bg); border-radius: 10px; }
   .facet-cards-grid { display: flex; flex-wrap: wrap; gap: 15px; justify-content: flex-start; margin-top: 12px; }
   .facet-cards-grid .compact-card { width: 160px; flex: 0 0 auto; }
   .facet-card { position: relative; padding-top: 18px; }
@@ -3572,11 +3512,6 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
   .hub-projects { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
   .hub-project-chip { font-size: 0.75rem; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 2px 10px; cursor: pointer; }
   .hub-projects-empty { font-size: 0.8rem; color: var(--text-sec); font-style: italic; }
-  #profile-all-sections.fiche-mode .profile-section.fiche-brique > h3 { cursor: pointer; }
-  #profile-all-sections.fiche-mode .profile-section.fiche-brique > h3::after { content: '▾'; color: var(--text-sec); font-size: 0.7rem; margin-left: 6px; transition: transform 0.15s; }
-  #profile-all-sections.fiche-mode .profile-section.fiche-brique.is-folded > h3::after { transform: rotate(-90deg); }
-  #profile-all-sections.fiche-mode .profile-section.fiche-brique.is-folded > h3 { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
-  #profile-all-sections.fiche-mode .profile-section.fiche-brique.is-folded > *:not(h3) { display: none; }
   .fid-tabpanel.is-active { display: flex; }
   .fid-tabpanel .fid-block-grip { display: none; }
   @media (max-width: 700px) { .fid-tabbar { padding: 10px 12px 0; } .fid-tabpanel { padding: 12px; } }
@@ -5769,7 +5704,6 @@ body.presentation-mode .presentation-bar {
   .minichat-file { color: var(--primary); text-decoration: underline; word-break: break-all; }
   .facet-tabs { display: flex; gap: 6px; margin-top: 14px; flex-wrap: wrap; }
   /* v593 : .facet-tab.active retiré (classe facet-tab jamais appliquée). */
-  .facet-visible-toggle { display: none; align-items: center; gap: 5px; font-size: 0.72rem; color: var(--text-sec); margin-top: 2px; cursor: pointer; white-space: nowrap; }
   /* Fonctions retirées des profils : calendrier de disponibilités et fil d'actualité */
   .profile-section[data-section="calendar"] { display: none !important; }
   /* Un seul interrupteur de visibilité par carte (👁 sur la casquette) : plus de réglage par section */
@@ -6313,7 +6247,7 @@ body.presentation-mode .presentation-bar {
     <div class="auth-box">
       <h1>🎬 Moteur</h1>
       <p style="font-size: 0.9rem; color: var(--text-sec); margin-top: -10px; font-style: italic;">"Mais où est-ce qu'il est ce con de perchman ?"</p>
-      <p>vv599</p>
+      <p>vv600</p>
       <button class="tuto-btn" onclick="app.Tutorial.open()" style="margin: 10px 0;">👁️ Tutoriel</button>
       
       <div id="prealpha-banner" style="margin: 15px 0; padding: 12px; background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15)); border: 1px solid rgba(255,152,0,0.4); border-radius: 8px;">
@@ -7045,947 +6979,9 @@ body.presentation-mode .presentation-bar {
                 <!-- Mes casquettes (facettes) -->
                 <div class="profile-section">
                     <div id="profile-hub-header"></div>
-                    <div style="display: none;">
-                        <label class="profile-type-card" id="profile-type-actor-label">
-                            <input type="checkbox" value="actor" id="profile-type-actor" onchange="app.PublicProfile.onProfileTypeChange()" class="d-none">
-                            <span class="profile-type-icon">🎭</span>
-                            <span class="profile-type-name">Comédien.ne</span>
-                            <span class="facet-visible-toggle" id="facet-visible-actor-label" onclick="event.preventDefault(); event.stopPropagation(); const c = document.getElementById('facet-visible-actor'); c.checked = !c.checked;"><input type="checkbox" id="facet-visible-actor" checked tabindex="-1" style="pointer-events: none;"> 👁 Visible dans l'Univers</span>
-                        </label>
-                        <label class="profile-type-card" id="profile-type-crew-label">
-                            <input type="checkbox" value="crew" id="profile-type-crew" onchange="app.PublicProfile.onProfileTypeChange()" class="d-none">
-                            <span class="profile-type-icon">🎥</span>
-                            <span class="profile-type-name">Technicien.ne</span>
-                            <span class="facet-visible-toggle" id="facet-visible-crew-label" onclick="event.stopPropagation()"><input type="checkbox" id="facet-visible-crew" checked onclick="event.stopPropagation()"> 👁 Visible dans l'Univers</span>
-                        </label>
-                        <label class="profile-type-card" id="profile-type-association-label">
-                            <input type="checkbox" value="association" id="profile-type-association" onchange="app.PublicProfile.onProfileTypeChange()" class="d-none">
-                            <span class="profile-type-icon">🏛️</span>
-                            <span class="profile-type-name">Association</span>
-                            <span class="facet-visible-toggle" id="facet-visible-asso-label" onclick="event.stopPropagation()"><input type="checkbox" id="facet-visible-asso" checked onclick="event.stopPropagation()"> 👁 Visible dans l'Univers</span>
-                        </label>
-                        <label class="profile-type-card" id="profile-type-enterprise-label">
-                            <input type="checkbox" value="enterprise" id="profile-type-enterprise" onchange="app.PublicProfile.onProfileTypeChange()" class="d-none">
-                            <span class="profile-type-icon">🏢</span>
-                            <span class="profile-type-name">Entreprise</span>
-                            <span class="facet-visible-toggle" id="facet-visible-ent-label" onclick="event.stopPropagation()"><input type="checkbox" id="facet-visible-ent" checked onclick="event.stopPropagation()"> 👁 Visible dans l'Univers</span>
-                        </label>
-                    </div>
                     <div id="facet-tabs" class="facet-tabs"></div>
                 </div>
 
-                <div id="profile-fiche-modal" class="card-edit-modal">
-                  <div class="card-edit-modal-content">
-                    <div class="card-edit-modal-header">
-                      <h3 id="profile-fiche-modal-title">Fiche</h3>
-                      <div style="display:flex; gap:10px; align-items:center;">
-                        <button type="button" class="btn btn--success" onclick="app.PublicProfile.saveCurrentProfile()">💾 Enregistrer</button>
-                        <button type="button" class="card-edit-modal-close" onclick="app.PublicProfile.closeFicheCard()">✕</button>
-                      </div>
-                    </div>
-                    <div class="card-edit-modal-body" style="flex:1; padding:16px; overflow:auto;">
-                <div id="profile-fiche-tabs" class="fid-tabbar profile-fiche-tabbar d-none"></div>
-                
-                <!-- Section Identité -->
-                <div class="profile-section" id="profile-identity-section" data-section="identity">
-                    <h3>
-                        <span class="section-title">👤 Identité</span>
-                        <div class="visibility-toggles">
-                            <button type="button" class="visibility-btn" data-section="identity" data-scope="public" onclick="app.PublicProfile.toggleVisibility('identity', 'public')" data-tooltip="Visible dans l'Univers">🌍 <span class="vis-icon">👁️</span></button>
-                            <button type="button" class="visibility-btn" data-section="identity" data-scope="project" onclick="app.PublicProfile.toggleVisibility('identity', 'project')" data-tooltip="Visible par l'équipe">🎬 <span class="vis-icon">👁️</span></button>
-                        </div>
-                    </h3>
-                    <div class="profile-photo-section">
-                        <div class="profile-photo-preview" id="profile-photo-preview">👤</div>
-                        <div class="flex-1">
-                            <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
-                                <button type="button" onclick="document.getElementById('profile-photo-input').click()" class="profile-input" style="background:var(--primary); color:white; cursor:pointer; padding:10px 20px; border:none; font-weight:600;">📷 Choisir une photo</button>
-                                <input type="file" id="profile-photo-input" accept="image/*" class="d-none" onchange="app.PublicProfile.handlePhotoUpload(event)">
-                                <span id="profile-photo-status" class="text-sec-sm2"></span>
-                            </div>
-                            <input type="hidden" id="profile-photo" value="">
-                            <p style="font-size:0.8rem; color:var(--text-sec);">Formats acceptés : JPG, PNG, GIF (max 2 Mo, redimensionné à 800px)</p>
-                        </div>
-                    </div>
-                    <div class="profile-row">
-                        <input type="text" class="profile-input" id="profile-name" placeholder="Nom complet *" data-tooltip="Nom complet *">
-                        <select class="profile-input" id="profile-gender">
-                            <option value="">-- Sexe * --</option>
-                            <option value="homme">Homme</option>
-                            <option value="femme">Femme</option>
-                            <option value="non-binaire">Non-binaire</option>
-                            <option value="non-precise">Ne souhaite pas préciser</option>
-                        </select>
-                    </div>
-                    <div class="profile-row">
-                        <input type="email" class="profile-input" id="profile-email" placeholder="Email *" data-tooltip="Email *" readonly>                        <input type="tel" class="profile-input" id="profile-phone" placeholder="Téléphone *" data-tooltip="Téléphone *">
-                        <input type="email" class="profile-input" id="profile-contact-email" placeholder="📧 Email de contact public (libre, affiché sur la fiche)" data-tooltip="📧 Email de contact public (libre, affiché sur la fiche)">
-                    </div>
-                    <!-- v578 (audit) : confidentialite du telephone. Applique EN BASE par
-                         public_profiles_for_me : si un telephone d'agent est renseigne, c'est
-                         lui qui sort et le personnel ne sort jamais ; sinon la case decide. -->
-                    <div class="profile-row" style="align-items:center; gap:12px; flex-wrap:wrap;">
-                        <input type="tel" class="profile-input" id="profile-agent-phone" placeholder="📞 Téléphone de mon agent (affiché à la place du mien)" data-tooltip="📞 Téléphone de mon agent (affiché à la place du mien)" style="flex:1; min-width:260px;">
-                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.9rem; white-space:nowrap;">
-                            <input type="checkbox" id="profile-hide-phone">
-                            <span>Ne pas afficher mon téléphone sur mon profil public</span>
-                        </label>
-                    </div>
-                    <div class="profile-row">
-                        <input type="text" class="profile-input" id="profile-city" placeholder="Ville / Région *" data-tooltip="Ville / Région *" list="city-suggestions" oninput="app.Geo.suggestCities(this)">
-                        <input type="text" class="profile-input" id="profile-website" placeholder="Site web / Portfolio" data-tooltip="Site web / Portfolio">
-                    </div>
-                    <div class="profile-row">
-                        <div class="address-autocomplete-container" style="flex: 1; position: relative;">
-                            <input type="text" class="profile-input" id="profile-address" placeholder="Adresse complète * (pour la géolocalisation)" data-tooltip="Adresse complète * (pour la géolocalisation)" autocomplete="off" oninput="app.PublicProfile.searchAddress(this.value)">
-                            <div id="profile-address-suggestions" class="address-suggestions"></div>
-                        </div>
-                    </div>
-                    <div id="profile-address-privacy" class="profile-row" style="display: none; flex-direction: column; gap: 8px; background: var(--bg); padding: 12px; border-radius: 8px; margin-top: 5px;">
-                        <div class="text-sec-sm2">🔒 Confidentialité de l'adresse</div>
-                        <label id="profile-hide-address-label" style="display: none; align-items: center; gap: 8px; cursor: pointer; font-size: 0.9rem;">
-                            <input type="checkbox" id="profile-hide-address">
-                            <span>Masquer mon adresse réelle sur la carte (afficher une position approximative)</span>
-                        </label>
-                        <label id="profile-hide-address-projects-label" style="display: none; align-items: center; gap: 8px; cursor: pointer; font-size: 0.9rem;">
-                            <input type="checkbox" id="profile-hide-address-projects">
-                            <span>Masquer aussi mon adresse dans les projets (visible uniquement par moi)</span>
-                        </label>
-                        <div id="profile-address-info" style="display: none; font-size: 0.8rem; color: var(--text-sec); font-style: italic; margin-top: 5px;">
-                            ℹ️ Pour les comédien·nes et technicien·nes, l'adresse exacte n'est jamais affichée publiquement dans l'Univers (seulement la ville).
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Section Parcours / Bio (comedien & technicien) -->
-                <div class="profile-section d-none" id="profile-bio-section">
-                    <h3><span class="section-title">📝 Parcours</span></h3>
-                    <label class="text-sec-sm2" style="display:block; margin-bottom:4px;">Bio</label>
-                    <textarea class="profile-input profile-textarea" id="profile-bio" placeholder="Présentation, parcours en quelques mots..." data-tooltip="Présentation, parcours en quelques mots..."></textarea>
-                    <label class="text-sec-sm2" style="display:block; margin:10px 0 4px;">Expérience</label>
-                    <textarea class="profile-input profile-textarea" id="profile-experience" placeholder="Filmographie, rôles, réalisations, matériel, formations..." data-tooltip="Filmographie, rôles, réalisations, matériel, formations..."></textarea>
-                </div>
-
-                <!-- Section Comédien - Description Physique (visible si actor) -->
-                <div class="profile-section d-none" id="profile-actor-physical-section" data-section="physical">
-                    <h3>
-                        <span class="section-title">📏 Description Physique</span>
-                        <div class="visibility-toggles">
-                            <button type="button" class="visibility-btn" data-section="physical" data-scope="public" onclick="app.PublicProfile.toggleVisibility('physical', 'public')" title="Visibilité publique (Univers)">🌍 <span class="vis-icon">👁️</span></button>
-                            <button type="button" class="visibility-btn" data-section="physical" data-scope="project" onclick="app.PublicProfile.toggleVisibility('physical', 'project')" title="Visibilité projet (équipe)">🎬 <span class="vis-icon">👁️</span></button>
-                        </div>
-                    </h3>
-                    <div class="profile-row">
-                        <input type="number" class="profile-input" id="profile-height" placeholder="Taille (cm)" data-tooltip="Taille (cm)">
-                        <input type="number" class="profile-input" id="profile-weight" placeholder="Poids (kg)" data-tooltip="Poids (kg)">
-                        <input type="number" class="profile-input" id="profile-age" placeholder="Âge" data-tooltip="Âge">
-                    </div>
-                    <div class="profile-row">
-                        <select class="profile-input" id="profile-eyes">
-                            <option value="">-- Couleur des yeux --</option>
-                            <option value="marron">Marron</option>
-                            <option value="bleu">Bleu</option>
-                            <option value="vert">Vert</option>
-                            <option value="gris">Gris</option>
-                            <option value="noisette">Noisette</option>
-                            <option value="noir">Noir</option>
-                        </select>
-                        <select class="profile-input" id="profile-hair-color">
-                          <option value="">-- Couleur cheveux --</option>
-                            <option value="noir">Noir</option>
-                            <option value="brun">Brun</option>
-                            <option value="chatain">Châtain</option>
-                            <option value="blond">Blond</option>
-                            <option value="roux">Roux</option>
-                            <option value="gris">Gris / Poivre et sel</option>
-                            <option value="blanc">Blanc</option>
-                            <option value="chauve">Chauve</option>
-                        </select>
-                        <select class="profile-input" id="profile-hair-length">
-                            <option value="">-- Longueur cheveux --</option>
-                            <option value="chauve">Chauve</option>
-                            <option value="rase">Rasé / Très court</option>
-                            <option value="court">Court</option>
-                            <option value="mi-long">Mi-long</option>
-                            <option value="long">Long</option>
-                        </select>
-                   </div>
-                    <div class="profile-row">
-                        <select class="profile-input" id="profile-ethnicity">
-                            <option value="">-- Apparence ethnique --</option>
-                            <option value="caucasien">Caucasien / Européen</option>
-                            <option value="africain">Africain / Afro-descendant</option>
-                            <option value="maghrebin">Maghrébin / Moyen-Oriental</option>
-                            <option value="asiatique">Asiatique</option>
-                            <option value="latino">Latino / Hispanique</option>
-                            <option value="indien">Indien / Sud-Asiatique</option>
-                            <option value="metis">Métis / Mixte</option>
-                            <option value="autre">Autre</option>
-                        </select>
-                        <select class="profile-input" id="profile-corpulence">
-                            <option value="">-- Corpulence --</option>
-                            <option value="mince">Mince</option>
-                            <option value="normale">Normale</option>
-                            <option value="athletique">Athlétique</option>
-                            <option value="ronde">Ronde</option>
-                            <option value="forte">Forte</option>
-                        </select>
-                    </div>
-                    <!-- Sports avec niveaux -->
-                    <div class="mt-15">
-                        <label class="label-bold-block-10">🏃 Sports & Compétences</label>
-                        <div id="profile-sports-list" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;"></div>
-                        <div class="flex-gap8">
-                            <select class="profile-input flex-1" id="profile-sport-select">
-                                <option value="">-- Ajouter un sport --</option>
-                                <option value="Équitation">Équitation</option>
-                                <option value="Natation">Natation</option>
-                                <option value="Arts martiaux">Arts martiaux</option>
-                                <option value="Danse">Danse</option>
-                                <option value="Yoga">Yoga</option>
-                                <option value="Tennis">Tennis</option>
-                                <option value="Football">Football</option>
-                                <option value="Basketball">Basketball</option>
-                                <option value="Boxe">Boxe</option>
-                                <option value="Escalade">Escalade</option>
-                                <option value="Ski">Ski</option>
-                                <option value="Surf">Surf</option>
-                                <option value="Cyclisme">Cyclisme</option>
-                                <option value="Course à pied">Course à pied</option>
-                                <option value="Gymnastique">Gymnastique</option>
-                                <option value="Escrime">Escrime</option>
-                                <option value="Tir">Tir</option>
-                                <option value="Conduite sportive">Conduite sportive</option>
-                                <option value="Moto">Moto</option>
-                                <option value="Plongée">Plongée</option>
-                                <option value="__custom__">Autre...</option>
-                            </select>
-                            <select class="profile-input" id="profile-sport-level" style="width: auto;">
-                                <option value="debutant">Débutant</option>
-                                <option value="amateur">Amateur</option>
-                                <option value="confirme" selected>Confirmé</option>
-                                <option value="competition">Compétition</option>
-                                <option value="professionnel">Professionnel</option>
-                            </select>
-                            <button type="button" onclick="app.PublicProfile.addSport()" class="btn btn--primary btn--sm">+</button>
-                        </div>
-                    </div>
-                    <!-- Champs cachés pour compatibilité -->
-                    <input type="hidden" id="profile-sports">
-                    <input type="hidden" id="profile-languages">
-                </div>
-
-                <!-- Section Langues (comédien et technicien, valeurs propres à chaque fiche) -->
-                <div class="profile-section d-none" id="profile-languages-section">
-                    <h3>🗣️ Langues parlées</h3>
-                    <div id="profile-languages-list" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;"></div>
-                    <div class="flex-gap8">
-                        <select class="profile-input flex-1" id="profile-language-select">
-                            <option value="">-- Ajouter une langue --</option>
-                            <option value="Français">Français</option>
-                            <option value="Anglais">Anglais</option>
-                            <option value="Espagnol">Espagnol</option>
-                            <option value="Allemand">Allemand</option>
-                            <option value="Italien">Italien</option>
-                            <option value="Portugais">Portugais</option>
-                            <option value="Arabe">Arabe</option>
-                            <option value="Chinois">Chinois</option>
-                            <option value="Japonais">Japonais</option>
-                            <option value="Russe">Russe</option>
-                            <option value="Néerlandais">Néerlandais</option>
-                            <option value="Polonais">Polonais</option>
-                            <option value="Turc">Turc</option>
-                            <option value="Coréen">Coréen</option>
-                            <option value="Hindi">Hindi</option>
-                            <option value="__custom__">Autre...</option>
-                        </select>
-                        <select class="profile-input" id="profile-language-level" style="width: auto;">
-                            <option value="notions">Notions</option>
-                            <option value="intermediaire">Intermédiaire</option>
-                            <option value="courant" selected>Courant</option>
-                            <option value="bilingue">Bilingue</option>
-                            <option value="maternelle">Maternelle</option>
-                        </select>
-                        <button type="button" onclick="app.PublicProfile.addLanguage()" class="btn btn--primary btn--sm">+</button>
-                    </div>
-                </div>
-
-                <!-- Section Comédien - Galerie Photos (visible si actor) -->
-                <div class="profile-section d-none" id="profile-actor-section" data-section="gallery">
-                    <h3>
-                        <span class="section-title">📸 Galerie Photos</span>
-                        <div class="visibility-toggles">
-                            <button type="button" class="visibility-btn" data-section="gallery" data-scope="public" onclick="app.PublicProfile.toggleVisibility('gallery', 'public')" title="Visibilité publique (Univers)">🌍 <span class="vis-icon">👁️</span></button>
-                            <button type="button" class="visibility-btn" data-section="gallery" data-scope="project" onclick="app.PublicProfile.toggleVisibility('gallery', 'project')" title="Visibilité projet (équipe)">🎬 <span class="vis-icon">👁️</span></button>
-                        </div>
-                    </h3>
-                    <p class="text-sec-sm-mb10">Ajoutez jusqu'à 3 photos pour votre book (format carré recommandé)</p>
-                    <div class="actor-gallery" id="actor-gallery">
-                        <div class="actor-gallery-item" id="gallery-item-0" onclick="document.getElementById('gallery-file-0').click()">
-                            <span class="gallery-placeholder">+</span>
-                        </div>
-                        <div class="actor-gallery-item" id="gallery-item-1" onclick="document.getElementById('gallery-file-1').click()">
-                            <span class="gallery-placeholder">+</span>
-                        </div>
-                        <div class="actor-gallery-item" id="gallery-item-2" onclick="document.getElementById('gallery-file-2').click()">
-                            <span class="gallery-placeholder">+</span>
-                        </div>
-                    </div>
-                    <input type="file" id="gallery-file-0" accept="image/*" class="d-none" onchange="app.PublicProfile.uploadGalleryPhoto(0, event)">
-                    <input type="file" id="gallery-file-1" accept="image/*" class="d-none" onchange="app.PublicProfile.uploadGalleryPhoto(1, event)">
-                    <input type="file" id="gallery-file-2" accept="image/*" class="d-none" onchange="app.PublicProfile.uploadGalleryPhoto(2, event)">
-                    <input type="hidden" id="gallery-input-0" value="">
-                    <input type="hidden" id="gallery-input-1" value="">
-                    <input type="hidden" id="gallery-input-2" value="">
-                </div>
-
-                <!-- Section Comédien - Bande Démo (visible si actor) -->
-                <div class="profile-section d-none" id="profile-actor-demoreel-section" data-section="demoreel">
-                    <h3>
-                        <span class="section-title">🎬 Bande Démo</span>
-                        <div class="visibility-toggles">
-                            <button type="button" class="visibility-btn" data-section="demoreel" data-scope="public" onclick="app.PublicProfile.toggleVisibility('demoreel', 'public')" title="Visibilité publique (Univers)">🌍 <span class="vis-icon">👁️</span></button>
-                            <button type="button" class="visibility-btn" data-section="demoreel" data-scope="project" onclick="app.PublicProfile.toggleVisibility('demoreel', 'project')" title="Visibilité projet (équipe)">🎬 <span class="vis-icon">👁️</span></button>
-                        </div>
-                    </h3>
-                    <p class="text-sec-sm-mb10">Ajoutez le lien vers votre bande démo (YouTube, Vimeo, etc.)</p>
-                    <input type="url" class="profile-input" id="profile-demoreel" placeholder="https://www.youtube.com/watch?v=..." data-tooltip="https://www.youtube.com/watch?v=...">
-                    <div id="demoreel-extra-actor"></div>
-                    <button type="button" class="demoreel-add-btn" onclick="app.PublicProfile.addDemoreelLine('actor')">➕ Ajouter une bande démo</button>
-                    <div id="demoreel-preview" class="mt-15-d-none">
-                        <iframe id="demoreel-iframe" width="100%" height="315" frameborder="0" allowfullscreen class="br-8"></iframe>
-                    </div>
-                </div>
-        
-                <!-- Section Technicien (visible si crew) -->
-                <div class="profile-section d-none" id="profile-crew-section" data-section="skills">
-                    <h3>
-                        <span class="section-title">🎬 Métier & Compétences</span>
-                <div class="visibility-toggles">
-                    <button type="button" class="visibility-btn" data-section="skills" data-scope="public" onclick="app.PublicProfile.toggleVisibility('skills', 'public')" title="Visibilité publique (Univers)">🌍 <span class="vis-icon">👁️</span></button>
-                    <button type="button" class="visibility-btn" data-section="skills" data-scope="project" onclick="app.PublicProfile.toggleVisibility('skills', 'project')" title="Visibilité projet (équipe)">🎬 <span class="vis-icon">👁️</span></button>
-                </div>
-            </h3>
-            <div class="profile-row">
-             <select class="profile-input" id="profile-department" onchange="app.PublicProfile.updateRoleOptions()">
-    <option value="">-- Département * --</option>
-    <option value="gc1">📹 Image</option>
-    <option value="gc2">💡 Lumière</option>
-    <option value="gc18">🏗️ Machinerie</option>
-    <option value="gc3">🎬 Réalisation</option>
-    <option value="gc4">🎤 Son</option>
-    <option value="gc5">🎨 Décoration</option>
-    <option value="gc6">👗 Costumes</option>
-    <option value="gc7">💄 Maquillage/Coiffure</option>
-    <option value="gc8">📝 Script/Continuité</option>
-    <option value="gc9">🎭 Régie</option>
-    <option value="gc10">💼 Production</option>
-    <option value="gc11">🍴 Catering</option>
-    <option value="gc12">🚗 Transport/Logistique</option>
-    <option value="gc13">🎞️ Post-production</option>
-    <option value="gc14">✍️ Scénario/Écriture</option>
-    <option value="gc15">🎵 Musique</option>
-    <option value="gc16">🦺 Cascades/Stunts</option>
-    <option value="gc17">➕ Autre</option>
-</select>
-<select class="profile-input" id="profile-role" onchange="app.PublicProfile.onRoleChange()">
-    <option value="">-- Fonction * --</option>
-</select>
-<input type="text" class="profile-input d-none" id="profile-role-custom" placeholder="Précisez votre fonction..." data-tooltip="Précisez votre fonction...">
-            </div>
-            
-<h3 class="mt-20">🔧 Mon Matériel</h3>
-            <p class="text-sec-sm-mb10">Le matériel affiché correspond à votre département. Cochez ci-dessous pour voir d'autres catégories.</p>
-            
-            <div style="margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 10px;">
-                <label class="flex-link">
-                    <input type="checkbox" id="show-equip-camera" onchange="app.PublicProfile.toggleEquipmentSection('camera')"> 📷 Caméras
-                </label>
-                <label class="flex-link">
-                    <input type="checkbox" id="show-equip-lens" onchange="app.PublicProfile.toggleEquipmentSection('lens')"> 🔭 Objectifs
-                </label>
-                <label class="flex-link">
-                    <input type="checkbox" id="show-equip-light" onchange="app.PublicProfile.toggleEquipmentSection('light')"> 💡 Lumière
-                </label>
-                <label class="flex-link">
-                    <input type="checkbox" id="show-equip-sound" onchange="app.PublicProfile.toggleEquipmentSection('sound')"> 🎤 Son
-                </label>
-                <label class="flex-link">
-                    <input type="checkbox" id="show-equip-grip" onchange="app.PublicProfile.toggleEquipmentSection('grip')"> 🎬 Machinerie
-                </label>
-                <label class="flex-link">
-                    <input type="checkbox" id="show-equip-makeup" onchange="app.PublicProfile.toggleEquipmentSection('makeup')"> 💄 Maquillage
-                </label>
-                <label class="flex-link">
-                    <input type="checkbox" id="show-equip-other" onchange="app.PublicProfile.toggleEquipmentSection('other')"> ➕ Autre
-                </label>
-            </div>
-            
-            <!-- Caméras -->
-            <div id="equip-section-camera" class="d-none-mb15">
-                <div class="profile-row">
-                    <select class="profile-input" id="profile-camera-select">
-                        <option value="">-- Ajouter une caméra --</option>
-                        <optgroup label="Cinéma">
-                            <option value="ARRI Alexa Mini">ARRI Alexa Mini</option>
-                            <option value="ARRI Alexa Mini LF">ARRI Alexa Mini LF</option>
-                            <option value="ARRI Alexa 35">ARRI Alexa 35</option>
-                            <option value="RED V-Raptor">RED V-Raptor</option>
-                            <option value="RED Komodo">RED Komodo</option>
-                            <option value="Sony Venice">Sony Venice</option>
-                            <option value="Sony Venice 2">Sony Venice 2</option>
-                            <option value="Blackmagic URSA Mini Pro 12K">Blackmagic URSA Mini Pro 12K</option>
-                            <option value="Canon C500 Mark II">Canon C500 Mark II</option>
-                            <option value="Canon C300 Mark III">Canon C300 Mark III</option>
-                        </optgroup>
-                        <optgroup label="Semi-Pro / Hybride">
-                            <option value="Sony FX9">Sony FX9</option>
-                            <option value="Sony FX6">Sony FX6</option>
-                            <option value="Sony FX3">Sony FX3</option>
-                            <option value="Sony A7S III">Sony A7S III</option>
-                            <option value="Panasonic S1H">Panasonic S1H</option>
-                            <option value="Blackmagic Pocket 6K Pro">Blackmagic Pocket 6K Pro</option>
-                            <option value="Canon R5 C">Canon R5 C</option>
-                        </optgroup>
-                    </select>
-                    <button onclick="app.PublicProfile.addEquipment('camera')" class="btn btn--primary btn--sm">+ Ajouter</button>
-                </div>
-                <div class="equipment-list" id="camera-list"></div>
-            </div>
-            
-            <!-- Objectifs -->
-            <div id="equip-section-lens" class="d-none-mb15">
-                <div class="profile-row">
-                    <select class="profile-input" id="profile-lens-select">
-                        <option value="">-- Ajouter un objectif --</option>
-                        <optgroup label="Cinéma - Primes">
-                            <option value="Zeiss Master Prime">Zeiss Master Prime</option>
-                            <option value="Zeiss Supreme Prime">Zeiss Supreme Prime</option>
-                            <option value="Zeiss CP.3">Zeiss CP.3</option>
-                            <option value="Cooke S4/i">Cooke S4/i</option>
-                            <option value="ARRI Signature Prime">ARRI Signature Prime</option>
-                        </optgroup>
-                        <optgroup label="Cinéma - Zooms">
-                            <option value="Angénieux EZ-1 30-90">Angénieux EZ-1 30-90</option>
-                            <option value="Angénieux Optimo 24-290">Angénieux Optimo 24-290</option>
-                            <option value="Fujinon Premista 28-100">Fujinon Premista 28-100</option>
-                        </optgroup>
-                        <optgroup label="Photo / Hybride">
-                            <option value="Canon RF 24-70 f/2.8">Canon RF 24-70 f/2.8</option>
-                            <option value="Sony GM 24-70 f/2.8">Sony GM 24-70 f/2.8</option>
-                            <option value="Sigma Art 24-70 f/2.8">Sigma Art 24-70 f/2.8</option>
-                        </optgroup>
-                    </select>
-                    <button onclick="app.PublicProfile.addEquipment('lens')" class="btn btn--primary btn--sm">+ Ajouter</button>
-                </div>
-                <div class="equipment-list" id="lens-list"></div>
-            </div>
-            
-            <!-- Lumière -->
-            <div id="equip-section-light" class="d-none-mb15">
-                <div class="profile-row">
-                    <select class="profile-input" id="profile-light-select">
-                        <option value="">-- Ajouter un projecteur --</option>
-                        <optgroup label="LED">
-                            <option value="ARRI SkyPanel S60">ARRI SkyPanel S60</option>
-                            <option value="ARRI SkyPanel S120">ARRI SkyPanel S120</option>
-                            <option value="ARRI Orbiter">ARRI Orbiter</option>
-                            <option value="Aputure 600d Pro">Aputure 600d Pro</option>
-                            <option value="Aputure 300d II">Aputure 300d II</option>
-                            <option value="Aputure Nova P300c">Aputure Nova P300c</option>
-                            <option value="Nanlite Forza 500">Nanlite Forza 500</option>
-                            <option value="Litepanels Astra 6X">Litepanels Astra 6X</option>
-                            <option value="Litepanels Gemini 2x1">Litepanels Gemini 2x1</option>
-                        </optgroup>
-                        <optgroup label="HMI / Tungstène">
-                            <option value="ARRI M18">ARRI M18</option>
-                            <option value="ARRI M40">ARRI M40</option>
-                            <option value="ARRI True Blue T1">ARRI True Blue T1</option>
-                            <option value="ARRI True Blue T5">ARRI True Blue T5</option>
-                        </optgroup>
-                        <optgroup label="Tubes / Flex">
-                            <option value="Astera Titan Tube">Astera Titan Tube</option>
-                            <option value="Quasar Science Rainbow 2">Quasar Science Rainbow 2</option>
-                            <option value="Nanlite PavoTube II">Nanlite PavoTube II</option>
-                        </optgroup>
-                    </select>
-                    <button onclick="app.PublicProfile.addEquipment('light')" class="btn btn--primary btn--sm">+ Ajouter</button>
-                </div>
-                <div class="equipment-list" id="light-list"></div>
-            </div>
-            
-            <!-- Son -->
-            <div id="equip-section-sound" class="d-none-mb15">
-                <div class="profile-row">
-                    <select class="profile-input" id="profile-sound-select">
-                        <option value="">-- Ajouter du matériel son --</option>
-                        <optgroup label="Enregistreurs">
-                            <option value="Sound Devices MixPre-10 II">Sound Devices MixPre-10 II</option>
-                            <option value="Sound Devices 833">Sound Devices 833</option>
-                            <option value="Sound Devices 888">Sound Devices 888</option>
-                            <option value="Zoom F8n Pro">Zoom F8n Pro</option>
-                            <option value="Zoom F6">Zoom F6</option>
-                        </optgroup>
-                        <optgroup label="Micros">
-                            <option value="Sennheiser MKH 416">Sennheiser MKH 416</option>
-                            <option value="Sennheiser MKH 8060">Sennheiser MKH 8060</option>
-                            <option value="Schoeps CMIT 5U">Schoeps CMIT 5U</option>
-                            <option value="Rode NTG5">Rode NTG5</option>
-                            <option value="DPA 4017B">DPA 4017B</option>
-                        </optgroup>
-                        <optgroup label="HF / Lavaliers">
-                            <option value="Sennheiser EW 500 G4">Sennheiser EW 500 G4</option>
-                            <option value="Lectrosonics SMWB">Lectrosonics SMWB</option>
-                            <option value="Sony UWP-D21">Sony UWP-D21</option>
-                            <option value="Rode Wireless GO II">Rode Wireless GO II</option>
-                            <option value="DPA 4060">DPA 4060</option>
-                            <option value="Sanken COS-11D">Sanken COS-11D</option>
-                        </optgroup>
-                        <optgroup label="Perches">
-                            <option value="K-Tek KE-110">K-Tek KE-110</option>
-                            <option value="Ambient QP 5100">Ambient QP 5100</option>
-                        </optgroup>
-                    </select>
-                    <button onclick="app.PublicProfile.addEquipment('sound')" class="btn btn--primary btn--sm">+ Ajouter</button>
-                </div>
-                <div class="equipment-list" id="sound-list"></div>
-            </div>
-            
-            <!-- Machinerie -->
-            <div id="equip-section-grip" class="d-none-mb15">
-                <div class="profile-row">
-                    <select class="profile-input" id="profile-grip-select">
-                        <option value="">-- Ajouter du matériel machinerie --</option>
-                        <optgroup label="Stabilisateurs">
-                            <option value="DJI Ronin 2">DJI Ronin 2</option>
-                            <option value="DJI RS 3 Pro">DJI RS 3 Pro</option>
-                            <option value="Freefly MōVI Pro">Freefly MōVI Pro</option>
-                        </optgroup>
-                        <optgroup label="Slider / Dolly">
-                            <option value="Slider motorisé 120cm">Slider motorisé 120cm</option>
-                            <option value="Dana Dolly">Dana Dolly</option>
-                            <option value="Doorway Dolly">Doorway Dolly</option>
-                        </optgroup>
-                        <optgroup label="Têtes / Pieds">
-                            <option value="O'Connor 2575">O'Connor 2575</option>
-                            <option value="Sachtler Video 18">Sachtler Video 18</option>
-                            <option value="Ronford-Baker">Ronford-Baker</option>
-                        </optgroup>
-                        <optgroup label="Drones">
-                            <option value="DJI Inspire 3">DJI Inspire 3</option>
-                            <option value="DJI Mavic 3 Pro Cine">DJI Mavic 3 Pro Cine</option>
-                        </optgroup>
-                    </select>
-                    <button onclick="app.PublicProfile.addEquipment('grip')" class="btn btn--primary btn--sm">+ Ajouter</button>
-                </div>
-                <div class="equipment-list" id="grip-list"></div>
-            </div>
-            
-            <!-- Maquillage -->
-            <div id="equip-section-makeup" class="d-none-mb15">
-                <div class="profile-row">
-                    <select class="profile-input" id="profile-makeup-select">
-                        <option value="">-- Ajouter du matériel maquillage --</option>
-                        <optgroup label="Aérographe">
-                            <option value="Kit Aérographe Iwata">Kit Aérographe Iwata</option>
-                            <option value="Kit Aérographe Temptu">Kit Aérographe Temptu</option>
-                            <option value="Compresseur silencieux">Compresseur silencieux</option>
-                        </optgroup>
-                        <optgroup label="Éclairage">
-                            <option value="Ring Light Pro">Ring Light Pro</option>
-                            <option value="Miroir LED Hollywood">Miroir LED Hollywood</option>
-                        </optgroup>
-                        <optgroup label="Mallettes">
-                            <option value="Mallette Zuca Pro">Mallette Zuca Pro</option>
-                            <option value="Trolley maquillage XXL">Trolley maquillage XXL</option>
-                        </optgroup>
-                        <optgroup label="FX / Prothèses">
-                            <option value="Kit prothèses silicone">Kit prothèses silicone</option>
-                            <option value="Kit cicatrices/blessures">Kit cicatrices/blessures</option>
-                            <option value="Kit vieillissement">Kit vieillissement</option>
-                        </optgroup>
-                    </select>
-                    <button onclick="app.PublicProfile.addEquipment('makeup')" class="btn btn--primary btn--sm">+ Ajouter</button>
-                </div>
-                <div class="equipment-list" id="makeup-list"></div>
-            </div>
-            
-            <!-- Autre -->
-            <div id="equip-section-other" class="d-none-mb15">
-                <div class="profile-row">
-                    <input type="text" class="profile-input" id="profile-other-equipment" placeholder="Autre matériel (moniteur, transmission vidéo...)" data-tooltip="Autre matériel (moniteur, transmission vidéo...)">
-                    <button onclick="app.PublicProfile.addEquipment('other')" class="btn btn--primary btn--sm">+ Ajouter</button>
-                </div>
-                <div class="equipment-list" id="other-equipment-list"></div>
-            </div>
-        </div>
-        
-                <!-- Section Technicien - Galerie Photos (visible si crew) -->
-                <div class="profile-section d-none" id="profile-crew-gallery-section" data-section="crew-gallery">
-                    <h3>
-                        <span class="section-title">📸 Galerie Photos</span>
-                        <div class="visibility-toggles">
-                            <button type="button" class="visibility-btn" data-section="crew-gallery" data-scope="public" onclick="app.PublicProfile.toggleVisibility('crew-gallery', 'public')" title="Visibilité publique (Univers)">🌍 <span class="vis-icon">👁️</span></button>
-                            <button type="button" class="visibility-btn" data-section="crew-gallery" data-scope="project" onclick="app.PublicProfile.toggleVisibility('crew-gallery', 'project')" title="Visibilité projet (équipe)">🎬 <span class="vis-icon">👁️</span></button>
-                        </div>
-                    </h3>
-                    <p class="text-sec-sm-mb10">Ajoutez jusqu'à 3 photos de vos réalisations ou de vous en situation de travail</p>
-                    <div class="actor-gallery" id="crew-gallery">
-                        <div class="actor-gallery-item" id="crew-gallery-item-0" onclick="document.getElementById('crew-gallery-file-0').click()">
-                            <span class="gallery-placeholder">+</span>
-                        </div>
-                        <div class="actor-gallery-item" id="crew-gallery-item-1" onclick="document.getElementById('crew-gallery-file-1').click()">
-                            <span class="gallery-placeholder">+</span>
-                        </div>
-                        <div class="actor-gallery-item" id="crew-gallery-item-2" onclick="document.getElementById('crew-gallery-file-2').click()">
-                            <span class="gallery-placeholder">+</span>
-                        </div>
-                    </div>
-                    <input type="file" id="crew-gallery-file-0" accept="image/*" class="d-none" onchange="app.PublicProfile.uploadCrewGalleryPhoto(0, event)">
-                    <input type="file" id="crew-gallery-file-1" accept="image/*" class="d-none" onchange="app.PublicProfile.uploadCrewGalleryPhoto(1, event)">
-                    <input type="file" id="crew-gallery-file-2" accept="image/*" class="d-none" onchange="app.PublicProfile.uploadCrewGalleryPhoto(2, event)">
-                    <input type="hidden" id="crew-gallery-input-0" value="">
-                    <input type="hidden" id="crew-gallery-input-1" value="">
-                    <input type="hidden" id="crew-gallery-input-2" value="">
-                </div>
-        
-				<!-- Section Technicien - Bande Démo (visible si crew avec métier visuel) -->
-                <div class="profile-section d-none" id="profile-crew-demoreel-section" data-section="crew-demoreel">
-                    <h3>
-                        <span class="section-title">🎬 Bande Démo / Showreel</span>
-                        <div class="visibility-toggles">
-                            <button type="button" class="visibility-btn" data-section="crew-demoreel" data-scope="public" onclick="app.PublicProfile.toggleVisibility('crew-demoreel', 'public')" title="Visibilité publique (Univers)">🌍 <span class="vis-icon">👁️</span></button>
-                            <button type="button" class="visibility-btn" data-section="crew-demoreel" data-scope="project" onclick="app.PublicProfile.toggleVisibility('crew-demoreel', 'project')" title="Visibilité projet (équipe)">🎬 <span class="vis-icon">👁️</span></button>
-                        </div>
-                    </h3>
-                    <p class="text-sec-sm-mb10">Montrez votre travail (réalisation, image, montage, VFX, musique...)</p>
-                    <input type="url" class="profile-input" id="profile-crew-demoreel" placeholder="https://www.youtube.com/watch?v=... ou https://vimeo.com/..." data-tooltip="https://www.youtube.com/watch?v=... ou https://vimeo.com/...">
-                    <div id="demoreel-extra-crew"></div>
-                    <button type="button" class="demoreel-add-btn" onclick="app.PublicProfile.addDemoreelLine('crew')">➕ Ajouter une bande démo</button>
-                    <div id="crew-demoreel-preview" class="mt-15-d-none">
-                        <iframe id="crew-demoreel-iframe" width="100%" height="315" frameborder="0" allowfullscreen class="br-8"></iframe>
-                    </div>
-                </div>
-        
-				<!-- Section Association (visible si association) -->
-                <div class="profile-section d-none" id="profile-association-section">
-                    <h3>🏛️ Informations Association</h3>
-                    <div class="profile-photo-section">
-                        <div class="profile-photo-preview" id="profile-asso-logo-preview">🏛️</div>
-                        <div class="flex-1">
-                            <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
-                                <button type="button" onclick="document.getElementById('profile-asso-logo-input').click()" class="profile-input" style="background:var(--primary); color:white; cursor:pointer; padding:10px 20px; border:none; font-weight:600;">🖼️ Choisir un logo</button>
-                                <input type="file" id="profile-asso-logo-input" accept="image/*" class="d-none" onchange="app.PublicProfile.handleLogoUpload('asso', event)">
-                                <span id="profile-asso-logo-status" class="text-sec-sm2"></span>
-                            </div>
-                            <input type="hidden" id="profile-asso-logo" value="">
-                            <p style="font-size:0.8rem; color:var(--text-sec);">Logo de l'association : JPG, PNG, GIF (max 5 Mo, redimensionné à 800px)</p>
-                        </div>
-                    </div>
-                    <div class="profile-row">
-                        <input type="text" class="profile-input" id="profile-asso-name" placeholder="Nom de l'association *" data-tooltip="Nom de l'association *">
-                        <select class="profile-input" id="profile-asso-type">
-                            <option value="">-- Type d'association * --</option>
-                        </select>
-                    </div>
-                    <div class="address-autocomplete-container" style="position: relative;">
-                        <input type="text" class="profile-input" id="profile-asso-hq" placeholder="📍 Adresse du siège (laissez vide si identique à votre adresse personnelle)" data-tooltip="📍 Adresse du siège (laissez vide si identique à votre adresse personnelle)" autocomplete="off" oninput="app.ProfileAddress.searchHqAddress('asso', this.value)">
-                        <div id="profile-asso-hq-suggestions" class="address-suggestions"></div>
-                    </div>
-                    <div class="profile-row">
-                        <input type="email" class="profile-input" id="profile-asso-email" placeholder="📧 Email de contact public" data-tooltip="📧 Email de contact public">
-                        <input type="tel" class="profile-input" id="profile-asso-phone" placeholder="📞 Téléphone" data-tooltip="📞 Téléphone">
-                        <input type="url" class="profile-input" id="profile-asso-website" placeholder="🌐 Site internet" data-tooltip="🌐 Site internet">
-                    </div>
-                    <div class="profile-row">
-                        <input type="text" class="profile-input" id="profile-asso-siret" placeholder="N° SIRET / RNA (optionnel)" data-tooltip="N° SIRET / RNA (optionnel)">
-                        <input type="number" class="profile-input" id="profile-asso-members" placeholder="Nombre de membres" data-tooltip="Nombre de membres">
-                    </div>
-                    <div class="profile-row">
-                        <input type="number" class="profile-input" id="profile-asso-year" placeholder="Année de création" data-tooltip="Année de création">
-                        <input type="text" class="profile-input" id="profile-asso-president" placeholder="Mon rôle dans l'association (président·e, trésorier·ère...)" data-tooltip="Mon rôle dans l'association (président·e, trésorier·ère...)">
-                    </div>
-                    <textarea class="profile-input profile-textarea" id="profile-asso-mission" placeholder="Mission / Objectifs de l'association *" data-tooltip="Mission / Objectifs de l'association *"></textarea>
-                    <textarea class="profile-input profile-textarea" id="profile-asso-activities" placeholder="Activités principales (ateliers, formations, événements...)" data-tooltip="Activités principales (ateliers, formations, événements...)"></textarea>
-                    
-                    <h4 class="mt-20">🎯 Services proposés</h4>
-                    <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="asso-service-formation"> 📚 Formations
-                        </label>
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="asso-service-ateliers"> 🎬 Ateliers pratiques
-                        </label>
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="asso-service-networking"> 🤝 Networking
-                        </label>
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="asso-service-casting"> 🎭 Casting
-                        </label>
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="asso-service-materiel"> 📦 Prêt de matériel
-                        </label>
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="asso-service-production"> 🎥 Aide à la production
-                        </label>
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="asso-service-diffusion"> 📽️ Diffusion / Festivals
-                        </label>
-                    </div>
-                    
-                    <h4 class="mt-20">💻 Présence en ligne</h4>
-                    <div class="profile-row">
-                        <input type="text" class="profile-input" id="profile-asso-facebook" placeholder="Page Facebook" data-tooltip="Page Facebook">
-                        <input type="text" class="profile-input" id="profile-asso-instagram" placeholder="Instagram" data-tooltip="Instagram">
-                    </div>
-                    <div class="profile-row">
-                        <input type="text" class="profile-input" id="profile-asso-youtube" placeholder="Chaîne YouTube" data-tooltip="Chaîne YouTube">
-                        <input type="text" class="profile-input" id="profile-asso-linkedin" placeholder="Page LinkedIn" data-tooltip="Page LinkedIn">
-                    </div>
-                    
-                    <h4 class="mt-20">🎬 Showreel / Vidéo de présentation</h4>
-                    <input type="url" class="profile-input" id="profile-asso-demoreel" placeholder="https://www.youtube.com/watch?v=... ou https://vimeo.com/..." data-tooltip="https://www.youtube.com/watch?v=... ou https://vimeo.com/...">
-                    <div id="demoreel-extra-asso"></div>
-                    <button type="button" class="demoreel-add-btn" onclick="app.PublicProfile.addDemoreelLine('asso')">➕ Ajouter une bande démo</button>
-                    <div id="asso-demoreel-preview" class="mt-15-d-none">
-                        <iframe id="asso-demoreel-iframe" width="100%" height="315" frameborder="0" allowfullscreen class="br-8"></iframe>
-                    </div>
-                </div>
-        
-				<!-- Section Entreprise (visible si enterprise) -->
-                <div class="profile-section d-none" id="profile-enterprise-section">
-                    <h3>🏢 Informations Entreprise</h3>
-                    <div class="profile-photo-section">
-                        <div class="profile-photo-preview" id="profile-ent-logo-preview">🏢</div>
-                        <div class="flex-1">
-                            <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
-                                <button type="button" onclick="document.getElementById('profile-ent-logo-input').click()" class="profile-input" style="background:var(--primary); color:white; cursor:pointer; padding:10px 20px; border:none; font-weight:600;">🖼️ Choisir un logo</button>
-                                <input type="file" id="profile-ent-logo-input" accept="image/*" class="d-none" onchange="app.PublicProfile.handleLogoUpload('ent', event)">
-                                <span id="profile-ent-logo-status" class="text-sec-sm2"></span>
-                            </div>
-                            <input type="hidden" id="profile-ent-logo" value="">
-                            <p style="font-size:0.8rem; color:var(--text-sec);">Logo de l'entreprise : JPG, PNG, GIF (max 5 Mo, redimensionné à 800px)</p>
-                        </div>
-                    </div>
-                    <div class="profile-row">
-                        <input type="text" class="profile-input" id="profile-ent-name" placeholder="Nom de l'entreprise *" data-tooltip="Nom de l'entreprise *">
-                        <select class="profile-input" id="profile-ent-type">
-                            <option value="">-- Type d'entreprise * --</option>
-                        </select>
-                    </div>
-                    <div class="address-autocomplete-container" style="position: relative;">
-                        <input type="text" class="profile-input" id="profile-ent-hq" placeholder="📍 Adresse du siège (laissez vide si identique à votre adresse personnelle)" data-tooltip="📍 Adresse du siège (laissez vide si identique à votre adresse personnelle)" autocomplete="off" oninput="app.ProfileAddress.searchHqAddress('ent', this.value)">
-                        <div id="profile-ent-hq-suggestions" class="address-suggestions"></div>
-                    </div>
-                    <div class="profile-row">
-                        <input type="email" class="profile-input" id="profile-ent-email" placeholder="📧 Email de contact public" data-tooltip="📧 Email de contact public">
-                        <input type="tel" class="profile-input" id="profile-ent-phone" placeholder="📞 Téléphone" data-tooltip="📞 Téléphone">
-                        <input type="url" class="profile-input" id="profile-ent-website" placeholder="🌐 Site internet" data-tooltip="🌐 Site internet">
-                    </div>
-                    <div class="profile-row">
-                        <input type="text" class="profile-input" id="profile-ent-siret" placeholder="N° SIRET *" data-tooltip="N° SIRET *">
-                        <select class="profile-input" id="profile-ent-legal">
-                            <option value="">-- Forme juridique --</option>
-                            <option value="sarl">SARL</option>
-                            <option value="sas">SAS</option>
-                            <option value="eurl">EURL</option>
-                            <option value="sasu">SASU</option>
-                            <option value="sa">SA</option>
-                            <option value="micro">Micro-entreprise</option>
-                            <option value="autre">Autre</option>
-                        </select>
-                    </div>
-                    <div class="profile-row">
-                        <input type="number" class="profile-input" id="profile-ent-year" placeholder="Année de création" data-tooltip="Année de création">
-                        <input type="number" class="profile-input" id="profile-ent-employees" placeholder="Nombre d'employés" data-tooltip="Nombre d'employés">
-                    </div>
-                    <div class="profile-row">
-                        <input type="text" class="profile-input" id="profile-ent-director" placeholder="Ma fonction dans l'entreprise (gérant·e, directrice...)" data-tooltip="Ma fonction dans l'entreprise (gérant·e, directrice...)">
-                        <input type="text" class="profile-input" id="profile-ent-contact" placeholder="Contact commercial" data-tooltip="Contact commercial">
-                    </div>
-                    <textarea class="profile-input profile-textarea" id="profile-ent-description" placeholder="Description de l'entreprise *" data-tooltip="Description de l'entreprise *"></textarea>
-                    <textarea class="profile-input profile-textarea" id="profile-ent-services" placeholder="Services proposés (détaillez vos prestations)" data-tooltip="Services proposés (détaillez vos prestations)"></textarea>
-                    
-                    <h4 class="mt-20">🎯 Spécialités</h4>
-                    <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="ent-spec-fiction"> 🎬 Fiction
-                        </label>
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="ent-spec-doc"> 📹 Documentaire
-                        </label>
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="ent-spec-pub"> 📺 Publicité
-                        </label>
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="ent-spec-corporate"> 💼 Corporate
-                        </label>
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="ent-spec-clip"> 🎵 Clip musical
-                        </label>
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="ent-spec-event"> 🎪 Événementiel
-                        </label>
-                        <label class="flex-row-btn">
-                            <input type="checkbox" id="ent-spec-web"> 🌐 Web / Réseaux sociaux
-                        </label>
-                    </div>
-                    
-                    <h4 class="mt-20">💻 Présence en ligne</h4>
-                    <div class="profile-row">
-                        <input type="text" class="profile-input" id="profile-ent-facebook" placeholder="Page Facebook" data-tooltip="Page Facebook">
-                        <input type="text" class="profile-input" id="profile-ent-instagram" placeholder="Instagram" data-tooltip="Instagram">
-                    </div>
-                    <div class="profile-row">
-                        <input type="text" class="profile-input" id="profile-ent-youtube" placeholder="Chaîne YouTube" data-tooltip="Chaîne YouTube">
-                        <input type="text" class="profile-input" id="profile-ent-linkedin" placeholder="Page LinkedIn" data-tooltip="Page LinkedIn">
-                    </div>
-                    <div class="profile-row">
-                        <input type="text" class="profile-input" id="profile-ent-vimeo" placeholder="Vimeo / Portfolio" data-tooltip="Vimeo / Portfolio">
-                        <input type="text" class="profile-input" id="profile-ent-imdb" placeholder="Page IMDb" data-tooltip="Page IMDb">
-                    </div>
-                    
-                    <h4 class="mt-20">🎬 Showreel / Vidéo de présentation</h4>
-                    <input type="url" class="profile-input" id="profile-ent-demoreel" placeholder="https://www.youtube.com/watch?v=... ou https://vimeo.com/..." data-tooltip="https://www.youtube.com/watch?v=... ou https://vimeo.com/...">
-                    <div id="demoreel-extra-ent"></div>
-                    <button type="button" class="demoreel-add-btn" onclick="app.PublicProfile.addDemoreelLine('ent')">➕ Ajouter une bande démo</button>
-                    <div id="ent-demoreel-preview" class="mt-15-d-none">
-                        <iframe id="ent-demoreel-iframe" width="100%" height="315" frameborder="0" allowfullscreen class="br-8"></iframe>
-                    </div>
-                </div>
-        
-				<!-- Section Tarif & Collaboration (pour tous) -->
-                <div class="profile-section" id="profile-tarif-section" data-section="tarif">
-                    <h3>
-                        <span class="section-title">💰 Tarif & Collaboration</span>
-                        <div class="visibility-toggles">
-                            <button type="button" class="visibility-btn" data-section="tarif" data-scope="public" onclick="app.PublicProfile.toggleVisibility('tarif', 'public')" title="Visibilité publique (Univers)">🌍 <span class="vis-icon">👁️</span></button>
-                            <button type="button" class="visibility-btn" data-section="tarif" data-scope="project" onclick="app.PublicProfile.toggleVisibility('tarif', 'project')" title="Visibilité projet (équipe)">🎬 <span class="vis-icon">👁️</span></button>
-                        </div>
-                    </h3>
-                    <div class="profile-row">
-                        <input type="number" class="profile-input" id="profile-rate" placeholder="Tarif journalier brut" data-tooltip="Tarif journalier brut">
-                        <select class="profile-input" id="profile-currency">
-                            <option value="€">€ Euro</option>
-                            <option value="$">$ Dollar</option>
-                            <option value="£">£ Livre</option>
-                            <option value="CHF">CHF Franc suisse</option>
-                        </select>
-                    </div>
-                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer; margin: 10px 0;">
-                        <input type="checkbox" id="profile-rate-negotiable" style="width:18px; height:18px;">
-                        <span>🤝 Tarif négociable selon le projet</span>
-                    </label>
-                    <textarea class="profile-input profile-textarea" id="profile-availability" placeholder="Vos disponibilités générales (ex: Disponible les weekends, Libre à partir de mars 2025...)" data-tooltip="Vos disponibilités générales (ex: Disponible les weekends, Libre à partir de mars 2025...)"></textarea>
-                    
-                    </div>
-        
-                <!-- Section Collaboration (toutes les fiches) -->
-                <div class="profile-section" id="profile-collab-section" data-section="collab">
-                    <h3><span class="section-title">🤝 Type de collaboration souhaitée</span></h3>
-                    <div class="mt-15">
-                        <p class="text-sec-sm-mb10">Cochez les types de projets qui vous intéressent (plusieurs choix possibles)</p>
-                        <div style="display: flex; gap: 15px; flex-wrap: wrap;">
-                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; padding:10px 15px; border:2px solid #4CAF50; border-radius:20px; background:var(--bg);" id="label-collab-pro">
-                                <input type="checkbox" id="profile-collab-pro" onchange="app.PublicProfile.updateCollabLabel('pro')">
-                                <span>🎬 Pro</span>
-                            </label>
-                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; padding:10px 15px; border:2px solid #FF9800; border-radius:20px; background:var(--bg);" id="label-collab-semi">
-                                <input type="checkbox" id="profile-collab-semi" onchange="app.PublicProfile.updateCollabLabel('semi')">
-                                <span>⚡ Semi-pro</span>
-                            </label>
-                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; padding:10px 15px; border:2px solid #E91E63; border-radius:20px; background:var(--bg);" id="label-collab-benevole">
-                                <input type="checkbox" id="profile-collab-benevole" onchange="app.PublicProfile.updateCollabLabel('benevole')">
-                                <span>❤️ Bénévole</span>
-                            </label>
-                        </div>
-                        <p style="font-size: 0.8rem; color: var(--text-sec); margin-top: 8px;">
-                            🎬 Pro = Contrats et tarifs standards | ⚡ Semi-pro = Flexible mais payé | ❤️ Bénévole = Défraiement uniquement
-                        </p>
-                    </div>
-                </div>
-        
-				<!-- Section Calendrier (pour tous) -->
-                <div class="profile-section" data-section="calendar">
-                    <h3>
-                        <span class="section-title">📅 Calendrier des disponibilités</span>
-                        <div class="visibility-toggles">
-                            <button type="button" class="visibility-btn" data-section="calendar" data-scope="public" onclick="app.PublicProfile.toggleVisibility('calendar', 'public')" title="Visibilité publique (Univers)">🌍 <span class="vis-icon">👁️</span></button>
-                            <button type="button" class="visibility-btn" data-section="calendar" data-scope="project" onclick="app.PublicProfile.toggleVisibility('calendar', 'project')" title="Visibilité projet (équipe)">🎬 <span class="vis-icon">👁️</span></button>
-                        </div>
-                    </h3>
-                    <p class="text-sec-sm-mb15">Clic gauche = disponible 🟢 | Clic droit = indisponible 🔴</p>
-                    <div id="profile-availability-calendar"></div>
-                    <!-- Les listes de périodes sont masquées car déjà visibles dans le calendrier -->
-                    <div id="profile-avail-dates-list" class="d-none"></div>
-                    <div id="profile-unavail-dates-list" class="d-none"></div>
-                </div>
-        
-                <!-- Section Véhicule -->
-                <div class="profile-section" id="profile-vehicle-section" data-section="vehicle">
-                    <h3>
-                        <span class="section-title">🚗 Véhicule</span>
-                        <div class="visibility-toggles">
-                            <button type="button" class="visibility-btn" data-section="vehicle" data-scope="public" onclick="app.PublicProfile.toggleVisibility('vehicle', 'public')" title="Visibilité publique (Univers)">🌍 <span class="vis-icon">👁️</span></button>
-                            <button type="button" class="visibility-btn" data-section="vehicle" data-scope="project" onclick="app.PublicProfile.toggleVisibility('vehicle', 'project')" title="Visibilité projet (équipe)">🎬 <span class="vis-icon">👁️</span></button>
-                        </div>
-                    </h3>
-                    <div style="margin-bottom:14px; padding:14px; background:rgba(0,0,0,0.03); border-radius:8px;">
-                        <label class="form-label" style="margin-bottom:8px; display:block;">Permis de conduire</label>
-                        <div style="display:flex; flex-wrap:wrap; gap:14px;">
-                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="profile-license-moto"> Moto (A)</label>
-                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="profile-license-vl"> VL (B)</label>
-                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="profile-license-pl"> PL (C)</label>
-                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="profile-license-spl"> SPL (CE)</label>
-                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="profile-license-tc"> TC (D)</label>
-                        </div>
-                    </div>
-                    <label class="flex-row-btn" style="margin-bottom: 10px;">
-                        <input type="checkbox" id="profile-has-vehicle" onchange="document.getElementById('profile-vehicle-details').style.display = this.checked ? 'block' : 'none';">
-                        🚗 Je possède un véhicule
-                    </label>
-                    <div id="profile-vehicle-details" style="display:none; margin-top:15px; padding:20px; background:var(--bg); border-radius:8px; border:1px solid var(--border);">
-                        <div class="profile-row mt-10" style="margin-top:0;">
-                            <div style="grid-column:1 / -1;">
-                                <label class="form-label">Utilisation sur un tournage</label>
-                                <select class="profile-input" id="profile-vehicle-usage">
-                                    <option value="">-- Précisez --</option>
-                                    <option value="free">À dispo gratuitement (peut emmener gens/matériel)</option>
-                                    <option value="compensation">À dispo contre dédommagement (frais)</option>
-                                    <option value="paid">À dispo en étant payé</option>
-                                    <option value="private">Je ne veux pas que la prod le voie</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="profile-row">
-                            <div>
-                                <label class="form-label">Type de véhicule</label>
-                                <input type="text" class="profile-input" id="profile-vehicle-type" placeholder="Ex: Citroën C3, Renault Kangoo..." data-tooltip="Ex: Citroën C3, Renault Kangoo...">
-                            </div>
-                            <div>
-                                <label class="form-label">Immatriculation</label>
-                                <input type="text" class="profile-input" id="profile-vehicle-plate" placeholder="AA-123-BB" data-tooltip="AA-123-BB">
-                            </div>
-                        </div>
-                        <div class="profile-row">
-                            <div>
-                                <label class="form-label">Places disponibles</label>
-                                <input type="number" class="profile-input" id="profile-vehicle-seats" placeholder="Nombre de places" data-tooltip="Nombre de places" min="1" max="9">
-                            </div>
-                            <label style="display:flex; align-items:center; gap:10px; cursor:pointer; padding:12px; background:var(--panel-bg); border-radius:6px; height:fit-content; margin-top:auto;">
-                                <input type="checkbox" id="profile-vehicle-trunk" style="width:18px; height:18px;">
-                                <span>📦 Coffre disponible pour matériel</span>
-                            </label>
-                        </div>
-                        <div class="profile-row mt-10">
-                            <textarea class="profile-input" id="profile-vehicle-notes" placeholder="Notes véhicule (climatisation, GPS, attelage...)" data-tooltip="Notes véhicule (climatisation, GPS, attelage...)" style="min-height:60px; resize:vertical;"></textarea>
-                        </div>
-                    </div>
-                </div>
-        
-                    </div>
-                  </div>
-                </div>
 				<!-- Zone Danger - Suppression profil et compte -->
                 <div class="profile-section" style="border-color: var(--danger); margin-top: 30px; max-width: 520px; margin-left: auto; margin-right: auto;">
                     <h3 class="text-danger" style="justify-content: center;">⚠️ Zone Danger</h3>
@@ -40427,7 +39423,7 @@ const ProfileGallery = {
     selectAddress: (address, city, lat, lng) => {
         const addressInput = document.getElementById('profile-address');
         addressInput.value = address;
-        // Stocker les coordonnées dans le dataset de l'input pour que saveFormToCurrentProfile les récupère
+        // Stocker les coordonnées dans le dataset de l'input (lu a la sauvegarde)
         if(lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
             addressInput.dataset.lat = lat;
             addressInput.dataset.lng = lng;
@@ -40641,7 +39637,7 @@ const ProfileGallery = {
             ProfileClaims.renderPendingClaims();
             PublicProfile.renderProfileTabs();
             PublicProfile.currentProfileIndex = PublicProfile.profiles.length - 1;
-            PublicProfile.loadProfileToForm(newProfile);
+            PublicProfile.refreshProfileScreen(newProfile);
             document.getElementById('no-profile-message').style.display = 'none';
             document.getElementById('profile-all-sections').style.display = 'block';
             
@@ -40736,65 +39732,6 @@ const ProfileGallery = {
         } catch(e) {
             console.error('Erreur chargement projets profils:', e);
         }
-    },
-    
-    // Gestion de la visibilité des sections
-    toggleVisibility: (section, scope) => {
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!profile) {
-            Utils.toast('Veuillez d\'abord sélectionner un profil', 'warning');
-            return;
-        }
-        
-        // Initialiser les tableaux si nécessaire
-        if(!profile.hiddenPublic) profile.hiddenPublic = [];
-        if(!profile.hiddenProject) profile.hiddenProject = [];
-        
-        const hiddenArray = scope === 'public' ? profile.hiddenPublic : profile.hiddenProject;
-        const index = hiddenArray.indexOf(section);
-        
-        if(index > -1) {
-            // Section cachée -> la rendre visible
-            hiddenArray.splice(index, 1);
-        } else {
-            // Section visible -> la cacher
-            hiddenArray.push(section);
-        }
-        
-        // Mettre à jour l'affichage des boutons
-        PublicProfile.updateVisibilityButtons();
-        
-        // Sauvegarder automatiquement
-        PublicProfile.save();
-    },
-    
-    updateVisibilityButtons: () => {
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!profile) return;
-        
-        const hiddenPublic = profile.hiddenPublic || [];
-        const hiddenProject = profile.hiddenProject || [];
-        
-        // Mettre à jour tous les boutons
-        document.querySelectorAll('.visibility-btn').forEach(btn => {
-            const section = btn.dataset.section;
-            const scope = btn.dataset.scope;
-            
-            const hiddenArray = scope === 'public' ? hiddenPublic : hiddenProject;
-            const isHidden = hiddenArray.includes(section);
-            
-            btn.classList.toggle('hidden-section', isHidden);
-            
-            // Mettre à jour l'icône
-            const icon = btn.querySelector('.vis-icon');
-            if(icon) {
-                icon.textContent = isHidden ? '👁️‍🗨️' : '👁️';
-            }
-            
-            // Mettre à jour le title
-            const scopeLabel = scope === 'public' ? 'public (Univers)' : 'projet (équipe)';
-            btn.title = isHidden ? `Section cachée en ${scopeLabel} - Cliquer pour afficher` : `Section visible en ${scopeLabel} - Cliquer pour cacher`;
-        });
     },
     
     open: async () => {
@@ -41040,7 +39977,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         PublicProfile.profiles.push(newProfile);
         PublicProfile.currentProfileIndex = PublicProfile.profiles.length - 1;
         PublicProfile.renderProfileTabs();
-        PublicProfile.loadProfileToForm(newProfile);
+        PublicProfile.refreshProfileScreen(newProfile);
         
         // Afficher le formulaire
         document.getElementById('no-profile-message').style.display = 'none';
@@ -41117,483 +40054,36 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         
         PublicProfile.currentProfileIndex = index;
         PublicProfile.renderProfileTabs();
-        PublicProfile.loadProfileToForm(PublicProfile.profiles[index]);
+        PublicProfile.refreshProfileScreen(PublicProfile.profiles[index]);
         
         document.getElementById('no-profile-message').style.display = 'none';
         document.getElementById('profile-all-sections').style.display = 'block';
     },
     
     // ============================================================
-    // ===== FORMULAIRE PROFIL (chargement / sauvegarde) =====
+    // ===== ECRAN « MON PROFIL » (rafraichissement) =====
     // ============================================================
-    // Charge un profil dans le formulaire
-    loadProfileToForm: (profile) => {
-        // Marque le formulaire comme peuple POUR CE PROFIL : saveFormToCurrentProfile
-        // reconstruit le profil entier depuis le DOM et n'a de sens qu'apres ce
-        // remplissage. Voir la garde posee en tete de cette fonction.
-        PublicProfile._loadedFor = profile?.id || null;
-        // Casquettes (facettes) : cocher depuis profile.facets (migration douce si absent)
+    // v600 : ne remplit plus aucun formulaire. L'ancien formulaire a 54 champs
+    // est SUPPRIME — chaque casquette s'edite dans sa propre fiche. Il ne reste
+    // ici que ce qui est VIVANT : les tuiles de casquettes et le bandeau de
+    // statut. Ancien nom : loadProfileToForm.
+    refreshProfileScreen: (profile) => {
+        if(!profile) return;
         profile.facets = PublicProfile._normalizeFacets(profile.facets, { profile_type: profile.type, is_public: profile.is_public });
-        document.getElementById('profile-type-actor').checked = profile.facets.actor.enabled;
-        document.getElementById('profile-type-crew').checked = PublicProfile.crewAnyEnabled(profile.facets);
-        document.getElementById('profile-type-association').checked = profile.facets.asso.enabled;
-        document.getElementById('profile-type-enterprise').checked = profile.facets.ent.enabled;
-        PublicProfile.FACET_KEYS.forEach(k => {
-            if(k === 'crew') return; // v598 : visibilité par fiche technicien, gérée dans les tuiles dédiées
-            const el = document.getElementById('facet-visible-' + k);
-            if(el) el.checked = profile.facets[k].visible !== false;
-        });
-        // Onglet courant : on le garde s'il est valide, sinon première fiche active (crew exclu : géré par le moteur)
-        const fEnabled = PublicProfile.FACET_KEYS.filter(k => k !== 'crew' && profile.facets[k].enabled);
-        if(!fEnabled.includes(PublicProfile.currentFacetTab)) PublicProfile.currentFacetTab = fEnabled[0] || null;
-        // Les champs plats reflètent la fiche affichée (héritage si la fiche est vierge)
-        PublicProfile._loadFacetToFlat(profile, PublicProfile.currentFacetTab);
-        PublicProfile.onProfileTypeChange();
-        
-        // Identité
-        document.getElementById('profile-photo').value = profile.photo || '';
-        PublicProfile.updatePhotoPreview();
-        document.getElementById('profile-name').value = profile.name || '';
-        document.getElementById('profile-gender').value = profile.gender || '';
-        document.getElementById('profile-email').value = state.currentUser?.email || '';
-        document.getElementById('profile-phone').value = profile.phone || '';
-        // v578 (audit) : confidentialite du telephone
-        const agentPhoneEl = document.getElementById('profile-agent-phone');
-        if(agentPhoneEl) agentPhoneEl.value = profile.agentPhone || '';
-        const hidePhoneEl = document.getElementById('profile-hide-phone');
-        if(hidePhoneEl) hidePhoneEl.checked = profile.hidePhone === true;
-        const ceEl = document.getElementById('profile-contact-email');
-        if(ceEl) ceEl.value = profile.contactEmail || '';
-        document.getElementById('profile-city').value = profile.city || '';
-        document.getElementById('profile-address').value = profile.address || '';
-        document.getElementById('profile-hide-address').checked = profile.hideAddress || false;
-        document.getElementById('profile-hide-address-projects').checked = profile.hideAddressInProjects || false;
-        document.getElementById('profile-website').value = profile.website || '';
-        document.getElementById('profile-bio').value = profile.bio || '';
-        { const _ex = document.getElementById('profile-experience'); if(_ex) _ex.value = profile.experience || ''; }
-        
-        // Mettre à jour les options de confidentialité
-        setTimeout(() => PublicProfile.updateAddressPrivacyOptions(), 100);
-        
-        // Langues parlées : section commune comédien / technicien (valeurs par fiche)
-        if(profile.facets.actor.enabled || PublicProfile.crewAnyEnabled(profile.facets)) {
-            PublicProfile.migrateSkillsData(profile);
-            PublicProfile.renderLanguagesList();
+        const enabled = PublicProfile._enabledFacets(profile);
+        // Onglet courant : celui affiche s'il est encore actif, sinon la premiere
+        // casquette active hors technicien (le technicien se choisit par tuile).
+        if(!enabled.includes(PublicProfile.currentFacetTab)) {
+            PublicProfile.currentFacetTab = enabled.find(k => k !== 'crew') || null;
         }
-        
-        // Comédien
-        if(profile.facets.actor.enabled) {
-            PublicProfile.loadGallery(profile.galleryPhotos || []);
-            document.getElementById('profile-height').value = profile.height || '';
-            document.getElementById('profile-weight').value = profile.weight || '';
-            document.getElementById('profile-age').value = profile.age || '';
-            document.getElementById('profile-eyes').value = profile.eyeColor || '';
-            document.getElementById('profile-hair-color').value = profile.hairColor || '';
-            document.getElementById('profile-hair-length').value = profile.hairLength || '';
-            document.getElementById('profile-ethnicity').value = profile.ethnicity || '';
-            document.getElementById('profile-corpulence').value = profile.corpulence || '';
-            // Sports avec niveaux (les langues sont gérées dans la section partagée)
-            PublicProfile.renderSportsList();
-            PublicProfile._writeDemoreels('actor', (profile.demoreels && profile.demoreels.length) ? profile.demoreels : profile.demoreel);
-        }
-        
-        // Technicien
-        if(PublicProfile.crewAnyEnabled(profile.facets)) {
-            document.getElementById('profile-department').value = profile.department || '';
-            PublicProfile.updateRoleOptions();
-            
-            const roleSelect = document.getElementById('profile-role');
-            const roleCustom = document.getElementById('profile-role-custom');
-            const savedRole = profile.role || '';
-            
-            let roleFound = false;
-            for(let i = 0; i < roleSelect.options.length; i++) {
-                if(roleSelect.options[i].value === savedRole) {
-                    roleSelect.value = savedRole;
-                    roleFound = true;
-                    break;
-                }
-            }
-            
-            if(!roleFound && savedRole) {
-                roleSelect.value = 'Autre';
-                roleCustom.style.display = 'block';
-                roleCustom.value = savedRole;
-            }
-            
-            PublicProfile.equipment = {
-                cameras: profile.cameras || [],
-                lenses: profile.lenses || [],
-                lights: profile.lights || [],
-                sounds: profile.sounds || [],
-                grips: profile.grips || [],
-                makeups: profile.makeups || [],
-                other: profile.otherEquipment || []
-            };
-            PublicProfile.renderEquipment();
-            PublicProfile._writeDemoreels('crew', (profile.demoreels && profile.demoreels.length) ? profile.demoreels : profile.demoreel);
-            PublicProfile.loadCrewGallery(profile.crewGalleryPhotos || []);
-        }
-        
-        // Association
-        if(profile.facets.asso.enabled) {
-            document.getElementById('profile-asso-name').value = profile.assoName || '';
-            const hqAsso = document.getElementById('profile-asso-hq');
-            if(hqAsso) hqAsso.value = (profile.facets && profile.facets.asso && profile.facets.asso.hqAddress) || '';
-            document.getElementById('profile-asso-type').value = profile.assoType || '';
-            document.getElementById('profile-asso-siret').value = profile.assoSiret || '';
-            document.getElementById('profile-asso-members').value = profile.assoMembers || '';
-            document.getElementById('profile-asso-year').value = profile.assoYear || '';
-            document.getElementById('profile-asso-president').value = profile.assoPresident || '';
-            document.getElementById('profile-asso-mission').value = profile.assoMission || '';
-            document.getElementById('profile-asso-activities').value = profile.assoActivities || '';
-            const services = profile.assoServices || {};
-            document.getElementById('asso-service-formation').checked = services.formation || false;
-            document.getElementById('asso-service-ateliers').checked = services.ateliers || false;
-            document.getElementById('asso-service-networking').checked = services.networking || false;
-            document.getElementById('asso-service-casting').checked = services.casting || false;
-            document.getElementById('asso-service-materiel').checked = services.materiel || false;
-            document.getElementById('asso-service-production').checked = services.production || false;
-            document.getElementById('asso-service-diffusion').checked = services.diffusion || false;
-            document.getElementById('profile-asso-facebook').value = profile.assoFacebook || '';
-            const aE = document.getElementById('profile-asso-email'); if(aE) aE.value = profile.assoEmail || '';
-            const aP = document.getElementById('profile-asso-phone'); if(aP) aP.value = profile.assoPhone || '';
-            const aW = document.getElementById('profile-asso-website'); if(aW) aW.value = profile.assoWebsite || '';
-            const aL = document.getElementById('profile-asso-logo'); if(aL) aL.value = profile.assoLogo || '';
-            PublicProfile._setLogoPreview('asso', profile.assoLogo || '');
-            document.getElementById('profile-asso-instagram').value = profile.assoInstagram || '';
-            document.getElementById('profile-asso-youtube').value = profile.assoYoutube || '';
-            document.getElementById('profile-asso-linkedin').value = profile.assoLinkedin || '';
-            PublicProfile._writeDemoreels('asso', (profile.assoDemoreels && profile.assoDemoreels.length) ? profile.assoDemoreels : profile.assoDemoreel);
-        }
-        
-        // Entreprise
-        if(profile.facets.ent.enabled) {
-            document.getElementById('profile-ent-name').value = profile.entName || '';
-            const hqEnt = document.getElementById('profile-ent-hq');
-            if(hqEnt) hqEnt.value = (profile.facets && profile.facets.ent && profile.facets.ent.hqAddress) || '';
-            document.getElementById('profile-ent-type').value = profile.entType || '';
-            document.getElementById('profile-ent-siret').value = profile.entSiret || '';
-            document.getElementById('profile-ent-legal').value = profile.entLegal || '';
-            document.getElementById('profile-ent-year').value = profile.entYear || '';
-            document.getElementById('profile-ent-employees').value = profile.entEmployees || '';
-            document.getElementById('profile-ent-director').value = profile.entDirector || '';
-            const eE = document.getElementById('profile-ent-email'); if(eE) eE.value = profile.entEmail || '';
-            const eP = document.getElementById('profile-ent-phone'); if(eP) eP.value = profile.entPhone || '';
-            const eW = document.getElementById('profile-ent-website'); if(eW) eW.value = profile.entWebsite || '';
-            const eL = document.getElementById('profile-ent-logo'); if(eL) eL.value = profile.entLogo || '';
-            PublicProfile._setLogoPreview('ent', profile.entLogo || '');
-            document.getElementById('profile-ent-contact').value = profile.entContact || '';
-            document.getElementById('profile-ent-description').value = profile.entDescription || '';
-            document.getElementById('profile-ent-services').value = profile.entServices || '';
-            const specs = profile.entSpecialties || {};
-            document.getElementById('ent-spec-fiction').checked = specs.fiction || false;
-            document.getElementById('ent-spec-doc').checked = specs.doc || false;
-            document.getElementById('ent-spec-pub').checked = specs.pub || false;
-            document.getElementById('ent-spec-corporate').checked = specs.corporate || false;
-            document.getElementById('ent-spec-clip').checked = specs.clip || false;
-            document.getElementById('ent-spec-event').checked = specs.event || false;
-            document.getElementById('ent-spec-web').checked = specs.web || false;
-            document.getElementById('profile-ent-facebook').value = profile.entFacebook || '';
-            document.getElementById('profile-ent-instagram').value = profile.entInstagram || '';
-            document.getElementById('profile-ent-youtube').value = profile.entYoutube || '';
-            document.getElementById('profile-ent-linkedin').value = profile.entLinkedin || '';
-            document.getElementById('profile-ent-vimeo').value = profile.entVimeo || '';
-            document.getElementById('profile-ent-imdb').value = profile.entImdb || '';
-            PublicProfile._writeDemoreels('ent', (profile.entDemoreels && profile.entDemoreels.length) ? profile.entDemoreels : profile.entDemoreel);
-        }   
-        // Tarif & Dispo
-        document.getElementById('profile-rate').value = profile.dailyRate || '';
-        document.getElementById('profile-currency').value = profile.rateCurrency || '€';
-        document.getElementById('profile-rate-negotiable').checked = profile.rateNegotiable || false;
-        document.getElementById('profile-availability').value = profile.availabilityText || '';
-        
-        // Calendrier disponibilités
-        PublicProfile.renderProfileCalendar();
-        PublicProfile.renderProfileDatesList();
-        
-        // Types de collaboration
-        PublicProfile.loadCollabTypes(profile);
-        
-        // Véhicule
-        document.getElementById('profile-has-vehicle').checked = profile.hasVehicle || false;
-        document.getElementById('profile-vehicle-details').style.display = profile.hasVehicle ? 'block' : 'none';
-        document.getElementById('profile-vehicle-type').value = profile.vehicleType || '';
-        document.getElementById('profile-vehicle-plate').value = profile.vehiclePlate || '';
-        document.getElementById('profile-vehicle-seats').value = profile.vehicleSeats || '';
-        document.getElementById('profile-vehicle-trunk').checked = profile.vehicleTrunk || false;
-        document.getElementById('profile-vehicle-notes').value = profile.vehicleNotes || '';
-        const vu = document.getElementById('profile-vehicle-usage'); if(vu) vu.value = profile.vehicleUsage || '';
-        ['moto','vl','pl','spl','tc'].forEach(k => { const el = document.getElementById('profile-license-' + k); if(el) el.checked = (profile.licenses || []).includes(k); });
-        
-        PublicProfile.updatePhotoPreview();
+        PublicProfile.renderFacetTabs(enabled);
         PublicProfile.updateStatus();
-        PublicProfile.updateVisibilityButtons();
-    },
-    
-    // Sauvegarde le formulaire dans le profil actuel
-    saveFormToCurrentProfile: () => {
-        if(PublicProfile.currentProfileIndex < 0) return;
-        
-        // GARDE : cette fonction reconstruit le profil depuis les 54 champs du
-        // formulaire de l'onglet Profil. Appelee avant que loadProfileToForm ne
-        // l'ait rempli — ou apres un changement de profil —, elle ecrirait des
-        // champs vides ou ceux du profil precedent par-dessus les donnees
-        // reelles. Pour ecrire un champ isole depuis ailleurs : ecriture ciblee
-        // sur l'objet profil, puis PublicProfile.saveCurrentProfile().
-        if(PublicProfile._loadedFor !== PublicProfile.profiles[PublicProfile.currentProfileIndex]?.id) {
-            console.warn('[PublicProfile] saveFormToCurrentProfile() ignoré : formulaire non chargé pour ce profil.');
-            return;
-        }
-        
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        
-        // Casquettes (facettes) : état des cases + visibilité Univers par facette
-        profile.facets = PublicProfile._normalizeFacets(profile.facets, { profile_type: profile.type, is_public: true });
-        PublicProfile.FACET_KEYS.forEach(k => {
-            profile.facets[k].enabled = document.getElementById(PublicProfile.FACET_INPUT_IDS[k])?.checked || false;
-            const vis = document.getElementById('facet-visible-' + k);
-            if(vis) profile.facets[k].visible = vis.checked;
-        });
-        // Type (compatibilité historique) = première casquette active
-        profile.type = PublicProfile._facetToType(PublicProfile.firstEnabledFacet(profile)) || '';
-        
-        // Identité
-        profile.photo = document.getElementById('profile-photo').value.trim();
-        profile.name = document.getElementById('profile-name').value.trim();
-        profile.gender = document.getElementById('profile-gender').value;
-        profile.phone = document.getElementById('profile-phone').value.trim();
-        // v578 (audit) : confidentialite du telephone
-        profile.agentPhone = document.getElementById('profile-agent-phone')?.value.trim() || '';
-        profile.hidePhone = document.getElementById('profile-hide-phone')?.checked || false;
-        profile.contactEmail = document.getElementById('profile-contact-email')?.value.trim() || '';
-        profile.city = document.getElementById('profile-city').value.trim();
-        const addressInput = document.getElementById('profile-address');
-        const previousAddress = profile.address || '';
-        profile.address = addressInput?.value.trim() || '';
-        // Récupérer les coords fournies par BAN via selectAddress (stockées dans dataset)
-        if(addressInput?.dataset.lat && addressInput?.dataset.lng) {
-            profile.latitude = parseFloat(addressInput.dataset.lat);
-            profile.longitude = parseFloat(addressInput.dataset.lng);
-        } else if(profile.address !== previousAddress) {
-            // Si l'adresse a changé à la main sans passer par l'autocomplétion, on invalide les anciennes coords
-            profile.latitude = null;
-            profile.longitude = null;
-        }
-        profile.hideAddress = document.getElementById('profile-hide-address')?.checked || false;
-        profile.hideAddressInProjects = document.getElementById('profile-hide-address-projects')?.checked || false;
-        profile.website = document.getElementById('profile-website').value.trim();
-        profile.bio = document.getElementById('profile-bio').value.trim();
-        { const _ex = document.getElementById('profile-experience'); if(_ex) profile.experience = _ex.value.trim(); }
-        
-        // Comédien (les champs à l'écran appartiennent à la fiche affichée)
-        if(PublicProfile.currentFacetTab === 'actor') {
-            profile.galleryPhotos = [
-                document.getElementById('gallery-input-0')?.value.trim() || '',
-                document.getElementById('gallery-input-1')?.value.trim() || '',
-                document.getElementById('gallery-input-2')?.value.trim() || ''
-            ].filter(url => url);
-            profile.height = document.getElementById('profile-height')?.value || '';
-            profile.weight = document.getElementById('profile-weight')?.value || '';
-            profile.age = document.getElementById('profile-age')?.value || '';
-            profile.eyeColor = document.getElementById('profile-eyes')?.value || '';
-            profile.hairColor = document.getElementById('profile-hair-color')?.value || '';
-            profile.hairLength = document.getElementById('profile-hair-length')?.value || '';
-            profile.ethnicity = document.getElementById('profile-ethnicity')?.value || '';
-            profile.corpulence = document.getElementById('profile-corpulence')?.value || '';
-            // Sports et langues avec niveaux (le champ caché est mis à jour automatiquement)
-            profile.sports = document.getElementById('profile-sports')?.value.trim() || '';
-            profile.languages = document.getElementById('profile-languages')?.value.trim() || '';
-            // Note: languagesWithLevels et sportsWithLevels sont déjà dans l'objet profile
-            profile.demoreels = PublicProfile._readDemoreels('actor');
-            profile.demoreel = profile.demoreels[0] || '';
-        }
-        
-        // Technicien (les champs à l'écran appartiennent à la fiche affichée)
-        if(PublicProfile.currentFacetTab === 'crew') {
-            profile.department = document.getElementById('profile-department')?.value || '';
-            // Langues parlées (champ caché mis à jour automatiquement, valeur propre à la fiche)
-            profile.languages = document.getElementById('profile-languages')?.value.trim() || '';
-            const roleSelect = document.getElementById('profile-role')?.value || '';
-            const roleCustom = document.getElementById('profile-role-custom')?.value.trim() || '';
-            profile.role = (roleSelect === 'Autre' && roleCustom) ? roleCustom : roleSelect;
-            profile.cameras = PublicProfile.equipment.cameras;
-            profile.lenses = PublicProfile.equipment.lenses;
-            profile.lights = PublicProfile.equipment.lights;
-            profile.sounds = PublicProfile.equipment.sounds;
-            profile.grips = PublicProfile.equipment.grips;
-            profile.makeups = PublicProfile.equipment.makeups;
-            profile.otherEquipment = PublicProfile.equipment.other;
-            profile.demoreels = PublicProfile._readDemoreels('crew');
-            profile.demoreel = profile.demoreels[0] || '';
-            profile.crewGalleryPhotos = [
-                document.getElementById('crew-gallery-input-0')?.value.trim() || '',
-                document.getElementById('crew-gallery-input-1')?.value.trim() || '',
-                document.getElementById('crew-gallery-input-2')?.value.trim() || ''
-            ].filter(url => url);
-        }
-        
-        // Association (champs dédiés : lisibles même masqués)
-        if(profile.facets && profile.facets.asso && profile.facets.asso.enabled) {
-            profile.assoName = document.getElementById('profile-asso-name')?.value.trim() || '';
-            if(profile.facets && profile.facets.asso) {
-                const hqEl = document.getElementById('profile-asso-hq');
-                const hq = hqEl?.value.trim() || '';
-                if(hq !== (profile.facets.asso.hqAddress || '')) { profile.facets.asso.hqLatitude = null; profile.facets.asso.hqLongitude = null; }
-                profile.facets.asso.hqAddress = hq;
-                if(hq && hqEl && hqEl.dataset.lat && hqEl.dataset.lng) {
-                    profile.facets.asso.hqLatitude = parseFloat(hqEl.dataset.lat);
-                    profile.facets.asso.hqLongitude = parseFloat(hqEl.dataset.lng);
-                }
-            }
-            profile.assoType = document.getElementById('profile-asso-type')?.value || '';
-            profile.assoSiret = document.getElementById('profile-asso-siret')?.value.trim() || '';
-            profile.assoMembers = document.getElementById('profile-asso-members')?.value || '';
-            profile.assoYear = document.getElementById('profile-asso-year')?.value || '';
-            profile.assoPresident = document.getElementById('profile-asso-president')?.value.trim() || '';
-            profile.assoMission = document.getElementById('profile-asso-mission')?.value.trim() || '';
-            profile.assoActivities = document.getElementById('profile-asso-activities')?.value.trim() || '';
-            profile.assoServices = {
-                formation: document.getElementById('asso-service-formation')?.checked || false,
-                ateliers: document.getElementById('asso-service-ateliers')?.checked || false,
-                networking: document.getElementById('asso-service-networking')?.checked || false,
-                casting: document.getElementById('asso-service-casting')?.checked || false,
-                materiel: document.getElementById('asso-service-materiel')?.checked || false,
-                production: document.getElementById('asso-service-production')?.checked || false,
-                diffusion: document.getElementById('asso-service-diffusion')?.checked || false
-            };
-            profile.assoFacebook = document.getElementById('profile-asso-facebook')?.value.trim() || '';
-            profile.assoEmail = document.getElementById('profile-asso-email')?.value.trim() || '';
-            profile.assoPhone = document.getElementById('profile-asso-phone')?.value.trim() || '';
-            profile.assoWebsite = document.getElementById('profile-asso-website')?.value.trim() || '';
-            profile.assoLogo = document.getElementById('profile-asso-logo')?.value.trim() || '';
-            profile.assoInstagram = document.getElementById('profile-asso-instagram')?.value.trim() || '';
-            profile.assoYoutube = document.getElementById('profile-asso-youtube')?.value.trim() || '';
-            profile.assoLinkedin = document.getElementById('profile-asso-linkedin')?.value.trim() || '';
-            profile.assoDemoreels = PublicProfile._readDemoreels('asso');
-            profile.assoDemoreel = profile.assoDemoreels[0] || '';
-            // Utiliser le nom de l'asso comme nom du profil
-            profile.name = profile.assoName || profile.name;
-        }
-        
-        // Entreprise (champs dédiés : lisibles même masqués)
-        if(profile.facets && profile.facets.ent && profile.facets.ent.enabled) {
-            profile.entName = document.getElementById('profile-ent-name')?.value.trim() || '';
-            if(profile.facets && profile.facets.ent) {
-                const hqEl = document.getElementById('profile-ent-hq');
-                const hq = hqEl?.value.trim() || '';
-                if(hq !== (profile.facets.ent.hqAddress || '')) { profile.facets.ent.hqLatitude = null; profile.facets.ent.hqLongitude = null; }
-                profile.facets.ent.hqAddress = hq;
-                if(hq && hqEl && hqEl.dataset.lat && hqEl.dataset.lng) {
-                    profile.facets.ent.hqLatitude = parseFloat(hqEl.dataset.lat);
-                    profile.facets.ent.hqLongitude = parseFloat(hqEl.dataset.lng);
-                }
-            }
-            profile.entType = document.getElementById('profile-ent-type')?.value || '';
-            profile.entSiret = document.getElementById('profile-ent-siret')?.value.trim() || '';
-            profile.entLegal = document.getElementById('profile-ent-legal')?.value || '';
-            profile.entYear = document.getElementById('profile-ent-year')?.value || '';
-            profile.entEmployees = document.getElementById('profile-ent-employees')?.value || '';
-            profile.entDirector = document.getElementById('profile-ent-director')?.value.trim() || '';
-            profile.entEmail = document.getElementById('profile-ent-email')?.value.trim() || '';
-            profile.entPhone = document.getElementById('profile-ent-phone')?.value.trim() || '';
-            profile.entWebsite = document.getElementById('profile-ent-website')?.value.trim() || '';
-            profile.entLogo = document.getElementById('profile-ent-logo')?.value.trim() || '';
-            profile.entContact = document.getElementById('profile-ent-contact')?.value.trim() || '';
-            profile.entDescription = document.getElementById('profile-ent-description')?.value.trim() || '';
-            profile.entServices = document.getElementById('profile-ent-services')?.value.trim() || '';
-            profile.entSpecialties = {
-                fiction: document.getElementById('ent-spec-fiction')?.checked || false,
-                doc: document.getElementById('ent-spec-doc')?.checked || false,
-                pub: document.getElementById('ent-spec-pub')?.checked || false,
-                corporate: document.getElementById('ent-spec-corporate')?.checked || false,
-                clip: document.getElementById('ent-spec-clip')?.checked || false,
-                event: document.getElementById('ent-spec-event')?.checked || false,
-                web: document.getElementById('ent-spec-web')?.checked || false
-            };
-            profile.entFacebook = document.getElementById('profile-ent-facebook')?.value.trim() || '';
-            profile.entInstagram = document.getElementById('profile-ent-instagram')?.value.trim() || '';
-            profile.entYoutube = document.getElementById('profile-ent-youtube')?.value.trim() || '';
-            profile.entLinkedin = document.getElementById('profile-ent-linkedin')?.value.trim() || '';
-            profile.entVimeo = document.getElementById('profile-ent-vimeo')?.value.trim() || '';
-            profile.entImdb = document.getElementById('profile-ent-imdb')?.value.trim() || '';
-            profile.entDemoreels = PublicProfile._readDemoreels('ent');
-            profile.entDemoreel = profile.entDemoreels[0] || '';
-            // Utiliser le nom de l'entreprise comme nom du profil
-            profile.name = profile.entName || profile.name;
-        }     
-        // Tarif & Dispo
-        profile.dailyRate = document.getElementById('profile-rate')?.value || '';
-        profile.rateCurrency = document.getElementById('profile-currency')?.value || '€';
-        profile.rateNegotiable = document.getElementById('profile-rate-negotiable')?.checked || false;
-        profile.availabilityText = document.getElementById('profile-availability')?.value.trim() || '';
-        
-        // Types de collaboration
-        PublicProfile.saveCollabTypes(profile);
-        
-        // Permis de conduire
-        profile.licenses = ['moto','vl','pl','spl','tc'].filter(k => document.getElementById('profile-license-' + k)?.checked);
-        
-        // Véhicule
-        profile.hasVehicle = document.getElementById('profile-has-vehicle')?.checked || false;
-        profile.vehicleType = document.getElementById('profile-vehicle-type')?.value.trim() || '';
-        profile.vehiclePlate = document.getElementById('profile-vehicle-plate')?.value.trim() || '';
-        profile.vehicleSeats = document.getElementById('profile-vehicle-seats')?.value || '';
-        profile.vehicleTrunk = document.getElementById('profile-vehicle-trunk')?.checked || false;
-        profile.vehicleNotes = document.getElementById('profile-vehicle-notes')?.value.trim() || '';
-        profile.vehicleUsage = document.getElementById('profile-vehicle-usage')?.value || '';
-        
-        // Statut
-        profile.profileComplete = !!(profile.type && (
-            profile.type === 'association' ? (profile.assoName && profile.assoType && profile.assoMission)
-            : profile.type === 'enterprise' ? (profile.entName && profile.entType && profile.entDescription)
-            : (profile.name && profile.phone && profile.city && profile.gender)
-        ));
-        profile.updatedAt = new Date().toISOString();
     },
     
     // Change le type de profil (comédien/technicien)
     // ===== Casquettes : sections par facette + barre d'onglets =====
     currentFacetTab: null,
-    FACET_INPUT_IDS: { actor: 'profile-type-actor', crew: 'profile-type-crew', asso: 'profile-type-association', ent: 'profile-type-enterprise' },
-    FACET_LABEL_IDS: { actor: 'profile-type-actor-label', crew: 'profile-type-crew-label', asso: 'profile-type-association-label', ent: 'profile-type-enterprise-label' },
     FACET_LABELS: { actor: '🎭 Comédien·ne', crew: '🎥 Technicien·ne', asso: '🏛️ Association', ent: '🏢 Entreprise' },
-    FACET_SECTIONS: {
-        actor: ['profile-identity-section', 'profile-actor-section', 'profile-actor-physical-section', 'profile-languages-section', 'profile-actor-demoreel-section', 'profile-tarif-section', 'profile-collab-section', 'profile-vehicle-section', 'profile-bio-section'],
-        crew:  ['profile-identity-section', 'profile-crew-section', 'profile-languages-section', 'profile-crew-gallery-section', 'profile-crew-demoreel-section', 'profile-tarif-section', 'profile-collab-section', 'profile-vehicle-section', 'profile-bio-section'],
-        asso:  ['profile-association-section', 'profile-collab-section'],
-        ent:   ['profile-enterprise-section', 'profile-collab-section']
-    },
-
-    // Presentation "fiche de projet" du contenu d'une casquette : onglets + briques.
-    // Lot 1 : comedien seulement. Les autres casquettes gardent l'empilement
-    // classique tant qu'elles n'ont pas leur propre entree ici.
-    FICHE_TABS: {
-        actor: [
-            { id: 'profil',     label: '🪪 Profil',                sections: ['profile-identity-section'] },
-            { id: 'photos',     label: '📸 Photos & démo',         sections: ['profile-actor-section', 'profile-actor-demoreel-section'] },
-            { id: 'physique',   label: '📏 Physique',              sections: ['profile-actor-physical-section', 'profile-languages-section'] },
-            { id: 'parcours',   label: '📝 Parcours',              sections: ['profile-bio-section'] },
-            { id: 'logistique', label: '📅 Planning & logistique', sections: ['profile-tarif-section', 'profile-collab-section', 'profile-vehicle-section'] }
-        ],
-        crew: [
-            { id: 'profil',      label: '🪪 Profil',                sections: ['profile-identity-section'] },
-            { id: 'photos',      label: '📸 Photos & démo',         sections: ['profile-crew-gallery-section', 'profile-crew-demoreel-section'] },
-            { id: 'competences', label: '🛠️ Compétences',          sections: ['profile-crew-section', 'profile-languages-section'] },
-            { id: 'parcours',    label: '📝 Parcours',              sections: ['profile-bio-section'] },
-            { id: 'logistique',  label: '📅 Planning & logistique', sections: ['profile-tarif-section', 'profile-collab-section', 'profile-vehicle-section'] }
-        ],
-        asso: [
-            { id: 'fiche',  label: '🏛️ Fiche',         sections: ['profile-association-section'] },
-            { id: 'collab', label: '🤝 Collaboration', sections: ['profile-collab-section'] }
-        ],
-        ent: [
-            { id: 'fiche',  label: '🏢 Fiche',         sections: ['profile-enterprise-section'] },
-            { id: 'collab', label: '🤝 Collaboration', sections: ['profile-collab-section'] }
-        ]
-    },
-    currentFicheTab: null,
-
     // FUSION : mode « fiche moteur » pour la creation de profil. Actif, la fiche
     // comedien affichee via le moteur du projet lit/ecrit DIRECTEMENT la casquette
     // comedien (objet facets.actor), sur une COPIE ; rien n'est ecrit sur les champs
@@ -41662,43 +40152,23 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         });
     },
 
-    _enabledFacetsFromForm: () => PublicProfile.FACET_KEYS.filter(k => document.getElementById(PublicProfile.FACET_INPUT_IDS[k])?.checked),
-
-    onProfileTypeChange: () => {
-        const enabled = PublicProfile._enabledFacetsFromForm();
-        // Surbrillance des cartes + interrupteurs de visibilité
-        PublicProfile.FACET_KEYS.forEach(k => {
-            const on = enabled.includes(k);
-            const lab = document.getElementById(PublicProfile.FACET_LABEL_IDS[k]);
-            if(lab) lab.style.borderColor = on ? 'var(--primary)' : 'var(--border)';
-            const vis = document.getElementById('facet-visible-' + k + '-label');
-            if(vis) vis.style.display = on ? 'inline-flex' : 'none';
-        });
-        // Onglet courant valide
-        if(!enabled.includes(PublicProfile.currentFacetTab)) PublicProfile.currentFacetTab = enabled[0] || null;
-        PublicProfile.renderFacetTabs(enabled);
-        PublicProfile.showFacetSections();
-        // Mettre à jour le matériel si technicien
-        if(enabled.includes('crew')) {
-            const dept = document.getElementById('profile-department')?.value || '';
-            PublicProfile.updateEquipmentForDepartment(dept);
-        }
-        // Peupler les selects pour association/entreprise
-        if(enabled.includes('asso')) PublicProfile.populateAssoTypes();
-        if(enabled.includes('ent')) PublicProfile.populateEntTypes();
-        // Mettre à jour les options de confidentialité d'adresse
-        PublicProfile.updateAddressPrivacyOptions();
+    // Casquettes actives, lues sur le PROFIL (et non plus sur des cases cachees
+    // du formulaire supprime). Le technicien compte des qu'UNE de ses fiches
+    // est active.
+    _enabledFacets: (profile) => {
+        const f = (profile && profile.facets) || {};
+        return PublicProfile.FACET_KEYS.filter(k => k === 'crew'
+            ? PublicProfile.crewAnyEnabled(f)
+            : !!(f[k] && f[k].enabled));
     },
 
     renderFacetTabs: (enabled) => {
         const bar = document.getElementById('facet-tabs');
         if(!bar) return;
-        enabled = enabled || PublicProfile._enabledFacetsFromForm();
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex] || {};
-        const nameEl = document.getElementById('profile-name');
-        const photoEl = document.getElementById('profile-photo');
-        const name = profile.name || (nameEl ? nameEl.value : '') || 'Mon profil';
-        const photo = profile.photo || (photoEl ? photoEl.value : '') || '';
+        enabled = enabled || PublicProfile._enabledFacets(profile);
+        const name = profile.name || 'Mon profil';
+        const photo = profile.photo || '';
         const ICONS = { actor: '🎭', crew: '🎥', asso: '🏛️', ent: '🏢' };
         // En-tete du hub : photo + nom + projets ou le profil apparait.
         const hub = document.getElementById('profile-hub-header');
@@ -41770,49 +40240,15 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         }).join('') + '</div>';
     },
 
-    selectFacetTab: (k) => {
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        const prev = PublicProfile.currentFacetTab;
-        if(profile && prev && prev !== k) {
-            PublicProfile.saveFormToCurrentProfile();        // champs -> profil plat
-            PublicProfile._commitFlatToFacet(profile, prev); // plat -> fiche quittée
-        }
-        PublicProfile.currentFacetTab = k;
-        if(profile) {
-            PublicProfile._loadFacetToFlat(profile, k);      // fiche ouverte -> plat (avec héritage)
-            PublicProfile.loadProfileToForm(profile);        // plat -> champs (rafraîchit tout + onglets)
-            return;
-        }
-        PublicProfile.renderFacetTabs(PublicProfile._enabledFacetsFromForm());
-        PublicProfile.showFacetSections();
-    },
-
-    // Changement d'onglet DANS une fiche (Profil / Physique / ...). Ne touche ni
-    // aux champs ni a la sauvegarde : on montre juste les sections de l'onglet.
-    selectFicheTab: (id) => {
-        PublicProfile.currentFicheTab = id;
-        PublicProfile.showFacetSections();
-    },
-
-    // Clic sur une carte de casquette : charge la facette puis ouvre sa fiche
-    // dans une fenetre (comme l'ouverture d'une carte dans un projet).
+    // Clic sur une carte de casquette : ouvre SA fiche. Les quatre casquettes
+    // passent par le moteur de fiche du projet ; l'ancienne modale, doublon
+    // inatteignable depuis la fusion des fiches, a ete supprimee (v600).
     openFicheCard: (facet, crewIdx) => {
-        // BASCULE : la casquette comedien ouvre la FICHE UNIVERSELLE (moteur du projet).
-        // Les autres casquettes gardent l'ancien formulaire tant qu'elles ne sont pas fusionnees.
+        PublicProfile.currentFacetTab = facet;
         if(facet === 'actor') { PublicProfile.openComedienEngine(); return; }
         if(facet === 'crew') { PublicProfile.openTechnicienEngine(crewIdx || 0); return; }
         if(facet === 'asso') { PublicProfile.openAssoEngine(); return; }
         if(facet === 'ent') { PublicProfile.openEntrepriseEngine(); return; }
-        PublicProfile._bindFicheFold();
-        PublicProfile.selectFacetTab(facet);
-        const title = document.getElementById('profile-fiche-modal-title');
-        if(title) title.textContent = PublicProfile.FACET_LABELS[facet] || 'Fiche';
-        const modal = document.getElementById('profile-fiche-modal');
-        if(modal) modal.classList.add('visible');
-    },
-    closeFicheCard: () => {
-        const modal = document.getElementById('profile-fiche-modal');
-        if(modal) modal.classList.remove('visible');
     },
 
     // ===== FUSION : fiche comedien via le MOTEUR DU PROJET =====
@@ -41945,13 +40381,12 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         if('_engineSavedRole' in PublicProfile) { state.currentRole = PublicProfile._engineSavedRole; delete PublicProfile._engineSavedRole; }
         const ov = document.getElementById('comedien-engine-overlay');
         if(ov) ov.remove();
-        // v598 — LE CHAMP QUI REVIENT. L'ANCIEN formulaire de profil, toujours en
-        // place derriere la fiche, n'etait pas rafraichi en sortant d'ici : il
-        // gardait a l'ecran les valeurs d'AVANT l'edition. Or « Sauvegarder »
-        // reconstruit le profil depuis ses 54 champs, puis recopie le resultat
-        // dans la casquette (_commitFlatToFacet). Un champ vide dans la fiche se
-        // voyait donc repeupler par l'ancienne valeur, dans le profil ET dans la
-        // casquette. On realigne le formulaire sur ce qui vient d'etre edite.
+        // v600 — l'ancien formulaire est SUPPRIME : il n'y a plus de champs a
+        // l'ecran a realigner en sortant de la fiche, et le pansement qui le
+        // declarait « non charge » pour la deuxieme fiche technicien n'a plus
+        // d'objet. Reste utile : aligner les champs PLATS du profil sur la fiche
+        // qui vient d'etre editee — ils alimentent les tuiles et les colonnes de
+        // la base —, puis rafraichir l'ecran.
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
         if(profile) {
             const kind = PublicProfile._engineKind || 'actor';
@@ -41959,15 +40394,8 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             if(kind !== 'crew' || idx === 0) {
                 PublicProfile.currentFacetTab = kind;
                 PublicProfile._loadFacetToFlat(profile, kind);
-                PublicProfile.loadProfileToForm(profile);
-            } else {
-                // Cet ancien formulaire ne sait representer QUE la casquette
-                // comedien et la PREMIERE fiche technicien. Pour les suivantes,
-                // on le declare non charge : sa garde interne empeche alors
-                // « Sauvegarder » d'aller y relire des valeurs qui ne sont pas
-                // celles de la fiche editee.
-                PublicProfile._loadedFor = null;
             }
+            PublicProfile.refreshProfileScreen(profile);
         }
     },
 
@@ -42284,25 +40712,28 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         return card;
     },
 
-    // Activer une casquette depuis sa carte grisee : coche l'etat cache, met a
-    // jour l'affichage, puis ouvre la fiche pour la remplir.
+    // Activer une casquette depuis sa carte grisee, puis ouvrir sa fiche.
+    // v600 : l'etat s'ecrit sur le PROFIL. Avant, il n'etait pose que sur une
+    // case cachee du formulaire, et seul ce formulaire — devenu mort — le
+    // recopiait vers le profil : activer ou refermer une casquette ne
+    // survivait donc plus a un enregistrement.
     activateFacetCard: (k) => {
-        const cb = document.getElementById(PublicProfile.FACET_INPUT_IDS[k]);
-        if(cb) cb.checked = true;
-        PublicProfile.onProfileTypeChange();
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile) { Utils.toast('Aucun profil chargé.', 'warning'); return; }
+        profile.facets = PublicProfile._normalizeFacets(profile.facets, { profile_type: profile.type, is_public: profile.is_public });
+        if(profile.facets[k]) profile.facets[k].enabled = true;
+        PublicProfile.renderFacetTabs(PublicProfile._enabledFacets(profile));
         PublicProfile.openFicheCard(k);
     },
     // Refermer une casquette : la carte redevient grisee (donnees gardees).
     deactivateFacetCard: (k) => {
-        const cb = document.getElementById(PublicProfile.FACET_INPUT_IDS[k]);
-        if(cb) cb.checked = false;
-        PublicProfile.onProfileTypeChange();
+        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+        if(!profile || !profile.facets || !profile.facets[k]) return;
+        profile.facets[k].enabled = false;
+        PublicProfile.renderFacetTabs(PublicProfile._enabledFacets(profile));
     },
-    // Bascule « Visible dans l'Univers » d'une casquette (la case cachee fait
-    // foi a la sauvegarde).
+    // Bascule « Visible dans l'Univers » d'une casquette.
     toggleFacetVisible: (k, checked) => {
-        const cb = document.getElementById('facet-visible-' + k);
-        if(cb) cb.checked = checked;
         const p = PublicProfile.profiles[PublicProfile.currentProfileIndex];
         if(p && p.facets && p.facets[k]) p.facets[k].visible = checked;
     },
@@ -42406,60 +40837,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         await PublicProfile.saveCurrentProfile();
     },
 
-    // Replier une brique au clic sur son titre (sans declencher les boutons de
-    // visibilite ni un champ). Delegue une seule fois au document.
-    _ficheFoldBound: false,
-    _bindFicheFold: () => {
-        if(PublicProfile._ficheFoldBound) return;
-        PublicProfile._ficheFoldBound = true;
-        document.addEventListener('click', (e) => {
-            const h3 = e.target.closest('.profile-section.fiche-brique > h3');
-            if(!h3) return;
-            if(e.target.closest('button, input, select, textarea, a, label, .visibility-toggles, .visibility-btn')) return;
-            h3.parentElement.classList.toggle('is-folded');
-        });
-    },
-
-    showFacetSections: () => {
-        // Visibilité calculée PAR SECTION : une section partagée entre plusieurs fiches
-        // (identité, tarif, collaboration, véhicule) est visible dès qu'elle appartient
-        // à la fiche affichée — sans être re-masquée par le passage des autres casquettes.
-        const facet = PublicProfile.currentFacetTab;
-        const current = PublicProfile.FACET_SECTIONS[facet] || [];
-        const all = new Set();
-        PublicProfile.FACET_KEYS.forEach(k => (PublicProfile.FACET_SECTIONS[k] || []).forEach(id => all.add(id)));
-        const ficheTabs = PublicProfile.FICHE_TABS[facet] || null;
-        const container = document.getElementById('profile-all-sections');
-        const bar = document.getElementById('profile-fiche-tabs');
-        if(ficheTabs) {
-            // Presentation "fiche" : une barre d'onglets, et seules les sections de
-            // l'onglet actif s'affichent, habillees en briques grises.
-            if(!ficheTabs.some(t => t.id === PublicProfile.currentFicheTab)) PublicProfile.currentFicheTab = ficheTabs[0].id;
-            const activeTab = ficheTabs.find(t => t.id === PublicProfile.currentFicheTab) || ficheTabs[0];
-            const shown = new Set(activeTab.sections);
-            if(container) container.classList.add('fiche-mode');
-            if(bar) {
-                bar.classList.remove('d-none');
-                bar.innerHTML = ficheTabs.map(t => '<button type="button" class="fid-tab' + (t.id === activeTab.id ? ' is-active' : '') + '" onclick="app.PublicProfile.selectFicheTab(\'' + t.id + '\')">' + t.label + '</button>').join('');
-            }
-            all.forEach(id => {
-                const el = document.getElementById(id);
-                if(!el) return;
-                const inFacet = current.includes(id);
-                el.style.display = (inFacet && shown.has(id)) ? 'block' : 'none';
-                el.classList.toggle('fiche-brique', inFacet);
-            });
-        } else {
-            // Empilement classique (casquette pas encore convertie en fiche).
-            if(container) container.classList.remove('fiche-mode');
-            if(bar) { bar.classList.add('d-none'); bar.innerHTML = ''; }
-            all.forEach(id => {
-                const el = document.getElementById(id);
-                if(el) { el.style.display = current.includes(id) ? 'block' : 'none'; el.classList.remove('fiche-brique'); }
-            });
-        }
-    },
-    
     // ===== ADRESSE / GÉOLOCALISATION — délégué à ProfileAddress =====
     geocodeAddressInternational: (...a) => ProfileAddress.geocodeAddressInternational(...a),
     searchAddress: (...a) => ProfileAddress.searchAddress(...a),
@@ -42870,6 +41247,17 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             }
         }
         
+        // v600 — STATUT « profil complet ». Il n'etait recalcule que par
+        // saveFormToCurrentProfile, mort depuis la fusion des fiches : le bouton
+        // du tableau de bord restait donc fige sur « Compléter mon profil ». Le
+        // calcul revient ici, ou les memes champs viennent d'etre valides.
+        profile.profileComplete = !!(profile.type && (
+            profile.type === 'association' ? (profile.assoName && profile.assoType && profile.assoMission)
+            : profile.type === 'enterprise' ? (profile.entName && profile.entType && profile.entDescription)
+            : (profile.name && profile.phone && profile.city && profile.gender)
+        ));
+        profile.updatedAt = new Date().toISOString();
+
         const btn = document.querySelector('button[onclick="app.PublicProfile.saveCurrentProfile()"]');
         const originalText = btn ? btn.innerHTML : '';
         if(btn) { btn.innerHTML = '<span class="spinner"></span>Sauvegarde...'; btn.classList.add('btn-loading'); }
@@ -43086,7 +41474,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             profile.facets[facet].hqLatitude = null;
             profile.facets[facet].hqLongitude = null;
         }
-        PublicProfile.loadProfileToForm(profile);
+        PublicProfile.refreshProfileScreen(profile);
         Utils.toast('Carte ' + label + ' remise à zéro — pensez à Sauvegarder pour confirmer.', 'success', 5000);
     },
     
@@ -43324,14 +41712,17 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         });
     },
     
+    // v600 : lit le PROFIL et non plus les champs du formulaire supprime.
     updateStatus: () => {
-        const name = document.getElementById('profile-name').value.trim();
-        const phone = document.getElementById('profile-phone').value.trim();
-        const city = document.getElementById('profile-city').value.trim();
-        const gender = document.getElementById('profile-gender').value;
+        const p = PublicProfile.profiles[PublicProfile.currentProfileIndex] || {};
+        const name = (p.name || '').trim();
+        const phone = (p.phone || '').trim();
+        const city = (p.city || '').trim();
+        const gender = p.gender || '';
         
         const isComplete = name && phone && city && gender;
         const statusDiv = document.getElementById('profile-status');
+        if(!statusDiv) return;
         
         if(isComplete) {
             statusDiv.className = 'profile-status complete';
