@@ -790,11 +790,22 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               state.data = safeData; state.currentProjectId = id;
               state.savedBaseline = JSON.parse(JSON.stringify(safeData)); // Phase 0 : état de référence pour sauvegarde partielle / merge sélectif
               // Lot 4 : migration hygiène URLs publiques 'projects' -> paths (one-shot, idempotent, gated par flag). APRÈS la baseline => la diff URL->path est réelle et sera persistée au prochain save.
-              if(!state.data._mediaPathsMigrated) {
+              // v599 — LE DRAPEAU DEVIENT VERSIONNE. Il valait true/false : une
+              // fois pose, la migration ne repassait PLUS JAMAIS. Les medias
+              // ajoutes APRES ce passage gardaient donc une URL de forme
+              // /object/public/ sur le bucket 'projects', qui est PRIVE —
+              // c'est-a-dire une adresse systematiquement refusee par le
+              // serveur. C'est ce qui empechait les images inserees dans le
+              // storyboard de s'afficher (constate en base : 32 objets image
+              // d'un projet, tous en forme publique, drapeau deja a true).
+              // Passer a 2 rejoue la migration UNE fois pour tout le monde ;
+              // elle est idempotente et ne touche que les URLs 'projects'.
+              if(state.data._mediaPathsMigrated !== 2) {
                   try {
+                      const _ancien = state.data._mediaPathsMigrated;
                       const _migN = Utils.migrateProjPathsInData(state.data);
-                      state.data._mediaPathsMigrated = true;
-                      if(_migN > 0) needsMigrationSave = true;
+                      state.data._mediaPathsMigrated = 2;
+                      if(_migN > 0 || _ancien !== 2) needsMigrationSave = true;
                   } catch(e) { console.warn('migrateProjPathsInData:', e); }
               }
               // 7d : passage du depouillement a la forme { t, k, id }. Non gardee
@@ -812,6 +823,9 @@ CONFIG.crewGroups.forEach(defaultGrp => {
                   const _flN = FicheLinks.migrate();
                   if(_flN > 0) needsMigrationSave = true;
               } catch(e) { console.warn('FicheLinks.migrate:', e); }
+              // v599 : les blobs de dessin gardes en memoire appartiennent au
+              // projet qu'on quitte — on repart propre.
+              if(typeof StoryboardExport !== 'undefined' && StoryboardExport.videBlobCache) StoryboardExport.videBlobCache();
               await Utils.refreshSignedCache(state.data); // Lot D6 : pré-signe les médias 'projects' avant rendu
               Utils.startImgResolver(); // Lot D6 : résolveur DOM des <img> signées
               Utils.prefetchStoryboardImages(); // v616 : préchauffage silencieux des images du Storyboard

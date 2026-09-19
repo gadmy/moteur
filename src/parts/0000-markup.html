@@ -97,6 +97,62 @@ Rien d'ouvert côté code au 17 septembre en dehors des chantiers ci-dessous.
     doublon du modèle unifié depuis la fusion des fiches (v590/v591). À retirer
     si souhaité un jour.
 
+[ ] RETIRER L'ANCIEN FORMULAIRE DE PROFIL — MOITIE FAITE (v599). CONSTAT :
+    il est deja INATTEIGNABLE. openFicheCard intercepte les QUATRE casquettes
+    (actor, crew, asso, ent), chacune ouvre sa propre fiche, et plus aucun
+    onclick du HTML n'ouvre l'ancienne modale ; selectFacetTab, selectFicheTab
+    et showFacetSections ne sont plus appeles que depuis ce chemin mort.
+    FAIT : les deux seules lectures VIVANTES du formulaire sont coupees —
+    saveCurrentProfile et switchToProfile ne le relisent plus. C'etait la
+    CAUSE COMMUNE des deux bugs du 19 septembre, jusque-la seulement rustines.
+    Le type du profil, seul element legitime qu'on en tirait, se deduit
+    desormais des casquettes actives sans passer par le DOM.
+    RESTE : la SUPPRESSION du code mort — la modale #profile-fiche-modal, les
+    sections profile-*-section, FACET_SECTIONS, FICHE_TABS, _bindFicheFold,
+    selectFacetTab / selectFicheTab / showFacetSections, et la partie de
+    loadProfileToForm qui remplit les 54 champs (ATTENTION : cette fonction
+    fait AUSSI le rendu des tuiles et le statut — ne pas la supprimer en bloc,
+    la scinder). Risque devenu faible maintenant que plus rien ne LIT ce
+    formulaire, mais loadProfileToForm attaque beaucoup de getElementById sans
+    garde : retirer le HTML sans la reecrire ferait planter le profil.
+
+[ ] CHARGER LES GROS MODULES A LA DEMANDE — PAS FAIT, et l'estimation notee
+    plus tot dans la journee etait FAUSSE : le decoupage en src/parts ne rend
+    pas ce chantier simple. Il decoupe la SOURCE ; le fichier publie reste un
+    seul bloc de script, et c'est lui que le navigateur telecharge.
+    Differer vraiment un module imposerait de le sortir de la portee commune
+    aux 95 modules — donc de declarer, un par un, qui a besoin de qui. C'est
+    exactement le cout qu'on a refuse en ecartant import / export (voir
+    DECISIONS CLOSES). Verifie le 19 septembre : aucune image encodee en dur
+    dans le fichier (0 Ko de base64), les gros morceaux sont du VRAI code
+    (Importer ~717 Ko, StoryboardPreview ~563 Ko, dont ~10 % de commentaires).
+    Il n'y a donc pas de gain facile a aller chercher : ce chantier demande un
+    mecanisme de passage de portee, a concevoir avant d'etre chiffre.
+
+[ ] PRECHARGER LES IMAGES STORYBOARD / MOODBOARD — REVU DEUX FOIS (v599).
+    Deuxieme passe apres signalement precis : le vrai defaut n'etait pas le
+    prechauffage mais la REVOCATION des URL blob des dessins apres dessin (voir
+    l'historique). Corrige. Si une attente subsiste, elle ne peut plus venir que
+    du VOLUME : s'attaquer alors au poids des images (vignettes), pas au moment
+    du telechargement. PREMIERE PASSE, toujours valable : un prechauffage
+    EXISTAIT DEJA
+    (Utils.prefetchStoryboardImages / prefetchMoodboardImages, appeles par
+    Store a l'ouverture du projet) et son principe est juste — les URL signees
+    sont pretes (refreshSignedCache, lots de 100, 1 h), et l'affichage reutilise
+    la MEME url depuis _signedCache, donc le cache du navigateur tombe juste.
+    Ses trois defauts, corriges : depart jusqu'a 4 s apres le chargement
+    (ramene a 1 s) ; aucune limite, des centaines d'images lancees d'un coup et
+    mises en file par le navigateur (desormais une file commune servie 4 a la
+    fois, dans l'ordre) ; et surtout AUCUN MOYEN DE SAVOIR s'il travaillait.
+    Taper Utils.prefetchInfo() (ou app.Utils.prefetchInfo()) dans la console
+    donne maintenant demandees / chargees / echouees / ignorees / en attente.
+    S'abstient entierement en connexion econome (navigator.connection.saveData).
+    SI L'ATTENTE PERSISTE : lire ce bilan avant de recoder quoi que ce soit.
+    « ignorees » eleve = images pas encore signees au moment de la passe ;
+    « chargees » eleve mais attente quand meme = le volume est simplement trop
+    gros et il faut s'attaquer au POIDS des images (vignettes), pas au moment
+    de leur telechargement.
+
 [ ] STRIPE / FEATURE GATING — EN PAUSE, ne pas ouvrir sans demande explicite.
     Prérequis juridique : domicile de l'éditeur dans les mentions légales (LCEN).
 
@@ -181,6 +237,12 @@ DÉCISIONS CLOSES (ne pas rouvrir)
 - Droit d'inviter = droit d'ÉCRIRE la section 'presentation' (fiche projet),
   testé au clic (Permissions.canEdit) et côté serveur. Pas de drapeau
   parallèle (can_invite dormant). (v582)
+- GARAGE PERSONNEL (plusieurs véhicules par personne) : ÉCARTÉ (v599). Une
+  personne = UN véhicule sur sa fiche. Les véhicules supplémentaires passent
+  par le PARC DE RÉGIE : la personne transmet les informations, l'assistant
+  réalisateur crée la fiche véhicule. Le modèle existe déjà (state.data.vehicles,
+  un conducteur par véhicule et par jour) et garde la logistique arbitrée par la
+  production plutôt que déclarée par chacun.
 - Fusion en ONGLETS des fiches d'une même personne recrutée deux fois sur un
   projet : ÉCARTÉE (v598). 80 % du contenu aurait été dupliqué à l'identique
   pour un simple confort d'affichage. C'est le PARCOURS PHYSIQUE qui est
@@ -409,6 +471,167 @@ vv599 (en cours)
 
   Livre avec vv598 mais pousse APRES la fusion, donc absent de la version
   publiee : le correctif du CHAMP EFFACE QUI REVENAIT, repris ici.
+
+  VIGNETTES : ON PREND LE CHEMIN QUI MARCHE. Indice decisif donne par
+  l'utilisateur : « Mini Apercu » et « Apercu Plein Ecran » affichent bien ces
+  images. L'apercu passe par StoryboardExport._loadPrintImg, qui telecharge les
+  medias du bucket PRIVE en blob via le SDK ; les vignettes passaient par
+  getOrCreateUploadedImage et son cache, qui dependait d'une URL signee.
+  Nouvelle fonction Storyboard.dessinerObjetsImage : elle reprend EXACTEMENT le
+  chemin de l'apercu, retrouve le canvas au moment de peindre, et reproduit la
+  transformation de renderObjectsOnCanvas (translation, rotation, dessin
+  centre). Les deux vignettes — compacte et fiche de plan — l'appellent apres
+  renderObjectsOnCanvas, qui continue de gerer les annotations non-images.
+  REGLE GENERALE A RETENIR : quand un ecran affiche un media et qu'un autre ne
+  l'affiche pas, ne pas reparer le second — lui faire emprunter le chemin du
+  premier.
+
+  VIGNETTES DU STORYBOARD — LA CAUSE, TROUVEE EN BASE. Quatre correctifs
+  successifs avaient echoue parce qu'ils cherchaient dans le RENDU. La reponse
+  etait dans la DONNEE, et il a fallu ouvrir la base pour la voir :
+    - bucket 'projects' : PRIVE (storage.buckets.public = false) ;
+    - les 32 objets image du projet testes stockent une URL de forme
+      /object/public/projects/... — zero signee, zero chemin brut ;
+    - une adresse publique sur un bucket prive est TOUJOURS refusee par le
+      serveur : ces images ne pouvaient donc jamais se charger.
+  POURQUOI CET ETAT : Utils.migrateProjPathsInData convertit justement ces URLs
+  en chemins bruts, mais son appel dans Store etait garde par un drapeau
+  BOOLEEN (_mediaPathsMigrated). Une fois pose, la migration ne repassait plus
+  jamais — les medias ajoutes APRES ce passage restaient donc en forme publique
+  pour toujours. Constate : drapeau deja a true sur le projet, 7 projets sur 38
+  marques migres. Le drapeau devient VERSIONNE (valeur 2) : la migration rejoue
+  une fois pour tout le monde, elle est idempotente, et le resultat part au
+  prochain enregistrement.
+  DEFENSE AJOUTEE, car la donnee peut toujours redevenir sale : une URL de
+  media projet n'est PLUS JAMAIS posee telle quelle. signedUrlFor rend la
+  valeur stockee inchangee quand la signature n'est pas en cache — un repli
+  presente comme sur, mais garanti de rater sur un bucket prive. Desormais,
+  media projet = URL signee si le cache a repondu, sinon telechargement par le
+  SDK ; les adresses data:, blob: et externes restent posees directement.
+  LECON DE METHODE, a garder : quatre hypotheses de suite sur le mecanisme de
+  rendu, toutes fausses, alors que la reponse tenait dans une requete SQL. Pour
+  une image qui ne s'affiche pas, REGARDER D'ABORD CE QUI EST STOCKE.
+
+  VIGNETTES, QUATRIEME PASSE : NE PLUS DEPENDRE DE LA SIGNATURE. Le diagnostic
+  a tranche : « repeintes : 0 » et AUCUNE entree dans le cache d'images
+  (pretes, en cours et echouees toutes a zero). Donc aucun chargement n'etait
+  meme tente — l'URL signee n'est pas disponible pour ces objets image, alors
+  qu'elle l'est pour les calques de dessin du meme plan (blobs_deja_en_cache a
+  1). La difference tient au CHEMIN EMPRUNTE : les calques passent par
+  StoryboardExport._resolveBlobUrl, qui telecharge le fichier par le SDK,
+  authentifie, SANS signature ; les objets image, eux, dependaient de
+  Utils.signedUrlFor. getOrCreateUploadedImage a donc desormais DEUX chemins :
+  URL directement utilisable (http, data:, blob:), sinon telechargement par le
+  SDK comme les calques. Et quand rien n'aboutit, l'entree est RETIREE du cache
+  au lieu d'etre marquee ratee, pour ne jamais bruler l'unique tentative.
+  A RETENIR : dans ce fichier, deux mecanismes coexistent pour atteindre un
+  media prive — l'URL signee et le telechargement SDK. Quand l'un affiche et
+  l'autre pas sur la MEME donnee, c'est le premier endroit ou regarder.
+
+  VIGNETTES, TROISIEME PASSE : L'UNIQUE TENTATIVE BRULEE. La garde corrigee
+  ci-dessous a debloque l'affichage sans clic sur une fiche, mais il fallait
+  encore quitter la scene et y revenir. Piste suivie :
+  getOrCreateUploadedImage posait « img.src = Utils.signedUrlFor(imageData) »
+  SANS verifier ce que signedUrlFor avait rendu. Or cette fonction rend le
+  CHEMIN BRUT tant que l'URL n'est pas signee — une adresse relative, qui
+  echoue, et dont l'echec etait memorise DEFINITIVEMENT (failed: true). L'unique
+  tentative etait donc brulee, et l'image ne s'affichait plus jamais meme une
+  fois la signature disponible. On s'abstient desormais quand l'URL n'est pas
+  utilisable, SANS rien mettre en cache : le rendu suivant reessaie. Retiree
+  aussi la condition « pas pendant l'edition d'un plan » ajoutee a la passe
+  precedente — sans consequence, et une condition de trop est un frein possible
+  de plus. Ajoutes au diagnostic : l'etat des OBJETS IMAGE (pretes, en cours,
+  echouees, non signees) et le nombre de repeintes depuis le chargement.
+
+  VIGNETTES DU STORYBOARD, LA CAUSE REELLE — UNE GARDE QUI NE PASSAIT JAMAIS.
+  Trouvee grace au diagnostic pose a l'etape precedente : il a montre que TOUT
+  etait en place (calques presents, blobs deja en cache, canvas bien dans le
+  document) et que l'image n'etait pas un calque mais un OBJET IMAGE insere.
+  Quand un tel objet n'est pas encore charge, renderObjectsOnCanvas dessine un
+  remplacant en pointilles — le rectangle vide qu'on voyait. Sa repeinte etait
+  bien prevue a la fin du chargement, mais gardee par
+  « state.currentShotId === null ». Or state.currentShotId N'EXISTE PAS dans le
+  code : seuls DrawingEditor.currentShotId et ScriptReport.currentShotId sont
+  poses quelque part. La condition valait donc undefined === null, soit FAUX
+  EN PERMANENCE, et la repeinte ne partait jamais — jusqu'a ce qu'un autre
+  evenement redessine la liste, typiquement l'ouverture puis la fermeture d'une
+  fiche de plan, d'ou « toutes les images apparaissent d'un coup apres avoir
+  clique ». Le defaut etait present DEUX FOIS (objets image et icones SVG).
+  Remplace par la bonne condition — ne pas redessiner la liste pendant qu'on
+  EDITE un plan — et par une repeinte coalescee (Storyboard.
+  planifierRepeinteVignettes), sans quoi dix images arrivant ensemble
+  provoqueraient dix redessins complets.
+  A RETENIR POUR TOUT AUDIT : chercher les gardes qui comparent une propriete
+  jamais ecrite. Elles ne levent aucune erreur, ne laissent aucune trace, et
+  desactivent silencieusement le code qu'elles protegent.
+
+  VIGNETTES DU STORYBOARD, DEUXIEME CAUSE — LE CANVAS ORPHELIN. La premiere
+  correction (cache des blobs, ci-dessous) n'a pas suffi : les miniatures
+  restaient vides tant qu'on n'avait pas ouvert une fiche au moins une fois.
+  Trouve dans renderDrawingData : le CONTEXTE du canvas etait capture a
+  l'appel, alors que les calques se dessinent APRES leur telechargement. Si la
+  liste des plans est redessinee entre-temps — changement de scene, retour
+  d'onglet, simple second rendu — la peinture atterrit dans un canvas retire du
+  document, et la vignette reste vide jusqu'au rendu suivant. La fonction
+  accepte desormais un IDENTIFIANT de canvas et le retrouve au moment de
+  peindre, jamais avant ; les deux vignettes (compacte et fiche) le lui passent.
+  Corrige au passage : les calques partaient tous en parallele et se dessinaient
+  dans leur ordre d'ARRIVEE, si bien qu'un calque lourd place dessous pouvait
+  recouvrir ceux du dessus. Ils sont dessines l'un apres l'autre, dans l'ordre
+  du dessin.
+  OUTIL : app.Storyboard.diagVignettes() dans la console liste, plan par plan,
+  ce que la vignette a de quoi dessiner (calques visibles, calques stockes,
+  blobs deja en cache, objets vectoriels, canvas present et dans le document).
+  Il tranche entre les trois causes qui donnent le meme symptome : le dessin
+  n'est pas la / il ne se telecharge pas / il n'arrive pas jusqu'au canvas.
+
+  VIGNETTES DU STORYBOARD : LA VRAIE CAUSE. Signalement precis : dans la liste
+  des plans, les images n'apparaissaient qu'apres avoir ouvert PUIS referme la
+  fiche d'un plan — et alors toutes d'un coup. Trouve : les DESSINS ne passent
+  pas par le cache d'images du navigateur. Ils sont telecharges en blob par le
+  SDK (StoryboardExport._resolveBlobUrl), et _loadPrintImg REVOQUAIT l'URL blob
+  juste apres l'avoir dessinee. Chaque rendu de la liste retelechargeait donc
+  tout, d'ou des vignettes vides le temps des telechargements ; le second rendu,
+  lui, retrouvait les reponses dans le cache HTTP et affichait tout d'un coup.
+  Corrige : les URL blob sont gardees dans un cache borne (150 entrees, la plus
+  ancienne liberee), les demandes simultanees sur le meme dessin sont mutualisees,
+  et le cache est vide au changement de projet. La revocation apres dessin est
+  supprimee.
+  CONSEQUENCE SUR LE PRECHAUFFAGE : il visait le mauvais canal. Un calque de
+  dessin ne se rechauffe pas avec une balise image mais en remplissant le cache
+  de blobs (Utils._warmBlobs). Le collecteur du storyboard separe desormais les
+  DESSINS (blobs) des images TELEVERSEES (balises) ; le mood board, dont les
+  elements sont de vraies balises, reste sur le canal image.
+
+  ANCIEN FORMULAIRE DE PROFIL : LA CAUSE, ET PLUS LES SYMPTOMES. Constat fait
+  en ouvrant le chantier : ce formulaire est deja INATTEIGNABLE — openFicheCard
+  intercepte les quatre casquettes, chacune ouvre sa propre fiche, et plus
+  aucun onclick n'ouvre l'ancienne modale. Il restait pourtant LU a deux
+  endroits vivants, saveCurrentProfile et switchToProfile, qui rejouaient
+  par-dessus la fiche des valeurs d'un formulaire que personne ne voyait : la
+  cause commune des deux bugs du 19 septembre, jusque-la seulement rustines.
+  Ces deux lectures sont coupees. Le type du profil, seul element legitime
+  qu'on en tirait, se deduit desormais des casquettes actives sans passer par
+  le DOM. Au passage, firstEnabledFacet corrigee : elle testait
+  facets.crew.enabled, or facets.crew est un TABLEAU depuis v597 — un compte
+  purement technicien n'avait donc aucune casquette active a ses yeux.
+  Reste la suppression du code mort, decrite au RESTE A FAIRE.
+
+  PRECHAUFFAGE DES IMAGES revu. Un prechauffage existait deja et son principe
+  etait bon ; il partait jusqu'a 4 s trop tard, lancait des centaines d'images
+  d'un coup, et ne disait jamais s'il avait travaille. File commune servie 4 a
+  la fois, depart a 1 s, abstention en connexion econome, et Utils.prefetchInfo()
+  pour lire le bilan dans la console.
+
+  CHARGEMENT DIFFERE DES GROS MODULES : non fait, et l'estimation « rendu
+  simple par le decoupage », notee plus tot dans la journee, etait FAUSSE —
+  corrigee au RESTE A FAIRE. Le decoupage porte sur la SOURCE ; le fichier
+  publie reste un seul bloc de script.
+
+  DECISIONS DE FIN DE CHANTIER (19 septembre) : garage personnel ECARTE, les
+  vehicules en plus passent par le parc de regie ; retrait de l'ancien
+  formulaire de profil, chargement des gros modules a la demande et
+  prechargement des images storyboard / moodboard ouverts au RESTE A FAIRE.
 
   DECOUPAGE DU FICHIER UNIQUE. index.html (4,62 Mo, 83 800 lignes) devient un
   fichier GENERE, reconstruit par tools/build.mjs a partir de 106 morceaux

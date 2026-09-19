@@ -5370,6 +5370,55 @@ const Storyboard = {
         shots.style.marginTop = Math.max(0, offset) + 'px';
     },
     
+    // v599 — DIAGNOSTIC DES VIGNETTES, a taper dans la console du navigateur :
+    //   app.Storyboard.diagVignettes()
+    // Dit, plan par plan, ce que la liste a REELLEMENT de quoi dessiner. Sert a
+    // trancher entre trois causes qui donnent le meme symptome a l'ecran :
+    // le dessin n'est pas la / il est la mais ne se telecharge pas / il se
+    // telecharge mais n'arrive pas jusqu'au canvas affiche.
+    diagVignettes: () => {
+        const shots = (state.data.shots || []).filter(s => s.sceneId === Storyboard.currentSceneId);
+        const lignes = shots.map((s, i) => {
+            const couches = (s.drawingData && Array.isArray(s.drawingData.layers))
+                ? s.drawingData.layers.filter(l => l && l.visible) : [];
+            const stockees = couches.filter(l => Utils._projPathFrom(l.imageData));
+            const zone = s.drawings && s.drawings.original;
+            const objets = (zone && Array.isArray(zone.objects)) ? zone.objects : [];
+            const img = objets.filter(o => o && o.type === 'image');
+            const cache = Storyboard._svgImageCache || {};
+            const c = document.getElementById('compact-preview-' + s.id);
+            return {
+                plan: i + 1,
+                type: s.imageType || '(aucun)',
+                drawingData_racine: !!s.drawingData,
+                calques_visibles: couches.length,
+                calques_stockes: stockees.length,
+                blobs_deja_en_cache: stockees.filter(l => StoryboardExport._blobCache.has(Utils._projPathFrom(l.imageData))).length,
+                zone_original: !!(zone && zone.drawingData),
+                objets_vectoriels: objets.length,
+                // v599 : etat des OBJETS IMAGE inseres — c'est eux, et non les
+                // calques, qui manquaient a l'appel. « non_signee » veut dire
+                // que l'URL n'etait pas prete : l'image sera retentee au rendu
+                // suivant. « echouee » veut dire que le chargement a echoue.
+                objets_image: img.length,
+                img_pretes: img.filter(o => { const e = cache['uploaded|' + o.id]; return e && e.ready && !e.failed; }).length,
+                img_en_cours: img.filter(o => { const e = cache['uploaded|' + o.id]; return e && !e.ready; }).length,
+                img_echouees: img.filter(o => { const e = cache['uploaded|' + o.id]; return e && e.failed; }).length,
+                img_non_signees: img.filter(o => { const u = Utils.signedUrlFor(o.imageData); return !(typeof u === 'string' && /^(https?|data|blob):/.test(u)); }).length,
+                // v599 : la valeur BRUTE et ce qu'en fait signedUrlFor — c'est
+                // ce qui manquait pour trancher sans deviner.
+                exemple_valeur: img.length ? String(img[0].imageData || '').slice(0, 70) : '',
+                exemple_url: img.length ? String(Utils.signedUrlFor(img[0].imageData) || '').slice(0, 70) : '',
+                exemple_chemin: img.length ? String(Utils._projPathFrom(img[0].imageData) || '(aucun)') : '',
+                canvas_present: !!c,
+                canvas_dans_le_document: !!(c && document.body.contains(c))
+            };
+        });
+        console.log('repeintes de la liste depuis le chargement :', Storyboard._repeintes);
+        try { console.table(lignes); } catch(e) { console.log(lignes); }
+        return lignes;
+    },
+
     renderShots: () => {
         const container = document.getElementById('sbShotsList');
         container.innerHTML = '';
@@ -5503,7 +5552,7 @@ const Storyboard = {
                 const canvas = document.getElementById(`compact-preview-${shot.id}`);
                 if(canvas) {
                     const ctx = canvas.getContext('2d');
-                    DrawingEditor.renderDrawingData(ctx, shot.drawingData);
+                    DrawingEditor.renderDrawingData(ctx, shot.drawingData, `compact-preview-${shot.id}`);
                 }
             }
             
@@ -5516,6 +5565,9 @@ const Storyboard = {
                     const originalZone = shot.drawings && shot.drawings.original;
                     if(originalZone && Array.isArray(originalZone.objects) && originalZone.objects.length > 0) {
                         Storyboard.renderObjectsOnCanvas(pctx, originalZone.objects);
+                        // v599 : les objets IMAGE par le chemin de l'apercu, seul
+                        // a savoir atteindre un media du bucket prive.
+                        Storyboard.dessinerObjetsImage('compact-preview-' + shot.id, originalZone.objects);
                     }
                 }
             }, 150);
@@ -5747,7 +5799,7 @@ const Storyboard = {
                 const canvas = document.getElementById(`preview-${shot.id}`);
                 if(canvas) {
                     const ctx = canvas.getContext('2d');
-                    DrawingEditor.renderDrawingData(ctx, shot.drawingData);
+                    DrawingEditor.renderDrawingData(ctx, shot.drawingData, `preview-${shot.id}`);
                 }
             }
             
@@ -5760,6 +5812,9 @@ const Storyboard = {
                     const originalZone = shot.drawings && shot.drawings.original;
                     if(originalZone && Array.isArray(originalZone.objects) && originalZone.objects.length > 0) {
                         Storyboard.renderObjectsOnCanvas(pctx, originalZone.objects);
+                        // v599 : les objets IMAGE par le chemin de l'apercu, seul
+                        // a savoir atteindre un media du bucket prive.
+                        Storyboard.dessinerObjetsImage('preview-' + shot.id, originalZone.objects);
                     }
                 }
             }, 150);
@@ -6024,7 +6079,7 @@ const Storyboard = {
             // (DrawingEditor + Storyboard listings)
             try {
                 if(typeof DrawingEditor !== 'undefined' && DrawingEditor.redraw) DrawingEditor.redraw();
-                if(typeof Storyboard.renderShots === 'function' && state.currentShotId === null) Storyboard.renderShots();
+                Storyboard.planifierRepeinteVignettes();
             } catch(_) { /* silent */ }
         };
         img.onerror = () => {
@@ -6042,6 +6097,38 @@ const Storyboard = {
     // Phase 4B v2 : retourne l'image d'un objet de type 'image' (lazy-loaded)
     // Identique à getOrCreateSvgImage mais utilise imageData (data URL base64) au lieu d'un type SVG.
     // La clé du cache est l'ID de l'objet pour éviter d'utiliser le data URL géant comme clé.
+    // v599 — REPEINTE DIFFEREE DES VIGNETTES. Une image-objet qui finit de
+    // charger doit faire redessiner la liste des plans : sans cela, le
+    // remplacant en pointilles dessine a sa place y reste POUR TOUJOURS.
+    // Le declencheur existait, mais il etait garde par
+    // « state.currentShotId === null ». Or state.currentShotId N'EXISTE PAS :
+    // seuls DrawingEditor.currentShotId et ScriptReport.currentShotId sont
+    // poses quelque part dans le code. La condition valait donc
+    // undefined === null, soit FAUX en permanence, et la repeinte ne partait
+    // JAMAIS. D'ou des miniatures vides jusqu'a ce qu'un autre evenement
+    // redessine la liste — typiquement l'ouverture puis la fermeture d'une
+    // fiche de plan, apres quoi toutes les images apparaissaient d'un coup.
+    // La bonne condition est : ne pas redessiner la liste pendant qu'on EDITE
+    // un plan. Et on coalesce, sinon dix images arrivant ensemble
+    // provoqueraient dix redessins complets.
+    _repeinteTimer: null,
+    _repeintes: 0,
+    planifierRepeinteVignettes: () => {
+        // v599 : la condition « pas pendant l'edition d'un plan », ajoutee au
+        // passage precedent, est retiree. Redessiner la liste pendant qu'une
+        // fenetre de dessin est ouverte est sans consequence — elle vit dans
+        // une autre partie de la page — alors qu'une condition de trop est un
+        // frein possible de plus, et c'est exactement ce genre de garde qui
+        // avait deja desactive cette repeinte en silence.
+        if(!document.getElementById('sbShotsList')) return;
+        if(Storyboard._repeinteTimer) return;
+        Storyboard._repeinteTimer = setTimeout(() => {
+            Storyboard._repeinteTimer = null;
+            Storyboard._repeintes++;
+            try { Storyboard.renderShots(); } catch(e) {}
+        }, 120);
+    },
+
     getOrCreateUploadedImage: (objectId, imageData) => {
         const cacheKey = 'uploaded|' + objectId;
         let entry = Storyboard._svgImageCache[cacheKey];
@@ -6049,10 +6136,45 @@ const Storyboard = {
         if(entry && !entry.ready) return null;
         
         if(!imageData) return null;
-        
+
+        // v599 — NE PAS BRULER L'UNIQUE TENTATIVE. signedUrlFor rend le CHEMIN
+        // BRUT tant que l'URL n'est pas signee. Le poser en src depuis une page
+        // ouverte en local donne une adresse relative, qui echoue — et l'echec
+        // etait memorise DEFINITIVEMENT (failed: true), si bien que l'image ne
+        // s'affichait plus jamais, meme une fois la signature disponible. On
+        // s'abstient donc, sans rien mettre en cache : le rendu suivant
+        // reessaiera, cette fois avec une vraie URL.
+        // v599 — DEUX CHEMINS, car le diagnostic a montre que l'URL signee
+        // n'etait PAS disponible pour ces images : aucune entree n'apparaissait
+        // dans le cache, et la liste n'etait jamais repeinte.
+        //  1. URL directement utilisable (http, data:, blob:) -> on la pose ;
+        //  2. sinon, si c'est un chemin de projet, on TELECHARGE le fichier par
+        //     le SDK (authentifie, sans passer par une signature) et on dessine
+        //     depuis une URL blob locale. C'est le meme chemin que celui des
+        //     calques de dessin, qui eux s'affichaient correctement — d'ou
+        //     l'idee de ne plus dependre de la signature ici non plus.
+        // Rien d'exploitable du tout -> on rend null SANS mettre en cache, le
+        // rendu suivant reessaiera (ne jamais bruler l'unique tentative).
+        const chemin = Utils._projPathFrom(imageData);
+        const url = Utils.signedUrlFor(imageData);
+        // v599 — UNE URL DE MEDIA PROJET N'EST JAMAIS POSEE TELLE QUELLE.
+        // Le bucket 'projects' est PRIVE : une adresse de forme
+        // /object/public/ y est toujours refusee. Or signedUrlFor rend la
+        // valeur stockee inchangee quand la signature n'est pas en cache — un
+        // repli qui, ici, est garanti de rater. On brulait l'unique tentative
+        // dessus, et l'image etait marquee ratee DEFINITIVEMENT.
+        // Donc : media projet -> URL signee si le cache a repondu, sinon
+        // telechargement par le SDK. Les autres adresses (data:, blob:, site
+        // externe) restent posees directement.
+        const signeeDisponible = !!chemin && url !== imageData;
+        const utilisable = chemin
+            ? signeeDisponible
+            : (typeof url === 'string' && (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:')));
+        if(!utilisable && !chemin) return null;
+
         const img = new Image();
         // Si l'image vient de Storage (URL https), activer CORS pour permettre le drawImage dans canvas (exports PDF)
-        if(typeof imageData === 'string' && imageData.startsWith('http')) {
+        if(utilisable && typeof imageData === 'string' && imageData.startsWith('http')) {
             img.crossOrigin = 'anonymous';
         }
         Storyboard._svgImageCache[cacheKey] = { img: img, ready: false };
@@ -6061,7 +6183,7 @@ const Storyboard = {
             Storyboard._svgImageCache[cacheKey].ready = true;
             try {
                 if(typeof DrawingEditor !== 'undefined' && DrawingEditor.redraw) DrawingEditor.redraw();
-                if(typeof Storyboard.renderShots === 'function' && state.currentShotId === null) Storyboard.renderShots();
+                Storyboard.planifierRepeinteVignettes();
             } catch(_) { /* silent */ }
         };
         img.onerror = () => {
@@ -6069,13 +6191,58 @@ const Storyboard = {
             Storyboard._svgImageCache[cacheKey].ready = true;
             Storyboard._svgImageCache[cacheKey].failed = true;
         };
-        img.src = Utils.signedUrlFor(imageData);
+        if(utilisable) {
+            img.src = url;
+        } else {
+            // Pas d'URL signee : on telecharge le fichier par le SDK et on
+            // dessine depuis une URL blob locale — le chemin qui fonctionne
+            // deja pour les calques de dessin.
+            StoryboardExport._resolveBlobUrl(imageData).then(blobUrl => {
+                if(blobUrl) { img.src = blobUrl; return; }
+                // Telechargement impossible : on RETIRE l'entree plutot que de
+                // la marquer ratee, pour laisser sa chance au rendu suivant.
+                delete Storyboard._svgImageCache[cacheKey];
+            }).catch(() => { delete Storyboard._svgImageCache[cacheKey]; });
+        }
         
         return null;
     },
     
     // Phase 4B : rendu canvas des objets via SVG (avec fallback emoji si SVG pas encore chargé)
     // Chaque objet : { type, x, y, scale?, rotation? } — type doit correspondre à un CONFIG.annotationObjects[].type
+    // v599 — DESSIN DES OBJETS IMAGE PAR LE CHEMIN EPROUVE.
+    // Constat de l'utilisateur, decisif : « Mini Apercu » et « Apercu Plein
+    // Ecran » affichent bien ces images. Or l'apercu passe par
+    // StoryboardExport._loadPrintImg, qui telecharge les medias du bucket PRIVE
+    // en blob via le SDK. Les vignettes, elles, passaient par
+    // getOrCreateUploadedImage et son cache, qui dependait d'une URL signee —
+    // et echouaient. Plutot que de continuer a reparer ce second chemin, on
+    // reprend ici EXACTEMENT celui de l'apercu.
+    // Le canvas est retrouve au moment de peindre (et non capture avant), pour
+    // survivre a un redessin de la liste entre le depart du telechargement et
+    // son arrivee. La transformation reproduit celle de renderObjectsOnCanvas :
+    // translation au centre de l'objet, rotation, puis dessin centre.
+    dessinerObjetsImage: (canvasId, objects) => {
+        const images = (objects || []).filter(o => o && o.type === 'image' && o.imageData);
+        if(!images.length || typeof StoryboardExport === 'undefined' || !StoryboardExport._loadPrintImg) return;
+        images.forEach(obj => {
+            const img = new Image();
+            StoryboardExport._loadPrintImg(img, obj.imageData, () => {
+                const c = document.getElementById(canvasId);
+                if(!c) return;
+                const ctx = c.getContext('2d');
+                const scale = obj.scale || 1;
+                const w = (obj.width || 100) * scale;
+                const h = (obj.height || 100) * scale;
+                ctx.save();
+                ctx.translate(obj.x || 0, obj.y || 0);
+                if(obj.rotation) ctx.rotate(obj.rotation * Math.PI / 180);
+                ctx.drawImage(img, -w / 2, -h / 2, w, h);
+                ctx.restore();
+            });
+        });
+    },
+
     renderObjectsOnCanvas: (ctx, objects) => {
         if(!ctx || !Array.isArray(objects) || objects.length === 0) return;
         const catalog = CONFIG.annotationObjects || [];
@@ -6390,14 +6557,52 @@ const StoryboardExport = {
     // (deja autorise cote CORS) et renvoie une URL blob locale (same-origin).
     // Utilise seulement pour les images STOCKEES (chemin projet). Les images en
     // data: URL (cas courant du storyboard) sont dessinees directement.
+    // ===== CACHE DES BLOBS DE DESSIN (v599) =====
+    // Les dessins du storyboard ne passent PAS par le cache d'images du
+    // navigateur : ils sont telecharges en blob par le SDK. Or l'URL blob
+    // etait revoquee juste apres avoir ete dessinee — chaque rendu de la liste
+    // des plans retelechargeait donc TOUT, et les vignettes restaient vides le
+    // temps des telechargements. C'est ce qui donnait l'impression que les
+    // images n'apparaissaient qu'apres avoir ouvert puis referme une fiche :
+    // le second rendu, lui, retrouvait la reponse dans le cache HTTP.
+    // On garde donc les URL blob, bornees et videes au changement de projet.
+    _blobCache: new Map(),
+    _blobEnCours: new Map(),
+    BLOB_CACHE_MAX: 150,
+    videBlobCache: () => {
+        StoryboardExport._blobCache.forEach(u => { try { URL.revokeObjectURL(u); } catch(e) {} });
+        StoryboardExport._blobCache.clear();
+        StoryboardExport._blobEnCours.clear();
+    },
     _resolveBlobUrl: async (storedUrl) => {
         try {
             const path = Utils._projPathFrom(storedUrl);
             if(!path) return null;
-            const { data, error } = await supabase.storage.from('projects').download(path);
-            if(error || !data) return null;
-            return URL.createObjectURL(data);
-        } catch(e) { return null; }
+            const cache = StoryboardExport._blobCache;
+            const dejaLa = cache.get(path);
+            if(dejaLa) return dejaLa;
+            // Deux vignettes peuvent demander le meme dessin en meme temps :
+            // sans cela, on le telechargerait deux fois.
+            const enCours = StoryboardExport._blobEnCours.get(path);
+            if(enCours) return enCours;
+            const p = (async () => {
+                const { data, error } = await supabase.storage.from('projects').download(path);
+                if(error || !data) return null;
+                const url = URL.createObjectURL(data);
+                if(cache.size >= StoryboardExport.BLOB_CACHE_MAX) {
+                    const plusAncien = cache.keys().next().value;
+                    const u = cache.get(plusAncien);
+                    cache.delete(plusAncien);
+                    try { URL.revokeObjectURL(u); } catch(e) {}
+                }
+                cache.set(path, url);
+                return url;
+            })();
+            StoryboardExport._blobEnCours.set(path, p);
+            const r = await p;
+            StoryboardExport._blobEnCours.delete(path);
+            return r;
+        } catch(e) { StoryboardExport._blobEnCours.delete(Utils._projPathFrom(storedUrl)); return null; }
     },
 
     // Charge une image de print puis appelle draw(). Regles :
@@ -6411,8 +6616,11 @@ const StoryboardExport = {
         const isData = typeof storedUrl === 'string' && (storedUrl.startsWith('data:') || storedUrl.startsWith('blob:'));
         const resolve = isData ? Promise.resolve(null) : StoryboardExport._resolveBlobUrl(storedUrl);
         const p = resolve.then(objUrl => new Promise(res => {
-            img.onload = () => { try { draw(); } catch(e) {} if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
-            img.onerror = () => { if(objUrl) { try { URL.revokeObjectURL(objUrl); } catch(e) {} } res(); };
+            // v599 : plus de revocation ici. L'URL blob vient desormais du cache
+            // ci-dessus et sert a tous les rendus suivants ; la detruire apres le
+            // premier dessin etait la cause du retelechargement systematique.
+            img.onload = () => { try { draw(); } catch(e) {} res(); };
+            img.onerror = () => { res(); };
             img.src = objUrl || (isData ? storedUrl : Utils.signedUrlFor(storedUrl));
             setTimeout(res, 8000);
         }));
@@ -8752,17 +8960,35 @@ const DrawingEditor = {
         Utils.toast(zoneLabel + ' sauvegardé !', 'success');
     },
     
-    renderDrawingData: (ctx, drawingData) => {
-        if(!drawingData || !drawingData.layers) return Promise.resolve();
-        
-        const promises = [];
-        drawingData.layers.forEach(layerData => {
-            if(!layerData.visible) return;
-            
+    // v599 — DEUX DEFAUTS CORRIGES ICI, tous deux invisibles tant que les
+    // calques arrivaient vite :
+    //  1. CANVAS ORPHELIN. Le contexte etait capture a l'appel, mais les calques
+    //     se dessinent APRES leur telechargement. Si la liste des plans est
+    //     redessinee entre-temps — changement de scene, retour d'onglet, simple
+    //     second rendu — la peinture atterrit dans un canvas retire du document :
+    //     la vignette reste vide POUR TOUJOURS, jusqu'au prochain rendu. D'ou
+    //     « les miniatures n'apparaissent qu'apres avoir clique sur une fiche ».
+    //     On accepte donc un identifiant de canvas et on le RETROUVE au moment
+    //     de peindre, jamais avant.
+    //  2. ORDRE D'EMPILEMENT. Les calques partaient tous en parallele et se
+    //     dessinaient dans leur ordre d'ARRIVEE : un calque lourd place dessous
+    //     pouvait recouvrir ceux du dessus. Ils sont desormais dessines l'un
+    //     apres l'autre, dans l'ordre du dessin.
+    renderDrawingData: async (ctx, drawingData, canvasId) => {
+        if(!drawingData || !Array.isArray(drawingData.layers)) return;
+        const cible = () => {
+            if(!canvasId) return ctx;
+            const c = document.getElementById(canvasId);
+            return c ? c.getContext('2d') : null;
+        };
+        for(const layerData of drawingData.layers) {
+            if(!layerData || !layerData.visible) continue;
             const img = new Image();
-            promises.push(StoryboardExport._loadPrintImg(img, layerData.imageData, () => { ctx.drawImage(img, 0, 0); }));
-        });
-        return Promise.all(promises);
+            await StoryboardExport._loadPrintImg(img, layerData.imageData, () => {
+                const c = cible();
+                if(c) c.drawImage(img, 0, 0);
+            });
+        }
     }
 };
 
