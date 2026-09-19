@@ -5,17 +5,17 @@
 --  ce que les gens ECRIVENT (« Un probleme », « Une idee », « Autre »), la-bas
 --  ce que l'application casse toute seule.
 --
---  POURQUOI CETTE TABLE ALORS QU'UN MAIL PART DEJA : le mail quotidien reste,
---  c'est la notification. Mais une boite mail ne se trie pas, ne se compte pas
---  et ne se relit pas a plusieurs. Les retours vivent donc AUSSI ici, ou on
---  peut les classer par urgence, marquer ce qui est traite, et les croiser
---  avec les erreurs remontees.
+--  POURQUOI CETTE TABLE : les retours partaient en mail une fois par jour, et
+--  une boite mail ne se trie pas, ne se compte pas et ne se relit pas a
+--  plusieurs. Ils vivent donc ici, ou on peut les classer par urgence, marquer
+--  ce qui est traite, et les croiser avec les erreurs remontees. Le mail
+--  quotidien a ete SUPPRIME dans la foulee : il faisait doublon.
 --
---  RETOURS ANONYMES : l'adresse de la personne n'est PAS enregistree ici.
---  Choix du 19 septembre. Elle figure toujours dans le MAIL que recoit
---  l'editeur — donc repondre reste possible, en repartant de la boite mail.
---  La base, elle, ne sert qu'a trier et a reparer : elle n'a pas besoin de
---  savoir qui a ecrit.
+--  RETOURS ANONYMES : l'adresse de la personne n'est PAS enregistree, et elle
+--  n'existe plus nulle part ailleurs depuis l'arret du mail. On ne peut donc
+--  PAS recontacter quelqu'un depuis un retour — c'est assume : qui a vraiment
+--  besoin d'une reponse ecrit directement a l'editeur. Remettre l'adresse ici
+--  est possible, mais c'est une decision a reprendre, pas un detail.
 --
 --  PAS DE PURGE AUTOMATIQUE, contrairement aux erreurs : une erreur de l'an
 --  dernier n'apprend plus rien, une idee d'utilisateur si.

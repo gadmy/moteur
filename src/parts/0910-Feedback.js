@@ -1,7 +1,5 @@
 
   const Feedback = {
-    // Adresse de reception des retours. Une seule ligne a changer si besoin.
-    TO: 'contact@moteur.studio',
     QUEUE_KEY: 'moteur_feedback_queue',
     LAST_KEY: 'moteur_feedback_lastsend',
     LABELS: { bug: 'Un probleme', idee: 'Une idee', autre: 'Autre' },
@@ -88,71 +86,42 @@
       await Feedback.flush();
     },
 
-    // DEPOT EN BASE (v600). Le mail quotidien reste — c'est la notification —
-    // mais une boite mail ne se trie pas et ne se compte pas. Les retours vont
-    // donc AUSSI dans la table client_feedback, ou on peut les classer par
-    // urgence et les croiser avec les erreurs remontees.
-    // ANONYME : l'adresse de la personne n'est PAS enregistree. Elle reste
-    // dans le mail, ce qui suffit pour repondre.
-    // MARQUAGE _enBase : le depot est tente AVANT l'envoi du mail, et une
-    // remarque deja deposee ne repart pas. Sans ce marqueur, un mail en echec
-    // (la file n'est alors PAS videe, a dessein) ferait redeposer les memes
-    // remarques le lendemain.
-    _deposer: async (q) => {
-      const aDeposer = q.filter(it => !it._enBase);
-      if (!aDeposer.length) return;
-      try {
-        const version = (document.getElementById('app-version') || {}).textContent || '';
-        const lignes = aDeposer.map(it => ({
-          type: String(it.type || 'autre').substring(0, 20),
-          texte: String(it.text || '').substring(0, 4000),
-          contexte: String(it.ctx || '').substring(0, 600),
-          version: String(version).substring(0, 20)
-        }));
-        const { error } = await supabase.from('client_feedback').insert(lignes);
-        if (error) throw error;
-        aDeposer.forEach(it => { it._enBase = true; });
-        Feedback._saveQueue(q);
-      } catch (e) {
-        // Un depot rate ne doit rien bloquer : le mail part quand meme, et la
-        // remarque sera redeposee au prochain passage.
-        console.warn('[Feedback] depot en base impossible, on reessaiera', e);
-      }
-    },
-
+    // DEPOT EN BASE (v600). Les remarques partaient en MAIL une fois par jour,
+    // et la file locale etait videe ensuite : la seule trace vivait dans une
+    // boite mail — qui ne se trie pas, ne se compte pas, et ne se relit pas a
+    // deux. Elles vont desormais dans la table client_feedback, lue par
+    // l'onglet « Retours » du tableau de bord admin.
+    // PLUS AUCUN MAIL (decision du 19 septembre) : le recapitulatif quotidien
+    // faisait doublon avec cette table. Consequence assumee — la table est
+    // ANONYME, donc plus moyen de recontacter qui que ce soit depuis un
+    // retour. Qui a vraiment besoin d'une reponse ecrit directement a
+    // l'editeur. Ne pas remettre l'un sans rediscuter l'autre.
+    // LE RYTHME NE CHANGE PAS : on depose a minuit ce qui date d'un jour
+    // ANTERIEUR, jamais ce qui vient d'etre ecrit. C'est ce qui laisse a la
+    // personne le temps de relire, corriger ou retirer sa remarque avant
+    // qu'elle ne parte.
     flush: async () => {
       const q = Feedback.queue();
       if (!q.length || Feedback._sending) return;
       Feedback._sending = true;
-      await Feedback._deposer(q);
-      const from = (state.currentUser && state.currentUser.email) || 'inconnu';
-      const clean = (s, max) => String(s || '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, max);
-      const corps = q.map((it, i) =>
-        '--- Remarque ' + (i + 1) + '/' + q.length + ' — ' + (Feedback.LABELS[it.type] || 'Autre') + ' — ' + (it.day || '') + ' ---\n' +
-        clean(it.text, 4000) + '\n' +
-        (it.ctx ? '(' + clean(it.ctx, 600) + ')\n' : '')
-      ).join('\n');
       try {
-        const { error } = await supabase.functions.invoke('super-action', {
-          body: {
-            to: Feedback.TO,
-            toName: 'moteur.studio',
-            type: 'generic',
-            data: {
-              subject: '[RETOURS x' + q.length + '] ' + clean(from, 120),
-              title: 'Retours utilisateur (' + q.length + ')',
-              message: 'De : ' + clean(from, 120) + '\n\n' + corps
-            }
-          }
-        });
+        const version = (document.getElementById('app-version') || {}).textContent || '';
+        const clean = (v, max) => String(v || '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, max);
+        const lignes = q.map(it => ({
+          type: clean(it.type || 'autre', 20),
+          texte: clean(it.text, 4000),
+          contexte: clean(it.ctx, 600),
+          version: clean(version, 20)
+        }));
+        const { error } = await supabase.from('client_feedback').insert(lignes);
         if (error) throw error;
-        // Envoye : la file disparait, comme convenu.
+        // Depose : la file disparait, comme convenu.
         Feedback._saveQueue([]);
         try { localStorage.setItem(Feedback.LAST_KEY, Feedback._today()); } catch (e) {}
         Feedback._refreshBadge();
       } catch (e) {
         // On NE VIDE PAS en cas d'echec : les remarques repartiront demain.
-        console.warn('[Feedback] envoi differe impossible, on reessaiera', e);
+        console.warn('[Feedback] depot differe impossible, on reessaiera', e);
       }
       Feedback._sending = false;
     },
