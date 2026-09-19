@@ -5604,8 +5604,8 @@ const SceneVersions = {
                         <strong>Résumé :</strong><br>
                         <p class="text-sec">${Utils.escape(v.resume) || '(vide)'}</p>
                     </div>
-                    <div style="background: white; color: #333; padding: 20px; border-radius: 8px; font-family: 'Courier Prime', monospace;">
-                        ${v.scriptContent || '<em style="color:#999">(vide)</em>'}
+                    <div style="background: var(--panel-bg); color: var(--text-main); padding: 20px; border-radius: 8px; font-family: 'Courier Prime', monospace;">
+                        ${v.scriptContent || '<em style="color:var(--text-sec)">(vide)</em>'}
                     </div>
                 </div>
                 <div style="padding: 15px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px;">
@@ -9522,7 +9522,7 @@ const ScriptReport = {
         
         const menu = document.createElement('div');
         menu.className = 'sr-star-menu';
-        menu.style.cssText = 'position: absolute; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); z-index: var(--z-dropdown); padding: 5px 0;';
+        menu.style.cssText = 'position: absolute; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); z-index: var(--z-dropdown); padding: 5px 0;';
         menu.innerHTML = `
             <div style="padding: 8px 15px; cursor: pointer; display: flex; align-items: center; gap: 8px;" onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='white'" onclick="app.ScriptReport.setTakeStar('${key}', ${reportIdx}, ${takeIdx}, 'gold'); this.parentElement.remove();">
                 <span style="font-size: 1.3rem; color: #FFD700;">★</span> <span>Or</span>
