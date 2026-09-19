@@ -1,5 +1,17 @@
 
 // =====================================================================
+// Adresse et cle PUBLIQUE de la base. Declarees ici, en dehors de
+// l'application, parce que le capteur d'erreurs ci-dessous doit pouvoir
+// envoyer AVANT que l'application n'ait demarre — et surtout quand c'est
+// justement son demarrage qui a echoue. L'application les reprend telles
+// quelles : une seule source, pas de copie a tenir a jour.
+// =====================================================================
+const MOTEUR_SUPABASE = {
+    url: 'https://txjuniuzqxpxghubluxm.supabase.co',
+    anon: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4anVuaXV6cXhweGdodWJsdXhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0MDk1MjMsImV4cCI6MjA4NDk4NTUyM30.QcuA9EdDFBSuzLvUVPiB9a3lPZLFzYBccw99pI71AhQ'
+};
+
+// =====================================================================
 // ErrorLogger — capteur global d'erreurs JS pour diagnostic des bugs
 // =====================================================================
 const ErrorLogger = {
@@ -82,6 +94,97 @@ const ErrorLogger = {
         }
     },
     
+    // =================================================================
+    // REMONTEE VERS LA BASE (v600)
+    // =================================================================
+    // Sans ca, une erreur survenue chez quelqu'un d'autre reste dans SON
+    // navigateur et personne ne la voit jamais. On la depose donc dans la
+    // table client_errors (voir sql/remontee_erreurs.sql).
+    // CE QU'ON ENVOIE : le message, le fichier, la ligne, la pile, la page,
+    // la version affichee et un navigateur abrege. NI compte, NI projet :
+    // on veut reparer le bug, pas savoir qui l'a eu.
+    // ENVOI DIRECT, sans le SDK Supabase, et c'est le point important : les
+    // erreurs les plus utiles sont justement celles du demarrage, quand le
+    // SDK n'est pas encore la — ou quand c'est lui qui a echoue.
+    REMONTEE: {
+        MAX_PAR_SESSION: 10,   // plafond dur : une boucle d'erreurs ne doit pas inonder la base
+        _envoyees: 0,
+        _vues: {},             // empreintes deja envoyees pendant cette session
+        // Bruit connu, sans valeur de diagnostic :
+        // - les extensions du navigateur ne sont pas notre code ;
+        // - « Script error. » est ce que rend un script d'un autre domaine,
+        //   sans message ni ligne : il n'apprend rien ;
+        // - la boucle ResizeObserver est un avertissement sans consequence.
+        IGNORER: [/^chrome-extension:/, /^moz-extension:/, /^safari-web-extension:/],
+        MESSAGES_IGNORES: [/^Script error\.?$/i, /ResizeObserver loop/i]
+    },
+
+    // Empreinte de regroupement : meme erreur, meme endroit. Les nombres sont
+    // remplaces par # pour que deux occurrences ne differant que par un
+    // identifiant ou un index se regroupent au lieu de compter pour deux.
+    _empreinte: (e) => (e.type + '|' + String(e.message).replace(/\d+/g, '#') + '|'
+        + String(e.source || '').split('/').pop() + '|' + (e.line || 0)).substring(0, 120),
+
+    _version: () => {
+        try { return (document.getElementById('app-version') || {}).textContent || ''; }
+        catch (err) { return ''; }
+    },
+    // Navigateur en clair et court. L'agent complet n'apprend rien de plus et
+    // sert surtout a pister les gens.
+    _navigateur: () => {
+        const ua = navigator.userAgent || '';
+        const nom = /Edg\//.test(ua) ? 'Edge'
+            : /OPR\//.test(ua) ? 'Opera'
+            : /Chrome\//.test(ua) ? 'Chrome'
+            : /Firefox\//.test(ua) ? 'Firefox'
+            : /Safari\//.test(ua) ? 'Safari' : 'Autre';
+        const os = /Windows/.test(ua) ? 'Windows'
+            : /Android/.test(ua) ? 'Android'
+            : /iPhone|iPad/.test(ua) ? 'iOS'
+            : /Mac OS X/.test(ua) ? 'macOS'
+            : /Linux/.test(ua) ? 'Linux' : '';
+        return (nom + (os ? ' / ' + os : '')).substring(0, 120);
+    },
+
+    envoyer: (e) => {
+        try {
+            if(!e) return;
+            const R = ErrorLogger.REMONTEE;
+            // En local (double-clic sur le fichier), on est en train de tester :
+            // rien a remonter, ca ne ferait que brouiller le tableau.
+            if(location.protocol === 'file:') return;
+            if(R._envoyees >= R.MAX_PAR_SESSION) return;
+            if(R.IGNORER.some(rx => rx.test(e.source || ''))) return;
+            if(R.MESSAGES_IGNORES.some(rx => rx.test(e.message || ''))) return;
+            const empreinte = ErrorLogger._empreinte(e);
+            if(R._vues[empreinte]) return;   // une fois par session suffit
+            R._vues[empreinte] = true;
+            R._envoyees++;
+            fetch(MOTEUR_SUPABASE.url + '/rest/v1/client_errors', {
+                method: 'POST',
+                keepalive: true,             // survit a la fermeture de l'onglet
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': MOTEUR_SUPABASE.anon,
+                    'Authorization': 'Bearer ' + MOTEUR_SUPABASE.anon,
+                    'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify({
+                    empreinte: empreinte,
+                    type: String(e.type || '').substring(0, 40),
+                    message: String(e.message || '').substring(0, 500),
+                    source: String(e.source || '').substring(0, 300),
+                    ligne: e.line || 0,
+                    colonne: e.col || 0,
+                    pile: String(e.stack || '').substring(0, 2000),
+                    page: String(e.url || '').substring(0, 300),
+                    version: ErrorLogger._version().substring(0, 20),
+                    navigateur: ErrorLogger._navigateur()
+                })
+            }).catch(() => {});   // un envoi rate ne doit JAMAIS relancer une erreur
+        } catch (err) { /* le capteur ne plante pas l'application */ }
+    },
+
     // Affiche un toast d'alerte visible dans l'UI
     showToast: (message) => {
         const now = Date.now();
@@ -115,7 +218,7 @@ window.addEventListener('error', function(event) {
         event.colno,
         event.error && event.error.stack ? event.error.stack : null
     );
-    if(entry) ErrorLogger.showToast();
+    if(entry) { ErrorLogger.envoyer(entry); ErrorLogger.showToast(); }
 });
 
 // Installer le capteur des promesses rejetées non gérées
@@ -124,7 +227,7 @@ window.addEventListener('unhandledrejection', function(event) {
     const msg = reason && reason.message ? reason.message : String(reason);
     const stack = reason && reason.stack ? reason.stack : null;
     const entry = ErrorLogger.addError('Promise rejetée', msg, '', 0, 0, stack);
-    if(entry) ErrorLogger.showToast();
+    if(entry) { ErrorLogger.envoyer(entry); ErrorLogger.showToast(); }
 });
 
 // Exposer en global pour usage console
@@ -134,8 +237,10 @@ console.log('%c[ErrorLogger] ✅ Capteur d\'erreurs actif - tape ErrorLogger.sho
 const app = (function(){
 
   // --- CONFIGURATION SUPABASE ---
-  const SUPABASE_URL = 'https://txjuniuzqxpxghubluxm.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4anVuaXV6cXhweGdodWJsdXhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk0MDk1MjMsImV4cCI6MjA4NDk4NTUyM30.QcuA9EdDFBSuzLvUVPiB9a3lPZLFzYBccw99pI71AhQ';
+  // Reprises de MOTEUR_SUPABASE, declare en tete de fichier (le capteur
+  // d'erreurs en a besoin avant le demarrage de l'application).
+  const SUPABASE_URL = MOTEUR_SUPABASE.url;
+  const SUPABASE_ANON_KEY = MOTEUR_SUPABASE.anon;
   
   var supabase;
   function initSupabase() {

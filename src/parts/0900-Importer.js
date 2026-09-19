@@ -8400,6 +8400,118 @@ const Admin = {
     // ===================== ÉTAT & INITIALISATION =====================
     allUsers: [],
     allReports: [],
+    allErrors: [],
+
+    // ===================== ERREURS REMONTEES (v600) =====================
+    // Les plantages survenus chez les utilisateurs, deposes par ErrorLogger
+    // dans la table client_errors (voir sql/remontee_erreurs.sql). Aucun
+    // identifiant de compte ni de projet n'y figure : c'est voulu.
+    // REGROUPEMENT PAR EMPREINTE : une meme erreur qui arrive cent fois est
+    // UNE ligne « 100 fois », pas cent lignes. Sans ca la liste serait
+    // illisible des le premier bug un peu bavard.
+    loadErrors: async () => {
+        if(!Admin.isAdmin()) return;
+        const bac = document.getElementById('admin-errors-list');
+        if(bac) bac.innerHTML = '<p class="text-sec-sm2">Chargement…</p>';
+        try {
+            const { data, error } = await supabase
+                .from('client_errors')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(500);
+            if(error) throw error;
+            Admin.allErrors = data || [];
+            Admin.renderErrors();
+        } catch(e) {
+            console.error('[Admin] Erreurs remontées:', e);
+            if(bac) bac.innerHTML = '<p class="text-sec-sm2">Impossible de charger les erreurs : ' + Utils.escape(e.message || 'erreur inconnue') + '</p>';
+        }
+    },
+
+    // Regroupe par empreinte : la plus recente porte le detail, les autres
+    // ne servent qu'a compter.
+    _groupesErreurs: () => {
+        const groupes = {};
+        Admin.allErrors.forEach(e => {
+            const g = groupes[e.empreinte];
+            if(!g) { groupes[e.empreinte] = { modele: e, nb: 1, premier: e.created_at, traite: !!e.traite, ids: [e.id] }; return; }
+            g.nb++;
+            g.ids.push(e.id);
+            if(e.created_at < g.premier) g.premier = e.created_at;
+            if(!e.traite) g.traite = false;
+        });
+        return Object.values(groupes).sort((a, b) => (a.traite === b.traite)
+            ? (b.modele.created_at < a.modele.created_at ? -1 : 1)
+            : (a.traite ? 1 : -1));
+    },
+
+    renderErrors: () => {
+        const bac = document.getElementById('admin-errors-list');
+        if(!bac) return;
+        const montrerTraitees = document.getElementById('admin-errors-show-done')?.checked;
+        const groupes = Admin._groupesErreurs().filter(g => montrerTraitees || !g.traite);
+        const enAttente = Admin._groupesErreurs().filter(g => !g.traite).length;
+        const badge = document.getElementById('admin-errors-badge');
+        if(badge) { badge.textContent = enAttente; badge.style.display = enAttente ? 'inline-block' : 'none'; }
+        if(groupes.length === 0) {
+            bac.innerHTML = '<p class="text-sec-sm2">✅ Aucune erreur' + (montrerTraitees ? '' : ' à traiter') + '.</p>';
+            return;
+        }
+        bac.innerHTML = groupes.map(g => {
+            const e = g.modele;
+            const date = new Date(e.created_at).toLocaleString('fr-FR');
+            const lieu = [e.source ? String(e.source).split('/').pop() : '', e.ligne ? ('ligne ' + e.ligne) : ''].filter(Boolean).join(' — ');
+            return '<details style="border:1px solid var(--border); border-radius:8px; margin-bottom:10px; background:var(--panel-bg);' + (g.traite ? ' opacity:.55;' : '') + '">'
+                + '<summary style="padding:10px 14px; cursor:pointer; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;">'
+                +   '<span style="background:' + (g.traite ? 'var(--border)' : 'var(--danger)') + '; color:' + (g.traite ? 'var(--text-sec)' : '#fff') + '; border-radius:10px; padding:1px 8px; font-size:0.75rem; font-weight:bold;">' + g.nb + '×</span>'
+                +   '<strong style="flex:1; min-width:200px;">' + Utils.escape(e.message || '') + '</strong>'
+                +   '<span class="text-sec-sm2">' + Utils.escape(date) + '</span>'
+                + '</summary>'
+                + '<div style="padding:0 14px 14px;">'
+                +   '<div class="text-sec-sm2" style="margin-bottom:8px;">'
+                +     Utils.escape(e.type || '') + (lieu ? ' · ' + Utils.escape(lieu) : '')
+                +     (e.page ? ' · page ' + Utils.escape(e.page) : '')
+                +     (e.version ? ' · ' + Utils.escape(e.version) : '')
+                +     (e.navigateur ? ' · ' + Utils.escape(e.navigateur) : '')
+                +   '</div>'
+                +   (e.pile ? '<pre style="background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:10px; overflow:auto; font-size:0.75rem; max-height:260px;">' + Utils.escape(e.pile) + '</pre>' : '')
+                +   '<div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">'
+                +     '<button class="btn btn--sm" onclick="app.Admin.copyError(\'' + Utils.escape(e.empreinte) + '\')">📋 Copier</button>'
+                +     '<button class="btn btn--sm" onclick="app.Admin.markErrorDone(\'' + Utils.escape(e.empreinte) + '\', ' + (g.traite ? 'false' : 'true') + ')">' + (g.traite ? '↩️ À retraiter' : '✔️ Traitée') + '</button>'
+                +   '</div>'
+                + '</div>'
+            + '</details>';
+        }).join('');
+    },
+
+    // Copie le detail au presse-papier, pret a coller dans une conversation.
+    copyError: async (empreinte) => {
+        const g = Admin._groupesErreurs().find(x => x.modele.empreinte === empreinte);
+        if(!g) return;
+        const e = g.modele;
+        const texte = [
+            '[' + e.type + '] ' + e.message,
+            'Vu ' + g.nb + ' fois — dernière : ' + new Date(e.created_at).toLocaleString('fr-FR'),
+            'Endroit : ' + (e.source || '?') + ':' + (e.ligne || 0) + ':' + (e.colonne || 0),
+            'Page : ' + (e.page || '?') + ' — ' + (e.version || '?') + ' — ' + (e.navigateur || '?'),
+            e.pile ? '\nPile :\n' + e.pile : ''
+        ].join('\n');
+        try { await navigator.clipboard.writeText(texte); Utils.toast('Erreur copiée.', 'success'); }
+        catch(err) { console.log(texte); Utils.toast('Copie impossible — le détail est dans la console.', 'warning'); }
+    },
+
+    // Marque toutes les lignes d'une meme erreur comme traitees (ou l'inverse).
+    markErrorDone: async (empreinte, traite) => {
+        try {
+            const { error } = await supabase.from('client_errors').update({ traite: traite }).eq('empreinte', empreinte);
+            if(error) throw error;
+            Admin.allErrors.forEach(e => { if(e.empreinte === empreinte) e.traite = traite; });
+            Admin.renderErrors();
+        } catch(e) {
+            console.error('[Admin] markErrorDone:', e);
+            Utils.toast('Impossible de marquer cette erreur.', 'error');
+        }
+    },
     
     isAdmin: () => {
         return state.currentUser && CONFIG.adminEmails.includes(state.currentUser.email.toLowerCase());
@@ -9418,6 +9530,9 @@ const Admin = {
         // Charger les données si nécessaire
         if(tabName === 'users' && Admin.allUsers.length === 0) {
             Admin.loadUsers();
+        }
+        if(tabName === 'errors' && Admin.allErrors.length === 0) {
+            Admin.loadErrors();
         }
         if(tabName === 'analytics') {
             Admin.loadConnectionStats();
