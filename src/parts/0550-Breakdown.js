@@ -5370,6 +5370,37 @@ const Storyboard = {
         shots.style.marginTop = Math.max(0, offset) + 'px';
     },
     
+    // v599 — DIAGNOSTIC DES VIGNETTES, a taper dans la console du navigateur :
+    //   app.Storyboard.diagVignettes()
+    // Dit, plan par plan, ce que la liste a REELLEMENT de quoi dessiner. Sert a
+    // trancher entre trois causes qui donnent le meme symptome a l'ecran :
+    // le dessin n'est pas la / il est la mais ne se telecharge pas / il se
+    // telecharge mais n'arrive pas jusqu'au canvas affiche.
+    diagVignettes: () => {
+        const shots = (state.data.shots || []).filter(s => s.sceneId === Storyboard.currentSceneId);
+        const lignes = shots.map((s, i) => {
+            const couches = (s.drawingData && Array.isArray(s.drawingData.layers))
+                ? s.drawingData.layers.filter(l => l && l.visible) : [];
+            const stockees = couches.filter(l => Utils._projPathFrom(l.imageData));
+            const zone = s.drawings && s.drawings.original;
+            const c = document.getElementById('compact-preview-' + s.id);
+            return {
+                plan: i + 1,
+                type: s.imageType || '(aucun)',
+                drawingData_racine: !!s.drawingData,
+                calques_visibles: couches.length,
+                calques_stockes: stockees.length,
+                blobs_deja_en_cache: stockees.filter(l => StoryboardExport._blobCache.has(Utils._projPathFrom(l.imageData))).length,
+                zone_original: !!(zone && zone.drawingData),
+                objets_vectoriels: (zone && Array.isArray(zone.objects)) ? zone.objects.length : 0,
+                canvas_present: !!c,
+                canvas_dans_le_document: !!(c && document.body.contains(c))
+            };
+        });
+        try { console.table(lignes); } catch(e) { console.log(lignes); }
+        return lignes;
+    },
+
     renderShots: () => {
         const container = document.getElementById('sbShotsList');
         container.innerHTML = '';
@@ -5503,7 +5534,7 @@ const Storyboard = {
                 const canvas = document.getElementById(`compact-preview-${shot.id}`);
                 if(canvas) {
                     const ctx = canvas.getContext('2d');
-                    DrawingEditor.renderDrawingData(ctx, shot.drawingData);
+                    DrawingEditor.renderDrawingData(ctx, shot.drawingData, `compact-preview-${shot.id}`);
                 }
             }
             
@@ -5747,7 +5778,7 @@ const Storyboard = {
                 const canvas = document.getElementById(`preview-${shot.id}`);
                 if(canvas) {
                     const ctx = canvas.getContext('2d');
-                    DrawingEditor.renderDrawingData(ctx, shot.drawingData);
+                    DrawingEditor.renderDrawingData(ctx, shot.drawingData, `preview-${shot.id}`);
                 }
             }
             
@@ -8793,17 +8824,35 @@ const DrawingEditor = {
         Utils.toast(zoneLabel + ' sauvegardé !', 'success');
     },
     
-    renderDrawingData: (ctx, drawingData) => {
-        if(!drawingData || !drawingData.layers) return Promise.resolve();
-        
-        const promises = [];
-        drawingData.layers.forEach(layerData => {
-            if(!layerData.visible) return;
-            
+    // v599 — DEUX DEFAUTS CORRIGES ICI, tous deux invisibles tant que les
+    // calques arrivaient vite :
+    //  1. CANVAS ORPHELIN. Le contexte etait capture a l'appel, mais les calques
+    //     se dessinent APRES leur telechargement. Si la liste des plans est
+    //     redessinee entre-temps — changement de scene, retour d'onglet, simple
+    //     second rendu — la peinture atterrit dans un canvas retire du document :
+    //     la vignette reste vide POUR TOUJOURS, jusqu'au prochain rendu. D'ou
+    //     « les miniatures n'apparaissent qu'apres avoir clique sur une fiche ».
+    //     On accepte donc un identifiant de canvas et on le RETROUVE au moment
+    //     de peindre, jamais avant.
+    //  2. ORDRE D'EMPILEMENT. Les calques partaient tous en parallele et se
+    //     dessinaient dans leur ordre d'ARRIVEE : un calque lourd place dessous
+    //     pouvait recouvrir ceux du dessus. Ils sont desormais dessines l'un
+    //     apres l'autre, dans l'ordre du dessin.
+    renderDrawingData: async (ctx, drawingData, canvasId) => {
+        if(!drawingData || !Array.isArray(drawingData.layers)) return;
+        const cible = () => {
+            if(!canvasId) return ctx;
+            const c = document.getElementById(canvasId);
+            return c ? c.getContext('2d') : null;
+        };
+        for(const layerData of drawingData.layers) {
+            if(!layerData || !layerData.visible) continue;
             const img = new Image();
-            promises.push(StoryboardExport._loadPrintImg(img, layerData.imageData, () => { ctx.drawImage(img, 0, 0); }));
-        });
-        return Promise.all(promises);
+            await StoryboardExport._loadPrintImg(img, layerData.imageData, () => {
+                const c = cible();
+                if(c) c.drawImage(img, 0, 0);
+            });
+        }
     }
 };
 
