@@ -5,7 +5,6 @@
     // ============================================================
     profiles: [], // Liste des profils de l'utilisateur
     currentProfileIndex: -1, // Index du profil actuellement affiché
-    equipment: { cameras: [], lenses: [], lights: [], sounds: [], grips: [], makeups: [], other: [] },
     profileProjects: {}, // Mapping profileId -> [{projectId, projectTitle, role}]
     
     // ===== PROJETS ASSOCIÉS / VISIBILITÉ =====
@@ -159,36 +158,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             } else {
                 Utils.toast('Erreur lors de la suppression : ' + e.message, 'error');
             }
-        }
-    },
-	
-	updateGallery: (index, url) => {
-        const item = document.getElementById('gallery-item-' + index);
-        if(!item) return;
-        
-        if(url && url.trim()) {
-            item.innerHTML = `
-                <img src="${Utils.safeMediaUrl(url)}" alt="Photo ${index + 1}" onerror="this.parentElement.innerHTML='<span class=\\'gallery-placeholder\\'>+</span>'">
-                <button class="gallery-remove" onclick="event.stopPropagation(); app.PublicProfile.removeGalleryPhoto(${index})">✕</button>
-            `;
-        } else {
-            item.innerHTML = '<span class="gallery-placeholder">+</span>';
-        }
-    },
-    
-// ===== GALERIE PHOTOS (profil + crew) — délégué à ProfileGallery =====
-    uploadGalleryPhoto: (...a) => ProfileGallery.uploadGalleryPhoto(...a),
-    removeGalleryPhoto: (...a) => ProfileGallery.removeGalleryPhoto(...a),
-    loadGallery: (...a) => ProfileGallery.loadGallery(...a),
-    uploadCrewGalleryPhoto: (...a) => ProfileGallery.uploadCrewGalleryPhoto(...a),
-    loadCrewGallery: (...a) => ProfileGallery.loadCrewGallery(...a),
-	
-	// Affiche/masque une section de matériel
-    toggleEquipmentSection: (section) => {
-        const sectionEl = document.getElementById('equip-section-' + section);
-        const checkbox = document.getElementById('show-equip-' + section);
-        if(sectionEl && checkbox) {
-            sectionEl.style.display = checkbox.checked ? 'block' : 'none';
         }
     },
     
@@ -363,17 +332,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         return availability;
     },
     
-// ========== LANGUES ET SPORTS — délégué à ProfileSkills ==========
-    get languageLevels() { return ProfileSkills.languageLevels; },
-    set languageLevels(v) { ProfileSkills.languageLevels = v; },
-    get sportLevels() { return ProfileSkills.sportLevels; },
-    set sportLevels(v) { ProfileSkills.sportLevels = v; },
-    addLanguage: (...a) => ProfileSkills.addLanguage(...a),
-    renderLanguagesList: (...a) => ProfileSkills.renderLanguagesList(...a),
-    addSport: (...a) => ProfileSkills.addSport(...a),
-    renderSportsList: (...a) => ProfileSkills.renderSportsList(...a),
-    migrateSkillsData: (...a) => ProfileSkills.migrateSkillsData(...a),
-    
     // Change de profil
     switchToProfile: (index) => {
         if(index < 0 || index >= PublicProfile.profiles.length) return;
@@ -467,12 +425,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     // sont mutés en place par les éditeurs — sans clone, deux fiches finiraient par
     // partager la même référence et toute modification de l'une toucherait l'autre.
     _cloneFacetVal: (v) => (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v,
-
-    // Range les valeurs « plates » courantes dans la fiche donnée
-    _commitFlatToFacet: (profile, facet) => {
-        if(!profile || !facet) return;
-        PublicProfile._facetKeysFor(facet).forEach(k => PublicProfile.setFacetField(profile, facet, k, PublicProfile._cloneFacetVal(profile[k])));
-    },
 
     // Charge la fiche donnée dans les champs plats (avec héritage des anciennes valeurs communes)
     _loadFacetToFlat: (profile, facet) => {
@@ -1170,75 +1122,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
 
     // ===== ADRESSE / GÉOLOCALISATION — délégué à ProfileAddress =====
     geocodeAddressInternational: (...a) => ProfileAddress.geocodeAddressInternational(...a),
-    searchAddress: (...a) => ProfileAddress.searchAddress(...a),
-    updateAddressPrivacyOptions: (...a) => ProfileAddress.updateAddressPrivacyOptions(...a),
-    
-    // Peuple les types d'association
-    populateAssoTypes: () => {
-        const select = document.getElementById('profile-asso-type');
-        if(!select || select.options.length > 1) return;
-        
-        CONFIG.associationTypes.forEach(type => {
-            const opt = document.createElement('option');
-            opt.value = type.id;
-            opt.textContent = type.name;
-            select.appendChild(opt);
-        });
-    },
-    
-    // Peuple les types d'entreprise
-    populateEntTypes: () => {
-        const select = document.getElementById('profile-ent-type');
-        if(!select || select.options.length > 1) return;
-        
-        CONFIG.enterpriseTypes.forEach(type => {
-            const opt = document.createElement('option');
-            opt.value = type.id;
-            opt.textContent = type.name;
-            select.appendChild(opt);
-        });
-    },
-	
-    // Met à jour les checkboxes de matériel selon le département
-    updateEquipmentForDepartment: (dept) => {
-        // Ne rien cocher automatiquement - l'utilisateur choisit lui-même
-    },
-	
-	updateRoleOptions: () => {
-        const deptSelect = document.getElementById('profile-department');
-        const roleSelect = document.getElementById('profile-role');
-        const roleCustom = document.getElementById('profile-role-custom');
-        
-        const deptId = deptSelect.value;
-        roleSelect.innerHTML = '<option value="">-- Fonction * --</option>';
-        roleCustom.style.display = 'none';
-        roleCustom.value = '';
-        
-        if(deptId && CONFIG.crewRoles[deptId]) {
-            CONFIG.crewRoles[deptId].forEach(role => {
-                const opt = document.createElement('option');
-                opt.value = role;
-                opt.textContent = role;
-                roleSelect.appendChild(opt);
-            });
-        }
-        
-        // Mettre à jour les sections de matériel selon le département
-        PublicProfile.updateEquipmentForDepartment(deptId);
-    },
-    
-    onRoleChange: () => {
-        const roleSelect = document.getElementById('profile-role');
-        const roleCustom = document.getElementById('profile-role-custom');
-        
-        if(roleSelect.value === 'Autre') {
-            roleCustom.style.display = 'block';
-            roleCustom.focus();
-        } else {
-            roleCustom.style.display = 'none';
-            roleCustom.value = '';
-        }
-    },
 	
     showTab: (tab) => {
         const profileContent = document.getElementById('profile-content');
@@ -1308,38 +1191,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         if(k === 'crew') f.crew[0].enabled = true;
         else if(k) f[k].enabled = true;
         return f;
-    },
-
-    // ===== Bandes démo multiples =====
-    DEMOREEL_MAIN_IDS: { actor: 'profile-demoreel', crew: 'profile-crew-demoreel', asso: 'profile-asso-demoreel', ent: 'profile-ent-demoreel' },
-
-    addDemoreelLine: (facet, value = '') => {
-        const box = document.getElementById('demoreel-extra-' + facet);
-        if(!box) return;
-        const row = document.createElement('div');
-        row.className = 'demoreel-extra-row';
-        row.innerHTML = `<input type="url" class="profile-input demoreel-extra-input" placeholder="https://www.youtube.com/watch?v=... ou https://vimeo.com/..." data-tooltip="https://www.youtube.com/watch?v=... ou https://vimeo.com/..." value="${Utils.escape(value)}">
-            <button type="button" class="demoreel-remove-btn" title="Retirer cette ligne" onclick="this.parentElement.remove()">✕</button>`;
-        box.appendChild(row);
-    },
-
-    // Lit toutes les bandes démo d'une fiche (champ principal + lignes ajoutées)
-    _readDemoreels: (facet) => {
-        const main = document.getElementById(PublicProfile.DEMOREEL_MAIN_IDS[facet])?.value.trim() || '';
-        const extras = Array.from(document.querySelectorAll('#demoreel-extra-' + facet + ' .demoreel-extra-input')).map(i => i.value.trim());
-        return [main, ...extras].filter(u => u);
-    },
-
-    // Écrit une liste de bandes démo dans le formulaire (1ʳᵉ dans le champ principal, le reste en lignes)
-    _writeDemoreels: (facet, list) => {
-        const arr = Array.isArray(list) ? list.filter(u => u) : (list ? [list] : []);
-        const main = document.getElementById(PublicProfile.DEMOREEL_MAIN_IDS[facet]);
-        if(main) main.value = arr[0] || '';
-        const box = document.getElementById('demoreel-extra-' + facet);
-        if(box) {
-            box.innerHTML = '';
-            arr.slice(1).forEach(u => PublicProfile.addDemoreelLine(facet, u));
-        }
     },
 
     // ===== Champs par fiche (casquette) =====
@@ -1813,159 +1664,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     save: async () => {
         await PublicProfile.saveCurrentProfile();
     },
-    
-    // ===== PHOTO / AVATAR =====
-    updatePhotoPreview: () => {
-        const url = document.getElementById('profile-photo').value.trim();
-        const preview = document.getElementById('profile-photo-preview');
-        if(url) {
-            preview.innerHTML = `<img src="${url}" alt="Photo" onerror="this.parentElement.innerHTML='👤'">`;
-        } else {
-            preview.innerHTML = '👤';
-        }
-    },
-    
-    handlePhotoUpload: async (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-        
-        const statusEl = document.getElementById('profile-photo-status');
-        const preview = document.getElementById('profile-photo-preview');
-        const photoInput = document.getElementById('profile-photo');
-        
-        // Vérifier le type
-        if (!file.type.startsWith('image/')) {
-            statusEl.textContent = '❌ Fichier non valide';
-            statusEl.style.color = '#e74c3c';
-            return;
-        }
-        
-        // Vérifier la taille (max 5 Mo)
-        if (file.size > 5 * 1024 * 1024) {
-            statusEl.textContent = '❌ Fichier trop volumineux (max 5 Mo)';
-            statusEl.style.color = '#e74c3c';
-            return;
-        }
-        
-        statusEl.textContent = '⏳ Upload en cours...';
-        statusEl.style.color = 'var(--text-sec)';
-        
-        try {
-            // Compresser l'image
-            const compressedBlob = await PublicProfile.compressImageToBlob(file, 800, 0.8);
-            
-            // Upload vers Supabase Storage
-            const userId = state.currentUser.id;
-            const fileName = `avatar_${Date.now()}.jpg`;
-            const filePath = `${userId}/${fileName}`;
-            
-            // Supprimer l'ancienne photo si elle existe
-            const oldPhoto = photoInput.value;
-            if (oldPhoto && oldPhoto.includes('supabase')) {
-                const oldPath = oldPhoto.split('/avatars/')[1];
-                if (oldPath) {
-                    const {error: rmAvatarErr} = await supabase.storage.from('avatars').remove([oldPath]);
-                    if(rmAvatarErr) console.error('Erreur suppression avatar:', rmAvatarErr);
-                }
-            }
-            
-            // Uploader la nouvelle photo
-            const { data, error } = await supabase.storage
-                .from('avatars')
-                .upload(filePath, compressedBlob, {
-                    contentType: 'image/jpeg',
-                    upsert: true
-                });
-            
-            if (error) throw error;
-            
-            // Récupérer l'URL publique
-            const { data: urlData } = supabase.storage
-                .from('avatars')
-                .getPublicUrl(filePath);
-            
-            const publicUrl = urlData.publicUrl;
-            
-            photoInput.value = publicUrl;
-            preview.innerHTML = `<img src="${publicUrl}" alt="Photo">`;
-            statusEl.textContent = `✅ Photo uploadée`;
-            statusEl.style.color = '#27ae60';
-        } catch (err) {
-            console.error('Erreur upload:', err);
-            statusEl.textContent = '❌ Erreur lors de l\'upload';
-            statusEl.style.color = '#e74c3c';
-        }
-    },
-    
-    // ===== LOGO ASSO / ENTREPRISE (pipeline dupliqué de la photo de profil) =====
-    LOGO_ICONS: { asso: '🏛️', ent: '🏢' },
-
-    _setLogoPreview: (facet, url) => {
-        const preview = document.getElementById('profile-' + facet + '-logo-preview');
-        if(!preview) return;
-        const icon = PublicProfile.LOGO_ICONS[facet] || '🖼️';
-        if(url) {
-            preview.innerHTML = '<img src="' + url + '" alt="Logo" onerror="this.parentElement.innerHTML=\'' + icon + '\'">';
-        } else {
-            preview.innerHTML = icon;
-        }
-    },
-
-    handleLogoUpload: async (facet, event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        const statusEl = document.getElementById('profile-' + facet + '-logo-status');
-        const logoInput = document.getElementById('profile-' + facet + '-logo');
-
-        if (!file.type.startsWith('image/')) {
-            statusEl.textContent = '❌ Fichier non valide';
-            statusEl.style.color = '#e74c3c';
-            return;
-        }
-        if (file.size > 5 * 1024 * 1024) {
-            statusEl.textContent = '❌ Fichier trop volumineux (max 5 Mo)';
-            statusEl.style.color = '#e74c3c';
-            return;
-        }
-
-        statusEl.textContent = '⏳ Upload en cours...';
-        statusEl.style.color = 'var(--text-sec)';
-
-        try {
-            const compressedBlob = await PublicProfile.compressImageToBlob(file, 800, 0.8);
-            const userId = state.currentUser.id;
-            const fileName = 'logo_' + facet + '_' + Date.now() + '.jpg';
-            const filePath = userId + '/' + fileName;
-
-            // Supprimer l'ancien logo s'il existe
-            const oldLogo = logoInput.value;
-            if (oldLogo && oldLogo.includes('supabase')) {
-                const oldPath = oldLogo.split('/avatars/')[1];
-                if (oldPath) {
-                    const {error: rmLogoErr} = await supabase.storage.from('avatars').remove([oldPath]);
-                    if(rmLogoErr) console.error('Erreur suppression logo:', rmLogoErr);
-                }
-            }
-
-            const { error } = await supabase.storage
-                .from('avatars')
-                .upload(filePath, compressedBlob, { contentType: 'image/jpeg', upsert: true });
-            if (error) throw error;
-
-            const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(filePath);
-            const publicUrl = urlData.publicUrl;
-
-            logoInput.value = publicUrl;
-            PublicProfile._setLogoPreview(facet, publicUrl);
-            statusEl.textContent = '✅ Logo uploadé';
-            statusEl.style.color = '#27ae60';
-        } catch (err) {
-            console.error('Erreur upload logo:', err);
-            statusEl.textContent = '❌ Erreur lors de l\'upload';
-            statusEl.style.color = '#e74c3c';
-        }
-    },
 
     compressImage: (file, maxSize, quality) => {
         return new Promise((resolve, reject) => {
@@ -2068,200 +1766,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             statusDiv.innerHTML = `⚠️ Profil incomplet. Champs manquants : ${missing.join(', ')}`;
         }
     },
-    
-    // ===== ÉQUIPEMENT / MATÉRIEL =====
-    addEquipment: (type) => {
-        let value = '';
-        let list = [];
-        let listId = '';
-        
-        if(type === 'camera') {
-            value = document.getElementById('profile-camera-select').value;
-            list = PublicProfile.equipment.cameras;
-            listId = 'camera-list';
-            document.getElementById('profile-camera-select').value = '';
-        } else if(type === 'lens') {
-            value = document.getElementById('profile-lens-select').value;
-            list = PublicProfile.equipment.lenses;
-            listId = 'lens-list';
-            document.getElementById('profile-lens-select').value = '';
-        } else if(type === 'light') {
-            value = document.getElementById('profile-light-select').value;
-            list = PublicProfile.equipment.lights;
-            listId = 'light-list';
-            document.getElementById('profile-light-select').value = '';
-        } else if(type === 'sound') {
-            value = document.getElementById('profile-sound-select').value;
-            list = PublicProfile.equipment.sounds;
-            listId = 'sound-list';
-            document.getElementById('profile-sound-select').value = '';
-        } else if(type === 'grip') {
-            value = document.getElementById('profile-grip-select').value;
-            list = PublicProfile.equipment.grips;
-            listId = 'grip-list';
-            document.getElementById('profile-grip-select').value = '';
-        } else if(type === 'makeup') {
-            value = document.getElementById('profile-makeup-select').value;
-            list = PublicProfile.equipment.makeups;
-            listId = 'makeup-list';
-            document.getElementById('profile-makeup-select').value = '';
-        } else if(type === 'other') {
-            value = document.getElementById('profile-other-equipment').value.trim();
-            list = PublicProfile.equipment.other;
-            listId = 'other-equipment-list';
-            document.getElementById('profile-other-equipment').value = '';
-        }
-        
-        if(value && !list.includes(value)) {
-            list.push(value);
-            PublicProfile.renderEquipment();
-        }
-    },
-    
-    removeEquipment: (type, index) => {
-        if(type === 'camera') {
-            PublicProfile.equipment.cameras.splice(index, 1);
-        } else if(type === 'lens') {
-            PublicProfile.equipment.lenses.splice(index, 1);
-        } else if(type === 'light') {
-            PublicProfile.equipment.lights.splice(index, 1);
-        } else if(type === 'sound') {
-            PublicProfile.equipment.sounds.splice(index, 1);
-        } else if(type === 'grip') {
-            PublicProfile.equipment.grips.splice(index, 1);
-        } else if(type === 'makeup') {
-            PublicProfile.equipment.makeups.splice(index, 1);
-        } else if(type === 'other') {
-            PublicProfile.equipment.other.splice(index, 1);
-        }
-        PublicProfile.renderEquipment();
-    },
-    
-    renderEquipment: () => {
-        // Caméras
-        const cameraList = document.getElementById('camera-list');
-        if(cameraList) {
-            cameraList.innerHTML = PublicProfile.equipment.cameras.map((c, i) => 
-                `<div class="equipment-tag">📷 ${c} <span class="remove" onclick="app.PublicProfile.removeEquipment('camera', ${i})">✖</span></div>`
-            ).join('');
-        }
-        
-        // Objectifs
-        const lensList = document.getElementById('lens-list');
-        if(lensList) {
-            lensList.innerHTML = PublicProfile.equipment.lenses.map((l, i) => 
-                `<div class="equipment-tag">🔭 ${l} <span class="remove" onclick="app.PublicProfile.removeEquipment('lens', ${i})">✖</span></div>`
-            ).join('');
-        }
-        
-        // Lumière
-        const lightList = document.getElementById('light-list');
-        if(lightList) {
-            lightList.innerHTML = PublicProfile.equipment.lights.map((l, i) => 
-                `<div class="equipment-tag">💡 ${l} <span class="remove" onclick="app.PublicProfile.removeEquipment('light', ${i})">✖</span></div>`
-            ).join('');
-        }
-        
-        // Son
-        const soundList = document.getElementById('sound-list');
-        if(soundList) {
-            soundList.innerHTML = PublicProfile.equipment.sounds.map((s, i) => 
-                `<div class="equipment-tag">🎤 ${s} <span class="remove" onclick="app.PublicProfile.removeEquipment('sound', ${i})">✖</span></div>`
-            ).join('');
-        }
-        
-        // Machinerie
-        const gripList = document.getElementById('grip-list');
-        if(gripList) {
-            gripList.innerHTML = PublicProfile.equipment.grips.map((g, i) => 
-                `<div class="equipment-tag">🎬 ${g} <span class="remove" onclick="app.PublicProfile.removeEquipment('grip', ${i})">✖</span></div>`
-            ).join('');
-        }
-        
-        // Maquillage
-        const makeupList = document.getElementById('makeup-list');
-        if(makeupList) {
-            makeupList.innerHTML = PublicProfile.equipment.makeups.map((m, i) => 
-                `<div class="equipment-tag">💄 ${m} <span class="remove" onclick="app.PublicProfile.removeEquipment('makeup', ${i})">✖</span></div>`
-            ).join('');
-        }
-        
-        // Autre
-        const otherList = document.getElementById('other-equipment-list');
-        if(otherList) {
-            otherList.innerHTML = PublicProfile.equipment.other.map((o, i) => 
-                `<div class="equipment-tag">🔧 ${o} <span class="remove" onclick="app.PublicProfile.removeEquipment('other', ${i})">✖</span></div>`
-            ).join('');
-        }
-    },
-    
-// ========== CALENDRIER DISPONIBILITÉS PROFIL — délégué à ProfileCalendar ==========
-    get _profileCalMonth() { return ProfileCalendar._profileCalMonth; },
-    set _profileCalMonth(v) { ProfileCalendar._profileCalMonth = v; },
-    get _profileCalYear() { return ProfileCalendar._profileCalYear; },
-    set _profileCalYear(v) { ProfileCalendar._profileCalYear = v; },
-    get _profileCalDrag() { return ProfileCalendar._profileCalDrag; },
-    set _profileCalDrag(v) { ProfileCalendar._profileCalDrag = v; },
-    renderProfileCalendar: (...a) => ProfileCalendar.renderProfileCalendar(...a),
-    renderProfileDatesList: (...a) => ProfileCalendar.renderProfileDatesList(...a),
-    
-    // ===== COLLABORATION (types de collab) =====
-    // Met à jour le style des labels de collaboration
-    updateCollabLabel: (type) => {
-        const labels = {
-            'pro': { id: 'label-collab-pro', checkId: 'profile-collab-pro', color: '#4CAF50' },
-            'semi': { id: 'label-collab-semi', checkId: 'profile-collab-semi', color: '#FF9800' },
-            'benevole': { id: 'label-collab-benevole', checkId: 'profile-collab-benevole', color: '#E91E63' }
-        };
-        
-        const info = labels[type];
-        if(!info) return;
-        
-        const label = document.getElementById(info.id);
-        const checkbox = document.getElementById(info.checkId);
-        
-        if(label && checkbox) {
-            if(checkbox.checked) {
-                label.style.background = info.color;
-                label.style.color = 'white';
-            } else {
-                label.style.background = 'var(--bg)';
-                label.style.color = 'var(--text-main)';
-            }
-        }
-    },
-    
-    // Charge les checkboxes de collaboration depuis le profil
-    loadCollabTypes: (profile) => {
-        const collabTypes = profile.collabTypes || [];
-        
-        const proCheck = document.getElementById('profile-collab-pro');
-        const semiCheck = document.getElementById('profile-collab-semi');
-        const benevoleCheck = document.getElementById('profile-collab-benevole');
-        
-        if(proCheck) proCheck.checked = collabTypes.includes('pro');
-        if(semiCheck) semiCheck.checked = collabTypes.includes('semi-pro');
-        if(benevoleCheck) benevoleCheck.checked = collabTypes.includes('benevole');
-        
-        PublicProfile.updateCollabLabel('pro');
-        PublicProfile.updateCollabLabel('semi');
-        PublicProfile.updateCollabLabel('benevole');
-    },
-    
-    // Sauvegarde les checkboxes de collaboration dans le profil
-    saveCollabTypes: (profile) => {
-        const collabTypes = [];
-        
-        if(document.getElementById('profile-collab-pro')?.checked) collabTypes.push('pro');
-        if(document.getElementById('profile-collab-semi')?.checked) collabTypes.push('semi-pro');
-        if(document.getElementById('profile-collab-benevole')?.checked) collabTypes.push('benevole');
-        
-        profile.collabTypes = collabTypes;
-    },
-    
-};
-
-const Permissions = {
     // ============================================================
     // ===== LOGIQUE D'ACCÈS (calcul des droits) =====
     // ============================================================
