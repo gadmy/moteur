@@ -1802,6 +1802,10 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             statusDiv.innerHTML = `⚠️ Profil incomplet. Champs manquants : ${missing.join(', ')}`;
         }
     },
+    
+};
+
+const Permissions = {
     // ============================================================
     // ===== LOGIQUE D'ACCÈS (calcul des droits) =====
     // ============================================================
