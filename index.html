@@ -299,6 +299,25 @@ vv598 (en cours)
   convocations automatiques (comédiens de scène, comédien, technicien)
   passent désormais par model.ensure et non plus par un push direct.
 
+  AJOUT D'UNE FICHE TECHNICIEN — LA TUILE « + ». Le bouton « Dupliquer » quitte
+  l'interieur de la fiche : on ajoute une fiche la ou on les voit toutes, pas
+  depuis l'une d'elles. La grille de Mon Profil porte desormais une tuile
+  « + Ajouter un profil technicien ». La nouvelle fiche reprend ce qui tient a la
+  PERSONNE — nom, photo, sexe, telephone, ville, adresse, vehicule et permis
+  (liste CREW_NEW_INHERIT) — depuis la premiere fiche technicien remplie, a
+  defaut la casquette comedien. L'age et la date de naissance ne sont pas listes :
+  ils vivent deja sur le profil, communs a toutes les casquettes. Le METIER
+  (departement, fonction, parcours, bande demo, tarif) et l'email de CONTACT ne
+  sont jamais repris. Les valeurs copiees sont CLONEES : deux fiches ne partagent
+  jamais le meme tableau de permis. Les emplacements vides n'ont plus de tuile
+  grisee a eux (activateCrewCard supprimee, plus aucun appelant) : la tuile « + »
+  reprend d'elle-meme le premier emplacement libre — donc le premier quand aucune
+  fiche n'existe encore. GARDE : un emplacement REFERME mais non vide est rouvert
+  tel quel, jamais ecrase (_crewCardHasContent) — « Refermer » promet de garder
+  les donnees. Le numero affiche sur les tuiles suit les fiches REMPLIES et non
+  l'index du tableau, sans quoi un emplacement laisse vide donnait un « n°2 »
+  sans « n°1 ».
+
   PROFIL PUBLIC, deux correctifs decouverts en testant. 1) L'identite saisie
   dans la fiche unifiee (nom, telephone, ville, sexe) ne rejoignait jamais les
   champs PLATS du profil : saveCurrentProfile les y valide, et la base les range
@@ -41046,19 +41065,21 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         // bascule 👁 -> visible dans l'Univers ; Effacer -> vide les champs.
         bar.innerHTML = '<div class="compact-cards-grid facet-cards-grid">' + PublicProfile.FACET_KEYS.map(k => {
             if(k === 'crew') {
-                // v598 : plusieurs fiches technicien possibles - une tuile par fiche du tableau.
+                // v598 : plusieurs fiches technicien possibles - une tuile par fiche REMPLIE,
+                // suivie d'une tuile « + ». Les emplacements vides n'ont plus de tuile a eux :
+                // la tuile « + » les remplace et reprend d'elle-meme le premier libre, ce qui
+                // evite d'afficher une case vide a cote d'un bouton qui fait la meme chose.
                 const crewArr = PublicProfile.crewArr(profile.facets);
-                return crewArr.map((cf, i) => {
-                    const nameSuffix = crewArr.length > 1 ? (' n°' + (i + 1)) : '';
-                    if(!cf || !cf.enabled) {
-                        return '<div class="compact-card facet-card is-grey" onclick="app.PublicProfile.activateCrewCard(' + i + ')" title="Activer et remplir">'
-                            + '<div class="compact-card-photo">🎥</div>'
-                            + '<div class="compact-card-name">Technicien·ne' + nameSuffix + '</div>'
-                            + '<div class="compact-card-role">Cliquer pour activer</div>'
-                        + '</div>';
-                    }
+                const actifs = crewArr.filter(f => f && f.enabled).length;
+                let rang = 0;
+                const tuiles = crewArr.map((cf, i) => {
+                    if(!cf || !cf.enabled) return '';
+                    rang++;
+                    // Le numero affiche suit les fiches REMPLIES (pas l'index du tableau) :
+                    // sans cela, un emplacement laisse vide donnait un « n°2 » sans « n°1 ».
+                    const nameSuffix = actifs > 1 ? (' n°' + rang) : '';
                     const visOn = cf.visible !== false;
-                    const xBtn = (crewArr.length > 1)
+                    const xBtn = (actifs > 1)
                         ? '<button type="button" class="facet-card-x" title="Supprimer cette fiche" onclick="event.stopPropagation(); app.PublicProfile.deleteCrewCard(' + i + ')">✕</button>'
                         : '<button type="button" class="facet-card-x" title="Refermer (regriser)" onclick="event.stopPropagation(); app.PublicProfile.deactivateCrewCard(' + i + ')">✕</button>';
                     return '<div class="compact-card facet-card" onclick="app.PublicProfile.openFicheCard(\'crew\', ' + i + ')">'
@@ -41070,6 +41091,12 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                         + '<button type="button" class="facet-card-erase" onclick="event.stopPropagation(); app.PublicProfile.effaceCrewCard(' + i + ')">🧹 Effacer</button>'
                     + '</div>';
                 }).join('');
+                return tuiles
+                    + '<div class="compact-card facet-card is-grey" onclick="app.PublicProfile.addCrewCard()" title="Créer une nouvelle fiche technicien">'
+                        + '<div class="compact-card-photo" style="font-size:2rem; line-height:1; font-weight:300;">+</div>'
+                        + '<div class="compact-card-name">Ajouter un profil technicien</div>'
+                        + '<div class="compact-card-role">' + (actifs ? 'Identité et véhicule repris' : 'Nouvelle spécialité') + '</div>'
+                    + '</div>';
             }
             const label = PublicProfile.FACET_LABELS[k];
             if(!enabled.includes(k)) {
@@ -41198,11 +41225,12 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         const bar = document.createElement('div');
         bar.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:8px; padding:0 0 10px;';
         const crewIdxLabel = (PublicProfile._engineKind === 'crew' && PublicProfile._engineCrewIndex) ? (' n°' + (PublicProfile._engineCrewIndex + 1)) : '';
-        const dupBtnHtml = (PublicProfile._engineKind === 'crew') ? '<button class="btn btn--sm" id="comedien-engine-dup" title="Créer une copie de cette fiche technicien pour un autre métier">📋 Dupliquer</button>' : '';
+        // v598 : le bouton « Dupliquer » a quitte la fiche. On ajoute une fiche
+        // technicien depuis la grille de Mon Profil (tuile « + »), la ou on les
+        // voit toutes — pas depuis l'interieur de l'une d'elles.
         bar.innerHTML = '<span style="font-weight:600;">' + (PublicProfile._engineKind === 'crew' ? ('🎥 Technicien·ne' + crewIdxLabel) : '🎭 Comédien·ne') + '</span>'
             + '<span style="display:flex; gap:8px;">'
             + '<button class="btn btn--primary btn--sm" id="comedien-engine-save">💾 Enregistrer</button>'
-            + dupBtnHtml
             + '<button class="btn btn--sm" id="comedien-engine-close">Fermer</button>'
             + '</span>';
         box.appendChild(bar);
@@ -41210,8 +41238,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         overlay.appendChild(box);
         document.body.appendChild(overlay);
         document.getElementById('comedien-engine-save').onclick = () => PublicProfile._engineDoSave(true);
-        const dupBtn = document.getElementById('comedien-engine-dup');
-        if(dupBtn) dupBtn.onclick = () => PublicProfile._engineDuplicateCrew();
         document.getElementById('comedien-engine-close').onclick = () => PublicProfile._closeComedienEngine();
     },
     // Enregistre la COPIE en cours d'edition dans la vraie casquette (facets.crew[idx] ou facets.actor), puis persiste.
@@ -41252,23 +41278,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         if(saved === false) return false;
         if(showToast) Utils.toast((kind === 'crew' ? 'Casquette technicien' : 'Casquette comédien') + ' enregistrée.', 'success');
         return true;
-    },
-    // Duplique la fiche technicien affichee : enregistre d'abord les modifs en cours, copie la
-    // fiche a la fin du tableau, puis rouvre le moteur sur cette copie (v598).
-    _engineDuplicateCrew: async () => {
-        const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!profile || PublicProfile._engineKind !== 'crew') return;
-        // v598 : si l'enregistrement a ete refuse, on ne duplique pas — sinon on
-        // creerait une deuxieme fiche a partir de modifications jamais parties.
-        if(await PublicProfile._engineDoSave(false) === false) return;
-        const copy = JSON.parse(JSON.stringify(profile.facets.crew[PublicProfile._engineCrewIndex] || { enabled: true, visible: true }));
-        copy.enabled = true;
-        profile.facets.crew.push(copy);
-        const newIdx = profile.facets.crew.length - 1;
-        PublicProfile._closeComedienEngine();
-        PublicProfile.renderFacetTabs();
-        Utils.toast('Fiche technicien dupliquée — modifiez le département pour la différencier.', 'success', 5000);
-        PublicProfile.openTechnicienEngine(newIdx);
     },
     _closeComedienEngine: () => {
         PublicProfile._engineMode = false;
@@ -41621,16 +41630,60 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     },
 
     // ===== v598 : plusieurs fiches technicien par compte — actions par index =====
-    // Activer une tuile technicien grisee (creation ou reactivation) puis ouvrir sa fiche.
-    activateCrewCard: (idx) => {
+    // Ce qu'une NOUVELLE fiche technicien reprend de la personne : identite,
+    // contact et vehicule. Pas le metier (departement, fonction, parcours, bande
+    // demo, tarif), pas l'email de CONTACT — il est propre a chaque fiche. L'age
+    // et la date de naissance ne sont pas listes : ils vivent deja sur le profil,
+    // communs a toutes les casquettes, donc rien a recopier.
+    CREW_NEW_INHERIT: ['name','photo','gender','phone','hidePhone','agentPhone','city','address','latitude','longitude','hideAddress','hideAddressInProjects','hasVehicle','vehicleType','vehiclePlate','vehicleSeats','vehicleTrunk','vehicleNotes','licenses','vehicleUsage'],
+
+    // Une fiche technicien porte-t-elle autre chose que ses deux interrupteurs ?
+    // Sert a distinguer un emplacement JAMAIS rempli d'une fiche simplement
+    // refermee, dont les donnees doivent etre rendues intactes.
+    _crewCardHasContent: (f) => !!f && Object.keys(f).some(k =>
+        k !== 'enabled' && k !== 'visible'
+        && f[k] !== undefined && f[k] !== null && f[k] !== ''
+        && !(Array.isArray(f[k]) && f[k].length === 0)),
+
+    // v598 — tuile « + Ajouter un profil technicien » de la grille Mon Profil.
+    // Remplace le bouton « Dupliquer » qui vivait DANS une fiche. Le modele est
+    // la premiere fiche technicien remplie ; a defaut la casquette comedien.
+    // Aucun emplacement technicien occupe ? On prend le PREMIER LIBRE au lieu
+    // d'en ouvrir un de plus a cote d'une case vide.
+    addCrewCard: () => {
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(!profile) return;
+        if(!profile) { Utils.toast('Aucun profil chargé.', 'warning'); return; }
+        if(!profile.facets) profile.facets = {};
         if(!Array.isArray(profile.facets.crew)) profile.facets.crew = PublicProfile.crewArr(profile.facets);
-        if(!profile.facets.crew[idx]) profile.facets.crew[idx] = { enabled: true, visible: true };
-        else profile.facets.crew[idx].enabled = true;
+        const arr = profile.facets.crew;
+        const actorFacet = profile.facets.actor;
+        const src = arr.find(f => f && f.enabled)
+            || ((actorFacet && actorFacet.enabled) ? actorFacet : null);
+        const fiche = { enabled: true, visible: true };
+        if(src) {
+            PublicProfile.CREW_NEW_INHERIT.forEach(k => {
+                const v = src[k];
+                if(v !== undefined && v !== null && v !== '') fiche[k] = PublicProfile._cloneFacetVal(v);
+            });
+        }
+        let idx = arr.findIndex(f => !f || !f.enabled);
+        let reprise = false;
+        if(idx === -1) { arr.push(fiche); idx = arr.length - 1; }
+        else if(PublicProfile._crewCardHasContent(arr[idx])) {
+            // Emplacement REFERME mais pas vide : « Refermer (regriser) » promet de
+            // garder les donnees. On le rouvre tel quel — l'ecraser avec une fiche
+            // neuve reviendrait a trahir cette promesse.
+            arr[idx].enabled = true;
+            if(arr[idx].visible === undefined) arr[idx].visible = true;
+            reprise = true;
+        }
+        else arr[idx] = fiche;
         PublicProfile.renderFacetTabs();
-        PublicProfile.openFicheCard('crew', idx);
+        if(reprise) Utils.toast('Fiche technicien rouverte telle qu\'elle avait été refermée.', 'success', 5000);
+        else if(src) Utils.toast('Nouvelle fiche technicien — identité, contact et véhicule repris. Choisis son département.', 'success', 5000);
+        PublicProfile.openTechnicienEngine(idx);
     },
+
     // Refermer une fiche technicien (regrisee, donnees gardees) — uniquement quand il n'y en a qu'une.
     deactivateCrewCard: (idx) => {
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
