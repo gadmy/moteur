@@ -755,6 +755,17 @@ vv600 (en cours)
   PAS DE PURGE pour les retours, contrairement aux erreurs : une erreur de
   l'an dernier n'apprend plus rien, une idee d'utilisateur si.
 
+  LA PASTILLE COMPTE TOUT, ET SANS QU'ON AIT A CHERCHER. Premiere version
+  ratee, corrigee aussitot : les pastilles des deux nouveaux onglets ne se
+  posaient qu'une fois l'onglet OUVERT — autrement dit elles ne prevenaient de
+  rien, alors que c'est leur seule raison d'etre. Le compte est desormais fait
+  au chargement du tableau de bord, puis toutes les deux minutes, par la
+  fonction qui servait deja aux signalements. Celle-ci ne comptait que les
+  signalements ; elle additionne maintenant signalements + erreurs + retours
+  sur le bouton « 🛡️ Admin », et pose au passage le compte propre a chaque
+  onglet. Les ERREURS sont comptees DISTINCTES, comme l'onglet les affiche :
+  une pastille a « 200 » pour un seul bug qui boucle ne dirait rien d'utile.
+
   A RETENIR : quand deux ecrans decrivent la meme chose, chercher s'ils lisent
   la MEME table. Ici trois listes de postes coexistaient — le referentiel, une
   copie figee dans le formulaire supprime, et celle de l'Univers — et la
@@ -61897,28 +61908,50 @@ const Admin = {
         }
     },
     
-    // Met à jour la pastille rouge avec le nombre de signalements 'pending'
+    // Met a jour la pastille rouge du bouton « 🛡️ Admin » ET celles des onglets.
+    // v600 : elle ne comptait que les signalements. Elle compte desormais TOUT
+    // ce qui attend : signalements + erreurs remontees + retours utilisateurs.
+    // POURQUOI ICI : une pastille ne sert a rien si elle n'apparait qu'une fois
+    // l'onglet ouvert — c'est justement ce qu'elle est censee t'epargner. Elle
+    // est donc posee au chargement du tableau de bord, puis toutes les deux
+    // minutes, sans attendre que tu cliques quoi que ce soit.
     refreshPendingBadge: async () => {
         if(!Admin.isAdmin()) return;
-        const badge = document.getElementById('admin-pending-badge');
-        if(!badge) return;
-        
+        const poser = (id, n) => {
+            const el = document.getElementById(id);
+            if(!el) return;
+            el.textContent = n > 99 ? '99+' : String(n);
+            el.style.display = n > 0 ? 'inline-block' : 'none';
+        };
+        let signalements = 0, erreurs = 0, retours = 0;
         try {
             const { count, error } = await supabase
                 .from('reports')
                 .select('id', { count: 'exact', head: true })
                 .eq('status', 'pending');
-            
-            if(!error && count !== null && count > 0) {
-                badge.textContent = count > 99 ? '99+' : String(count);
-                badge.style.display = 'inline-block';
-            } else {
-                badge.style.display = 'none';
-            }
-        } catch(e) {
-            console.warn('Impossible de rafraîchir la pastille admin:', e);
-            badge.style.display = 'none';
-        }
+            if(!error && count) signalements = count;
+        } catch(e) { console.warn('[Admin] pastille signalements:', e); }
+        try {
+            // On compte les erreurs DISTINCTES, comme l'onglet les affiche :
+            // une pastille a « 200 » pour un seul bug qui boucle ne dirait rien
+            // d'utile. Une seule colonne suffit pour ca.
+            const { data, error } = await supabase
+                .from('client_errors')
+                .select('empreinte')
+                .eq('traite', false)
+                .limit(1000);
+            if(!error && data) erreurs = new Set(data.map(x => x.empreinte)).size;
+        } catch(e) { console.warn('[Admin] pastille erreurs:', e); }
+        try {
+            const { count, error } = await supabase
+                .from('client_feedback')
+                .select('id', { count: 'exact', head: true })
+                .eq('traite', false);
+            if(!error && count) retours = count;
+        } catch(e) { console.warn('[Admin] pastille retours:', e); }
+        poser('admin-errors-badge', erreurs);
+        poser('admin-feedback-badge', retours);
+        poser('admin-pending-badge', signalements + erreurs + retours);
     },
     
     // B5 : re-clic sur le bouton Admin = retour à l'accueil
