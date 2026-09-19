@@ -464,9 +464,14 @@
         const card = document.createElement('div');
         card.className = 'crew-card fid-card';
 
-        const roles = member.group_id ? Crew.getRolesForGroup(member.group_id) : [];
+        // v600 : une fonction DEJA ENREGISTREE mais absente du referentiel (saisie
+        // a la main, ou departement change depuis) est ajoutee a la liste et
+        // selectionnee. Sans cela le selecteur retombait sur « -- Fonction -- »
+        // alors que la fiche en porte une : le premier passage dessus l'effacait.
+        const roles = member.group_id ? Crew.getRolesForGroup(member.group_id).slice() : [];
+        if(member.role && !roles.includes(member.role)) roles.unshift(member.role);
         let rolesOptions = '<option value="">-- Fonction --</option>';
-        roles.forEach(r => { rolesOptions += `<option value="${r}" ${member.role === r ? 'selected' : ''}>${r}</option>`; });
+        roles.forEach(r => { rolesOptions += `<option value="${Utils.escape(r)}" ${member.role === r ? 'selected' : ''}>${Utils.escape(r)}</option>`; });
         rolesOptions += '<option value="__custom__">➕ Autre...</option>';
         let groupOptions = '<option value="">-- Département --</option>';
         availableGroups.forEach(g => { groupOptions += `<option value="${g.id}" ${member.group_id === g.id ? 'selected' : ''}>${Utils.escape(g.name)}</option>`; });
@@ -613,16 +618,22 @@
         return card;
     },
     
-    handleRoleChange: (idx, value) => {
+    // v600 : addCustomRole est ASYNC (elle ouvre une fenetre de saisie) et
+    // n'etait pas ATTENDUE. On enregistrait donc la PROMESSE comme fonction —
+    // un poste saisi a la main partait en « [object Promise] ». Corrige.
+    // Au passage, la fiche de profil (moteur) n'a pas d'onglet Equipe a
+    // redessiner : c'est sa propre carte qu'il faut rafraichir.
+    handleRoleChange: async (idx, value) => {
+        const member = PublicProfile._engineMode ? PublicProfile._engineProfile : state.data.crew[idx];
+        if(!member) return;
         if(value === '__custom__') {
-            const member = state.data.crew[idx];
-            const newRole = Crew.addCustomRole(member.group_id);
+            const newRole = await Crew.addCustomRole(member.group_id);
             if(newRole) {
                 Crew.updateMember(idx, 'role', newRole);
-                UI.renderCrewTab();
+                if(PublicProfile._engineMode) PublicProfile._engineRerenderCard(); else UI.renderCrewTab();
             } else {
-                // Reset select
-                document.getElementById(`role-select-${idx}`).value = member.role || '';
+                const sel = document.getElementById(`role-select-${idx}`);
+                if(sel) sel.value = member.role || '';
             }
         } else {
             Crew.updateMember(idx, 'role', value);

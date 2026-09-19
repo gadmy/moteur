@@ -10366,11 +10366,19 @@ const UniverseSearch = {
             const dept = document.getElementById('universe-department')?.value;
             const role = document.getElementById('universe-crew-role')?.value;
             
+            // v600 : on interroge TOUTES les fiches technicien de la personne, pas
+            // seulement les champs plats. Depuis v597 un compte peut en porter
+            // plusieurs (cadreur ET electro) ; les champs plats n'en decrivent
+            // qu'une, la deuxieme etait donc introuvable par departement ou par
+            // fonction. Les champs plats restent testes : ils sont les seuls
+            // remplis sur les profils d'avant les casquettes.
             if(dept) {
-                results = results.filter(p => p.department === dept);
+                results = results.filter(p => p.department === dept
+                    || Universe._fichesCrew(p).some(f => (f.department || f.group_id) === dept));
             }
             if(role) {
-                results = results.filter(p => p.role && p.role.toLowerCase().includes(role));
+                results = results.filter(p => (p.role && p.role.toLowerCase().includes(role))
+                    || Universe._fichesCrew(p).some(f => f.role && f.role.toLowerCase().includes(role)));
             }
         }
         
@@ -12095,21 +12103,6 @@ hoverCard: null,
 	
 	// ===================== FORMULAIRE & DROPDOWNS =====================
 	// Données des rôles par département
-    crewRolesByDept: {
-        'realisation': ['Réalisateur', '1er Assistant Réalisateur', '2ème Assistant Réalisateur', 'Scripte', 'Dialoguiste'],
-        'image': ['Chef Opérateur / DOP', 'Cadreur', 'Assistant Caméra', 'Steadicamer', 'DIT'],
-        'lumiere': ['Chef Électricien', 'Électricien', 'Pupitreur'],
-        'machinerie': ['Chef Machiniste', 'Machiniste'],
-        'son': ['Ingénieur du Son', 'Perchman', 'Assistant Son'],
-        'decoration': ['Chef Décorateur', 'Ensemblier', 'Accessoiriste', 'Peintre', 'Constructeur'],
-        'costumes': ['Chef Costumier', 'Costumier', 'Habilleur'],
-        'maquillage': ['Chef Maquilleur', 'Maquilleur', 'Coiffeur', 'Prothésiste'],
-        'regie': ['Directeur de Production', 'Régisseur Général', 'Régisseur Adjoint', 'Assistant Régie'],
-        'casting': ['Directeur de Casting', 'Assistant Casting'],
-        'postprod': ['Monteur', 'Assistant Monteur', 'Étalonneur', 'Mixeur Son', 'Bruiteur', 'Compositeur', 'VFX Artist'],
-        'production': ['Producteur', 'Producteur Exécutif', 'Directeur de Production', 'Comptable de Production']
-    },
-
     // Affiche/masque les filtres selon le type sélectionné
     onTypeChange: () => {
         const type = document.getElementById('universe-type').value;
@@ -12153,25 +12146,40 @@ hoverCard: null,
         }
     },
 
-    // Remplit la liste des fonctions techniciens selon le département
+    // Les fiches technicien VISIBLES d'un profil (une personne peut en avoir
+    // plusieurs depuis v597). Rend un tableau vide pour un profil sans casquettes.
+    _fichesCrew: (p) => {
+        if(!p || !p.facets) return [];
+        return PublicProfile.crewArr(p.facets).filter(f => f && f.enabled && f.visible !== false);
+    },
+
+    // Remplit la liste des fonctions techniciens selon le département.
+    // v600 — LE MEME REFERENTIEL QUE PARTOUT AILLEURS (CONFIG.crewRoles).
+    // Cette liste avait sa PROPRE table (crewRolesByDept), avec ses propres
+    // identifiants de departement ('image', 'lumiere'…) et ses propres
+    // orthographes ('Cadreur', 'Perchman'). Or le selecteur Departement, lui,
+    // est rempli depuis CONFIG.crewGroups ('gc1', 'gc2'…) : choisir un
+    // departement ne trouvait donc AUCUNE fonction, et sans departement la
+    // liste proposait des libelles ('Cadreur') que pas un profil ne porte
+    // ('Cadreur·euse'). La recherche par fonction ne pouvait pas aboutir.
     populateCrewRoles: (dept) => {
         const select = document.getElementById('universe-crew-role');
         if(!select) return;
         
         select.innerHTML = '<option value="">-- Fonction --</option>';
         
+        const table = (typeof CONFIG !== 'undefined' && CONFIG.crewRoles) ? CONFIG.crewRoles : {};
         let roles = [];
-        
-        if(dept && Universe.crewRolesByDept[dept]) {
-            roles = Universe.crewRolesByDept[dept];
+        if(dept && table[dept]) {
+            roles = table[dept].slice();
         } else {
-            Object.values(Universe.crewRolesByDept).forEach(deptRoles => {
-                roles = roles.concat(deptRoles);
-            });
-            roles = [...new Set(roles)];
+            Object.values(table).forEach(r => { roles = roles.concat(r); });
         }
+        // « Autre » n'est pas une fonction : c'est la porte de sortie du
+        // formulaire de saisie, elle n'a rien a faire dans un filtre.
+        roles = [...new Set(roles)].filter(r => r && r !== 'Autre');
         
-        roles.sort().forEach(role => {
+        roles.sort((a, b) => a.localeCompare(b, 'fr')).forEach(role => {
             const opt = document.createElement('option');
             opt.value = role.toLowerCase();
             opt.textContent = role;
