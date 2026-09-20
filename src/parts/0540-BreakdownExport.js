@@ -79,36 +79,33 @@
                   y = margin;
               }
               
-              // En-tête de scène
-              doc.setFillColor(...PdfTheme.COLORS.BG_LIGHT);
-              doc.rect(margin, y, pageWidth - margin * 2, 10, 'F');
-              doc.setFillColor(...PdfTheme.accentFor('Dépouillement'));
-              doc.rect(margin, y, 1.8, 10, 'F');
-              doc.setDrawColor(...PdfTheme.COLORS.BORDER);
-              doc.rect(margin, y, pageWidth - margin * 2, 10, 'S');
-              
-              doc.setFontSize(10);
-              doc.setFont('helvetica', 'bold');
-              doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-              const sceneTitle = `#${sceneIdx + 1} - ${scene.title || 'Sans titre'}`;
-              doc.text(sceneTitle, margin + 3, y + 7);
-              
-              // Badge statut
+              // En-tête de scène — meme porte que les titres de section (v601).
+              // Le badge de statut est dessine AVANT le titre, parce que le titre
+              // laisse un etat de dessin propre derriere lui : l'inverse
+              // obligerait a reposer police et couleur a la main.
+              const yBadge = y;
               if(scene.isFinal) {
                   doc.setFillColor(...PdfTheme.COLORS.SUCCESS);
                   doc.setTextColor(...PdfTheme.COLORS.WHITE);
-                  doc.roundedRect(pageWidth - margin - 20, y + 2, 18, 6, 1, 1, 'F');
+                  doc.roundedRect(pageWidth - margin - 20, yBadge + 0.8, 18, 6, 1, 1, 'F');
                   doc.setFontSize(6);
-                  doc.text('FINAL', pageWidth - margin - 11, y + 6, { align: 'center' });
+                  doc.setFont('helvetica', 'bold');
+                  doc.text('FINAL', pageWidth - margin - 11, yBadge + 4.9, { align: 'center' });
               } else {
                   doc.setFillColor(...PdfTheme.COLORS.WARNING);
                   doc.setTextColor(...PdfTheme.COLORS.BLACK);
-                  doc.roundedRect(pageWidth - margin - 25, y + 2, 23, 6, 1, 1, 'F');
+                  doc.roundedRect(pageWidth - margin - 25, yBadge + 0.8, 23, 6, 1, 1, 'F');
                   doc.setFontSize(6);
-                  doc.text('BROUILLON', pageWidth - margin - 13.5, y + 6, { align: 'center' });
+                  doc.setFont('helvetica', 'bold');
+                  doc.text('BROUILLON', pageWidth - margin - 13.5, yBadge + 4.9, { align: 'center' });
               }
-              
-              y += 14;
+              // La largeur s'arrete AVANT le badge, sinon le filet lui passerait
+              // dessous et le titre long viendrait mordre sur « BROUILLON ».
+              y = PdfTheme.sectionBand(doc, {
+                  x: margin, y, width: pageWidth - margin * 2 - 28, size: 10,
+                  title: `#${sceneIdx + 1} - ${scene.title || 'Sans titre'}`,
+                  accent: PdfTheme.accentFor('Dépouillement')
+              }) + 0.5;
               
               // Catégories du dépouillement
               Object.entries(breakdown).forEach(([cat, items]) => {
@@ -192,17 +189,14 @@
               // Espace avant chaque nouvelle catégorie (sauf la 1ère)
               if(catIdx > 0) y += 4;
               
-              // En-tête catégorie
-              doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-              doc.rect(margin, y, pageWidth - margin * 2, 8, 'F');
-              doc.setTextColor(...PdfTheme.COLORS.WHITE);
-              doc.setFontSize(10);
-              doc.setFont('helvetica', 'bold');
-              doc.text(PdfTheme.cleanText(`${cat} (${items.length})`), margin + 3, y + 6);
-              y += 8;
-              
-              // Espace entre bandeau coloré et 1ère ligne du tableau
-              y += 4;
+              // En-tête catégorie — meme porte que les titres de section, avec la
+              // couleur PROPRE a la categorie : c'est elle qui fait lire la page
+              // d'un coup d'oeil, on ne la perd pas en allegeant le bandeau.
+              y = PdfTheme.sectionBand(doc, {
+                  x: margin, y, width: pageWidth - margin * 2, size: 10,
+                  title: cat, right: String(items.length),
+                  accent: rgb
+              });
               
               // Liste
               doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);

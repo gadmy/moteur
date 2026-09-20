@@ -2112,17 +2112,38 @@ const Stats = {
         doc.setFillColor(...accent);
         doc.rect(x, y, 2.4, 7.4, 'F');
 
+        // Texte secondaire a droite (date, effectif...), mesure D'ABORD : il
+        // decide de la place qui reste au titre.
+        const droite = o.right ? clean(o.right) : '';
+        let largeurDroite = 0;
+        if(droite) {
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            largeurDroite = doc.getTextWidth(droite) + 4;
+        }
+
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(o.size || 11.5);
         doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
-        doc.text(titre, x + 5.4, y + 5.6);
+        // TITRE TRONQUE SI BESOIN, et ici plutot que chez chaque appelant : un
+        // titre de scene un peu long debordait de sa bande et venait s'imprimer
+        // PAR-DESSUS le badge « BROUILLON » place a cote. On raccourcit d'un
+        // caractere a la fois, suite comprise dans la mesure (meme regle que les
+        // deux troncatures du recapitulatif, pour la meme raison : retirer n
+        // caracteres pour en rajouter autant tourne en rond).
+        const placeTitre = w - 5.4 - largeurDroite;
+        let titreAffiche = titre;
+        if(doc.getTextWidth(titreAffiche) > placeTitre) {
+            while(titreAffiche.length > 2 && doc.getTextWidth(titreAffiche + '…') > placeTitre) titreAffiche = titreAffiche.slice(0, -1);
+            titreAffiche += '…';
+        }
+        doc.text(titreAffiche, x + 5.4, y + 5.6);
 
-        // Texte secondaire a droite (date, effectif...), quand il y en a un
-        if(o.right) {
+        if(droite) {
             doc.setFont('helvetica', 'normal');
             doc.setFontSize(9);
             doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
-            doc.text(clean(o.right), x + w, y + 5.6, { align: 'right' });
+            doc.text(droite, x + w, y + 5.6, { align: 'right' });
         }
 
         // Filet fin sous toute la largeur, a la couleur de la section eclaircie

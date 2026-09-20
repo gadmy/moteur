@@ -7374,17 +7374,15 @@ const FichesPDF = {
     // Dessine un bandeau "GROUPE : XXX" stylé
     // L'accent est défini par l'export appelant via FichesPDF._accent (couleur de section)
     _accent: null,
+    // Titre de groupe (Protagonistes, Casting principal, Interieurs...) — meme
+    // porte que les titres de section depuis v601 : la couleur vient de l'export
+    // appelant (_accent), donc personnages en vert, decors en brun, etc.
     _drawGroupHeader: (doc, groupName, y, marginX, usableWidth) => {
-        const h = 8;
-        doc.setFillColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-        doc.rect(marginX, y, usableWidth, h, 'F');
-        doc.setFillColor(...(FichesPDF._accent || PdfTheme.COLORS.BANNER_BLUE));
-        doc.rect(marginX, y, 1.8, h, 'F');
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
-        doc.setTextColor(...PdfTheme.COLORS.WHITE);
-        doc.text(PdfTheme.cleanText(groupName).toUpperCase().trim(), marginX + 5, y + h - 2.5);
-        return y + h + 4;
+        return PdfTheme.sectionBand(doc, {
+            x: marginX, y, width: usableWidth, size: 10,
+            title: groupName,
+            accent: FichesPDF._accent || PdfTheme.COLORS.BANNER_BLUE
+        }) + 1;
     },
     
     // Assure qu'il reste `space` mm avant la fin de la page sinon saut
