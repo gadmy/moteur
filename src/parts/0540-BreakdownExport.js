@@ -79,36 +79,33 @@
                   y = margin;
               }
               
-              // En-tête de scène
-              doc.setFillColor(...PdfTheme.COLORS.BG_LIGHT);
-              doc.rect(margin, y, pageWidth - margin * 2, 10, 'F');
-              doc.setFillColor(...PdfTheme.accentFor('Dépouillement'));
-              doc.rect(margin, y, 1.8, 10, 'F');
-              doc.setDrawColor(...PdfTheme.COLORS.BORDER);
-              doc.rect(margin, y, pageWidth - margin * 2, 10, 'S');
-              
-              doc.setFontSize(10);
-              doc.setFont('helvetica', 'bold');
-              doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-              const sceneTitle = `#${sceneIdx + 1} - ${scene.title || 'Sans titre'}`;
-              doc.text(sceneTitle, margin + 3, y + 7);
-              
-              // Badge statut
+              // En-tête de scène — meme porte que les titres de section (v601).
+              // Le badge de statut est dessine AVANT le titre, parce que le titre
+              // laisse un etat de dessin propre derriere lui : l'inverse
+              // obligerait a reposer police et couleur a la main.
+              const yBadge = y;
               if(scene.isFinal) {
                   doc.setFillColor(...PdfTheme.COLORS.SUCCESS);
                   doc.setTextColor(...PdfTheme.COLORS.WHITE);
-                  doc.roundedRect(pageWidth - margin - 20, y + 2, 18, 6, 1, 1, 'F');
+                  doc.roundedRect(pageWidth - margin - 20, yBadge + 0.8, 18, 6, 1, 1, 'F');
                   doc.setFontSize(6);
-                  doc.text('FINAL', pageWidth - margin - 11, y + 6, { align: 'center' });
+                  doc.setFont('helvetica', 'bold');
+                  doc.text('FINAL', pageWidth - margin - 11, yBadge + 4.9, { align: 'center' });
               } else {
                   doc.setFillColor(...PdfTheme.COLORS.WARNING);
                   doc.setTextColor(...PdfTheme.COLORS.BLACK);
-                  doc.roundedRect(pageWidth - margin - 25, y + 2, 23, 6, 1, 1, 'F');
+                  doc.roundedRect(pageWidth - margin - 25, yBadge + 0.8, 23, 6, 1, 1, 'F');
                   doc.setFontSize(6);
-                  doc.text('BROUILLON', pageWidth - margin - 13.5, y + 6, { align: 'center' });
+                  doc.setFont('helvetica', 'bold');
+                  doc.text('BROUILLON', pageWidth - margin - 13.5, yBadge + 4.9, { align: 'center' });
               }
-              
-              y += 14;
+              // La largeur s'arrete AVANT le badge, sinon le filet lui passerait
+              // dessous et le titre long viendrait mordre sur « BROUILLON ».
+              y = PdfTheme.sectionBand(doc, {
+                  x: margin, y, width: pageWidth - margin * 2 - 28, size: 10,
+                  title: `#${sceneIdx + 1} - ${scene.title || 'Sans titre'}`,
+                  accent: PdfTheme.accentFor('Dépouillement')
+              }) + 0.5;
               
               // Catégories du dépouillement
               Object.entries(breakdown).forEach(([cat, items]) => {
@@ -157,11 +154,9 @@
           doc.addPage();
           y = margin;
           
-          PdfTheme.sectionBand(doc, { x: margin, y, width: pageWidth - margin * 2,
-                                      title: 'Récapitulatif global',
-                                      accent: PdfTheme.accentFor('Dépouillement') });
-          
-          y = 30;
+          y = PdfTheme.sectionBand(doc, { x: margin, y, width: pageWidth - margin * 2,
+                                          title: 'Récapitulatif global',
+                                          accent: PdfTheme.accentFor('Dépouillement') }) + 4;
           
           // Agrégation par catégorie. On regroupe par nom, mais on retient les
           // FICHES distinctes derriere : deux chemises destinees a deux
@@ -194,44 +189,76 @@
               // Espace avant chaque nouvelle catégorie (sauf la 1ère)
               if(catIdx > 0) y += 4;
               
-              // En-tête catégorie
-              doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-              doc.rect(margin, y, pageWidth - margin * 2, 8, 'F');
-              doc.setTextColor(...PdfTheme.COLORS.WHITE);
-              doc.setFontSize(10);
-              doc.setFont('helvetica', 'bold');
-              doc.text(PdfTheme.cleanText(`${cat} (${items.length})`), margin + 3, y + 6);
-              y += 8;
-              
-              // Espace entre bandeau coloré et 1ère ligne du tableau
-              y += 4;
+              // En-tête catégorie — meme porte que les titres de section, avec la
+              // couleur PROPRE a la categorie : c'est elle qui fait lire la page
+              // d'un coup d'oeil, on ne la perd pas en allegeant le bandeau.
+              y = PdfTheme.sectionBand(doc, {
+                  x: margin, y, width: pageWidth - margin * 2, size: 10,
+                  title: cat, right: String(items.length),
+                  accent: rgb
+              });
               
               // Liste
               doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
               doc.setFontSize(9);
               doc.setFont('helvetica', 'normal');
               
-              items.forEach((item, idx) => {
+              // DEUX COLONNES (v601). Chaque ligne portait un nom a gauche et
+              // « (n scenes) » cale a l'extreme droite : entre les deux, dix
+              // centimetres de vide sur toute la hauteur de la page. Ce sont en
+              // realite des tableaux a DEUX colonnes ; on en pose donc deux cote
+              // a cote. Le recapitulatif tient en deux fois moins de pages, et
+              // chaque nom reste colle a son compte de scenes, ce qui est
+              // justement ce qu'on vient y lire.
+              // REMPLISSAGE EN LIGNES, pas en colonnes : la colonne de gauche
+              // d'abord obligerait a connaitre la hauteur totale AVANT d'ecrire,
+              // or une categorie peut deborder sur la page suivante.
+              const gouttiere = 8;
+              const colL = (pageWidth - margin * 2 - gouttiere) / 2;
+              const colonneX = [margin + 3, margin + 3 + colL + gouttiere];
+              const compteScenes = (item) => scenes.filter(s => {
+                  const bd = s.breakdown?.[cat] || [];
+                  return bd.some(i => Utils.bdText(i) === item);
+              }).length;
+
+              for(let i = 0; i < items.length; i += 2) {
                   if(y > pageHeight - 15) {
                       doc.addPage();
                       y = margin;
                   }
-                  // Compter dans combien de scènes
-                  const sceneCount = scenes.filter(s => {
-                      const bd = s.breakdown?.[cat] || [];
-                      return bd.some(i => Utils.bdText(i) === item);
-                  }).length;
-                  
-                  const nFiches = (itemsMap.get(item) || new Set()).size;
-                  const libelle = nFiches > 1 ? `${item} x${nFiches}` : item;
-                  let itemTxt = PdfTheme.cleanText(`• ${libelle}`);
-                  while(doc.getTextWidth(itemTxt) > pageWidth - margin * 2 - 30 && itemTxt.length > 5) itemTxt = itemTxt.substring(0, itemTxt.length - 2) + '...';
-                  doc.text(itemTxt, margin + 3, y);
-                  doc.setTextColor(...PdfTheme.COLORS.TEXT_FAINT);
-                  doc.text(`(${sceneCount} scène${sceneCount > 1 ? 's' : ''})`, pageWidth - margin - 3, y, { align: 'right' });
+                  for(let c = 0; c < 2; c++) {
+                      const item = items[i + c];
+                      if(item === undefined) break;
+                      const x = colonneX[c];
+                      const nFiches = (itemsMap.get(item) || new Set()).size;
+                      const libelle = nFiches > 1 ? `${item} x${nFiches}` : item;
+                      const n = compteScenes(item);
+                      const compte = `(${n} scène${n > 1 ? 's' : ''})`;
+                      // La troncature se mesure sur la COLONNE, pas sur la page :
+                      // sinon un nom long mordrait sur la colonne d'a cote.
+                      const place = colL - doc.getTextWidth(compte) - 5;
+                      let itemTxt = PdfTheme.cleanText(`• ${libelle}`);
+                      // BOUCLE INFINIE CORRIGEE (v601) : la troncature d'origine
+                      // retirait DEUX caracteres et en rajoutait TROIS (« ... »).
+                      // Chaque tour rallongeait donc le texte d'un caractere et la
+                      // condition de sortie ne tombait jamais — le navigateur se
+                      // figeait. Invisible jusqu'ici parce que la limite etait la
+                      // page entiere, jamais atteinte ; elle l'est des qu'on mesure
+                      // sur une COLONNE. On raccourcit d'un caractere a la fois,
+                      // points de suite COMPRIS dans la mesure.
+                      if(doc.getTextWidth(itemTxt) > place) {
+                          let coupe = itemTxt;
+                          while(coupe.length > 4 && doc.getTextWidth(coupe + '...') > place) coupe = coupe.slice(0, -1);
+                          itemTxt = coupe + '...';
+                      }
+                      doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+                      doc.text(itemTxt, x, y);
+                      doc.setTextColor(...PdfTheme.COLORS.TEXT_FAINT);
+                      doc.text(compte, x + colL - 3, y, { align: 'right' });
+                  }
                   doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
                   y += 4.5;
-              });
+              }
               
               y += 6;
           });
