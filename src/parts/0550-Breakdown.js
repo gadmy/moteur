@@ -6840,37 +6840,53 @@ const StoryboardExport = {
         const composedCtx = composedCanvas.getContext('2d');
         let hasContent = false;
         
-        // 1) Calque ORIGINAL en premier (image uploadée OU drawing original)
-        if(shot.imageType === 'upload' && shot.imageUrl) {
-            const img = new Image();
-            const baseP = StoryboardExport._loadPrintImg(img, shot.imageUrl, () => {
-                // Garder l'aspect ratio : dessiner centré dans le canvas
-                const ratio = Math.min(composedCanvas.width / img.naturalWidth, composedCanvas.height / img.naturalHeight);
-                const w = img.naturalWidth * ratio;
-                const h = img.naturalHeight * ratio;
-                const x = (composedCanvas.width - w) / 2;
-                const y = (composedCanvas.height - h) / 2;
-                composedCtx.drawImage(img, x, y, w, h);
-            });
-            // Puis dessiner le calque technique par-dessus, une fois l'image de base posée
-            const techP = baseP.then(() => Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer));
-            if(StoryboardExport._printCapturing) StoryboardExport._printImgPromises.push(techP);
-            hasContent = true;
-        } else if(shot.imageType === 'drawing' && shot.drawingData) {
-            // Rendu du dessin (renderDrawingData renvoie une promesse désormais suivie)
-            const baseP = DrawingEditor.renderDrawingData(composedCtx, shot.drawingData) || Promise.resolve();
-            // Objets vectoriels de la zone Original par-dessus, une fois le dessin de base posé
-            const originalZone = shot.drawings && shot.drawings.original;
-            const objectsP = (originalZone && Array.isArray(originalZone.objects) && originalZone.objects.length > 0)
-                ? baseP.then(() => StoryboardExport._preloadObjectImages(originalZone.objects))
-                       .then(() => Storyboard.renderObjectsOnCanvas(composedCtx, originalZone.objects))
-                : baseP;
-            // Puis le calque technique par-dessus
-            const techP = objectsP.then(() => Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer));
+        // ====================================================================
+        // DEUX RANGEMENTS, ET L'EXPORT N'EN LISAIT QU'UN (v601)
+        // ====================================================================
+        // Un plan peut porter son image a DEUX endroits :
+        //   - A LA RACINE (shot.imageType / imageUrl / drawingData) : l'ancien
+        //     format, celui que la vignette de l'onglet lit encore ;
+        //   - DANS LA ZONE « original » (shot.drawings.original) : le format des
+        //     quatre calques, celui que l'EDITEUR DE DESSIN ecrit depuis qu'il
+        //     existe. Une image inseree dans l'editeur y devient un OBJET
+        //     (objects[]), pas une imageUrl.
+        // L'export ne lisait que la RACINE, et pire : il n'allait chercher les
+        // objets de la zone QUE si la racine portait deja un drawingData. Un plan
+        // dessine ou illustre uniquement dans l'editeur n'avait donc aucune de ces
+        // deux conditions — « Pas d'image », page blanche, et pas la moindre
+        // erreur pour le dire.
+        // On compose desormais dans l'ordre naturel : image de fond (racine OU
+        // zone), calques de dessin (zone d'abord, racine en repli), puis objets.
+        const zoneOrig = (shot.drawings && shot.drawings.original) || null;
+        const fondUrl = (shot.imageType === 'upload' && shot.imageUrl) ? shot.imageUrl
+                      : (zoneOrig && zoneOrig.imageType === 'upload' && zoneOrig.imageUrl) ? zoneOrig.imageUrl
+                      : null;
+        const calques = (zoneOrig && zoneOrig.drawingData) || shot.drawingData || null;
+        const objets = (zoneOrig && Array.isArray(zoneOrig.objects)) ? zoneOrig.objects : [];
+
+        if(fondUrl || calques || objets.length > 0) {
+            let etape = Promise.resolve();
+            if(fondUrl) {
+                const img = new Image();
+                etape = StoryboardExport._loadPrintImg(img, fondUrl, () => {
+                    // Garder l'aspect ratio : dessiner centre dans le canvas
+                    const ratio = Math.min(composedCanvas.width / img.naturalWidth, composedCanvas.height / img.naturalHeight);
+                    const w = img.naturalWidth * ratio;
+                    const h = img.naturalHeight * ratio;
+                    composedCtx.drawImage(img, (composedCanvas.width - w) / 2, (composedCanvas.height - h) / 2, w, h);
+                });
+            }
+            if(calques) etape = etape.then(() => DrawingEditor.renderDrawingData(composedCtx, calques) || Promise.resolve());
+            if(objets.length > 0) {
+                etape = etape.then(() => StoryboardExport._preloadObjectImages(objets))
+                             .then(() => Storyboard.renderObjectsOnCanvas(composedCtx, objets));
+            }
+            const techP = etape.then(() => Storyboard._drawTechLayerOnTop(composedCtx, shot, techLayer, wantsTechLayer));
             if(StoryboardExport._printCapturing) StoryboardExport._printImgPromises.push(techP);
             hasContent = true;
         }
-        
+
+
 if(hasContent) {
             imageDiv.appendChild(composedCanvas);
         } else {
