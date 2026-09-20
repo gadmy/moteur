@@ -226,6 +226,27 @@
           };
           document.addEventListener('selectionchange', surActivite);
           document.addEventListener('focusin', surActivite, true);
+          // ------------------------------------------------------------------
+          //  UNE SEULE PORTE POUR REPOSER LES MARQUES.
+          // ------------------------------------------------------------------
+          //  Chaque redessin d'ecran (changement d'onglet, sauvegarde, tri...)
+          //  reconstruit ses scenes et efface donc les badges avec. Les reposer
+          //  depuis chaque fonction de rendu, c'est en oublier une — on en a
+          //  deja oublie cinq dans ce chantier. On surveille donc la PAGE : des
+          //  qu'elle bouge, on repose les marques, une fois, apres un court
+          //  delai. Un ecran ajoute demain est couvert sans qu'on y pense.
+          //  On n'ecoute QUE l'apparition et la disparition d'elements, jamais
+          //  les attributs ni le texte : sinon chaque touche frappee dans une
+          //  scene relancerait le calcul.
+          try {
+              let mt = null;
+              const obs = new MutationObserver(() => {
+                  clearTimeout(mt);
+                  mt = setTimeout(() => { try { SceneLock.marquerEcrans(); } catch(e) {} }, 300);
+              });
+              obs.observe(document.body, { childList: true, subtree: true });
+              SceneLock._observateur = obs;
+          } catch(e) { console.warn('[SceneLock] surveillance de la page :', e && e.message); }
           // Fermeture de la page : on rend la main tout de suite plutot que de
           // laisser les autres attendre trois minutes l'expiration.
           window.addEventListener('pagehide', () => { try { SceneLock.libererToutes(); } catch(e) {} });
@@ -316,11 +337,18 @@
               el.classList.toggle('scene-verrouillee', parUnAutre);
               el.classList.toggle('scene-a-moi', !!(l && LockManager._mine(l)));
               const ancien = el.querySelector(':scope > .scene-lock-badge');
+              // NE RIEN TOUCHER SI RIEN N'A CHANGE. Ce n'est pas du confort :
+              // la surveillance ci-dessous rappelle cette fonction des que la
+              // page bouge. Si elle refaisait le badge a chaque passage, elle
+              // declencherait sa propre surveillance — une boucle sans fin.
+              const memeQue = ancien && ancien.dataset.qui;
+              if(parUnAutre && memeQue && memeQue === String(l.holder_uid || '')) return;
               if(ancien) ancien.remove();
               if(!parUnAutre) return;
               const qui = LockManager._who(l);
               const badge = document.createElement('span');
               badge.className = 'scene-lock-badge';
+              badge.dataset.qui = String(l.holder_uid || '');
               badge.title = '🔒 Verrouillée — ' + qui + ' travaille sur cette scène';
               const em = (l.holder_email || '').toLowerCase();
               const pastille = document.createElement('span');
