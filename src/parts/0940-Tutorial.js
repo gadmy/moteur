@@ -11,7 +11,7 @@
           <p>Plus besoin de jongler entre dix logiciels différents. Moteur gère tout, du premier mot à la dernière prise.</p>
           
           <h3>Les 3 espaces principaux</h3>
-          <p><strong>🏠 Accueil :</strong> Dès la connexion, tu arrives sur la grille de tes projets. Les menus du haut donnent accès au reste : Mon Espace (Profil, Contacts), Communauté (Univers, Forum), Aide (Cours, Guide).</p>
+          <p><strong>🏠 Accueil :</strong> Dès la connexion, tu arrives sur la grille de tes projets. Les menus du haut donnent accès au reste : Mon Espace (Profil, Contacts), Communauté (Univers, Forum), Aide (Cours, Guide, Visites guidées, Conditions &amp; mentions légales).</p>
           <div class="tuto-tip"><strong>🗑 Corbeille :</strong> Supprimer un projet ne l'efface pas tout de suite : il part à la <strong>Corbeille</strong> (bouton dans la barre des dossiers), récupérable <strong>30 jours</strong> via « Restaurer », puis effacé définitivement (données et fichiers).</div>
           <p><strong>📁 L'espace projet :</strong> L'espace de travail sur un film. Onglets à gauche (scénario, séquencier, dépouillement...), menus en haut, équipe connectée en temps réel.</p>
           <p><strong>🌍 Univers :</strong> L'annuaire communautaire. Tous les profils et projets publics géolocalisés sur une carte.</p>
@@ -20,9 +20,31 @@
           <p>Tu peux collaborer en temps réel avec toute ton équipe. Synchronisation instantanée, mini-tchat de projet, commentaires, permissions fines. Et grâce aux <strong>casquettes</strong>, ton profil unique peut cumuler plusieurs rôles (ex : réalisateur·ice + comédien·ne).</p>
           
           <div class="tuto-tip"><strong>🚧 Pré-alpha ouverte :</strong> Moteur est en développement actif. Des bugs peuvent survenir, des fonctionnalités sont incomplètes. Tes données peuvent évoluer. Utilise à des fins de test et d'exploration !</div>
-          <div class="tuto-tip"><strong>💬 Feedback bienvenu :</strong> Trouvé un bug ? Une fonctionnalité à suggérer ? Va dans le Forum. L'app grandit avec vous !</div>
+          <div class="tuto-tip"><strong>💡 Vos remarques :</strong> Trouvé un bug ? Une idée ? L'ampoule 💡 en bas à gauche ouvre « Vos remarques » : tu écris, tu peux te relire et corriger jusqu'à la nuit suivante, puis c'est transmis. Le Forum reste là pour les échanges entre membres. L'app grandit avec vous !</div>
           
           <p><strong>Commence par :</strong> compléter ton profil public (pour apparaître dans l'Univers), puis crée ton premier projet via le bouton "Nouveau projet" sur l'accueil.</p>
+        `
+      },
+      {
+        id: 'series',
+        title: '📺 Film ou Série',
+        content: `
+          <h3>Un choix fait à la création</h3>
+          <p>Quand tu crées un projet, une première fenêtre te demande s'il s'agit d'un <strong>Film</strong> ou d'une <strong>Série</strong>. En série, tu annonces tout de suite le nombre de <strong>saisons</strong> (jusqu'à 20) et d'<strong>épisodes par saison</strong> (jusqu'à 50) ; tu pourras en ajouter ou en retirer ensuite.</p>
+          <div class="tuto-tip"><strong>⚠️ Le type ne se change pas après coup :</strong> un projet créé en Film reste un film. Si tu hésites, pars sur une série d'un seul épisode plutôt que l'inverse.</div>
+
+          <h3>Deux onglets en plus</h3>
+          <p>Une série fait apparaître deux onglets d'écriture réservés : <strong>📺 Saisons</strong> et <strong>🎬 Épisodes</strong>. Ils n'existent pas sur un film.</p>
+          <p><strong>Saisons :</strong> une carte par saison, avec son numéro, un titre facultatif et le nombre d'épisodes qu'elle contient. Réordonne par glisser-déposer ; « 📂 Voir épisodes » bascule sur les épisodes de cette saison.</p>
+          <p><strong>Épisodes :</strong> une carte par épisode de la saison affichée, avec une vignette que tu peux remplacer par ton image.</p>
+
+          <h3>Le sélecteur du bandeau</h3>
+          <p>C'est la pièce maîtresse. En haut de l'espace projet, deux menus <strong>S..</strong> et <strong>E..</strong> choisissent la saison et l'épisode <strong>courants</strong>. Scénario, séquencier, beat board et dépouillement ne montrent alors que les scènes de cet épisode.</p>
+          <div class="tuto-tip"><strong>💡 Une scène appartient à un épisode :</strong> elle est rattachée à l'épisode actif <strong>au moment où tu la crées</strong>. Vérifie le sélecteur avant d'écrire, sinon tu écriras dans le mauvais épisode.</div>
+
+          <h3>Ce qui reste commun</h3>
+          <p>Tout le reste appartient à la série entière, pas à un épisode : <strong>casting, équipe technique, décors, ressources, structures, budget, contrats et planning</strong>. C'est voulu — on ne recrute pas une nouvelle équipe à chaque épisode.</p>
+          <p><strong>Exports :</strong> quand un document peut être découpé par épisode (séquencier, personnages, storyboard...), l'export te demande d'abord quels épisodes inclure.</p>
         `
       },
       {
@@ -163,7 +185,7 @@
         content: `
           <h3>Ton tableau d'inspiration</h3>
           <p>Ambiances, couleurs, références visuelles... Crée plusieurs planches : décors, costumes, éclairage...</p>
-          <p>Glisse-dépose des images, redimensionne, tourne, superpose. 30 formes géométriques disponibles.</p>
+          <p>Glisse-dépose des images, redimensionne, tourne, superpose. 34 formes géométriques disponibles (rectangles, cercles, flèches, bulles, cadres...).</p>
           <p><strong>Générateur de palettes :</strong> Roue chromatique style Adobe Color. Choisis une harmonie (complémentaire, triade, analogue) et hop, 5 couleurs assorties !</p>
           <div class="tuto-tip"><strong>💡 Astuce :</strong> Clique sur une couleur de palette pour copier son code hex.</div>
           <p>Export en PNG ou PDF haute qualité.</p>
@@ -216,7 +238,7 @@
         content: `
           <h3>Ton organigramme technique</h3>
           <p>Tous les postes, tous les départements : réalisateur, chef op, ingé son, scripte, machino...</p>
-          <p>Chaque fiche technicien : contact, dispo, compétences, matériel technique (caméra, objectifs, micros...).</p>
+          <p>Chaque fiche technicien·ne est une fiche à onglets : <em>Dans le projet</em> (département, poste, notes), <em>Photos &amp; démo</em>, <em>Profil</em> (identité, contact), <em>Parcours</em> (bio, expérience, notes) et <em>Planning &amp; logistique</em> (disponibilités, véhicule, cachet et statut).</p>
           <p><strong>Contrats :</strong> Génère un CDDU ou contrat de prestation selon le statut.</p>
           <p>L'export PDF liste tout le monde par département avec coordonnées. Parfait pour le premier jour !</p>
           <p><strong>🚐 Véhicules de production :</strong> le bouton « Ajouter Véhicule » crée un véhicule de régie (places conducteur inclus, permis requis) pour le transport de l'équipe, listé sous les techniciens.</p>
@@ -297,9 +319,9 @@
           <p>Pour apparaître dans l'Univers, active au moins une casquette : <strong>Comédien·ne, Technicien·ne, Association ou Entreprise</strong>. Chaque casquette te rend visible auprès des autres membres de la communauté.</p>
           <div class="tuto-tip"><strong>💡 Quatre casquettes :</strong> Ton profil unique peut cumuler jusqu'à 4 casquettes (comédien·ne, technicien·ne, association, entreprise). Chaque casquette a ses propres champs et sa propre visibilité dans l'Univers.</div>
           <p><strong>Profil Comédien·ne :</strong> Nom de scène, mensurations, compétences, langues, sports (avec niveaux). Jusqu'à 3 photos (profil, plein-pied, portrait).</p>
-          <p><strong>Profil Technicien·ne :</strong> Métiers (perche, lumière, machino...), matos perso, expériences, showreel.</p>
+          <p><strong>Profil Technicien·ne :</strong> Département et poste (perche, lumière, machino...), identité, contact, photos, bande démo, parcours, disponibilités, véhicule et tarif. Tu peux ouvrir <strong>plusieurs fiches technicien</strong> si tu tiens plusieurs spécialités : le bouton « + » sur la grille des casquettes en crée une nouvelle, qui reprend ton identité et ton véhicule.</p>
           <p><strong>Profil Association / Entreprise :</strong> Nom de structure, description, membres référents, zone d'action.</p>
-          <div class="tuto-tip"><strong>🔒 Visibilité :</strong> Chaque section a un bouton pour masquer ce que tu ne veux pas montrer publiquement. Tu contrôles ton image.</div>
+          <div class="tuto-tip"><strong>🔒 Visibilité :</strong> elle se règle <strong>par casquette</strong>, avec la case « 👁 Univers » sur sa carte. Tu peux être cherchable comme technicien·ne sans l'être comme comédien·ne. Le bouton « 🧹 Effacer » vide une casquette sans toucher aux autres ni à ton compte.</div>
           <p><strong>📍 Géolocalisation :</strong> Ajoute ta ville et tu apparais pile au bon endroit sur la carte de l'Univers.</p>
           <p><strong>🚗 Permis & véhicule :</strong> indique tes permis (moto, VL, PL, SPL, TC) et, si tu as un véhicule, précise si tu le mets à dispo d'un tournage (gratuitement, contre dédommagement ou payé) — ou pas. Ces infos servent au transport de l'équipe.</p>
           <p>Tarif, zone de mobilité, coordonnées de contact... Tout pour faciliter les contacts !</p>
@@ -313,7 +335,7 @@
           <p>Sur Moteur, ton compte possède <strong>un seul profil public</strong>. Mais ce profil peut porter <strong>jusqu'à 4 casquettes</strong> : Comédien·ne, Technicien·ne, Association et Entreprise. Idéal si tu cumules les rôles (réalisateur·ice qui joue, technicien·ne qui gère sa boîte de prod...).</p>
 
           <h3>Activer une casquette</h3>
-          <p>Va dans <em>Mon Profil</em> : chaque casquette est une carte que tu actives, remplis et rends « 👁 Visible dans l'Univers » indépendamment. Une barre d'onglets en haut te fait passer de l'une à l'autre.</p>
+          <p>Va dans <em>Mon Profil</em> : les casquettes s'affichent en <strong>grille de cartes</strong>. Une carte grisée s'active d'un clic — et ouvre aussitôt sa fiche ; la croix la regrise. Chaque carte a sa case « 👁 Univers » et son bouton « 🧹 Effacer », indépendants des autres. La carte « + » du côté technicien ajoute une <strong>deuxième fiche technicien</strong> pour une autre spécialité, en reprenant ton identité et ton véhicule.</p>
           <div class="tuto-tip"><strong>💡 Chaque casquette est autonome :</strong> son identité, ses photos, son tarif, ses disponibilités, son contact public... Les fiches Comédien·ne et Technicien·ne ont chacune leurs champs, et au premier remplissage elles héritent en douceur de tes anciennes valeurs communes.</div>
 
           <h3>Dans l'Univers</h3>
