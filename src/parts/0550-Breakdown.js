@@ -6978,10 +6978,23 @@ if(hasContent) {
                 setTimeout(() => resolve(), 5000);
             });
         }));
-        // [2b] Attendre le dessin reel de toutes les images de print (layers, upload, calque
-        // technique) avant la rasterisation : les canvas sont peints via img.onload async,
-        // un delai fixe ne suffit pas -> sans ca les vignettes ressortent vides.
-        try { await Promise.all(StoryboardExport._printImgPromises); } catch(e) {}
+        // [2b] Attendre le dessin reel de toutes les images de print (calques, image
+        // televersee, calque technique) avant la rasterisation : les canvas sont
+        // peints via img.onload async, un delai fixe ne suffit pas — sans ca les
+        // vignettes ressortent vides.
+        // ON VIDE LA FILE, ON NE LA PHOTOGRAPHIE PAS (v601). Promise.all fige la
+        // liste au moment de l'appel ; or un dessin a plusieurs CALQUES n'empile le
+        // deuxieme qu'une fois le premier telecharge, donc APRES cette photo. Les
+        // calques suivants n'etaient pas attendus, et une planche a deux calques
+        // pouvait partir a moitie peinte. On recommence tant que la file grossit.
+        try {
+            for(let tour = 0; tour < 12; tour++) {
+                const enCours = StoryboardExport._printImgPromises.slice();
+                if(!enCours.length) break;
+                await Promise.all(enCours);
+                if(StoryboardExport._printImgPromises.length === enCours.length) break;
+            }
+        } catch(e) { console.warn('[Storyboard PDF] attente des images :', e); }
         StoryboardExport._printCapturing = false;
         // Laisser le temps aux objets vectoriels (setTimeout) de finir leur composition
         await new Promise(r => setTimeout(r, 500));

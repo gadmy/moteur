@@ -904,6 +904,43 @@ vv601 (20 septembre 2026) — EN COURS.
   du balisage, du code et du CSS (8 regles devenues sans cible). Le forum
   lui-meme reste SUSPENDU, et son avenir rejoint le RESTE A FAIRE.
 
+  EXPORT PDF, PREMIER LOT : LES TITRES ET LES BLANCS.
+  LES BANDEAUX GRIS FONCE PLEINE LARGEUR PARTENT. Une page de dossier en
+  comptait parfois cinq ; le noir plein mange l'encre et n'aide pas a lire. Le
+  remplacant reprend le vocabulaire DEJA pose sur les pages de garde — une barre
+  a la couleur de la section, le titre en gris tres fonce, un filet fin dessous,
+  et un texte secondaire facultatif a droite (effectif, date). Rien de neuf a
+  apprendre en feuilletant.
+  UNE SEULE PORTE, PdfTheme.sectionBand : les DOUZE copies du bandeau sont
+  remplacees par un appel. Changer le style se fera desormais en un endroit.
+  Elle renvoie le y SUIVANT, pour que l'appelant n'ait plus a recalculer l'avance
+  a la main — c'est la que les copies divergeaient (12, 13 ou 14 mm selon les
+  fichiers). Et elle repose la police, la couleur et le trait avant de rendre la
+  main : sans cela, le premier appelant qui oubliait de le faire ecrivait son
+  paragraphe en gris clair.
+  NON TOUCHES a dessein : les bandeaux pleine largeur en TETE de page de fiche
+  (personnage, comedien, decor, technicien, structure) et les lignes d'en-tete de
+  TABLEAU. Ce ne sont pas le meme objet ; a voir si on les allege aussi.
+  LES GRANDS BLANCS DU SYNOPSIS. Chaque section ouvrait une page neuve : un
+  synopsis d'un tiers de page laissait deux tiers de blanc avant le resume court,
+  lui aussi court, et ainsi de suite — six sections faisaient six pages presque
+  vides. On enchaine desormais, SAUF s'il ne reste pas de quoi poser le titre et
+  quelques lignes dessous (42 mm) : un titre seul en bas de page est pire qu'un
+  blanc. Mesure sur un cas type : SIX pages deviennent DEUX.
+
+  STORYBOARD ABSENT D'UN EXPORT GLOBAL : UNE PISTE SERIEUSE, ET LA DIFFERENCE
+  AVEC LE MOOD BOARD. Le mood board pose ses images en BALISES et attend
+  img.complete ; le storyboard, lui, telecharge ses dessins par le SDK et les
+  peint dans un CANVAS — il n'y a donc AUCUNE balise a attendre, et la seule
+  garde est la file de promesses d'images.
+  DEFAUT TROUVE DANS CETTE FILE : on la PHOTOGRAPHIAIT au lieu de la VIDER.
+  Promise.all fige la liste au moment de l'appel ; or un dessin a plusieurs
+  CALQUES n'empile le deuxieme qu'une fois le premier telecharge, donc apres
+  cette photo. Les calques suivants n'etaient pas attendus et une planche pouvait
+  partir a moitie peinte. On recommence maintenant tant que la file grossit.
+  A CONFIRMER sur le cas signale (export global sans etre passe par l'onglet) :
+  si le defaut persiste, la console du navigateur le nommera.
+
 
 -->
 <head>
@@ -26184,14 +26221,9 @@ initCategoriesDragDrop: () => {
           doc.addPage();
           y = margin;
           
-          doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-          doc.rect(margin, y, pageWidth - margin * 2, 9, 'F');
-          doc.setFillColor(...PdfTheme.accentFor('Dépouillement'));
-          doc.rect(margin, y, 1.8, 9, 'F');
-          doc.setTextColor(...PdfTheme.COLORS.WHITE);
-          doc.setFontSize(11);
-          doc.setFont('helvetica', 'bold');
-          doc.text('RÉCAPITULATIF GLOBAL', margin + 4, y + 6.2);
+          PdfTheme.sectionBand(doc, { x: margin, y, width: pageWidth - margin * 2,
+                                      title: 'Récapitulatif global',
+                                      accent: PdfTheme.accentFor('Dépouillement') });
           
           y = 30;
           
@@ -33259,10 +33291,23 @@ if(hasContent) {
                 setTimeout(() => resolve(), 5000);
             });
         }));
-        // [2b] Attendre le dessin reel de toutes les images de print (layers, upload, calque
-        // technique) avant la rasterisation : les canvas sont peints via img.onload async,
-        // un delai fixe ne suffit pas -> sans ca les vignettes ressortent vides.
-        try { await Promise.all(StoryboardExport._printImgPromises); } catch(e) {}
+        // [2b] Attendre le dessin reel de toutes les images de print (calques, image
+        // televersee, calque technique) avant la rasterisation : les canvas sont
+        // peints via img.onload async, un delai fixe ne suffit pas — sans ca les
+        // vignettes ressortent vides.
+        // ON VIDE LA FILE, ON NE LA PHOTOGRAPHIE PAS (v601). Promise.all fige la
+        // liste au moment de l'appel ; or un dessin a plusieurs CALQUES n'empile le
+        // deuxieme qu'une fois le premier telecharge, donc APRES cette photo. Les
+        // calques suivants n'etaient pas attendus, et une planche a deux calques
+        // pouvait partir a moitie peinte. On recommence tant que la file grossit.
+        try {
+            for(let tour = 0; tour < 12; tour++) {
+                const enCours = StoryboardExport._printImgPromises.slice();
+                if(!enCours.length) break;
+                await Promise.all(enCours);
+                if(StoryboardExport._printImgPromises.length === enCours.length) break;
+            }
+        } catch(e) { console.warn('[Storyboard PDF] attente des images :', e); }
         StoryboardExport._printCapturing = false;
         // Laisser le temps aux objets vectoriels (setTimeout) de finir leur composition
         await new Promise(r => setTimeout(r, 500));
@@ -37787,16 +37832,10 @@ const DrawingEditor = {
           
           const drawCatHeader = (catKey, count) => {
               ensureSpace(14);
-              doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-              doc.rect(margin, y, usableWidth, 9, 'F');
-              doc.setFillColor(...PdfTheme.accentFor('Ressources'));
-              doc.rect(margin, y, 1.8, 9, 'F');
-              doc.setTextColor(...PdfTheme.COLORS.WHITE);
-              doc.setFontSize(11);
-              doc.setFont('helvetica', 'bold');
               const lbl = (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText(catLabels[catKey] || catKey) : (catLabels[catKey] || catKey);
-              doc.text(`${lbl.toUpperCase()} (${count})`, margin + 4, y + 6.2);
-              y += 12;
+              y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                              title: lbl, right: String(count),
+                                              accent: PdfTheme.accentFor('Ressources') });
           };
           
           const drawPhoto = (url, x, y, w, h) => {
@@ -38122,16 +38161,10 @@ const DrawingEditor = {
         
         const drawDeptHeader = (deptName, count) => {
             ensureSpace(14);
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(margin, y, usableWidth, 9, 'F');
-            doc.setFillColor(...PdfTheme.accentFor('Équipe'));
-            doc.rect(margin, y, 1.8, 9, 'F');
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.setFontSize(11);
-            doc.setFont('helvetica', 'bold');
             const lbl = (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText(deptName) : deptName;
-            doc.text(`${lbl.toUpperCase()} (${count})`, margin + 4, y + 6.2);
-            y += 12;
+            y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                            title: lbl, right: count + (count > 1 ? ' personnes' : ' personne'),
+                                            accent: PdfTheme.accentFor('Équipe') });
         };
         
         const drawPhoto = (url, x, y, w, h) => {
@@ -38483,13 +38516,10 @@ const DrawingEditor = {
         const dayStr = (day.startDate || day.date) ? new Date(day.startDate || day.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '';
         const dayHdr = [day.name, dayStr].filter(Boolean).join(' - ');
         let y = layout.startY || margin;
-        doc.setFillColor(...C.BANNER_DARK);
-        doc.rect(margin, y, usableWidth, 9, 'F');
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...C.WHITE);
-        doc.text(clean('FEUILLE DE SERVICE - FIGURATION'), margin + 3, y + 6);
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-        doc.text(clean(dayHdr), margin + usableWidth - 3, y + 6, { align: 'right' });
-        y += 14;
+        y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                        title: 'Feuille de service - Figuration',
+                                        right: dayHdr,
+                                        accent: PdfTheme.accentFor('Figuration') });
         doc.setTextColor(...C.TEXT_BODY); doc.setFontSize(9.5);
         const info = [];
         // Mêmes lignes que la vue écran : ce qui est affiché est ce qui sort.
@@ -43977,15 +44007,9 @@ const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
         
         // ========= EN-TÊTE EN BANDEAU GRIS (cohérent avec les autres sections) =========
         ensureSpace(16);
-doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-        doc.rect(margin, y, usableWidth, 9, 'F');
-        doc.setFillColor(...PdfTheme.accentFor('Planning'));
-        doc.rect(margin, y, 1.8, 9, 'F');
-        doc.setTextColor(...PdfTheme.COLORS.WHITE);
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'bold');
-        doc.text('PLANNING DE TOURNAGE', margin + 4, y + 6.2);
-        y += 12;
+        y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                        title: 'Planning de tournage',
+                                        accent: PdfTheme.accentFor('Planning') });
         // Sous-titre discret avec le nombre de jours
         doc.setFont('helvetica', 'italic');
         doc.setFontSize(9.5);
@@ -50924,15 +50948,9 @@ const Stats = {
         };
         
         // ========= EN-TÊTE EN BANDEAU GRIS (cohérent avec les autres sections) =========
-        doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-        doc.rect(margin, y, usableWidth, 9, 'F');
-        doc.setFillColor(...PdfTheme.accentFor('Statistiques'));
-        doc.rect(margin, y, 1.8, 9, 'F');
-        doc.setTextColor(...PdfTheme.COLORS.WHITE);
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'bold');
-        doc.text('RAPPORT DE STATISTIQUES', margin + 4, y + 6.2);
-        y += 12;
+        y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                        title: 'Rapport de statistiques',
+                                        accent: PdfTheme.accentFor('Statistiques') });
         if(scopeLabel) {
             doc.setFont('helvetica', 'italic');
             doc.setFontSize(9.5);
@@ -51345,6 +51363,64 @@ const Stats = {
     },
     // Couleur d'accent d'une section (repli : bleu identitaire)
     accentFor: (sectionName) => PdfTheme.SECTION_COLORS[sectionName] || PdfTheme.COLORS.BANNER_BLUE,
+
+    // Eclaircit une couleur vers le blanc. f = 0 rend la couleur, f = 1 le blanc.
+    tint: (c, f) => [Math.round(c[0] + (255 - c[0]) * f),
+                     Math.round(c[1] + (255 - c[1]) * f),
+                     Math.round(c[2] + (255 - c[2]) * f)],
+
+    // ============================================================
+    // TITRE DE SECTION (v601) — UNE SEULE PORTE
+    // ============================================================
+    // Remplace le bandeau gris fonce pleine largeur, juge trop lourd : une page
+    // de dossier en comptait parfois cinq, et le noir plein mange l'encre a
+    // l'impression sans rien apporter a la lecture.
+    // Le dessin reprend le vocabulaire DEJA pose sur les pages de garde : une
+    // barre a la couleur de la section, le titre en gris tres fonce, un filet
+    // fin dessous. Rien de neuf a apprendre en feuilletant le dossier.
+    // TOUS LES EXPORTS PASSENT PAR ICI : changer le style se fait en un endroit,
+    // au lieu des quinze copies du bandeau qui existaient avant.
+    // Renvoie le y SUIVANT (apres le titre et son espace), pour que l'appelant
+    // ecrive « y = PdfTheme.sectionBand(...) » sans recalculer l'avance.
+    HEADER_H: 13.5,
+    sectionBand: (doc, o = {}) => {
+        const x = (o.x !== undefined) ? o.x : 25;
+        const y = o.y || 0;
+        const w = o.width || (doc.internal.pageSize.getWidth() - x * 2);
+        const accent = o.accent || PdfTheme.COLORS.BANNER_BLUE;
+        const clean = (t) => PdfTheme.cleanText ? PdfTheme.cleanText(t || '') : (t || '');
+        const titre = clean(o.title).toUpperCase();
+
+        // Barre d'accent, a gauche du titre
+        doc.setFillColor(...accent);
+        doc.rect(x, y, 2.4, 7.4, 'F');
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(o.size || 11.5);
+        doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
+        doc.text(titre, x + 5.4, y + 5.6);
+
+        // Texte secondaire a droite (date, effectif...), quand il y en a un
+        if(o.right) {
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
+            doc.text(clean(o.right), x + w, y + 5.6, { align: 'right' });
+        }
+
+        // Filet fin sous toute la largeur, a la couleur de la section eclaircie
+        doc.setDrawColor(...PdfTheme.tint(accent, 0.55));
+        doc.setLineWidth(0.4);
+        doc.line(x, y + 8.6, x + w, y + 8.6);
+
+        // On rend au suivant un etat neutre : sans cela, le premier appelant qui
+        // oubliait de reposer sa couleur ecrivait son paragraphe en gris clair.
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...PdfTheme.COLORS.TEXT_BODY);
+        doc.setDrawColor(...PdfTheme.COLORS.BORDER);
+        doc.setLineWidth(0.2);
+        return y + PdfTheme.HEADER_H;
+    },
     
     // Mapping section → rôles à chercher dans state.data.crew (par ordre de priorité)
     AUTHOR_ROLES: {
@@ -52753,16 +52829,11 @@ const MoteurArchive = {
                 doc.addPage();
                 yPos = margin;
             }
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(margin, yPos, pageWidth - margin * 2, 10, 'F');
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.setFontSize(12);
-            doc.setFont('helvetica', 'bold');
-            // Phase C.1 : retirer les emojis qui plantent en latin-1
-            doc.text(PdfTheme.cleanText(title), margin + 5, yPos + 7);
+            const yApres = PdfTheme.sectionBand(doc, { x: margin, y: yPos, width: pageWidth - margin * 2,
+                                                      title, size: 12,
+                                                      accent: PdfTheme.accentFor('Rapport de production') });
             doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-            doc.setFont('helvetica', 'normal');
-            return yPos + 15;
+            return yApres + 1.5;
         };
         
         const addKeyValue = (key, value, yPos) => {
@@ -54550,14 +54621,9 @@ const orgGroups = (state.data.groups || []).filter(g => g.type === 'org');
 
         const drawGroupHeader = (name, count) => {
             ensureSpace(14);
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(margin, y, usableWidth, 9, 'F');
-            doc.setFillColor(...PdfTheme.accentFor('Asso / Entreprises'));
-            doc.rect(margin, y, 1.8, 9, 'F');
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.setFontSize(11); doc.setFont('helvetica', 'bold');
-            doc.text(`${cleanT(name).toUpperCase()} (${count})`, margin + 4, y + 6.2);
-            y += 12;
+            y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                            title: cleanT(name), right: String(count),
+                                            accent: PdfTheme.accentFor('Asso / Entreprises') });
         };
 
         const drawPhoto = (url, x, py, w, h) => {
@@ -57916,13 +57982,8 @@ const Presentation = {
         // Helper section
         const section = (title) => {
             if(y > pageHeight - 30) { doc.addPage(); y = margin; }
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(margin, y, pageWidth - margin * 2, 9, 'F');
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.setFontSize(11);
-            doc.setFont('helvetica', 'bold');
-            doc.text(PdfTheme.cleanText(title), margin + 4, y + 6.2);
-            y += 12;
+            y = PdfTheme.sectionBand(doc, { x: margin, y, width: pageWidth - margin * 2,
+                                            title, accent: PdfTheme.accentFor('Présentation') });
         };
         const keyVal = (key, val) => {
             if(!val) return;
@@ -58210,13 +58271,9 @@ const ExpensesExport = {
         y += 48;
         
         // ===== TABLEAU CATÉGORIES CNC =====
-        doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-        doc.roundedRect(margin, y, pageWidth - margin * 2, 9, 1.5, 1.5, 'F');
-        doc.setTextColor(...PdfTheme.COLORS.WHITE);
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'bold');
-        doc.text('RÉPARTITION PAR CATÉGORIE CNC', margin + 5, y + 6.5);
-        y += 13;
+        y = PdfTheme.sectionBand(doc, { x: margin, y, width: pageWidth - margin * 2,
+                                        title: 'Répartition par catégorie CNC', size: 10,
+                                        accent: PdfTheme.accentFor('Budget') });
         
         // En-têtes
         doc.setFillColor(...PdfTheme.COLORS.BG_LIGHTER);
@@ -58283,13 +58340,10 @@ const ExpensesExport = {
         if(!opts.simple && expenses.length > 0) {
             if(y > pageHeight - 50) { doc.addPage(); y = margin; }
             
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.roundedRect(margin, y, pageWidth - margin * 2, 9, 1.5, 1.5, 'F');
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.setFontSize(10);
-            doc.setFont('helvetica', 'bold');
-            doc.text('LISTE DES DÉPENSES (' + expenses.length + ')', margin + 5, y + 6.5);
-            y += 13;
+            y = PdfTheme.sectionBand(doc, { x: margin, y, width: pageWidth - margin * 2,
+                                            title: 'Liste des dépenses', size: 10,
+                                            right: String(expenses.length),
+                                            accent: PdfTheme.accentFor('Budget') });
             
             y = drawExpenseHeaders(y);
             
@@ -76949,21 +77003,24 @@ const Synopsis = {
         if(opts.includeDirector && state.data.directorNote) sections.push({ title: 'Note du réalisateur', html: state.data.directorNote });
         if(opts.includeProducer && state.data.producerNote) sections.push({ title: 'Note du producteur', html: state.data.producerNote });
         
+        // PLUS DE SAUT DE PAGE SYSTEMATIQUE (v601). Chaque section ouvrait une
+        // page neuve : un synopsis d'un tiers de page laissait donc deux tiers de
+        // blanc avant le resume court, lui aussi court, et ainsi de suite. Un
+        // dossier de six sections faisait six pages presque vides.
+        // LA REGLE EST DESORMAIS CELLE DU BON SENS TYPOGRAPHIQUE : on enchaine,
+        // sauf s'il ne reste pas de quoi poser le titre ET quelques lignes
+        // dessous. Un titre seul en bas de page est pire qu'un blanc.
+        const PLACE_MIN = 42;   // mm : le titre, son filet, et environ 4 lignes
         sections.forEach((section, idx) => {
-            // Nouvelle page pour chaque section (sauf la 1ère)
             if(idx > 0) {
-                doc.addPage();
-                y = margin;
+                y += 8;                   // respiration entre deux sections
+                ensureSpace(PLACE_MIN);   // saute la page seulement si c'est trop juste
             }
             
-            // Titre de section : bandeau gris foncé pleine largeur (cohérent avec les autres sections)
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(margin, y, usableWidth, 9, 'F');
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.setFontSize(11);
-            doc.setFont('helvetica', 'bold');
-            doc.text(section.title.toUpperCase(), margin + 4, y + 6.2);
-            y += 14;
+            // Titre de section — porte unique PdfTheme.sectionBand (v601).
+            y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                            title: section.title,
+                                            accent: PdfTheme.accentFor('Synopsis') });
             
             // Parser et rendre les blocs
             const blocks = Synopsis._parseRichHtml(section.html);
@@ -81437,13 +81494,9 @@ const Weather = {
                   if(y > pageHeight - 30) { doc.addPage(); y = margin; }
                   
                   // En-tête saison
-                  doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-                  doc.rect(margin, y, pageWidth - margin * 2, 9, 'F');
-                  doc.setTextColor(...PdfTheme.COLORS.WHITE);
-                  doc.setFontSize(11);
-                  doc.setFont('helvetica', 'bold');
-                  doc.text(PdfTheme.cleanText(season.title || 'Saison').toUpperCase(), margin + 4, y + 6.2);
-                  y += 12;
+                  y = PdfTheme.sectionBand(doc, { x: margin, y, width: pageWidth - margin * 2,
+                                                  title: season.title || 'Saison',
+                                                  accent: PdfTheme.accentFor('Séquencier') });
                   
                   // Épisodes de cette saison
                   const seasonEps = episodes.filter(e => e.seasonId === season.id);

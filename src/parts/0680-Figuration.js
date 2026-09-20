@@ -45,13 +45,10 @@
         const dayStr = (day.startDate || day.date) ? new Date(day.startDate || day.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '';
         const dayHdr = [day.name, dayStr].filter(Boolean).join(' - ');
         let y = layout.startY || margin;
-        doc.setFillColor(...C.BANNER_DARK);
-        doc.rect(margin, y, usableWidth, 9, 'F');
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...C.WHITE);
-        doc.text(clean('FEUILLE DE SERVICE - FIGURATION'), margin + 3, y + 6);
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-        doc.text(clean(dayHdr), margin + usableWidth - 3, y + 6, { align: 'right' });
-        y += 14;
+        y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                        title: 'Feuille de service - Figuration',
+                                        right: dayHdr,
+                                        accent: PdfTheme.accentFor('Figuration') });
         doc.setTextColor(...C.TEXT_BODY); doc.setFontSize(9.5);
         const info = [];
         // Mêmes lignes que la vue écran : ce qui est affiché est ce qui sort.

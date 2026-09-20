@@ -157,14 +157,9 @@
           doc.addPage();
           y = margin;
           
-          doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-          doc.rect(margin, y, pageWidth - margin * 2, 9, 'F');
-          doc.setFillColor(...PdfTheme.accentFor('Dépouillement'));
-          doc.rect(margin, y, 1.8, 9, 'F');
-          doc.setTextColor(...PdfTheme.COLORS.WHITE);
-          doc.setFontSize(11);
-          doc.setFont('helvetica', 'bold');
-          doc.text('RÉCAPITULATIF GLOBAL', margin + 4, y + 6.2);
+          PdfTheme.sectionBand(doc, { x: margin, y, width: pageWidth - margin * 2,
+                                      title: 'Récapitulatif global',
+                                      accent: PdfTheme.accentFor('Dépouillement') });
           
           y = 30;
           

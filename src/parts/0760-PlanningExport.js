@@ -372,15 +372,9 @@ const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
         
         // ========= EN-TÊTE EN BANDEAU GRIS (cohérent avec les autres sections) =========
         ensureSpace(16);
-doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-        doc.rect(margin, y, usableWidth, 9, 'F');
-        doc.setFillColor(...PdfTheme.accentFor('Planning'));
-        doc.rect(margin, y, 1.8, 9, 'F');
-        doc.setTextColor(...PdfTheme.COLORS.WHITE);
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'bold');
-        doc.text('PLANNING DE TOURNAGE', margin + 4, y + 6.2);
-        y += 12;
+        y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                        title: 'Planning de tournage',
+                                        accent: PdfTheme.accentFor('Planning') });
         // Sous-titre discret avec le nombre de jours
         doc.setFont('helvetica', 'italic');
         doc.setFontSize(9.5);
