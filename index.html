@@ -1046,6 +1046,26 @@ vv601 (20 septembre 2026) — EN COURS.
   restent justes, elles reglaient de vrais defauts — elles ne reglaient juste pas
   CELUI-LA.
 
+  STORYBOARD, LA DERNIERE PIECE : LE CANVAS SOUILLE. L'onglet montrait les
+  images, le PDF sortait blanc — et la difference tenait a l'ORIGINE de l'image.
+  Les CALQUES de dessin passent par _loadPrintImg, donc par une URL blob
+  fabriquee par la page elle-meme : meme origine. Les IMAGES INSEREES dans
+  l'editeur, elles, etaient posees depuis l'URL SIGNEE du stockage : une autre
+  origine. Dessiner une telle image dans un canvas ne rate pas — elle s'affiche
+  parfaitement — mais elle SOUILLE le canvas, et le navigateur interdit ensuite
+  d'en relire le contenu. Or c'est exactement ce que fait html2canvas pour
+  fabriquer la page. D'ou une planche vide, sans la moindre erreur, alors que la
+  vignette de l'onglet etait impeccable.
+  UN MEDIA DE PROJET PASSE DESORMAIS TOUJOURS PAR LE TELECHARGEMENT, jamais par
+  l'URL signee — le chemin que les calques empruntaient deja, et qui marchait.
+  Les adresses exterieures, elles, demandent le partage d'origine : si le serveur
+  refuse, l'image ne se charge pas du tout, echec franc prefere a une page vide.
+  GARDE-FOU : avant de rasteriser, on lit UN pixel de chaque canvas. S'il est
+  illisible, on le dit en console et a l'ecran. Moins d'une milliseconde, et un
+  defaut jusqu'ici totalement muet devient nommable.
+  A RETENIR : « ca s'affiche a l'ecran » ne prouve RIEN sur ce qu'on pourra
+  relire. Afficher et relire sont deux droits differents.
+
 
 -->
 <head>
@@ -32620,15 +32640,30 @@ const Storyboard = {
         // Donc : media projet -> URL signee si le cache a repondu, sinon
         // telechargement par le SDK. Les autres adresses (data:, blob:, site
         // externe) restent posees directement.
-        const signeeDisponible = !!chemin && url !== imageData;
+        // v601 — UN MEDIA DE PROJET PASSE TOUJOURS PAR LE TELECHARGEMENT, PLUS
+        // JAMAIS PAR L'URL SIGNEE. C'est ce qui empechait les images inserees
+        // dans l'editeur de sortir a l'export, alors que les CALQUES de dessin
+        // sortaient : les calques passent par _loadPrintImg, donc par une URL
+        // blob de MEME ORIGINE ; les images-objets, elles, etaient posees depuis
+        // l'URL signee du stockage, une autre origine.
+        // Dessiner une image d'une autre origine dans un canvas ne rate PAS —
+        // l'image s'affiche tres bien a l'ecran — mais elle SOUILLE le canvas :
+        // le navigateur interdit ensuite d'en RELIRE le contenu. Or c'est
+        // exactement ce que fait html2canvas pour fabriquer la page du PDF. D'ou
+        // une planche vide, sans erreur visible, alors que la vignette de
+        // l'onglet, elle, s'affichait parfaitement.
+        // Une URL blob vient de la page elle-meme : elle ne souille rien.
         const utilisable = chemin
-            ? signeeDisponible
+            ? false
             : (typeof url === 'string' && (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:')));
         if(!utilisable && !chemin) return null;
 
         const img = new Image();
-        // Si l'image vient de Storage (URL https), activer CORS pour permettre le drawImage dans canvas (exports PDF)
-        if(utilisable && typeof imageData === 'string' && imageData.startsWith('http')) {
+        // Adresse EXTERIEURE (image posee par un outil tiers) : on demande le
+        // partage d'origine, sans quoi elle souillerait le canvas comme
+        // ci-dessus. Si le serveur refuse, l'image ne se chargera pas du tout —
+        // c'est un echec franc, prefere a une planche vide inexpliquee.
+        if(utilisable && typeof url === 'string' && url.startsWith('http')) {
             img.crossOrigin = 'anonymous';
         }
         Storyboard._svgImageCache[cacheKey] = { img: img, ready: false };

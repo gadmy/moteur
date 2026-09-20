@@ -6175,15 +6175,30 @@ const Storyboard = {
         // Donc : media projet -> URL signee si le cache a repondu, sinon
         // telechargement par le SDK. Les autres adresses (data:, blob:, site
         // externe) restent posees directement.
-        const signeeDisponible = !!chemin && url !== imageData;
+        // v601 — UN MEDIA DE PROJET PASSE TOUJOURS PAR LE TELECHARGEMENT, PLUS
+        // JAMAIS PAR L'URL SIGNEE. C'est ce qui empechait les images inserees
+        // dans l'editeur de sortir a l'export, alors que les CALQUES de dessin
+        // sortaient : les calques passent par _loadPrintImg, donc par une URL
+        // blob de MEME ORIGINE ; les images-objets, elles, etaient posees depuis
+        // l'URL signee du stockage, une autre origine.
+        // Dessiner une image d'une autre origine dans un canvas ne rate PAS —
+        // l'image s'affiche tres bien a l'ecran — mais elle SOUILLE le canvas :
+        // le navigateur interdit ensuite d'en RELIRE le contenu. Or c'est
+        // exactement ce que fait html2canvas pour fabriquer la page du PDF. D'ou
+        // une planche vide, sans erreur visible, alors que la vignette de
+        // l'onglet, elle, s'affichait parfaitement.
+        // Une URL blob vient de la page elle-meme : elle ne souille rien.
         const utilisable = chemin
-            ? signeeDisponible
+            ? false
             : (typeof url === 'string' && (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:')));
         if(!utilisable && !chemin) return null;
 
         const img = new Image();
-        // Si l'image vient de Storage (URL https), activer CORS pour permettre le drawImage dans canvas (exports PDF)
-        if(utilisable && typeof imageData === 'string' && imageData.startsWith('http')) {
+        // Adresse EXTERIEURE (image posee par un outil tiers) : on demande le
+        // partage d'origine, sans quoi elle souillerait le canvas comme
+        // ci-dessus. Si le serveur refuse, l'image ne se chargera pas du tout —
+        // c'est un echec franc, prefere a une planche vide inexpliquee.
+        if(utilisable && typeof url === 'string' && url.startsWith('http')) {
             img.crossOrigin = 'anonymous';
         }
         Storyboard._svgImageCache[cacheKey] = { img: img, ready: false };
