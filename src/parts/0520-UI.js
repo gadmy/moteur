@@ -792,7 +792,7 @@
               const el = document.createElement('div'); 
               const isFinal = s.isFinal === true;
               el.className = 'card seq-card ' + (isFinal ? 'is-final' : 'is-draft'); 
-              el.draggable = !isView; el.dataset.id = s.id; 
+              el.draggable = !isView; el.dataset.id = s.id; el.dataset.sceneId = s.id; 
               const tag = state.data.tags.find(t => t.id === s.tag_id) || {name:'', color: 'transparent'}; 
               const status = s.status || 'not-verified';
               // Infobulle : le RESUME seul. Le titre, les personnages et la

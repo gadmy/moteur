@@ -105,11 +105,16 @@ Rien d'ouvert côté code au 20 septembre en dehors des chantiers ci-dessous.
     verrouillees en cascade (mesure faite : cela aurait fige presque tout le
     projet), seule leur SUPPRESSION est refusee tant qu'une scene qui s'en sert
     est tenue.
-    LA REGLE QUI SURVIT AU CHANTIER : trois gestes changent la FORME du tableau
-    des scenes — deplacer, ajouter, supprimer — et ceux-la passent par la
-    sauvegarde COMPLETE, pas par saveScene. Tout nouveau geste de cette famille
-    doit donc penser au verrou LUI-MEME : le refus de saveScene ne le couvre
-    pas.
+    DEUX REGLES QUI SURVIVENT AU CHANTIER, et qui ont coute une verification
+    complete pour etre apprises :
+    - UN ECRAN QUI MONTRE UNE SCENE DOIT PORTER SON IDENTIFIANT sur son
+      conteneur (data-scene-id) ET etre inscrit dans SceneLock.ZONES ; s'il
+      permet d'y ecrire, aussi dans ZONES_ECRITURE. Sans cela le verrou ne le
+      voit pas — et rien ne le signale.
+    - TOUTE ECRITURE DE SCENE PASSE PAR StoreSave.save, jamais par saveScene,
+      que personne n'appelle encore. C'est donc dans save() que vit le refus.
+      Un nouveau chemin d'ecriture qui contournerait save() contournerait aussi
+      le verrou.
 
 [ ] AVENIR DU FORUM — a trancher. Il est SUSPENDU depuis un moment
     (Forum.suspended = true : le menu y mene, un message le dit, on revient au
@@ -1259,6 +1264,47 @@ vv601 (20 septembre 2026) — EN COURS.
   modifient une scene, 11 touchent au tableau) sans voir que le verrou qu'on
   retirait couvrait AUSSI les 11 autres. Retirer un filet oblige a regarder tout
   ce qu'il retenait, pas seulement ce qu'on voulait lui faire lacher.
+
+  (5) ET LA VERIFICATION QUI A TOUT REPRIS. Question du developpeur apres coup :
+  « il y a des soucis avec ce vrai sujet ? » Il y en avait trois, et le premier
+  vidait le chantier de sa substance.
+  LE VERROU NE SE PRENAIT QUE DANS LE SCENARIO. Le declencheur cherche un
+  conteneur qui PORTE l'identifiant de la scene. Verifie ligne a ligne apres la
+  question : dans toute l'application, UN SEUL en portait un, le bloc de
+  l'editeur continu. Le depouillement, le sequencier, le Beat Board et la fiche
+  passaient le leur par un onclick. On pouvait donc depouiller a deux la meme
+  scene sans que rien ne s'allume. Les cinq conteneurs portent desormais
+  data-scene-id ; pour la fiche, l'identifiant est pose sur une ENVELOPPE a
+  l'interieur du corps de la fenetre et non sur le corps : ouvrir ensuite la
+  fiche d'un comedien remplace ce contenu, donc l'enveloppe disparait d'elle-
+  meme — sur le corps, l'attribut serait reste et la fiche du comedien se serait
+  crue verrouillee.
+  LE BADGE ALLAIT AUSSI AU MAUVAIS ENDROIT. « Marquer tout element qui porte
+  l'identifiant d'une scene » paraissait robuste ; en pratique, les seuls autres
+  a en porter un etaient les pastilles de commentaire, l'apercu de relecture et
+  LES CASES A COCHER DES EXPORTS — celles-la meme qu'on croyait avoir ecartees
+  (le filtre visait « modal-overlay », or ces fenetres s'appellent
+  « confirm-modal-overlay »). Et dans le Scenario le badge se posait DEUX fois,
+  le bloc et son titre portant tous deux l'identifiant. On NOMME donc les zones,
+  une fois, dans SceneLock : sept zones marquees, dont quatre ou poser le
+  curseur prend le verrou. Les listes et les cartes n'en font pas partie : les
+  parcourir, c'est lire.
+  ET LE PLUS GENANT : PERSONNE N'APPELAIT saveScene. Le refus d'ecriture avait
+  ete pose dedans, « la ou l'ecriture part » — sauf qu'aucun ecran n'y passe.
+  Tous ecrivent par la sauvegarde complete. Le refus ne refusait donc rien.
+  IL VIT MAINTENANT DANS save(), qui est le vrai point de passage : avant
+  d'envoyer, et seulement a plusieurs, on relit le serveur et on reprend SA
+  version des scenes qu'il tient — meme celles qu'on a modifiees. Et on le DIT :
+  une modification qui disparait sans un mot est pire que pas de verrou du tout.
+  saveScene reste en place, juste et inutilisee, pour le jour ou les editeurs y
+  passeront ; le journal le dit desormais au lieu de laisser croire le contraire.
+  LA LECON, ET ELLE EST DURE : les trois etapes precedentes etaient justes dans
+  leur mecanique et fausses dans leur PREMISSE. On avait construit sur « les
+  ecrans portent l'identifiant de leurs scenes » et sur « les ecritures passent
+  par saveScene », deux choses qu'il suffisait de verifier et qu'on n'avait pas
+  verifiees. Un mecanisme juste branche sur rien ne fait rien — et il en a
+  l'air. Verifier ce a quoi on se branche vaut mieux que verifier ce qu'on
+  branche.
 
 
 -->
@@ -6275,9 +6321,10 @@ body.presentation-mode .presentation-bar {
   /* ON NE NEUTRALISE QUE LA SAISIE, jamais le conteneur entier : couper tous
      les evenements empecherait aussi d'ouvrir la fiche, de defiler ou de cocher
      une case dans une liste d'export. La vraie interdiction n'est pas ici —
-     elle est au point de passage de l'ecriture (StoreSave.saveScene), donc
-     valable meme sur un ecran qui aurait oublie de regarder. Ceci ne fait que
-     le RENDRE VISIBLE. */
+     elle est au point de passage de l'ecriture (StoreSave.save, qui relit le
+     serveur avant d'envoyer), donc valable meme sur un ecran qui aurait oublie
+     de regarder. Ceci ne fait que le RENDRE VISIBLE, et evite de taper pour
+     rien. */
   .scene-verrouillee [contenteditable], .scene-verrouillee input,
   .scene-verrouillee textarea, .scene-verrouillee select { pointer-events: none; opacity: .6; }
   .scene-lock-badge { position: absolute; top: 4px; right: 4px; z-index: 5; display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 2px; border-radius: 12px; background: var(--panel-bg); border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0,0,0,.25); font-size: .72rem; font-weight: 600; color: var(--text-main); pointer-events: auto; white-space: nowrap; }
@@ -6291,6 +6338,16 @@ body.presentation-mode .presentation-bar {
      liseré est en ombre interieure, donc il ne decale aucune mise en page. */
   .scene-a-moi { box-shadow: inset 3px 0 0 rgba(40,167,69,.5); }
   @media print { .scene-lock-badge { display: none; } .scene-verrouillee, .scene-a-moi { outline: none; } .scene-verrouillee > * { opacity: 1; } }
+  /* Sur une LIGNE ou une CARTE, la pastille suffit : le mot « Verrouillée » y
+     couvrirait le titre de la scene. Dans les zones de travail (scenario,
+     depouillement, fiche), on garde le mot — c'est la qu'il faut comprendre
+     pourquoi on ne peut pas ecrire. */
+  .bd-scene-row .scene-lock-texte,
+  .seq-card .scene-lock-texte,
+  .beatboard-card .scene-lock-texte { display: none; }
+  .bd-scene-row .scene-lock-badge,
+  .seq-card .scene-lock-badge,
+  .beatboard-card .scene-lock-badge { padding: 2px; }
 
   /* « CE QUI A BOUGE » (v601). Bandeau d'information, jamais de blocage : il se
      pose en haut de l'onglet actif, ne prend aucun clic hors de sa croix et
@@ -16294,7 +16351,6 @@ const LockManager = {
       //  deplace pas, donc LIRE ne verrouille rien.
       //  Le declencheur vit ICI et non dans l'editeur : le jour ou un autre
       //  ecran rend une scene modifiable, il est couvert sans qu'on y pense.
-      CONTENEURS: '.script-continuous-scene, .fid-card[data-scene-id], [data-scene-id].scene-fiche',
       DELAI: 250,
       _inited: false,
       _minuteur: null,
@@ -16319,7 +16375,7 @@ const LockManager = {
               let noeud = (sel && sel.anchorNode) || document.activeElement;
               if(noeud && noeud.nodeType === 3) noeud = noeud.parentElement;
               if(!noeud || !noeud.closest) return '';
-              const bloc = noeud.closest(SceneLock.CONTENEURS);
+              const bloc = noeud.closest(SceneLock.ZONES_ECRITURE);
               if(!bloc || bloc.closest(SceneLock.HORS_JEU)) return '';
               return String(SceneLock._idDe(bloc) || '');
           } catch(e) { return ''; }
@@ -16348,17 +16404,49 @@ const LockManager = {
       //  sans qu'on ait a y penser — c'est la lecon des trois vignettes de
       //  storyboard qui lisaient trois choses differentes.
       // ------------------------------------------------------------------
-      SELECTEURS: '[data-scene-id], [data-sceneid], [data-scene]',
+      // UNE SEULE LISTE, ET C'EST TOUT LE SUJET. La premiere version marquait
+      // « tout element qui porte l'identifiant d'une scene ». Verifie apres coup :
+      // presque rien n'en portait — le depouillement, le sequencier et la fiche
+      // passaient le leur par un onclick. Le verrou ne voyait donc que le
+      // Scenario, et le badge allait se poser sur les pastilles de commentaire
+      // et dans les listes de choix des exports, qui en portent un sans etre des
+      // zones de travail.
+      // On NOMME donc les zones, une fois, ici. Ajouter un ecran demain, c'est
+      // ajouter une ligne a cette liste — et le poser dans l'autre liste s'il
+      // permet d'ECRIRE.
+      ZONES: [
+          '.script-continuous-scene[data-scene-id]',   // Scenario
+          '#bdScriptContent[data-scene-id]',           // Depouillement, texte
+          '#bdRightContent[data-scene-id]',            // Depouillement, fiches
+          '.bd-scene-row[data-scene-id]',              // Depouillement, liste
+          '.seq-card[data-scene-id]',                  // Sequencier
+          '.beatboard-card[data-scene-id]',            // Beat Board
+          '.fiche-scene[data-scene-id]'                // Fiche de la scene
+      ].join(', '),
+      // Les zones ou l'on ECRIT : y poser le curseur, c'est l'intention de
+      // modifier, donc la prise du verrou. Les listes et les cartes n'y sont
+      // pas : les parcourir, c'est lire.
+      ZONES_ECRITURE: [
+          '.script-continuous-scene[data-scene-id]',
+          '#bdScriptContent[data-scene-id]',
+          '#bdRightContent[data-scene-id]',
+          '.fiche-scene[data-scene-id]'
+      ].join(', '),
       // Les LISTES DE CHOIX (export, partage, impression) portent aussi
       // l'identifiant des scenes, pour cocher lesquelles inclure. Y poser un
       // badge de verrou serait faux : choisir une scene dans un export ne la
       // modifie pas. On les ecarte.
-      HORS_JEU: '.modal, .modal-overlay, .fb-ov, .tour-panel-ov, [id*="export"], [id*="chooser"], [class*="chooser"]',
+      // Filet de securite en plus des zones nommees : meme si une zone finissait
+      // un jour dans une fenetre de choix (export, partage, impression), y poser
+      // un verrou serait faux — cocher une scene dans un export ne la modifie
+      // pas. « confirm-modal-overlay » est le vrai nom de ces fenetres ; l'oubli
+      // de la premiere version laissait le badge se poser sur leurs cases.
+      HORS_JEU: '.modal, .modal-overlay, .confirm-modal-overlay, .fb-ov, .tour-panel-ov, [id*="export"], [id*="chooser"], [class*="chooser"]',
       _idDe: (el) => el.getAttribute('data-scene-id') || el.getAttribute('data-sceneid') || el.getAttribute('data-scene') || '',
 
       marquerEcrans: () => {
           const tenues = SceneLock.tous();
-          document.querySelectorAll(SceneLock.SELECTEURS).forEach(el => {
+          document.querySelectorAll(SceneLock.ZONES).forEach(el => {
               if(el.closest(SceneLock.HORS_JEU)) return;
               const id = String(SceneLock._idDe(el) || '');
               const l = id ? tenues[id] : null;
@@ -17059,10 +17147,18 @@ const LockManager = {
       // miennes : le tableau qu'on s'apprete a envoyer (mon ordre).
       // base    : ce que le serveur m'avait envoye (dit ce que J'AI touche).
       // fraiches: ce que le serveur a MAINTENANT.
-      _scenesAJour: (miennes, base, fraiches) => {
+      // interdites : les scenes tenues par QUELQU'UN D'AUTRE. Pour celles-la on
+      // reprend la version du serveur MEME si on l'a modifiee : c'est le refus
+      // d'ecriture, pose au seul endroit par ou toutes les modifications de
+      // scene passent vraiment. Renvoie aussi la liste de celles qu'on a du
+      // reprendre, pour pouvoir le DIRE — une modification qui disparait sans
+      // un mot est pire que pas de verrou du tout.
+      _scenesAJour: (miennes, base, fraiches, interdites) => {
           const cle = (sc) => String((sc && sc.id) !== undefined && sc.id !== null ? sc.id : '');
           const mBase = new Map(); (base || []).forEach(sc => { const k = cle(sc); if(k) mBase.set(k, sc); });
           const mFraiche = new Map(); (fraiches || []).forEach(sc => { const k = cle(sc); if(k) mFraiche.set(k, sc); });
+          const bloquees = new Set((interdites || []).map(String));
+          const refusees = [];
           const vues = new Set();
           const out = (miennes || []).map(scMienne => {
               const k = cle(scMienne);
@@ -17071,6 +17167,10 @@ const LockManager = {
               const scFraiche = mFraiche.get(k);
               if(!scFraiche) return scMienne;   // pas (encore) sur le serveur : la mienne
               const jeLaiTouchee = JSON.stringify(scMienne) !== JSON.stringify(mBase.get(k));
+              if(bloquees.has(k)) {
+                  if(jeLaiTouchee) refusees.push(k);
+                  return scFraiche;             // tenue par un autre : la sienne, toujours
+              }
               return jeLaiTouchee ? scMienne : scFraiche;
           });
           // Nee chez quelqu'un d'autre depuis ma derniere synchro : je ne l'ai
@@ -17080,6 +17180,7 @@ const LockManager = {
               if(!k || vues.has(k) || mBase.has(k)) return;
               out.push(scFraiche);
           });
+          out._refusees = refusees;
           return out;
       },
 
@@ -17339,6 +17440,13 @@ const LockManager = {
       // saveScene n'ecrit que LA scene donnee, cote serveur, sans toucher aux
       // autres (fonction patch_project_scene, sql/ecriture_par_scene.sql).
       //
+      // ETAT AU 20 SEPTEMBRE : PERSONNE NE L'APPELLE ENCORE. Verifie sur tout le
+      // depot — aucun ecran n'appelle saveScene ; le scenario, le depouillement
+      // et la fiche passent tous par save(), c'est-a-dire par l'ecriture du
+      // tableau entier. C'est pourquoi le refus d'ecriture vit dans save() et
+      // non ici : pose ici seulement, il ne refusait rien. La fonction reste,
+      // elle est juste, et elle servira le jour ou les editeurs y passeront —
+      // mais elle ne protege rien tant que personne ne l'emprunte.
       // REPLI AUTOMATIQUE : si la fonction n'existe pas encore sur la base, on
       // retombe sur save(). Le code peut donc partir avant le SQL sans rien
       // casser, et l'ecriture fine s'active d'elle-meme le jour ou le SQL est
@@ -17447,22 +17555,41 @@ const LockManager = {
                   if(state.pendingSave) { state.pendingSave = false; StoreSave.save(); }
                   return;
               }
-              // v601 — ON NE PIETINE PAS UNE SCENE TENUE PAR QUELQU'UN D'AUTRE.
-              // Voir StoreRealtime._scenesAJour : envoyer tout le tableau des
-              // scenes pour en deplacer une renverrait aussi notre copie de
-              // celle que le voisin ecrit. On relit donc le serveur et on
-              // reprend SA version des scenes qu'on n'a pas touchees.
-              // UNE LECTURE DE PLUS, ET SEULEMENT quand quelqu'un d'autre tient
-              // vraiment une scene : le reste du temps, rien ne change.
+              // v601 — LE VRAI POINT DE PASSAGE DE TOUTE ECRITURE DE SCENE.
+              // C'EST ICI, ET NULLE PART AILLEURS, que les modifications de scene
+              // partent : aucun ecran n'appelle saveScene, tous passent par la
+              // sauvegarde complete. Le refus devait donc etre pose ici — pose
+              // ailleurs, il ne refusait rien.
+              // DEUX CHOSES EN UNE RELECTURE : on reprend la version du serveur
+              // pour les scenes qu'on n'a pas touchees (sinon deplacer une scene
+              // ecraserait ce que le voisin vient d'ecrire dans une autre), ET
+              // pour celles qu'il TIENT, meme si on les a touchees — c'est le
+              // refus d'ecriture.
+              // UNE LECTURE DE PLUS, ET SEULEMENT A PLUSIEURS : seul sur le
+              // projet, rien ne change.
               if(savePatch.scenes && typeof SceneLock !== 'undefined' && typeof StoreRealtime !== 'undefined') {
-                  let occupees = [];
-                  try { occupees = Object.keys(SceneLock.tous()).filter(sid => !SceneLock.tenueParMoi(sid)); } catch(e) {}
-                  if(occupees.length) {
+                  let seul = true;
+                  try { seul = LockManager.isAlone(); } catch(e) {}
+                  if(!seul) {
+                      let occupees = [];
+                      try { occupees = Object.keys(SceneLock.tous()).filter(sid => !SceneLock.tenueParMoi(sid)); } catch(e) {}
                       try {
                           const { data: frais, error: errFrais } = await supabase.rpc('project_data_for_me', { p_id: id });
                           if(!errFrais && frais && Array.isArray(frais.scenes)) {
-                              savePatch.scenes = StoreRealtime._scenesAJour(savePatch.scenes, (saveBase && saveBase.scenes) || [], frais.scenes);
-                              state.data.scenes = savePatch.scenes;
+                              const fusion = StoreRealtime._scenesAJour(savePatch.scenes, (saveBase && saveBase.scenes) || [], frais.scenes, occupees);
+                              savePatch.scenes = fusion;
+                              state.data.scenes = fusion;
+                              // Une modification refusee doit se VOIR. Elle vient
+                              // d'etre remplacee a l'ecran par la version de
+                              // l'autre : sans message, on croirait avoir ecrit.
+                              const refusees = (fusion && fusion._refusees) || [];
+                              if(refusees.length) {
+                                  const q = SceneLock.qui(refusees[0]);
+                                  Utils.toast('Scène verrouillée' + (q ? ' par ' + q : '')
+                                      + ' : vos modifications sur ' + (refusees.length > 1 ? refusees.length + ' scènes n\'ont' : 'cette scène n\'ont')
+                                      + ' pas été enregistrées.', 'warning', 9000);
+                                  try { UI.renderScript(); } catch(e) {}
+                              }
                           }
                       } catch(e) {
                           // Relecture impossible : on envoie quand meme. Le verrou de
@@ -24364,7 +24491,7 @@ initCategoriesDragDrop: () => {
               const el = document.createElement('div'); 
               const isFinal = s.isFinal === true;
               el.className = 'card seq-card ' + (isFinal ? 'is-final' : 'is-draft'); 
-              el.draggable = !isView; el.dataset.id = s.id; 
+              el.draggable = !isView; el.dataset.id = s.id; el.dataset.sceneId = s.id; 
               const tag = state.data.tags.find(t => t.id === s.tag_id) || {name:'', color: 'transparent'}; 
               const status = s.status || 'not-verified';
               // Infobulle : le RESUME seul. Le titre, les personnages et la
@@ -27463,7 +27590,7 @@ initCategoriesDragDrop: () => {
               CONFIG.bdCategories.forEach(cat => { n += ((s.breakdown && s.breakdown[cat]) || []).length; });
               const actif = (s.id === state.activeBdSceneId) ? ' active' : '';
               const st = labels[s.status || 'not-verified'];
-              return `<div class="bd-scene-row${actif}" onclick="app.Breakdown.selectScene('${s.id}')" title="${esc(s.title || '')}">
+              return `<div class="bd-scene-row${actif}" data-scene-id="${esc(String(s.id))}" onclick="app.Breakdown.selectScene('${s.id}')" title="${esc(s.title || '')}">
                           <span class="bd-scene-row-num">#${idx + 1}</span>
                           <span class="bd-scene-row-title">${esc(s.title || 'Sans titre')}</span>
                           <span class="bd-scene-row-count" title="${isFinal ? n + ' élément(s) dépouillé(s)' : 'Scène en brouillon'}">${isFinal ? (n || '·') : '📝'}</span>
@@ -27532,8 +27659,23 @@ initCategoriesDragDrop: () => {
           if(scene) Breakdown.renderFiches(scene);
       },
 
+      // v601 — LES DEUX PANNEAUX DISENT DE QUELLE SCENE ILS PARLENT. Sans cet
+      // attribut, le verrou par scene ne voyait rien ici : il cherche un
+      // conteneur qui PORTE l'identifiant, et le depouillement passait le sien
+      // par un onclick. On pouvait donc depouiller a deux la meme scene sans
+      // que personne ne soit prevenu.
+      _marquerPanneaux: (scene) => {
+          const id = (scene && scene.id != null) ? String(scene.id) : '';
+          [els.bdScriptContent, els.bdRightContent].forEach(el => {
+              if(!el) return;
+              if(id) el.dataset.sceneId = id; else delete el.dataset.sceneId;
+          });
+          try { if(typeof SceneLock !== 'undefined') SceneLock.marquerEcrans(); } catch(e) {}
+      },
+
       renderFiches: (scene) => {
           if(!els.bdRightContent) return;
+          Breakdown._marquerPanneaux(scene);
           if(!scene) { els.bdRightContent.innerHTML = ''; return; }
           if(scene.isFinal !== true) {
               els.bdRightContent.innerHTML = `
@@ -76096,11 +76238,19 @@ const CardModal = {
         const resumeHtml = `<textarea class="data-desc" style="min-height:90px; width:100%;" placeholder="Ce qui se passe dans la scène..." data-tooltip="Ce qui se passe dans la scène..." onchange="app.CardModal.setSceneField('${scid}', 'resume', this.value)" ${dis}>${Utils.escape(sc.resume || '')}</textarea>`;
         blocks.push(FicheUI.block('scene', 'resume', '📝 Résumé', resumeHtml));
 
-        if(body) body.innerHTML = FicheUI.headHtml({
-            name: sc.title || 'Sans titre', id: sc.id, kindLabel: 'Scène', photo: '',
-            badgesHtml: '', delBtnHtml: delBtn
-        }) + FicheBlocks.renderTabbed(blocks, 'scene');
+        // v601 — LA FICHE DIT DE QUELLE SCENE ELLE PARLE. L'identifiant est pose
+        // sur une ENVELOPPE a l'interieur du corps, pas sur le corps lui-meme :
+        // ouvrir ensuite la fiche d'un comedien remplace ce contenu, donc
+        // l'enveloppe disparait d'elle-meme. Sur le corps, l'attribut serait
+        // reste en place et la fiche du comedien se serait crue verrouillee.
+        if(body) body.innerHTML = '<div class="fiche-scene" data-scene-id="' + scid + '">'
+            + FicheUI.headHtml({
+                name: sc.title || 'Sans titre', id: sc.id, kindLabel: 'Scène', photo: '',
+                badgesHtml: '', delBtnHtml: delBtn
+            }) + FicheBlocks.renderTabbed(blocks, 'scene')
+            + '</div>';
         CardModal.applyRights('scene');
+        try { if(typeof SceneLock !== 'undefined') SceneLock.marquerEcrans(); } catch(e) {}
         if(modal) modal.classList.add('visible');
         // v581 : les briques sont equilibrees par hauteur une fois visibles
         // (mesure reelle du DOM), meme mecanique que les six autres familles.
@@ -81527,6 +81677,7 @@ const Weather = {
           const card = document.createElement('div');
           card.className = 'beatboard-card' + (isInTimeline ? '' : ' out-of-timeline');
           card.dataset.id = scene.id;
+          card.dataset.sceneId = scene.id;   // v601 : lu par le verrou par scene
           card.dataset.inTimeline = isInTimeline;
           if(idx !== null) card.dataset.index = idx;
           card.style.left = scene.beatboardX + 'px';

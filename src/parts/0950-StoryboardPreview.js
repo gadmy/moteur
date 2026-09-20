@@ -4943,11 +4943,19 @@ const CardModal = {
         const resumeHtml = `<textarea class="data-desc" style="min-height:90px; width:100%;" placeholder="Ce qui se passe dans la scène..." data-tooltip="Ce qui se passe dans la scène..." onchange="app.CardModal.setSceneField('${scid}', 'resume', this.value)" ${dis}>${Utils.escape(sc.resume || '')}</textarea>`;
         blocks.push(FicheUI.block('scene', 'resume', '📝 Résumé', resumeHtml));
 
-        if(body) body.innerHTML = FicheUI.headHtml({
-            name: sc.title || 'Sans titre', id: sc.id, kindLabel: 'Scène', photo: '',
-            badgesHtml: '', delBtnHtml: delBtn
-        }) + FicheBlocks.renderTabbed(blocks, 'scene');
+        // v601 — LA FICHE DIT DE QUELLE SCENE ELLE PARLE. L'identifiant est pose
+        // sur une ENVELOPPE a l'interieur du corps, pas sur le corps lui-meme :
+        // ouvrir ensuite la fiche d'un comedien remplace ce contenu, donc
+        // l'enveloppe disparait d'elle-meme. Sur le corps, l'attribut serait
+        // reste en place et la fiche du comedien se serait crue verrouillee.
+        if(body) body.innerHTML = '<div class="fiche-scene" data-scene-id="' + scid + '">'
+            + FicheUI.headHtml({
+                name: sc.title || 'Sans titre', id: sc.id, kindLabel: 'Scène', photo: '',
+                badgesHtml: '', delBtnHtml: delBtn
+            }) + FicheBlocks.renderTabbed(blocks, 'scene')
+            + '</div>';
         CardModal.applyRights('scene');
+        try { if(typeof SceneLock !== 'undefined') SceneLock.marquerEcrans(); } catch(e) {}
         if(modal) modal.classList.add('visible');
         // v581 : les briques sont equilibrees par hauteur une fois visibles
         // (mesure reelle du DOM), meme mecanique que les six autres familles.

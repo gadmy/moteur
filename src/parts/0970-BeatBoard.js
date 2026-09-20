@@ -131,6 +131,7 @@
           const card = document.createElement('div');
           card.className = 'beatboard-card' + (isInTimeline ? '' : ' out-of-timeline');
           card.dataset.id = scene.id;
+          card.dataset.sceneId = scene.id;   // v601 : lu par le verrou par scene
           card.dataset.inTimeline = isInTimeline;
           if(idx !== null) card.dataset.index = idx;
           card.style.left = scene.beatboardX + 'px';

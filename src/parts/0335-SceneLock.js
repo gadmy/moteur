@@ -213,7 +213,6 @@
       //  deplace pas, donc LIRE ne verrouille rien.
       //  Le declencheur vit ICI et non dans l'editeur : le jour ou un autre
       //  ecran rend une scene modifiable, il est couvert sans qu'on y pense.
-      CONTENEURS: '.script-continuous-scene, .fid-card[data-scene-id], [data-scene-id].scene-fiche',
       DELAI: 250,
       _inited: false,
       _minuteur: null,
@@ -238,7 +237,7 @@
               let noeud = (sel && sel.anchorNode) || document.activeElement;
               if(noeud && noeud.nodeType === 3) noeud = noeud.parentElement;
               if(!noeud || !noeud.closest) return '';
-              const bloc = noeud.closest(SceneLock.CONTENEURS);
+              const bloc = noeud.closest(SceneLock.ZONES_ECRITURE);
               if(!bloc || bloc.closest(SceneLock.HORS_JEU)) return '';
               return String(SceneLock._idDe(bloc) || '');
           } catch(e) { return ''; }
@@ -267,17 +266,49 @@
       //  sans qu'on ait a y penser — c'est la lecon des trois vignettes de
       //  storyboard qui lisaient trois choses differentes.
       // ------------------------------------------------------------------
-      SELECTEURS: '[data-scene-id], [data-sceneid], [data-scene]',
+      // UNE SEULE LISTE, ET C'EST TOUT LE SUJET. La premiere version marquait
+      // « tout element qui porte l'identifiant d'une scene ». Verifie apres coup :
+      // presque rien n'en portait — le depouillement, le sequencier et la fiche
+      // passaient le leur par un onclick. Le verrou ne voyait donc que le
+      // Scenario, et le badge allait se poser sur les pastilles de commentaire
+      // et dans les listes de choix des exports, qui en portent un sans etre des
+      // zones de travail.
+      // On NOMME donc les zones, une fois, ici. Ajouter un ecran demain, c'est
+      // ajouter une ligne a cette liste — et le poser dans l'autre liste s'il
+      // permet d'ECRIRE.
+      ZONES: [
+          '.script-continuous-scene[data-scene-id]',   // Scenario
+          '#bdScriptContent[data-scene-id]',           // Depouillement, texte
+          '#bdRightContent[data-scene-id]',            // Depouillement, fiches
+          '.bd-scene-row[data-scene-id]',              // Depouillement, liste
+          '.seq-card[data-scene-id]',                  // Sequencier
+          '.beatboard-card[data-scene-id]',            // Beat Board
+          '.fiche-scene[data-scene-id]'                // Fiche de la scene
+      ].join(', '),
+      // Les zones ou l'on ECRIT : y poser le curseur, c'est l'intention de
+      // modifier, donc la prise du verrou. Les listes et les cartes n'y sont
+      // pas : les parcourir, c'est lire.
+      ZONES_ECRITURE: [
+          '.script-continuous-scene[data-scene-id]',
+          '#bdScriptContent[data-scene-id]',
+          '#bdRightContent[data-scene-id]',
+          '.fiche-scene[data-scene-id]'
+      ].join(', '),
       // Les LISTES DE CHOIX (export, partage, impression) portent aussi
       // l'identifiant des scenes, pour cocher lesquelles inclure. Y poser un
       // badge de verrou serait faux : choisir une scene dans un export ne la
       // modifie pas. On les ecarte.
-      HORS_JEU: '.modal, .modal-overlay, .fb-ov, .tour-panel-ov, [id*="export"], [id*="chooser"], [class*="chooser"]',
+      // Filet de securite en plus des zones nommees : meme si une zone finissait
+      // un jour dans une fenetre de choix (export, partage, impression), y poser
+      // un verrou serait faux — cocher une scene dans un export ne la modifie
+      // pas. « confirm-modal-overlay » est le vrai nom de ces fenetres ; l'oubli
+      // de la premiere version laissait le badge se poser sur leurs cases.
+      HORS_JEU: '.modal, .modal-overlay, .confirm-modal-overlay, .fb-ov, .tour-panel-ov, [id*="export"], [id*="chooser"], [class*="chooser"]',
       _idDe: (el) => el.getAttribute('data-scene-id') || el.getAttribute('data-sceneid') || el.getAttribute('data-scene') || '',
 
       marquerEcrans: () => {
           const tenues = SceneLock.tous();
-          document.querySelectorAll(SceneLock.SELECTEURS).forEach(el => {
+          document.querySelectorAll(SceneLock.ZONES).forEach(el => {
               if(el.closest(SceneLock.HORS_JEU)) return;
               const id = String(SceneLock._idDe(el) || '');
               const l = id ? tenues[id] : null;

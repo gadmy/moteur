@@ -11,6 +11,13 @@
       // saveScene n'ecrit que LA scene donnee, cote serveur, sans toucher aux
       // autres (fonction patch_project_scene, sql/ecriture_par_scene.sql).
       //
+      // ETAT AU 20 SEPTEMBRE : PERSONNE NE L'APPELLE ENCORE. Verifie sur tout le
+      // depot — aucun ecran n'appelle saveScene ; le scenario, le depouillement
+      // et la fiche passent tous par save(), c'est-a-dire par l'ecriture du
+      // tableau entier. C'est pourquoi le refus d'ecriture vit dans save() et
+      // non ici : pose ici seulement, il ne refusait rien. La fonction reste,
+      // elle est juste, et elle servira le jour ou les editeurs y passeront —
+      // mais elle ne protege rien tant que personne ne l'emprunte.
       // REPLI AUTOMATIQUE : si la fonction n'existe pas encore sur la base, on
       // retombe sur save(). Le code peut donc partir avant le SQL sans rien
       // casser, et l'ecriture fine s'active d'elle-meme le jour ou le SQL est
@@ -119,22 +126,41 @@
                   if(state.pendingSave) { state.pendingSave = false; StoreSave.save(); }
                   return;
               }
-              // v601 — ON NE PIETINE PAS UNE SCENE TENUE PAR QUELQU'UN D'AUTRE.
-              // Voir StoreRealtime._scenesAJour : envoyer tout le tableau des
-              // scenes pour en deplacer une renverrait aussi notre copie de
-              // celle que le voisin ecrit. On relit donc le serveur et on
-              // reprend SA version des scenes qu'on n'a pas touchees.
-              // UNE LECTURE DE PLUS, ET SEULEMENT quand quelqu'un d'autre tient
-              // vraiment une scene : le reste du temps, rien ne change.
+              // v601 — LE VRAI POINT DE PASSAGE DE TOUTE ECRITURE DE SCENE.
+              // C'EST ICI, ET NULLE PART AILLEURS, que les modifications de scene
+              // partent : aucun ecran n'appelle saveScene, tous passent par la
+              // sauvegarde complete. Le refus devait donc etre pose ici — pose
+              // ailleurs, il ne refusait rien.
+              // DEUX CHOSES EN UNE RELECTURE : on reprend la version du serveur
+              // pour les scenes qu'on n'a pas touchees (sinon deplacer une scene
+              // ecraserait ce que le voisin vient d'ecrire dans une autre), ET
+              // pour celles qu'il TIENT, meme si on les a touchees — c'est le
+              // refus d'ecriture.
+              // UNE LECTURE DE PLUS, ET SEULEMENT A PLUSIEURS : seul sur le
+              // projet, rien ne change.
               if(savePatch.scenes && typeof SceneLock !== 'undefined' && typeof StoreRealtime !== 'undefined') {
-                  let occupees = [];
-                  try { occupees = Object.keys(SceneLock.tous()).filter(sid => !SceneLock.tenueParMoi(sid)); } catch(e) {}
-                  if(occupees.length) {
+                  let seul = true;
+                  try { seul = LockManager.isAlone(); } catch(e) {}
+                  if(!seul) {
+                      let occupees = [];
+                      try { occupees = Object.keys(SceneLock.tous()).filter(sid => !SceneLock.tenueParMoi(sid)); } catch(e) {}
                       try {
                           const { data: frais, error: errFrais } = await supabase.rpc('project_data_for_me', { p_id: id });
                           if(!errFrais && frais && Array.isArray(frais.scenes)) {
-                              savePatch.scenes = StoreRealtime._scenesAJour(savePatch.scenes, (saveBase && saveBase.scenes) || [], frais.scenes);
-                              state.data.scenes = savePatch.scenes;
+                              const fusion = StoreRealtime._scenesAJour(savePatch.scenes, (saveBase && saveBase.scenes) || [], frais.scenes, occupees);
+                              savePatch.scenes = fusion;
+                              state.data.scenes = fusion;
+                              // Une modification refusee doit se VOIR. Elle vient
+                              // d'etre remplacee a l'ecran par la version de
+                              // l'autre : sans message, on croirait avoir ecrit.
+                              const refusees = (fusion && fusion._refusees) || [];
+                              if(refusees.length) {
+                                  const q = SceneLock.qui(refusees[0]);
+                                  Utils.toast('Scène verrouillée' + (q ? ' par ' + q : '')
+                                      + ' : vos modifications sur ' + (refusees.length > 1 ? refusees.length + ' scènes n\'ont' : 'cette scène n\'ont')
+                                      + ' pas été enregistrées.', 'warning', 9000);
+                                  try { UI.renderScript(); } catch(e) {}
+                              }
                           }
                       } catch(e) {
                           // Relecture impossible : on envoie quand meme. Le verrou de

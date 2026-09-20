@@ -45,7 +45,7 @@
               CONFIG.bdCategories.forEach(cat => { n += ((s.breakdown && s.breakdown[cat]) || []).length; });
               const actif = (s.id === state.activeBdSceneId) ? ' active' : '';
               const st = labels[s.status || 'not-verified'];
-              return `<div class="bd-scene-row${actif}" onclick="app.Breakdown.selectScene('${s.id}')" title="${esc(s.title || '')}">
+              return `<div class="bd-scene-row${actif}" data-scene-id="${esc(String(s.id))}" onclick="app.Breakdown.selectScene('${s.id}')" title="${esc(s.title || '')}">
                           <span class="bd-scene-row-num">#${idx + 1}</span>
                           <span class="bd-scene-row-title">${esc(s.title || 'Sans titre')}</span>
                           <span class="bd-scene-row-count" title="${isFinal ? n + ' élément(s) dépouillé(s)' : 'Scène en brouillon'}">${isFinal ? (n || '·') : '📝'}</span>
@@ -114,8 +114,23 @@
           if(scene) Breakdown.renderFiches(scene);
       },
 
+      // v601 — LES DEUX PANNEAUX DISENT DE QUELLE SCENE ILS PARLENT. Sans cet
+      // attribut, le verrou par scene ne voyait rien ici : il cherche un
+      // conteneur qui PORTE l'identifiant, et le depouillement passait le sien
+      // par un onclick. On pouvait donc depouiller a deux la meme scene sans
+      // que personne ne soit prevenu.
+      _marquerPanneaux: (scene) => {
+          const id = (scene && scene.id != null) ? String(scene.id) : '';
+          [els.bdScriptContent, els.bdRightContent].forEach(el => {
+              if(!el) return;
+              if(id) el.dataset.sceneId = id; else delete el.dataset.sceneId;
+          });
+          try { if(typeof SceneLock !== 'undefined') SceneLock.marquerEcrans(); } catch(e) {}
+      },
+
       renderFiches: (scene) => {
           if(!els.bdRightContent) return;
+          Breakdown._marquerPanneaux(scene);
           if(!scene) { els.bdRightContent.innerHTML = ''; return; }
           if(scene.isFinal !== true) {
               els.bdRightContent.innerHTML = `

@@ -82,10 +82,18 @@
       // miennes : le tableau qu'on s'apprete a envoyer (mon ordre).
       // base    : ce que le serveur m'avait envoye (dit ce que J'AI touche).
       // fraiches: ce que le serveur a MAINTENANT.
-      _scenesAJour: (miennes, base, fraiches) => {
+      // interdites : les scenes tenues par QUELQU'UN D'AUTRE. Pour celles-la on
+      // reprend la version du serveur MEME si on l'a modifiee : c'est le refus
+      // d'ecriture, pose au seul endroit par ou toutes les modifications de
+      // scene passent vraiment. Renvoie aussi la liste de celles qu'on a du
+      // reprendre, pour pouvoir le DIRE — une modification qui disparait sans
+      // un mot est pire que pas de verrou du tout.
+      _scenesAJour: (miennes, base, fraiches, interdites) => {
           const cle = (sc) => String((sc && sc.id) !== undefined && sc.id !== null ? sc.id : '');
           const mBase = new Map(); (base || []).forEach(sc => { const k = cle(sc); if(k) mBase.set(k, sc); });
           const mFraiche = new Map(); (fraiches || []).forEach(sc => { const k = cle(sc); if(k) mFraiche.set(k, sc); });
+          const bloquees = new Set((interdites || []).map(String));
+          const refusees = [];
           const vues = new Set();
           const out = (miennes || []).map(scMienne => {
               const k = cle(scMienne);
@@ -94,6 +102,10 @@
               const scFraiche = mFraiche.get(k);
               if(!scFraiche) return scMienne;   // pas (encore) sur le serveur : la mienne
               const jeLaiTouchee = JSON.stringify(scMienne) !== JSON.stringify(mBase.get(k));
+              if(bloquees.has(k)) {
+                  if(jeLaiTouchee) refusees.push(k);
+                  return scFraiche;             // tenue par un autre : la sienne, toujours
+              }
               return jeLaiTouchee ? scMienne : scFraiche;
           });
           // Nee chez quelqu'un d'autre depuis ma derniere synchro : je ne l'ai
@@ -103,6 +115,7 @@
               if(!k || vues.has(k) || mBase.has(k)) return;
               out.push(scFraiche);
           });
+          out._refusees = refusees;
           return out;
       },
 
