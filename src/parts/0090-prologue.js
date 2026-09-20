@@ -412,7 +412,12 @@ enterpriseTypes: [
     {id: 'ent_autre', name: '➕ Autre'}
 ],
 crewRoles: {
-    'gc1': ['Directeur·rice de la photographie', 'Cadreur·euse', 'Assistant·e caméra', '1er·ère assistant·e opérateur·rice', '2ème assistant·e opérateur·rice', 'Chef·fe électro', 'Steadicamer', 'Pilote drone', 'DIT', 'Photographe plateau', 'Autre'],
+    // 'Chef·fe électro' a quitte ce departement le 20 septembre : il appartient a
+    // 'gc2' (Lumiere), ou il existe deja sous « Chef·fe électricien·ne ». Verifie
+    // en base avant de bouger : AUCUN profil ne l'avait choisi, le retrait ne rend
+    // donc personne introuvable. Regle generale inchangee — un libelle de poste est
+    // une VALEUR STOCKEE : on en ajoute, on n'en renomme pas a la legere.
+    'gc1': ['Directeur·rice de la photographie', 'Cadreur·euse', 'Assistant·e caméra', '1er·ère assistant·e opérateur·rice', '2ème assistant·e opérateur·rice', 'Steadicamer', 'Pilote drone', 'DIT', 'Photographe plateau', 'Autre'],
     'gc2': ['Chef·fe électricien·ne', 'Électricien·ne', 'Groupiste', 'Best Boy/Girl', 'Pupitreur·euse', 'Autre'],
     'gc18': ['Chef·fe machiniste', 'Sous-chef·fe machiniste', 'Machiniste', 'Grutier·ère', 'Autre'],
     'gc3': ['Réalisateur·rice', 'Réalisateur·rice 2ème équipe', '1er·ère assistant·e réalisateur·rice', '2ème assistant·e réalisateur·rice', '3ème assistant·e réalisateur·rice', 'Directeur·rice de casting', 'Coach acting', 'Autre'],
