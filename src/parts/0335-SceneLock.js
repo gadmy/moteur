@@ -107,6 +107,21 @@
           return false;
       },
 
+      // Refus groupe : supprimer une saison ou un episode emporte toutes ses
+      // scenes. Si l'une d'elles est tenue, on refuse le lot entier — on ne
+      // supprime pas a moitie.
+      autoriseSuppressionScenes: (scenes) => {
+          try {
+              const tenues = (scenes || []).filter(sc => sc && !SceneLock.peutEcrire(sc.id));
+              if(!tenues.length) return true;
+              const q = SceneLock.qui(tenues[0].id);
+              Utils.toast('Impossible pour le moment : ' + (q || 'quelqu\'un') + ' écrit '
+                  + (tenues.length > 1 ? tenues.length + ' des scènes concernées' : 'une des scènes concernées')
+                  + '. Réessayez dans un instant.', 'warning', 8000);
+              return false;
+          } catch(e) { return true; }
+      },
+
       _enCours: {},   // scenes pour lesquelles une demande est partie
 
       // Prend le verrou d'une scene. Renvoie true si je l'ai.

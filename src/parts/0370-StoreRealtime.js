@@ -64,6 +64,48 @@
           return fusionnees;
       },
 
+      // ====================================================================
+      // RELECTURE AVANT UNE SAUVEGARDE COMPLETE DES SCENES (v601)
+      // ====================================================================
+      // Deplacer, ajouter ou supprimer une scene ne passe pas par saveScene :
+      // ces trois gestes changent la FORME du tableau, donc on renvoie le
+      // tableau ENTIER — y compris la scene que le voisin est en train
+      // d'ecrire, dans l'etat ou on l'avait recue. Si son enregistrement est
+      // arrive entre-temps, le notre l'effacerait sans un mot. C'est le dernier
+      // recoin ou deux personnes peuvent encore se marcher dessus.
+      //
+      // ON GARDE NOTRE ORDRE — c'est ce qu'on est en train de faire — mais on
+      // reprend LEUR CONTENU pour toutes les scenes qu'on n'a pas touchees. Et
+      // une scene creee par quelqu'un d'autre depuis notre derniere synchro est
+      // rajoutee a la fin plutot que supprimee par omission.
+      //
+      // miennes : le tableau qu'on s'apprete a envoyer (mon ordre).
+      // base    : ce que le serveur m'avait envoye (dit ce que J'AI touche).
+      // fraiches: ce que le serveur a MAINTENANT.
+      _scenesAJour: (miennes, base, fraiches) => {
+          const cle = (sc) => String((sc && sc.id) !== undefined && sc.id !== null ? sc.id : '');
+          const mBase = new Map(); (base || []).forEach(sc => { const k = cle(sc); if(k) mBase.set(k, sc); });
+          const mFraiche = new Map(); (fraiches || []).forEach(sc => { const k = cle(sc); if(k) mFraiche.set(k, sc); });
+          const vues = new Set();
+          const out = (miennes || []).map(scMienne => {
+              const k = cle(scMienne);
+              if(!k) return scMienne;
+              vues.add(k);
+              const scFraiche = mFraiche.get(k);
+              if(!scFraiche) return scMienne;   // pas (encore) sur le serveur : la mienne
+              const jeLaiTouchee = JSON.stringify(scMienne) !== JSON.stringify(mBase.get(k));
+              return jeLaiTouchee ? scMienne : scFraiche;
+          });
+          // Nee chez quelqu'un d'autre depuis ma derniere synchro : je ne l'ai
+          // jamais vue, donc je ne l'ai pas supprimee — je l'ajoute.
+          (fraiches || []).forEach(scFraiche => {
+              const k = cle(scFraiche);
+              if(!k || vues.has(k) || mBase.has(k)) return;
+              out.push(scFraiche);
+          });
+          return out;
+      },
+
       // Applique un jeu de clés distantes sur state.data (merge sélectif + rendu)
       applyRemote: (val) => {
           if(!val) return;
@@ -82,6 +124,9 @@
                   // verrou descendra a la scene.
                   // On garde donc MES scenes modifiees, et on prend les leurs.
                   if(k === 'scenes' && Array.isArray(val[k]) && Array.isArray(state.data[k]) && Array.isArray(base_[k])) {
+                      // v601 : on regarde ce qui a bouge AVANT de fusionner — apres,
+                      // les deux etats sont confondus et le diff n'existe plus.
+                      try { if(typeof SceneNews !== 'undefined') SceneNews.detecter(base_[k], val[k]); } catch(e) {}
                       state.data[k] = StoreRealtime._fusionScenes(state.data[k], base_[k], val[k]);
                       base_[k] = JSON.parse(JSON.stringify(val[k]));
                       continue;
@@ -122,6 +167,10 @@
           // vient de changer les acces) — on relit nos droits et on reconstruit la
           // navigation, sans rechargement de page.
           try { if(typeof Permissions !== 'undefined' && val && val.memberPermissions) Permissions.refreshLive(); } catch(e) {}
+          // v601 : le bandeau « ce qui a bouge » se pose APRES le rendu, sinon le
+          // re-rendu ci-dessus l'effacerait aussitot (defaut corrige en v570 sur
+          // les bandeaux de verrou).
+          try { if(typeof SceneNews !== 'undefined') SceneNews.afficher(); } catch(e) {}
       },
 
       // Filet de sécurité : recharge le projet quand le diff n'a pas pu être transmis

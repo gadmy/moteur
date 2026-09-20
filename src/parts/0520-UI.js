@@ -1327,6 +1327,15 @@
       
       deleteScene: async (id) => { 
           if(state.currentRole==='viewer') return; 
+          // v601 — LE SEUL CAS DE PERTE QUI RESTAIT. Supprimer une scene passe par
+          // la sauvegarde COMPLETE (tout le tableau), qui ne passe donc pas par le
+          // refus pose sur saveScene. Sans ce test, quelqu'un pouvait effacer la
+          // scene qu'un autre est en train d'ecrire, et le texte partait avec.
+          if(typeof SceneLock !== 'undefined' && !SceneLock.peutEcrire(id)) {
+              const q = SceneLock.qui(id);
+              Utils.toast('Impossible : ' + (q || 'quelqu\'un') + ' écrit cette scène en ce moment. Réessayez dans un instant.', 'warning', 8000);
+              return;
+          }
           const sceneToDelete = state.data.scenes.find(s => s.id === id || String(s.id) === String(id));
           if(!sceneToDelete) return;
           

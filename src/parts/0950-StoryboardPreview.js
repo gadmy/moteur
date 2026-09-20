@@ -5784,6 +5784,10 @@ const Seasons = {
         const linkedEpisodes = (state.data.episodes || []).filter(ep => ep.seasonId === seasonId);
         const linkedScenes = (state.data.scenes || []).filter(sc => linkedEpisodes.some(ep => ep.id === sc.episodeId));
         
+        // v601 : supprimer une saison emporte ses scenes. On ne l'autorise pas
+        // tant que quelqu'un en ecrit une (voir SceneLock).
+        if(typeof SceneLock !== 'undefined' && !SceneLock.autoriseSuppressionScenes(linkedScenes)) return;
+        
         let msg = `Supprimer la saison S${String(s.number).padStart(2,'0')}${s.title ? ' — ' + s.title : ''} ?`;
         if(linkedEpisodes.length > 0) {
             msg += `\n\n⚠️ ${linkedEpisodes.length} épisode${linkedEpisodes.length>1?'s':''} seront aussi supprimé${linkedEpisodes.length>1?'s':''}`;
@@ -6063,6 +6067,9 @@ const Episodes = {
         
         // Compter les scènes liées
         const linkedScenes = (state.data.scenes || []).filter(s => s.episodeId === episodeId);
+        // v601 : meme garde que pour la saison — une scene tenue par quelqu'un
+        // ne part pas dans la suppression de son episode.
+        if(typeof SceneLock !== 'undefined' && !SceneLock.autoriseSuppressionScenes(linkedScenes)) return;
         const sceneCountMsg = linkedScenes.length > 0 
             ? `\n\n⚠️ ${linkedScenes.length} scène${linkedScenes.length>1?'s':''} seront aussi supprimée${linkedScenes.length>1?'s':''}.`
             : '';

@@ -119,6 +119,32 @@
                   if(state.pendingSave) { state.pendingSave = false; StoreSave.save(); }
                   return;
               }
+              // v601 — ON NE PIETINE PAS UNE SCENE TENUE PAR QUELQU'UN D'AUTRE.
+              // Voir StoreRealtime._scenesAJour : envoyer tout le tableau des
+              // scenes pour en deplacer une renverrait aussi notre copie de
+              // celle que le voisin ecrit. On relit donc le serveur et on
+              // reprend SA version des scenes qu'on n'a pas touchees.
+              // UNE LECTURE DE PLUS, ET SEULEMENT quand quelqu'un d'autre tient
+              // vraiment une scene : le reste du temps, rien ne change.
+              if(savePatch.scenes && typeof SceneLock !== 'undefined' && typeof StoreRealtime !== 'undefined') {
+                  let occupees = [];
+                  try { occupees = Object.keys(SceneLock.tous()).filter(sid => !SceneLock.tenueParMoi(sid)); } catch(e) {}
+                  if(occupees.length) {
+                      try {
+                          const { data: frais, error: errFrais } = await supabase.rpc('project_data_for_me', { p_id: id });
+                          if(!errFrais && frais && Array.isArray(frais.scenes)) {
+                              savePatch.scenes = StoreRealtime._scenesAJour(savePatch.scenes, (saveBase && saveBase.scenes) || [], frais.scenes);
+                              state.data.scenes = savePatch.scenes;
+                          }
+                      } catch(e) {
+                          // Relecture impossible : on envoie quand meme. Le verrou de
+                          // scene a deja ecarte le cas frequent (deux ecritures sur la
+                          // MEME scene) ; renoncer a sauvegarder ferait perdre a coup sur
+                          // ce qu'on essaie de proteger par precaution.
+                          console.warn('[Store] relecture avant envoi impossible :', e && e.message);
+                      }
+                  }
+              }
           } 
           
           // Tentatives avec retry exponentiel : 1ère immédiate, puis attente 1s, puis 3s
