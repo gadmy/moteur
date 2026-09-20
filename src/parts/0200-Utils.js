@@ -30,9 +30,20 @@
         return root.innerHTML;
       },
       // URL d'image sure pour les attributs src de contenu inter-utilisateurs
+      // v601 — ON SIGNE AVANT DE VALIDER. Un media de projet est stocke par son
+      // CHEMIN (« projects/xxx/yyy.jpg »), ou par une adresse « /object/public/ »
+      // que le bucket PRIVE refuse de servir. Dans les deux cas le controle
+      // ci-dessous le rejetait : le chemin nu ne commence pas par https, et
+      // l'adresse publique part en 403. Resultat, TOUTE photo de comedien, de
+      // personnage ou de decor ressortait vide — l'image cassee laissant voir son
+      // texte de remplacement (« Phot du... ») dans les vignettes.
+      // L'ordre compte : on resout d'abord en URL signee, on valide ENSUITE. Le
+      // controle de securite garde donc le dernier mot, sur la valeur reellement
+      // posee dans la page.
       safeMediaUrl: (u) => {
         u = String(u || '');
-        return (/^(data:image\/|https:\/\/)/i.test(u)) ? u.replace(/"/g, '%22').replace(/'/g, '%27').replace(/</g, '%3C') : '';
+        const v = String((Utils.signedUrlFor ? Utils.signedUrlFor(u) : u) || '');
+        return (/^(data:image\/|https:\/\/)/i.test(v)) ? v.replace(/"/g, '%22').replace(/'/g, '%27').replace(/</g, '%3C') : '';
       },
       // URL de lien sure (href) : http(s) ou mailto uniquement, jamais javascript:
       safeUrl: (u) => {
