@@ -1,7 +1,16 @@
 
   const LockDomains = {
       defs: {
-          scenes:       { label: 'Scènes',       keys: ['scenes','seasons','episodes','tags','groups','scriptMeta'],            tabs: ['script','breakdown','board','seasons','episodes'] },
+          // v601 — LE DOMAINE « SCENES » EST COUPE EN DEUX, PAS SUPPRIME.
+          // Le CONTENU des scenes passe au verrou PAR SCENE (SceneLock) : le
+          // Scenario, le Sequencier et le Depouillement ne se bloquent donc plus
+          // d'un bloc. Mais ce domaine couvrait aussi saisons, episodes,
+          // etiquettes, groupes et metadonnees du scenario — qui ne sont PAS des
+          // scenes et n'ont aucun verrou fin. Les laisser sans domaine, c'etait
+          // les laisser sans filet : deux personnes qui renomment une saison
+          // s'ecraseraient, cette fois sans rien pour l'empecher.
+          // Ils restent donc sur un verrou de domaine, sous leur vrai nom.
+          structure:    { label: 'Structure du récit', keys: ['seasons','episodes','tags','groups','scriptMeta'],               tabs: ['seasons','episodes'] },
           // v570 : Rapports de script sorti du domaine 'scenes'. Verifie ligne a ligne :
           // il LIT les scenes (8 fois) et les plans (6 fois) mais n'en ecrit AUCUN ;
           // sa seule ecriture est scriptReports. Un verrou protege ce qu'on ECRIT, pas
@@ -399,6 +408,9 @@ const LockManager = {
 
       applyUI: () => {
           try { if(typeof WindowManager !== 'undefined' && WindowManager.wins) WindowManager._arbitrate(); } catch(_) {}
+          // v601 : les verrous PAR SCENE se redessinent au meme rythme que ceux
+          // de domaine — meme source (state.domainLocks), meme rafraichissement.
+          try { if(typeof SceneLock !== 'undefined') SceneLock.marquerEcrans(); } catch(_) {}
           // Seul(e) sur le projet : aucun verrou affiché, tout reste éditable
           if(LockManager.isAlone()) {
               document.querySelectorAll('.dlock-avatar-tab, .dlock-badge, .dlock-banner, .dlock-watcher').forEach(el => el.remove());
@@ -436,6 +448,30 @@ const LockManager = {
           };
           // sous-onglets (mode catégories) + onglets plats
           document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => markBtn(btn, lockFor(btn.dataset.tab)));
+          // v601 — LE BADGE D'ONGLET RESTE, IL CESSE SEULEMENT DE VERROUILLER.
+          // Scenario, Sequencier et Depouillement n'ont plus de domaine : ils ne
+          // se bloquent donc plus. Mais savoir que quelqu'un ecrit LA reste utile
+          // — on continue de l'annoncer, sans empecher personne d'entrer.
+          try {
+              const tenues = (typeof SceneLock !== 'undefined') ? SceneLock.tous() : {};
+              const autres = Object.keys(tenues).filter(id => !LockManager._mine(tenues[id]));
+              document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => {
+                  if(['script','breakdown','board'].indexOf(btn.dataset.tab) === -1) return;
+                  const vieux = btn.querySelector('.dlock-avatar-scene');
+                  if(vieux) vieux.remove();
+                  if(!autres.length) return;
+                  const l = tenues[autres[0]];
+                  const av = document.createElement('span');
+                  av.className = 'dlock-avatar-tab dlock-avatar-scene';
+                  const em = (l.holder_email || '').toLowerCase();
+                  if(em) av.style.background = Utils.getColor(em);
+                  av.textContent = autres.length > 1 ? String(autres.length) : (LockManager._who(l)[0] || '?').toUpperCase();
+                  av.title = autres.length > 1
+                      ? ('✍️ ' + autres.length + ' scènes en cours d\'écriture — les autres restent ouvertes')
+                      : ('✍️ ' + LockManager._who(l) + ' écrit une scène — les autres restent ouvertes');
+                  btn.appendChild(av);
+              });
+          } catch(e) { console.warn('[Lock] badge de scene :', e && e.message); }
           // Spectateurs : badge gris pour chaque personne qui REGARDE le domaine (sans le modifier)
           document.querySelectorAll('.dlock-watcher').forEach(el => el.remove());
           const myEm = ((state.currentUser && state.currentUser.email) || '').toLowerCase();
@@ -597,6 +633,8 @@ const LockManager = {
               UI.showDashboard();
               return;
           }
+          // v601 : les verrous de SCENE battent au meme rythme que les domaines.
+          try { if(typeof SceneLock !== 'undefined') await SceneLock.battre(); } catch(e) {}
           const doms = {};
           if(LockManager.currentDomain) doms[LockManager.currentDomain] = true;
           Object.keys(LockManager.winDomains || {}).forEach(d => { doms[d] = true; });

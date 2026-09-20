@@ -131,22 +131,18 @@ Rien d'ouvert côté code au 20 septembre en dehors des chantiers ci-dessous.
     defauts. C'est la partie a construire lentement et a eprouver.
     ETAPES. (1) et (2) SONT FAITES le 20 septembre, verrou de domaine inchange :
     rien ne change a l'usage, le piege est enleve. RESTENT :
-      (3) VERROU PAR SCENE et bandeau « cette scene est ecrite par X ». C'est la
-          seule etape VISIBLE, et la plus delicate. Decision deja prise avec le
-          developpeur : le badge d'onglet ne disparait pas, il cesse simplement
-          de VERROUILLER — il continue d'annoncer qui travaille la, et le verrou
-          reel descend a la scene.
-          A VERIFIER AVANT DE COMMENCER : LockDomains.defs.scenes couvre aussi
-          seasons, episodes, tags, groups et scriptMeta. Ces cles-la ne sont PAS
-          des scenes et doivent garder un verrou de domaine : sinon deux
-          personnes qui renomment une saison s'ecrasent, sans filet cette fois.
-          Le domaine « scenes » doit donc etre COUPE EN DEUX, pas supprime.
-      (4) Notifications d'en-tete pour l'ordre et les liens (« ta scene a ete
-          deplacee », « le decor a change »), qui ne bloquent rien.
-    PERTE ASSUMEE, CONNUE ET MESUREE : si quelqu'un SUPPRIME une scene pendant
-    que j'y ecris, la suppression gagne et mon texte part avec. C'est le seul
-    cas de perte des huit testes. L'etape (3) le fermera — une scene tenue par
-    quelqu'un ne pourra plus etre supprimee par un autre.
+      (3) FAITE le 20 septembre : verrou par scene (SceneLock), refus pose sur
+          la sauvegarde d'une scene, marque « Verrouillee » partout ou la scene
+          apparait, domaine « scenes » coupe en deux (« Structure du recit »
+          garde saisons, episodes, etiquettes, groupes et metadonnees), et
+          suppression d'une fiche refusee tant qu'une scene qui s'en sert est
+          tenue par quelqu'un. Le badge d'onglet reste, il ne verrouille plus.
+      (4) RESTE : notifications d'en-tete pour l'ordre et les liens (« ta scene
+          a ete deplacee », « le decor a change »), qui ne bloquent rien.
+    PERTE ASSUMEE, CONNUE ET MESUREE, DESORMAIS FERMEE : si quelqu'un
+    SUPPRIMAIT une scene pendant que j'y ecrivais, la suppression gagnait et mon
+    texte partait avec. C'etait le seul cas de perte des huit testes. L'etape
+    (3) l'a ferme : une scene tenue n'est plus ecrite ni effacee par un autre.
 
 [ ] AVENIR DU FORUM — a trancher. Il est SUSPENDU depuis un moment
     (Forum.suspended = true : le menu y mene, un message le dit, on revient au
@@ -1174,6 +1170,86 @@ vv601 (20 septembre 2026) — EN COURS.
   Verifie sur les sept formes possibles : chemin nu, adresse publique du bucket
   prive, image encodee en dur, adresse externe, chemin inconnu, tentative
   « javascript: » et valeur vide. Les trois dernieres rendent bien du vide.
+
+  LE VERROU DESCEND A LA SCENE. Jusqu'ici un verrou couvrait un DOMAINE entier :
+  « scenes » bloquait d'un coup le Scenario, le Sequencier et le Depouillement.
+  Une personne ecrivait, tout le monde regardait. Trois etapes, dans cet ordre,
+  et l'ordre est tout : l'ECRITURE d'abord, le verrou ensuite.
+
+  (1) ECRIRE UNE SEULE SCENE. La sauvegarde envoyait la LISTE COMPLETE des
+  scenes ; deux personnes qui ecrivent chacune la sienne s'ecrasaient, la
+  derniere gagnait. Le verrou de domaine n'etait que le pansement pose sur ce
+  defaut-la. Nouvelle fonction serveur patch_project_scene (sql/ecriture_par_
+  scene.sql, appliquee sur la base) : elle remplace UNE entree du tableau,
+  reperee par son identifiant, sans toucher aux autres — et si l'identifiant est
+  inconnu, elle AJOUTE plutot que d'echouer, pour que deux creations simultanees
+  en gardent chacune une. Memes gardes que patch_project_data : aucun acces
+  nouveau. Cote navigateur, StoreSave.saveScene. REPLI AUTOMATIQUE : si la
+  fonction manque sur la base, on retombe sur l'ancienne sauvegarde — mais
+  UNIQUEMENT sur l'erreur « fonction inconnue ». Une erreur de droit ou de
+  reseau ne doit pas se transformer en reecriture complete et silencieuse.
+
+  (2) FUSIONNER SCENE PAR SCENE. C'etait la piece dangereuse. L'ancienne fusion
+  protegeait une cle ENTIERE : une modification non enregistree dans « scenes »
+  faisait refuser TOUT ce qui venait des autres. Desormais StoreRealtime fusionne
+  scene par scene : je garde celles que j'ai modifiees, je prends les leurs,
+  l'ORDRE du serveur fait foi, mes scenes toutes neuves encore jamais
+  enregistrees sont ajoutees a la fin, et une scene supprimee chez eux disparait
+  bien chez moi. Se tromper la, c'est perdre le texte de quelqu'un SANS message
+  d'erreur : chaque cas a ete eprouve un par un.
+
+  (3) LE VERROU PAR SCENE. Aucune piece serveur nouvelle : la table des verrous
+  accepte n'importe quelle clef en texte libre et les arbitre toutes de la meme
+  facon (premier arrive, expiration a trois minutes sans battement). On y pose
+  donc « scene:<identifiant> ». Nouveau module SceneLock.
+  ON NE PREND QU'UNE SCENE A LA FOIS : ouvrir une autre scene libere la
+  precedente. Sans cela, quelqu'un qui parcourt son scenario verrouillerait tout
+  ce qu'il a survole et le laisserait bloque trois minutes.
+  LE VERROU SE PREND QUAND LE CURSEUR ENTRE DANS LA SCENE — pas au survol (on
+  verrouillerait tout ce qu'on parcourt), pas a l'enregistrement (trop tard,
+  l'autre aurait deja ecrit). Le defilement ne deplace pas le curseur : LIRE ne
+  verrouille donc rien. Et le declencheur vit DANS le module, pas dans
+  l'editeur : le jour ou un autre ecran rend une scene modifiable, il est
+  couvert sans qu'on y pense.
+  LE REFUS EST POSE LA OU L'ECRITURE PART, pas sur les ecrans. Cinq ecrans
+  montrent une scene aujourd'hui et il en viendra d'autres ; chacun pourrait
+  oublier de verifier. StoreSave.saveScene refuse donc toute scene tenue par
+  quelqu'un d'autre, quel que soit l'ecran qui le demande, et le dit.
+  LE BADGE D'ONGLET RESTE, IL CESSE SEULEMENT DE VERROUILLER. Savoir que
+  quelqu'un ecrit dans le Scenario reste utile — on continue de l'annoncer, sans
+  empecher personne d'entrer. La scene tenue, elle, porte la pastille de la
+  personne et la mention « Verrouillee » PARTOUT ou elle apparait : on ne marque
+  pas les ecrans un par un, on marque tout element qui porte l'identifiant d'une
+  scene. Les listes de choix des exports en sont ecartees — y cocher une scene
+  ne la modifie pas.
+
+  LE DOMAINE « SCENES » EST COUPE EN DEUX, PAS SUPPRIME. Il couvrait aussi les
+  saisons, les episodes, les etiquettes, les groupes et les metadonnees du
+  scenario. Ce ne sont pas des scenes et elles n'ont aucun verrou fin : les
+  laisser sans domaine, c'etait les laisser sans filet. Elles gardent donc un
+  verrou de domaine, sous leur vrai nom, « Structure du recit ».
+
+  CE QU'ON NE VERROUILLE PAS, ET POURQUOI. Verrouiller en cascade les fiches
+  liees (comedien, personnage, decor) paraissait prudent : c'est l'inverse.
+  Mesure sur un projet reel de 21 scenes — la realisatrice est rattachee aux 21,
+  les comediens principaux a 20. Verrouiller une seule scene aurait donc fige
+  presque toutes les fiches du projet, bien pire qu'avant. Le vrai danger n'est
+  pas qu'on RENOMME un decor pendant que j'ecris (je verrai le nouveau nom),
+  c'est qu'on l'EFFACE : la scene perd son lien et je ne m'en apercois qu'a
+  l'export. C'est donc la SUPPRESSION, et elle seule, qui est refusee tant
+  qu'une scene qui s'en sert est tenue par quelqu'un. Refus temporaire, jamais
+  definitif. La garde est posee sur UI.deleteDataItem, porte unique de la
+  suppression des fiches.
+
+  LES SOUS-ELEMENTS SONT COUVERTS D'OFFICE : depouillement, resume, titre, liens
+  vers les personnages et le decor vivent DANS l'objet scene. Verrouiller la
+  scene les verrouille tous, partout a la fois.
+
+  DETAIL QUI AURAIT TOUT GACHE : le battement de coeur. Un verrou qu'on ne fait
+  plus battre est considere abandonne au bout de trois minutes. Les verrous de
+  scene se branchent sur la meme horloge que les domaines — sans cela ma propre
+  scene aurait expire sous mes doigts pendant que j'ecris, et le voisin aurait
+  pu la prendre.
 
 
 -->
@@ -6181,6 +6257,32 @@ body.presentation-mode .presentation-bar {
      MiniChat pose en se montant et retire en s'arretant. */
   .feedback-bubble { position: fixed; bottom: 20px; left: 20px; width: 52px; height: 52px; border-radius: 50%; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--border); cursor: pointer; font-size: 1.3rem; box-shadow: 0 6px 18px rgba(0,0,0,.35); z-index: var(--z-dropdown); display: flex; align-items: center; justify-content: center; transition: bottom .15s, transform .12s; }
   .feedback-bubble:hover { transform: scale(1.08); }
+  /* VERROU PAR SCENE (v601). La scene tenue par quelqu'un d'autre porte son
+     initiale et la mention « verrouillée », partout ou elle apparait —
+     scenario, sequencier, depouillement, beat board, fiche. Le conteneur passe
+     en position relative pour que le badge se cale dessus, et l'interieur perd
+     les evenements : on regarde, on ne tape pas. */
+  .scene-verrouillee { position: relative; outline: 2px solid rgba(233,69,96,.45); outline-offset: 1px; border-radius: 6px; }
+  /* ON NE NEUTRALISE QUE LA SAISIE, jamais le conteneur entier : couper tous
+     les evenements empecherait aussi d'ouvrir la fiche, de defiler ou de cocher
+     une case dans une liste d'export. La vraie interdiction n'est pas ici —
+     elle est au point de passage de l'ecriture (StoreSave.saveScene), donc
+     valable meme sur un ecran qui aurait oublie de regarder. Ceci ne fait que
+     le RENDRE VISIBLE. */
+  .scene-verrouillee [contenteditable], .scene-verrouillee input,
+  .scene-verrouillee textarea, .scene-verrouillee select { pointer-events: none; opacity: .6; }
+  .scene-lock-badge { position: absolute; top: 4px; right: 4px; z-index: 5; display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 2px; border-radius: 12px; background: var(--panel-bg); border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0,0,0,.25); font-size: .72rem; font-weight: 600; color: var(--text-main); pointer-events: auto; white-space: nowrap; }
+  .scene-lock-avatar { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: .66rem; font-weight: 700; }
+  .scene-lock-texte { opacity: .85; }
+  /* MA scene : un liseré discret, sans badge — je sais que je l'ai, inutile de
+     me le repeter a chaque ligne. */
+  /* MA scene : un simple lisere a gauche, pas un cadre. Une scene apparait a
+     beaucoup d'endroits a la fois (scenario, sequencier, depouillement,
+     planning) : un cadre vert partout transformerait la page en sapin. Le
+     liseré est en ombre interieure, donc il ne decale aucune mise en page. */
+  .scene-a-moi { box-shadow: inset 3px 0 0 rgba(40,167,69,.5); }
+  @media print { .scene-lock-badge { display: none; } .scene-verrouillee, .scene-a-moi { outline: none; } .scene-verrouillee > * { opacity: 1; } }
+
   /* RAPPEL DE L'AMPOULE (v601) : elle ne bouge jamais, on finit par ne plus la
      voir. De temps en temps elle brille quelques instants et le mot monte
      au-dessus en fondu, comme les degats au-dessus d'un ennemi dans un jeu.
@@ -15286,7 +15388,16 @@ showDashboard: async () => {
   // Un domaine = les onglets qui écrivent une ou plusieurs clés communes (cf. audit interconnexions).
   const LockDomains = {
       defs: {
-          scenes:       { label: 'Scènes',       keys: ['scenes','seasons','episodes','tags','groups','scriptMeta'],            tabs: ['script','breakdown','board','seasons','episodes'] },
+          // v601 — LE DOMAINE « SCENES » EST COUPE EN DEUX, PAS SUPPRIME.
+          // Le CONTENU des scenes passe au verrou PAR SCENE (SceneLock) : le
+          // Scenario, le Sequencier et le Depouillement ne se bloquent donc plus
+          // d'un bloc. Mais ce domaine couvrait aussi saisons, episodes,
+          // etiquettes, groupes et metadonnees du scenario — qui ne sont PAS des
+          // scenes et n'ont aucun verrou fin. Les laisser sans domaine, c'etait
+          // les laisser sans filet : deux personnes qui renomment une saison
+          // s'ecraseraient, cette fois sans rien pour l'empecher.
+          // Ils restent donc sur un verrou de domaine, sous leur vrai nom.
+          structure:    { label: 'Structure du récit', keys: ['seasons','episodes','tags','groups','scriptMeta'],               tabs: ['seasons','episodes'] },
           // v570 : Rapports de script sorti du domaine 'scenes'. Verifie ligne a ligne :
           // il LIT les scenes (8 fois) et les plans (6 fois) mais n'en ecrit AUCUN ;
           // sa seule ecriture est scriptReports. Un verrou protege ce qu'on ECRIT, pas
@@ -15684,6 +15795,9 @@ const LockManager = {
 
       applyUI: () => {
           try { if(typeof WindowManager !== 'undefined' && WindowManager.wins) WindowManager._arbitrate(); } catch(_) {}
+          // v601 : les verrous PAR SCENE se redessinent au meme rythme que ceux
+          // de domaine — meme source (state.domainLocks), meme rafraichissement.
+          try { if(typeof SceneLock !== 'undefined') SceneLock.marquerEcrans(); } catch(_) {}
           // Seul(e) sur le projet : aucun verrou affiché, tout reste éditable
           if(LockManager.isAlone()) {
               document.querySelectorAll('.dlock-avatar-tab, .dlock-badge, .dlock-banner, .dlock-watcher').forEach(el => el.remove());
@@ -15721,6 +15835,30 @@ const LockManager = {
           };
           // sous-onglets (mode catégories) + onglets plats
           document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => markBtn(btn, lockFor(btn.dataset.tab)));
+          // v601 — LE BADGE D'ONGLET RESTE, IL CESSE SEULEMENT DE VERROUILLER.
+          // Scenario, Sequencier et Depouillement n'ont plus de domaine : ils ne
+          // se bloquent donc plus. Mais savoir que quelqu'un ecrit LA reste utile
+          // — on continue de l'annoncer, sans empecher personne d'entrer.
+          try {
+              const tenues = (typeof SceneLock !== 'undefined') ? SceneLock.tous() : {};
+              const autres = Object.keys(tenues).filter(id => !LockManager._mine(tenues[id]));
+              document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => {
+                  if(['script','breakdown','board'].indexOf(btn.dataset.tab) === -1) return;
+                  const vieux = btn.querySelector('.dlock-avatar-scene');
+                  if(vieux) vieux.remove();
+                  if(!autres.length) return;
+                  const l = tenues[autres[0]];
+                  const av = document.createElement('span');
+                  av.className = 'dlock-avatar-tab dlock-avatar-scene';
+                  const em = (l.holder_email || '').toLowerCase();
+                  if(em) av.style.background = Utils.getColor(em);
+                  av.textContent = autres.length > 1 ? String(autres.length) : (LockManager._who(l)[0] || '?').toUpperCase();
+                  av.title = autres.length > 1
+                      ? ('✍️ ' + autres.length + ' scènes en cours d\'écriture — les autres restent ouvertes')
+                      : ('✍️ ' + LockManager._who(l) + ' écrit une scène — les autres restent ouvertes');
+                  btn.appendChild(av);
+              });
+          } catch(e) { console.warn('[Lock] badge de scene :', e && e.message); }
           // Spectateurs : badge gris pour chaque personne qui REGARDE le domaine (sans le modifier)
           document.querySelectorAll('.dlock-watcher').forEach(el => el.remove());
           const myEm = ((state.currentUser && state.currentUser.email) || '').toLowerCase();
@@ -15882,6 +16020,8 @@ const LockManager = {
               UI.showDashboard();
               return;
           }
+          // v601 : les verrous de SCENE battent au meme rythme que les domaines.
+          try { if(typeof SceneLock !== 'undefined') await SceneLock.battre(); } catch(e) {}
           const doms = {};
           if(LockManager.currentDomain) doms[LockManager.currentDomain] = true;
           Object.keys(LockManager.winDomains || {}).forEach(d => { doms[d] = true; });
@@ -15917,6 +16057,298 @@ const LockManager = {
   };
 
   // DBPresence — présence par base de données (heartbeat) : fiable même si Realtime Presence est muet.
+  // ==========================================================================
+  //  VERROU PAR SCENE (v601) — etape 3
+  // ==========================================================================
+  //  Jusqu'ici un verrou couvrait un DOMAINE entier : « scenes » bloquait d'un
+  //  coup le Scenario, le Sequencier et le Depouillement. Une personne ecrit,
+  //  tout le monde regarde. Depuis que chaque scene a sa fiche, elle a une
+  //  IDENTITE STABLE (scene.id) et une frontiere nette : on peut donc verrouiller
+  //  la scene, et elle seule.
+  //
+  //  AUCUNE PIECE SERVEUR NOUVELLE. La table project_locks a une colonne
+  //  lock_key en TEXTE LIBRE, et lock_acquire arbitre n'importe quelle clef avec
+  //  la meme autorite (premier arrive, expiration a 3 minutes sans battement).
+  //  On y pose donc « scene:<id> ». Tout ce que LockManager sait deja faire —
+  //  rafraichissement, expiration, temps reel — vaut pour ces clefs-la aussi.
+  //
+  //  CE QU'ON NE VERROUILLE PAS, ET POURQUOI. Les fiches LIEES a la scene
+  //  (comedien, personnage, decor, technicien) restent libres. Verrouiller en
+  //  cascade paraissait prudent, c'est l'inverse : dans un projet reel de 21
+  //  scenes, la realisatrice est rattachee aux 21, et les comediens principaux a
+  //  20. Verrouiller une seule scene aurait donc fige presque toutes les fiches
+  //  du projet — bien pire qu'aujourd'hui, ou verrouiller le scenario laisse au
+  //  moins le casting libre. Le vrai risque n'est pas qu'on RENOMME un decor
+  //  pendant que j'ecris, c'est qu'on l'EFFACE : c'est ca qu'on protege.
+  //
+  //  LES SOUS-ELEMENTS SONT COUVERTS D'OFFICE : le depouillement, le resume, le
+  //  titre, les liens vers les personnages et le decor vivent DANS l'objet
+  //  scene. Verrouiller la scene les verrouille tous, partout a la fois.
+  const SceneLock = {
+      PREFIXE: 'scene:',
+      clef: (sceneId) => SceneLock.PREFIXE + String(sceneId || ''),
+
+      // Toutes les scenes tenues par quelqu'un, MOI COMPRIS : { id -> verrou }.
+      // On repart de state.domainLocks, que LockManager tient deja a jour.
+      tous: () => {
+          const out = {};
+          const locks = state.domainLocks || {};
+          const maintenant = Date.now();
+          for(const k in locks) {
+              if(k.indexOf(SceneLock.PREFIXE) !== 0) continue;
+              const l = locks[k];
+              if(!l) continue;
+              // Meme regle d'expiration que les verrous de domaine : sans
+              // battement depuis 3 minutes, la personne a ferme sa page.
+              if(l.heartbeat_at && (maintenant - new Date(l.heartbeat_at).getTime()) > 180000) continue;
+              out[k.slice(SceneLock.PREFIXE.length)] = l;
+          }
+          return out;
+      },
+
+      // Le verrou d'une scene s'il est tenu par QUELQU'UN D'AUTRE, sinon null.
+      // C'est la seule question que posent les ecrans : « est-ce que je peux
+      // toucher a cette scene ? »
+      detenteur: (sceneId) => {
+          if(!sceneId) return null;
+          const l = SceneLock.tous()[String(sceneId)];
+          if(!l || LockManager._mine(l)) return null;
+          return l;
+      },
+      tenueParMoi: (sceneId) => {
+          if(!sceneId) return false;
+          const l = SceneLock.tous()[String(sceneId)];
+          return !!(l && LockManager._mine(l));
+      },
+      peutEcrire: (sceneId) => !SceneLock.detenteur(sceneId),
+      qui: (sceneId) => {
+          const l = SceneLock.detenteur(sceneId);
+          return l ? LockManager._who(l) : '';
+      },
+
+      // ------------------------------------------------------------------
+      //  LE SEUL EFFET EN CASCADE QU'ON GARDE : ON N'EFFACE PAS SOUS LES PIEDS.
+      // ------------------------------------------------------------------
+      //  On a choisi de NE PAS verrouiller les fiches liees (voir l'en-tete).
+      //  Reste le vrai danger : pendant que Marc ecrit la scene 12, quelqu'un
+      //  SUPPRIME le decor « Cuisine » qu'elle utilise. Renommer ne coute rien —
+      //  Marc verra le nouveau nom. Supprimer, si : la scene perd son lien, et
+      //  Marc ne s'en apercoit pas avant l'export.
+      //  On refuse donc la suppression tant qu'une scene qui s'en sert est tenue
+      //  par quelqu'un. C'est temporaire, pas definitif : trois minutes plus
+      //  tard, ou des que la personne passe a autre chose, la suppression repasse.
+      SCENE_KIND: { characters: 'character', actors: 'actor', locations: 'location', crew: 'crew', resources: 'resource' },
+
+      scenesTenuesLiees: (type, id) => {
+          try {
+              const kind = SceneLock.SCENE_KIND[type] || type;
+              if(!id || typeof UI === 'undefined' || !UI.scenesForFiche) return [];
+              const tenues = SceneLock.tous();
+              return UI.scenesForFiche(kind, id).filter(s => {
+                  const l = s && tenues[String(s.id)];
+                  return !!(l && !LockManager._mine(l));
+              });
+          } catch(e) { return []; }
+      },
+
+      // Renvoie true si la suppression peut se faire ; sinon explique et refuse.
+      autoriseSuppression: (type, id) => {
+          const bloquantes = SceneLock.scenesTenuesLiees(type, id);
+          if(!bloquantes.length) return true;
+          const s = bloquantes[0];
+          const l = SceneLock.tous()[String(s.id)];
+          const qui = l ? LockManager._who(l) : 'quelqu\'un';
+          const num = s.number || s.num || s.id;
+          Utils.toast('Impossible pour le moment : ' + qui + ' travaille sur la scène ' + num
+              + (bloquantes.length > 1 ? ' (et ' + (bloquantes.length - 1) + ' autre' + (bloquantes.length > 2 ? 's' : '') + ')' : '')
+              + ', qui utilise cette fiche. Réessayez dans un instant.', 'warning', 8000);
+          return false;
+      },
+
+      _enCours: {},   // scenes pour lesquelles une demande est partie
+
+      // Prend le verrou d'une scene. Renvoie true si je l'ai.
+      // ON NE PREND QU'UNE SCENE A LA FOIS : ouvrir une autre scene libere la
+      // precedente. Sans cela, quelqu'un qui parcourt son scenario verrouillerait
+      // tout ce qu'il a survole, et le laisserait bloque trois minutes.
+      prendre: async (sceneId) => {
+          if(!sceneId || !state.currentProjectId || !state.currentUser) return false;
+          if(state.currentRole === 'viewer') return false;
+          const id = String(sceneId);
+          if(SceneLock.tenueParMoi(id)) return true;
+          if(SceneLock._enCours[id]) return false;
+          SceneLock._enCours[id] = true;
+          try {
+              const { data, error } = await supabase.rpc('lock_acquire', {
+                  p_id: state.currentProjectId,
+                  p_key: SceneLock.clef(id),
+                  p_uid: LockManager._uid(),
+                  p_name: (state.currentUser.email || '').split('@')[0]
+              });
+              if(error) { console.warn('[SceneLock] prise du verrou :', error.message); return false; }
+              let lock = data;
+              if(Array.isArray(lock)) lock = lock[0] || null;
+              state.domainLocks = state.domainLocks || {};
+              if(lock) state.domainLocks[SceneLock.clef(id)] = lock;
+              const obtenu = LockManager._mine(lock);
+              if(obtenu) {
+                  // Liberer les autres APRES avoir obtenu celle-ci : si la prise
+                  // echoue, on ne s'est pas desarme pour rien.
+                  await SceneLock.libererSauf(id);
+              }
+              SceneLock.rafraichirUI();
+              return obtenu;
+          } catch(e) {
+              console.warn('[SceneLock] prise du verrou :', e && e.message);
+              return false;
+          } finally {
+              delete SceneLock._enCours[id];
+          }
+      },
+
+      liberer: async (sceneId) => {
+          if(!sceneId || !state.currentProjectId || !state.currentUser) return;
+          const id = String(sceneId);
+          if(!SceneLock.tenueParMoi(id)) return;
+          try {
+              await supabase.rpc('lock_release', {
+                  p_id: state.currentProjectId, p_key: SceneLock.clef(id), p_uid: LockManager._uid()
+              });
+          } catch(e) {
+              // Pas grave : le verrou expirera tout seul au bout de 3 minutes.
+              console.warn('[SceneLock] liberation echouee, expiration dans 3 min :', e && e.message);
+          }
+          if(state.domainLocks) delete state.domainLocks[SceneLock.clef(id)];
+          SceneLock.rafraichirUI();
+      },
+
+      libererSauf: async (sceneIdGardee) => {
+          const garde = String(sceneIdGardee || '');
+          const miennes = Object.keys(SceneLock.tous()).filter(id => id !== garde && SceneLock.tenueParMoi(id));
+          for(const id of miennes) await SceneLock.liberer(id);
+      },
+      libererToutes: () => SceneLock.libererSauf(null),
+
+      // BATTEMENT DE COEUR. Un verrou qu'on ne fait plus battre est considere
+      // abandonne au bout de trois minutes — c'est ce qui libere la place quand
+      // quelqu'un ferme son ordinateur. LockManager fait battre SES domaines
+      // toutes les minutes ; sans la meme horloge ici, ma propre scene
+      // expirerait sous mes doigts pendant que j'ecris, et le voisin pourrait
+      // la prendre. On se branche donc sur le meme battement.
+      battre: async () => {
+          if(!state.currentProjectId || !state.currentUser) return;
+          const miennes = Object.keys(SceneLock.tous()).filter(id => SceneLock.tenueParMoi(id));
+          for(const id of miennes) {
+              try {
+                  await supabase.rpc('lock_heartbeat', {
+                      p_id: state.currentProjectId, p_key: SceneLock.clef(id), p_uid: LockManager._uid()
+                  });
+              } catch(e) { /* prochain battement dans une minute */ }
+          }
+      },
+
+      // ------------------------------------------------------------------
+      //  QUAND PREND-ON LE VERROU ? Quand le curseur ENTRE dans une scene.
+      // ------------------------------------------------------------------
+      //  Pas au survol (on verrouillerait tout ce qu'on parcourt), pas a
+      //  l'enregistrement (trop tard, l'autre aurait deja ecrit). Le curseur
+      //  dans le texte, c'est l'intention d'ecrire — et le defilement ne le
+      //  deplace pas, donc LIRE ne verrouille rien.
+      //  Le declencheur vit ICI et non dans l'editeur : le jour ou un autre
+      //  ecran rend une scene modifiable, il est couvert sans qu'on y pense.
+      CONTENEURS: '.script-continuous-scene, .fid-card[data-scene-id], [data-scene-id].scene-fiche',
+      DELAI: 250,
+      _inited: false,
+      _minuteur: null,
+
+      init: () => {
+          if(SceneLock._inited) return;
+          SceneLock._inited = true;
+          const surActivite = () => {
+              clearTimeout(SceneLock._minuteur);
+              SceneLock._minuteur = setTimeout(SceneLock._suivreCurseur, SceneLock.DELAI);
+          };
+          document.addEventListener('selectionchange', surActivite);
+          document.addEventListener('focusin', surActivite, true);
+          // Fermeture de la page : on rend la main tout de suite plutot que de
+          // laisser les autres attendre trois minutes l'expiration.
+          window.addEventListener('pagehide', () => { try { SceneLock.libererToutes(); } catch(e) {} });
+      },
+
+      _sceneDuCurseur: () => {
+          try {
+              const sel = document.getSelection();
+              let noeud = (sel && sel.anchorNode) || document.activeElement;
+              if(noeud && noeud.nodeType === 3) noeud = noeud.parentElement;
+              if(!noeud || !noeud.closest) return '';
+              const bloc = noeud.closest(SceneLock.CONTENEURS);
+              if(!bloc || bloc.closest(SceneLock.HORS_JEU)) return '';
+              return String(SceneLock._idDe(bloc) || '');
+          } catch(e) { return ''; }
+      },
+
+      _suivreCurseur: async () => {
+          if(state.currentRole === 'viewer') return;
+          const id = SceneLock._sceneDuCurseur();
+          if(!id) return;                       // curseur hors d'une scene : on garde la sienne
+          if(SceneLock.tenueParMoi(id)) return; // deja a moi
+          if(SceneLock.detenteur(id)) return;   // tenue par un autre : le badge le dit deja
+          await SceneLock.prendre(id);
+      },
+
+      // Redessine les marques de verrou. Appelee apres chaque changement connu ;
+      // le rafraichissement periodique de LockManager passe aussi par ici.
+      rafraichirUI: () => {
+          try { SceneLock.marquerEcrans(); } catch(e) { console.warn('[SceneLock] affichage :', e && e.message); }
+      },
+
+      // ------------------------------------------------------------------
+      //  AFFICHAGE : la scene tenue porte le badge de la personne et la
+      //  mention « verrouillée », PARTOUT ou elle apparait. On ne cherche pas
+      //  les ecrans un par un : on marque tout element qui porte l'identifiant
+      //  d'une scene, quel que soit l'ecran. Un ecran ajoute demain est couvert
+      //  sans qu'on ait a y penser — c'est la lecon des trois vignettes de
+      //  storyboard qui lisaient trois choses differentes.
+      // ------------------------------------------------------------------
+      SELECTEURS: '[data-scene-id], [data-sceneid], [data-scene]',
+      // Les LISTES DE CHOIX (export, partage, impression) portent aussi
+      // l'identifiant des scenes, pour cocher lesquelles inclure. Y poser un
+      // badge de verrou serait faux : choisir une scene dans un export ne la
+      // modifie pas. On les ecarte.
+      HORS_JEU: '.modal, .modal-overlay, .fb-ov, .tour-panel-ov, [id*="export"], [id*="chooser"], [class*="chooser"]',
+      _idDe: (el) => el.getAttribute('data-scene-id') || el.getAttribute('data-sceneid') || el.getAttribute('data-scene') || '',
+
+      marquerEcrans: () => {
+          const tenues = SceneLock.tous();
+          document.querySelectorAll(SceneLock.SELECTEURS).forEach(el => {
+              if(el.closest(SceneLock.HORS_JEU)) return;
+              const id = String(SceneLock._idDe(el) || '');
+              const l = id ? tenues[id] : null;
+              const parUnAutre = !!(l && !LockManager._mine(l));
+              el.classList.toggle('scene-verrouillee', parUnAutre);
+              el.classList.toggle('scene-a-moi', !!(l && LockManager._mine(l)));
+              const ancien = el.querySelector(':scope > .scene-lock-badge');
+              if(ancien) ancien.remove();
+              if(!parUnAutre) return;
+              const qui = LockManager._who(l);
+              const badge = document.createElement('span');
+              badge.className = 'scene-lock-badge';
+              badge.title = '🔒 Verrouillée — ' + qui + ' travaille sur cette scène';
+              const em = (l.holder_email || '').toLowerCase();
+              const pastille = document.createElement('span');
+              pastille.className = 'scene-lock-avatar';
+              if(em) pastille.style.background = Utils.getColor(em);
+              pastille.textContent = (qui[0] || '?').toUpperCase();
+              badge.appendChild(pastille);
+              const txt = document.createElement('span');
+              txt.className = 'scene-lock-texte';
+              txt.textContent = '🔒 Verrouillée';
+              badge.appendChild(txt);
+              el.appendChild(badge);
+          });
+      }
+  };
+
   const DBPresence = {
       timer: null,
       channel: null,
@@ -16695,6 +17127,17 @@ const LockManager = {
       saveScene: async (scene) => {
           if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) return false;
           if(!scene || !scene.id || !state.currentProjectId) return false;
+          // REFUS AU POINT DE PASSAGE, PAS A L'ECRAN (v601). Chaque ecran qui
+          // montre une scene pourrait oublier de verifier le verrou — il y en a
+          // cinq, et il en viendra d'autres. La garde est donc posee LA OU
+          // L'ECRITURE PART : une scene tenue par quelqu'un d'autre n'est jamais
+          // ecrite, quel que soit l'ecran qui le demande.
+          if(typeof SceneLock !== 'undefined' && !SceneLock.peutEcrire(scene.id)) {
+              const qui = SceneLock.qui(scene.id);
+              console.warn('[Store] ecriture refusee : scene tenue par', qui);
+              Utils.toast('Cette scène est verrouillée' + (qui ? ' par ' + qui : '') + ' : votre modification n\'a pas été enregistrée.', 'warning', 7000);
+              return false;
+          }
           if(StoreSave._sceneRpcAbsente) { StoreSave.save(); return false; }
           try {
               const propre = JSON.parse(JSON.stringify(scene, (k, v) => v === undefined ? null : v));
@@ -17810,7 +18253,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               state.statsFilter = { scope: 'all', seasonId: null, episodeId: null }; // Stats: filtre de scope par défaut
               NavMemory.setProject(id); // Persistance pour F5
               LoadingScreen.setProgress(95);
-              UI.launchEditor(); Store.startRealtimeListener(id); Store.initPresence(id); LockManager.init(id); if(typeof DBPresence !== 'undefined') DBPresence.start(id); if(typeof MiniChat !== 'undefined') MiniChat.start(id);
+              UI.launchEditor(); Store.startRealtimeListener(id); Store.initPresence(id); LockManager.init(id); if(typeof SceneLock !== 'undefined') SceneLock.init(); if(typeof DBPresence !== 'undefined') DBPresence.start(id); if(typeof MiniChat !== 'undefined') MiniChat.start(id);
               // S7.1 : forcer la sauvegarde si migration saisons effectuée
               if(needsMigrationSave) setTimeout(() => Store.save(), 1000);
               LoadingScreen.hide();
@@ -24512,6 +24955,11 @@ initCategoriesDragDrop: () => {
       updateDataItem: (type, idx, val) => { const k = { characters:'character', actors:'actor', locations:'location', crew:'crew' }[type]; if(k && !Permissions.canEditFiche(k)) return; const _it = state.data[type][idx]; if(_it && _it.publicProfileId) return; if(state.data[type][idx]) { const key = (type === 'characters' || type === 'actors') ? 'bio' : 'desc'; state.data[type][idx][key] = val; Store.saveDebounced(); } },
       deleteDataItem: async (type, idx) => { 
           if(PublicProfile._engineMode) return; // fiche moteur : pas de suppression ici
+          // v601 : on n'efface pas une fiche pendant que quelqu'un ecrit une
+          // scene qui s'en sert (voir SceneLock.autoriseSuppression). Refus
+          // temporaire : la suppression redevient possible des que la scene est
+          // liberee.
+          if(typeof SceneLock !== 'undefined' && !SceneLock.autoriseSuppression(type, state.data[type] && state.data[type][idx] && state.data[type][idx].id)) return;
           if(await ConfirmModal.confirmDelete("Cet élément sera supprimé.")) { 
               if(typeof CardModal !== 'undefined' && CardModal.closeIfShowing) CardModal.closeIfShowing(type, state.data[type][idx]?.id);
               // Si on supprime un acteur, délier les personnages associés
@@ -83269,7 +83717,7 @@ const Weather = {
       },
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PersonIdentity, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileSkills, ProfileGear, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, CoursesWeb, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo, DBPresence, LockManager, LockDomains, Links, Web, FicheLinks, RenameReview, Diag, FicheUI, FicheBlocks, Board, ScriptShare, ScriptReader, ScriptReview, ProjectWelcome, PhotoViewer };
+  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PersonIdentity, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileSkills, ProfileGear, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, CoursesWeb, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, GroupDnD, Geo, DBPresence, LockManager, LockDomains, SceneLock, Links, Web, FicheLinks, RenameReview, Diag, FicheUI, FicheBlocks, Board, ScriptShare, ScriptReader, ScriptReview, ProjectWelcome, PhotoViewer };
 })();
 </script>
 

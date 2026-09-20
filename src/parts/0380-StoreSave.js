@@ -21,6 +21,17 @@
       saveScene: async (scene) => {
           if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) return false;
           if(!scene || !scene.id || !state.currentProjectId) return false;
+          // REFUS AU POINT DE PASSAGE, PAS A L'ECRAN (v601). Chaque ecran qui
+          // montre une scene pourrait oublier de verifier le verrou — il y en a
+          // cinq, et il en viendra d'autres. La garde est donc posee LA OU
+          // L'ECRITURE PART : une scene tenue par quelqu'un d'autre n'est jamais
+          // ecrite, quel que soit l'ecran qui le demande.
+          if(typeof SceneLock !== 'undefined' && !SceneLock.peutEcrire(scene.id)) {
+              const qui = SceneLock.qui(scene.id);
+              console.warn('[Store] ecriture refusee : scene tenue par', qui);
+              Utils.toast('Cette scène est verrouillée' + (qui ? ' par ' + qui : '') + ' : votre modification n\'a pas été enregistrée.', 'warning', 7000);
+              return false;
+          }
           if(StoreSave._sceneRpcAbsente) { StoreSave.save(); return false; }
           try {
               const propre = JSON.parse(JSON.stringify(scene, (k, v) => v === undefined ? null : v));

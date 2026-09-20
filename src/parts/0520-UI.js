@@ -1631,6 +1631,11 @@
       updateDataItem: (type, idx, val) => { const k = { characters:'character', actors:'actor', locations:'location', crew:'crew' }[type]; if(k && !Permissions.canEditFiche(k)) return; const _it = state.data[type][idx]; if(_it && _it.publicProfileId) return; if(state.data[type][idx]) { const key = (type === 'characters' || type === 'actors') ? 'bio' : 'desc'; state.data[type][idx][key] = val; Store.saveDebounced(); } },
       deleteDataItem: async (type, idx) => { 
           if(PublicProfile._engineMode) return; // fiche moteur : pas de suppression ici
+          // v601 : on n'efface pas une fiche pendant que quelqu'un ecrit une
+          // scene qui s'en sert (voir SceneLock.autoriseSuppression). Refus
+          // temporaire : la suppression redevient possible des que la scene est
+          // liberee.
+          if(typeof SceneLock !== 'undefined' && !SceneLock.autoriseSuppression(type, state.data[type] && state.data[type][idx] && state.data[type][idx].id)) return;
           if(await ConfirmModal.confirmDelete("Cet élément sera supprimé.")) { 
               if(typeof CardModal !== 'undefined' && CardModal.closeIfShowing) CardModal.closeIfShowing(type, state.data[type][idx]?.id);
               // Si on supprime un acteur, délier les personnages associés

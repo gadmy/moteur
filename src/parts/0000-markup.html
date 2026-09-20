@@ -131,22 +131,18 @@ Rien d'ouvert côté code au 20 septembre en dehors des chantiers ci-dessous.
     defauts. C'est la partie a construire lentement et a eprouver.
     ETAPES. (1) et (2) SONT FAITES le 20 septembre, verrou de domaine inchange :
     rien ne change a l'usage, le piege est enleve. RESTENT :
-      (3) VERROU PAR SCENE et bandeau « cette scene est ecrite par X ». C'est la
-          seule etape VISIBLE, et la plus delicate. Decision deja prise avec le
-          developpeur : le badge d'onglet ne disparait pas, il cesse simplement
-          de VERROUILLER — il continue d'annoncer qui travaille la, et le verrou
-          reel descend a la scene.
-          A VERIFIER AVANT DE COMMENCER : LockDomains.defs.scenes couvre aussi
-          seasons, episodes, tags, groups et scriptMeta. Ces cles-la ne sont PAS
-          des scenes et doivent garder un verrou de domaine : sinon deux
-          personnes qui renomment une saison s'ecrasent, sans filet cette fois.
-          Le domaine « scenes » doit donc etre COUPE EN DEUX, pas supprime.
-      (4) Notifications d'en-tete pour l'ordre et les liens (« ta scene a ete
-          deplacee », « le decor a change »), qui ne bloquent rien.
-    PERTE ASSUMEE, CONNUE ET MESUREE : si quelqu'un SUPPRIME une scene pendant
-    que j'y ecris, la suppression gagne et mon texte part avec. C'est le seul
-    cas de perte des huit testes. L'etape (3) le fermera — une scene tenue par
-    quelqu'un ne pourra plus etre supprimee par un autre.
+      (3) FAITE le 20 septembre : verrou par scene (SceneLock), refus pose sur
+          la sauvegarde d'une scene, marque « Verrouillee » partout ou la scene
+          apparait, domaine « scenes » coupe en deux (« Structure du recit »
+          garde saisons, episodes, etiquettes, groupes et metadonnees), et
+          suppression d'une fiche refusee tant qu'une scene qui s'en sert est
+          tenue par quelqu'un. Le badge d'onglet reste, il ne verrouille plus.
+      (4) RESTE : notifications d'en-tete pour l'ordre et les liens (« ta scene
+          a ete deplacee », « le decor a change »), qui ne bloquent rien.
+    PERTE ASSUMEE, CONNUE ET MESUREE, DESORMAIS FERMEE : si quelqu'un
+    SUPPRIMAIT une scene pendant que j'y ecrivais, la suppression gagnait et mon
+    texte partait avec. C'etait le seul cas de perte des huit testes. L'etape
+    (3) l'a ferme : une scene tenue n'est plus ecrite ni effacee par un autre.
 
 [ ] AVENIR DU FORUM — a trancher. Il est SUSPENDU depuis un moment
     (Forum.suspended = true : le menu y mene, un message le dit, on revient au
@@ -1174,6 +1170,86 @@ vv601 (20 septembre 2026) — EN COURS.
   Verifie sur les sept formes possibles : chemin nu, adresse publique du bucket
   prive, image encodee en dur, adresse externe, chemin inconnu, tentative
   « javascript: » et valeur vide. Les trois dernieres rendent bien du vide.
+
+  LE VERROU DESCEND A LA SCENE. Jusqu'ici un verrou couvrait un DOMAINE entier :
+  « scenes » bloquait d'un coup le Scenario, le Sequencier et le Depouillement.
+  Une personne ecrivait, tout le monde regardait. Trois etapes, dans cet ordre,
+  et l'ordre est tout : l'ECRITURE d'abord, le verrou ensuite.
+
+  (1) ECRIRE UNE SEULE SCENE. La sauvegarde envoyait la LISTE COMPLETE des
+  scenes ; deux personnes qui ecrivent chacune la sienne s'ecrasaient, la
+  derniere gagnait. Le verrou de domaine n'etait que le pansement pose sur ce
+  defaut-la. Nouvelle fonction serveur patch_project_scene (sql/ecriture_par_
+  scene.sql, appliquee sur la base) : elle remplace UNE entree du tableau,
+  reperee par son identifiant, sans toucher aux autres — et si l'identifiant est
+  inconnu, elle AJOUTE plutot que d'echouer, pour que deux creations simultanees
+  en gardent chacune une. Memes gardes que patch_project_data : aucun acces
+  nouveau. Cote navigateur, StoreSave.saveScene. REPLI AUTOMATIQUE : si la
+  fonction manque sur la base, on retombe sur l'ancienne sauvegarde — mais
+  UNIQUEMENT sur l'erreur « fonction inconnue ». Une erreur de droit ou de
+  reseau ne doit pas se transformer en reecriture complete et silencieuse.
+
+  (2) FUSIONNER SCENE PAR SCENE. C'etait la piece dangereuse. L'ancienne fusion
+  protegeait une cle ENTIERE : une modification non enregistree dans « scenes »
+  faisait refuser TOUT ce qui venait des autres. Desormais StoreRealtime fusionne
+  scene par scene : je garde celles que j'ai modifiees, je prends les leurs,
+  l'ORDRE du serveur fait foi, mes scenes toutes neuves encore jamais
+  enregistrees sont ajoutees a la fin, et une scene supprimee chez eux disparait
+  bien chez moi. Se tromper la, c'est perdre le texte de quelqu'un SANS message
+  d'erreur : chaque cas a ete eprouve un par un.
+
+  (3) LE VERROU PAR SCENE. Aucune piece serveur nouvelle : la table des verrous
+  accepte n'importe quelle clef en texte libre et les arbitre toutes de la meme
+  facon (premier arrive, expiration a trois minutes sans battement). On y pose
+  donc « scene:<identifiant> ». Nouveau module SceneLock.
+  ON NE PREND QU'UNE SCENE A LA FOIS : ouvrir une autre scene libere la
+  precedente. Sans cela, quelqu'un qui parcourt son scenario verrouillerait tout
+  ce qu'il a survole et le laisserait bloque trois minutes.
+  LE VERROU SE PREND QUAND LE CURSEUR ENTRE DANS LA SCENE — pas au survol (on
+  verrouillerait tout ce qu'on parcourt), pas a l'enregistrement (trop tard,
+  l'autre aurait deja ecrit). Le defilement ne deplace pas le curseur : LIRE ne
+  verrouille donc rien. Et le declencheur vit DANS le module, pas dans
+  l'editeur : le jour ou un autre ecran rend une scene modifiable, il est
+  couvert sans qu'on y pense.
+  LE REFUS EST POSE LA OU L'ECRITURE PART, pas sur les ecrans. Cinq ecrans
+  montrent une scene aujourd'hui et il en viendra d'autres ; chacun pourrait
+  oublier de verifier. StoreSave.saveScene refuse donc toute scene tenue par
+  quelqu'un d'autre, quel que soit l'ecran qui le demande, et le dit.
+  LE BADGE D'ONGLET RESTE, IL CESSE SEULEMENT DE VERROUILLER. Savoir que
+  quelqu'un ecrit dans le Scenario reste utile — on continue de l'annoncer, sans
+  empecher personne d'entrer. La scene tenue, elle, porte la pastille de la
+  personne et la mention « Verrouillee » PARTOUT ou elle apparait : on ne marque
+  pas les ecrans un par un, on marque tout element qui porte l'identifiant d'une
+  scene. Les listes de choix des exports en sont ecartees — y cocher une scene
+  ne la modifie pas.
+
+  LE DOMAINE « SCENES » EST COUPE EN DEUX, PAS SUPPRIME. Il couvrait aussi les
+  saisons, les episodes, les etiquettes, les groupes et les metadonnees du
+  scenario. Ce ne sont pas des scenes et elles n'ont aucun verrou fin : les
+  laisser sans domaine, c'etait les laisser sans filet. Elles gardent donc un
+  verrou de domaine, sous leur vrai nom, « Structure du recit ».
+
+  CE QU'ON NE VERROUILLE PAS, ET POURQUOI. Verrouiller en cascade les fiches
+  liees (comedien, personnage, decor) paraissait prudent : c'est l'inverse.
+  Mesure sur un projet reel de 21 scenes — la realisatrice est rattachee aux 21,
+  les comediens principaux a 20. Verrouiller une seule scene aurait donc fige
+  presque toutes les fiches du projet, bien pire qu'avant. Le vrai danger n'est
+  pas qu'on RENOMME un decor pendant que j'ecris (je verrai le nouveau nom),
+  c'est qu'on l'EFFACE : la scene perd son lien et je ne m'en apercois qu'a
+  l'export. C'est donc la SUPPRESSION, et elle seule, qui est refusee tant
+  qu'une scene qui s'en sert est tenue par quelqu'un. Refus temporaire, jamais
+  definitif. La garde est posee sur UI.deleteDataItem, porte unique de la
+  suppression des fiches.
+
+  LES SOUS-ELEMENTS SONT COUVERTS D'OFFICE : depouillement, resume, titre, liens
+  vers les personnages et le decor vivent DANS l'objet scene. Verrouiller la
+  scene les verrouille tous, partout a la fois.
+
+  DETAIL QUI AURAIT TOUT GACHE : le battement de coeur. Un verrou qu'on ne fait
+  plus battre est considere abandonne au bout de trois minutes. Les verrous de
+  scene se branchent sur la meme horloge que les domaines — sans cela ma propre
+  scene aurait expire sous mes doigts pendant que j'ecris, et le voisin aurait
+  pu la prendre.
 
 
 -->

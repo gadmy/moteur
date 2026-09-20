@@ -834,7 +834,7 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               state.statsFilter = { scope: 'all', seasonId: null, episodeId: null }; // Stats: filtre de scope par défaut
               NavMemory.setProject(id); // Persistance pour F5
               LoadingScreen.setProgress(95);
-              UI.launchEditor(); Store.startRealtimeListener(id); Store.initPresence(id); LockManager.init(id); if(typeof DBPresence !== 'undefined') DBPresence.start(id); if(typeof MiniChat !== 'undefined') MiniChat.start(id);
+              UI.launchEditor(); Store.startRealtimeListener(id); Store.initPresence(id); LockManager.init(id); if(typeof SceneLock !== 'undefined') SceneLock.init(); if(typeof DBPresence !== 'undefined') DBPresence.start(id); if(typeof MiniChat !== 'undefined') MiniChat.start(id);
               // S7.1 : forcer la sauvegarde si migration saisons effectuée
               if(needsMigrationSave) setTimeout(() => Store.save(), 1000);
               LoadingScreen.hide();
