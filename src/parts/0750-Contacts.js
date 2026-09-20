@@ -105,7 +105,7 @@
                     </select>
                     <input type="text" class="global-search-input" id="contact-filter-role" placeholder="Fonction..." data-tooltip="Fonction..." style="width:130px;" oninput="app.Contacts.searchDirectory()">
                     <input type="text" class="global-search-input" id="contact-filter-camera" placeholder="📷 Caméra..." data-tooltip="📷 Caméra..." style="width:130px;" oninput="app.Contacts.searchDirectory()">
-                    <input type="text" class="global-search-input" id="contact-filter-equipment" placeholder="🔧 Matériel..." data-tooltip="🔧 Matériel..." style="width:130px;" oninput="app.Contacts.searchDirectory()">
+                    <input type="text" class="global-search-input" id="contact-filter-equipment" placeholder="🔧 Matériel (caméra, objectifs...)" data-tooltip="🔧 Matériel (caméra, objectifs...)" style="width:130px;" oninput="app.Contacts.searchDirectory()">
                 </div>
             `;
         } else if(tab === 'projects') {
@@ -223,7 +223,8 @@
                 if(camera) results = results.filter(r => (r.cameras || []).some(c => c.toLowerCase().includes(camera)));
                 if(equipment) {
                     results = results.filter(r => {
-                        const allEquip = [...(r.cameras || []), ...(r.lenses || []), ...(r.otherEquipment || [])].join(' ').toLowerCase();
+                        // v601 : deux listes seulement (cf. ProfileGear).
+                        const allEquip = [...(r.cameras || []), ...(r.lenses || [])].join(' ').toLowerCase();
                         return allEquip.includes(equipment);
                     });
                 }
@@ -348,7 +349,6 @@
                 <p><strong>Fonction:</strong> ${Utils.escape(person.role || 'N/A')}</p>
                 ${person.cameras && person.cameras.length > 0 ? `<p><strong>Caméras:</strong> ${Utils.escape(person.cameras.join(', '))}</p>` : ''}
                 ${person.lenses && person.lenses.length > 0 ? `<p><strong>Objectifs:</strong> ${Utils.escape(person.lenses.join(', '))}</p>` : ''}
-                ${person.otherEquipment && person.otherEquipment.length > 0 ? `<p><strong>Matériel:</strong> ${Utils.escape(person.otherEquipment.join(', '))}</p>` : ''}
             `;
         } else if(tab === 'projects') {
             defaultIcon = '🎬';

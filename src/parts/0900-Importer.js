@@ -11523,9 +11523,10 @@ const UniverseProfileModal = {
                 addInfo('Département', deptName);
             }
             addInfo('Expérience', profile.experience);
-            if(profile.equipment && profile.equipment.length > 0) {
-                addInfo('Matériel', profile.equipment.join(', '));
-            }
+            // v601 : « equipment » n'a jamais existe sur un profil — la ligne ne
+            // s'est donc jamais affichee. Les vrais champs sont cameras et lenses.
+            if(profile.cameras && profile.cameras.length > 0) addInfo('Caméras', profile.cameras.join(', '));
+            if(profile.lenses && profile.lenses.length > 0) addInfo('Objectifs', profile.lenses.join(', '));
             y += 4;
         }
         

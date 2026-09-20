@@ -2630,24 +2630,7 @@ const Forum = {
         scenario: { icon: '📝', name: 'Scénario', desc: 'Écriture, structure, dialogues' },
         realisation: { icon: '🎬', name: 'Réalisation', desc: 'Mise en scène, direction' },
         production: { icon: '💼', name: 'Production', desc: 'Financement, logistique' },
-        postprod: { icon: '✂️', name: 'Post-production', desc: 'Montage, VFX, son' },
-        retours_general: { icon: '🐛', name: '🐛 Général', desc: 'Bugs généraux', parent: 'retours' },
-        retours_editeur: { icon: '📝', name: '📝 Éditeur Scénario', desc: 'Éditeur de scénario', parent: 'retours' },
-        retours_sequencier: { icon: '🎬', name: '🎬 Séquencier', desc: 'Séquencier et planning', parent: 'retours' },
-        retours_depouillement: { icon: '📋', name: '📋 Dépouillement', desc: 'Dépouillement', parent: 'retours' },
-        retours_storyboard: { icon: '🎨', name: '🎨 Storyboard', desc: 'Storyboard', parent: 'retours' },
-        retours_moodboard: { icon: '🖼️', name: '🖼️ Moodboard', desc: 'Moodboard', parent: 'retours' },
-        retours_equipe: { icon: '👥', name: '👥 Équipe', desc: 'Gestion équipe', parent: 'retours' },
-        retours_budget: { icon: '💰', name: '💰 Budget', desc: 'Budget et dépenses', parent: 'retours' },
-        retours_contrats: { icon: '📄', name: '📄 Contrats', desc: 'Contrats', parent: 'retours' },
-        retours_univers: { icon: '🌍', name: '🌍 Univers', desc: 'Univers et profils', parent: 'retours' },
-        retours_forum: { icon: '💬', name: '💬 Forum', desc: 'Forum communautaire', parent: 'retours' },
-        retours_fil: { icon: '📰', name: '📰 Le Fil', desc: 'Le Fil actualité', parent: 'retours' },
-        retours_guide: { icon: '❓', name: '❓ Guide', desc: 'Guide et aide', parent: 'retours' },
-        retours_cours: { icon: '🎓', name: '🎓 Cours', desc: 'Cours cinéma', parent: 'retours' },
-        retours_profil: { icon: '👤', name: '👤 Mon Profil', desc: 'Profil utilisateur', parent: 'retours' },
-        retours_messages: { icon: '✉️', name: '✉️ Messages', desc: 'Messagerie', parent: 'retours' },
-        retours_design: { icon: '🎨', name: '🎨 Design/Thèmes', desc: 'Design et thèmes', parent: 'retours' }
+        postprod: { icon: '✂️', name: 'Post-production', desc: 'Montage, VFX, son' }
     },
     
     // ===================== NAVIGATION & CHARGEMENT =====================
