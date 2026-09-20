@@ -6872,12 +6872,26 @@ const StoryboardExport = {
         // erreur pour le dire.
         // On compose desormais dans l'ordre naturel : image de fond (racine OU
         // zone), calques de dessin (zone d'abord, racine en repli), puis objets.
+        // L'EDITEUR GAGNE, ET C'EST TOUTE LA REGLE (v601). Un plan peut porter une
+        // image a la RACINE (ancien format, souvent une esquisse de depart) ET un
+        // contenu dans la zone « original », celle qu'ecrit l'editeur de dessin.
+        // Les composer tous les deux faisait reapparaitre l'esquisse EN FOND,
+        // derriere le travail reel, des que celui-ci ne couvrait pas tout le
+        // cadre. Des que la zone a quelque chose a elle — un calque, un objet, une
+        // image — elle est la SEULE source ; la racine ne sert plus que de repli
+        // pour les plans jamais ouverts dans l'editeur.
+        // RIEN N'EST EFFACE : l'ancienne image dort dans les donnees et
+        // reapparaitrait si on vidait la zone. On choisit ce qu'on REGARDE, pas
+        // ce qu'on garde.
         const zoneOrig = (shot.drawings && shot.drawings.original) || null;
-        const fondUrl = (shot.imageType === 'upload' && shot.imageUrl) ? shot.imageUrl
-                      : (zoneOrig && zoneOrig.imageType === 'upload' && zoneOrig.imageUrl) ? zoneOrig.imageUrl
-                      : null;
-        const calques = (zoneOrig && zoneOrig.drawingData) || shot.drawingData || null;
-        const objets = (zoneOrig && Array.isArray(zoneOrig.objects)) ? zoneOrig.objects : [];
+        const zonePleine = !!(zoneOrig && (zoneOrig.drawingData
+                                        || (zoneOrig.imageType === 'upload' && zoneOrig.imageUrl)
+                                        || (Array.isArray(zoneOrig.objects) && zoneOrig.objects.length > 0)));
+        const fondUrl = zonePleine
+            ? ((zoneOrig.imageType === 'upload' && zoneOrig.imageUrl) ? zoneOrig.imageUrl : null)
+            : ((shot.imageType === 'upload' && shot.imageUrl) ? shot.imageUrl : null);
+        const calques = zonePleine ? (zoneOrig.drawingData || null) : (shot.drawingData || null);
+        const objets = (zonePleine && Array.isArray(zoneOrig.objects)) ? zoneOrig.objects : [];
 
         if(fondUrl || calques || objets.length > 0) {
             let etape = Promise.resolve();
