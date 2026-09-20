@@ -4335,23 +4335,74 @@ const Presentation = {
             y = PdfTheme.sectionBand(doc, { x: margin, y, width: pageWidth - margin * 2,
                                             title, accent: PdfTheme.accentFor('Présentation') });
         };
+        const COL_VAL = 50;   // mm : abscisse de la colonne des valeurs
         const keyVal = (key, val) => {
             if(!val) return;
             if(y > pageHeight - 15) { doc.addPage(); y = margin; }
             doc.setFontSize(9);
             doc.setFont('helvetica', 'bold');
             doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
-            doc.text(key + ' :', margin, y);
+            const libelle = key + ' :';
+            doc.text(libelle, margin, y);
+            // LIBELLE TROP LONG : IL MORDAIT SUR LA VALEUR (v601). La colonne des
+            // valeurs est a 50 mm fixes ; « Touristes / villageois / hommes de
+            // main : » la depasse et s'imprimait PAR-DESSUS « 40 role(s) », deux
+            // textes superposes et illisibles. Quand le libelle deborde, la valeur
+            // passe a la ligne SOUS lui, sur toute la largeur.
+            const deborde = doc.getTextWidth(libelle) > COL_VAL - 4;
+            const xVal = deborde ? margin : margin + COL_VAL;
+            if(deborde) { y += 4.5; if(y > pageHeight - 15) { doc.addPage(); y = margin; } }
             doc.setFont('helvetica', 'normal');
             doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
             const valStr = PdfTheme.cleanText(String(val));
-            const lines = doc.splitTextToSize(valStr, pageWidth - margin - 55);
+            const lines = doc.splitTextToSize(valStr, pageWidth - margin - xVal - 5);
             lines.forEach((l, i) => {
                 if(i > 0 && y > pageHeight - 15) { doc.addPage(); y = margin; }
-                doc.text(l, margin + 50, y);
+                doc.text(l, xVal, y);
                 if(i < lines.length - 1) y += 5;
             });
             y += 6.5;
+        };
+
+        // BESOINS EQUIPE EN DEUX COLONNES (v601). Ici la valeur est un simple
+        // NOMBRE : une ligne pleine largeur par poste laissait les trois quarts
+        // de la page en blanc. Deux paires poste / effectif par ligne.
+        const keyValDeuxCol = (paires) => {
+            const gouttiere = 10;
+            const colL = (pageWidth - margin * 2 - gouttiere) / 2;
+            doc.setFontSize(9);
+            for(let i = 0; i < paires.length; i += 2) {
+                if(y > pageHeight - 15) { doc.addPage(); y = margin; }
+                for(let c = 0; c < 2; c++) {
+                    const paire = paires[i + c];
+                    if(!paire) break;
+                    const x = margin + c * (colL + gouttiere);
+                    const compte = PdfTheme.cleanText(String(paire[1]));
+                    doc.setFont('helvetica', 'normal');
+                    doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+                    const largeurCompte = doc.getTextWidth(compte);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setTextColor(...PdfTheme.COLORS.TEXT_MUTED);
+                    // Meme garde que ci-dessus : on tronque sur la COLONNE, sinon
+                    // un poste au nom long passerait sous l'effectif d'a cote.
+                    let lbl = PdfTheme.cleanText(String(paire[0]));
+                    const place = colL - largeurCompte - 6;
+                    // Un caractere a la fois, suite et deux-points COMPRIS dans la
+                    // mesure : retirer n caracteres pour en rajouter autant tourne
+                    // en rond (cf. la meme faute au recapitulatif global).
+                    if(doc.getTextWidth(lbl + ' :') > place) {
+                        while(lbl.length > 2 && doc.getTextWidth(lbl + '… :') > place) lbl = lbl.slice(0, -1);
+                        lbl += '…';
+                    }
+                    lbl += ' :';
+                    doc.text(lbl, x, y);
+                    doc.setFont('helvetica', 'normal');
+                    doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
+                    doc.text(compte, x + colL - 3, y, { align: 'right' });
+                }
+                y += 5.5;
+            }
+            y += 3;
         };
         
         // === IDENTITÉ DU PROJET ===
@@ -4414,13 +4465,15 @@ const Presentation = {
         if(posesRetenues.length > 0 || besoinsPerso.length > 0) {
             y += 4;
             section('BESOINS ÉQUIPE');
+            const pairesEquipe = [];
             posesRetenues.forEach(([posId, n]) => {
                 const pos = Presentation.crewPositions.find(x => x.id === posId);
-                keyVal(PdfTheme.cleanText(pos ? pos.name : posId), String(n.count || 1));
+                pairesEquipe.push([pos ? pos.name : posId, String(n.count || 1)]);
             });
             besoinsPerso.forEach(cn => {
-                keyVal(PdfTheme.cleanText(cn.name || ''), String(cn.count || 1));
+                if(cn.name) pairesEquipe.push([cn.name, String(cn.count || 1)]);
             });
+            keyValDeuxCol(pairesEquipe);
         }
         
         // === BESOINS COMÉDIENS ===
