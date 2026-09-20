@@ -38,17 +38,27 @@
       badge.className = 'feedback-bubble-badge';
       badge.id = 'fb-badge';
       b.appendChild(badge);
+      // Le mot du rappel vit en permanence dans l'ampoule, invisible : il est
+      // seulement joue par l'animation. Le recreer a chaque fois ne servirait
+      // qu'a fabriquer du dechet dans la page.
+      const hint = document.createElement('span');
+      hint.className = 'feedback-bubble-hint';
+      hint.setAttribute('aria-hidden', 'true');
+      hint.textContent = 'Remarques';
+      b.appendChild(hint);
       root.appendChild(b);
       document.body.appendChild(root);
       Feedback._refreshBadge();
       Feedback._flushIfDue();
       Feedback._scheduleMidnight();
+      Feedback._scheduleGlow();
     },
 
     unmount: () => {
       const r = document.getElementById('feedback-root');
       if (r) r.remove();
       if (Feedback._timer) { clearTimeout(Feedback._timer); Feedback._timer = null; }
+      if (Feedback._glowTimer) { clearTimeout(Feedback._glowTimer); Feedback._glowTimer = null; }
     },
 
     _refreshBadge: () => {
@@ -57,6 +67,43 @@
       const n = Feedback.queue().length;
       el.textContent = n > 9 ? '9+' : String(n);
       el.style.display = n > 0 ? 'flex' : 'none';
+    },
+
+    // ---- RAPPEL DE L'AMPOULE (v601) ----
+    // Elle est en bas a gauche et ne bouge jamais : on finit par ne plus la
+    // voir. Entre 1 et 10 minutes, elle brille quelques instants et le mot
+    // « Remarques » monte au-dessus en fondu. Le delai est RETIRE AU HASARD a
+    // chaque fois, jamais fixe : un battement regulier devient du decor au bout
+    // d'une heure, et on ne le voit plus non plus.
+    GLOW_MIN_MS: 60000,
+    GLOW_MAX_MS: 600000,
+    GLOW_MS: 2400,
+    _glowTimer: null,
+
+    _scheduleGlow: () => {
+      if (Feedback._glowTimer) clearTimeout(Feedback._glowTimer);
+      const etendue = Feedback.GLOW_MAX_MS - Feedback.GLOW_MIN_MS;
+      const ms = Feedback.GLOW_MIN_MS + Math.floor(Math.random() * (etendue + 1));
+      Feedback._glowTimer = setTimeout(() => {
+        Feedback._glowTimer = null;
+        Feedback._glow();
+        Feedback._scheduleGlow();
+      }, ms);
+    },
+
+    _glow: () => {
+      const b = document.querySelector('.feedback-bubble');
+      // ONGLET EN ARRIERE-PLAN ou panneau des remarques deja ouvert : on passe
+      // notre tour sans rien jouer. Briller dans un onglet que personne ne
+      // regarde ne previendrait de rien, et le prochain rendez-vous est deja
+      // pris par l'appelant.
+      if (!b || document.hidden || document.getElementById('fb-ov')) return;
+      b.classList.remove('fb-glow');
+      void b.offsetWidth;   // sans cette relecture, reposer la classe dans la
+                            // foulee ne REJOUE pas l'animation : le navigateur
+                            // ne voit aucun changement.
+      b.classList.add('fb-glow');
+      setTimeout(() => b.classList.remove('fb-glow'), Feedback.GLOW_MS + 100);
     },
 
     // ---- declenchement a minuit ----

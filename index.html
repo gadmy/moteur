@@ -791,6 +791,21 @@ vv601 (20 septembre 2026) — EN COURS.
   demarrage : une tablette a laquelle on branche une souris redevient un poste
   normal sans recharger la page.
 
+  L'AMPOULE DES REMARQUES SE RAPPELLE AU SOUVENIR. Elle est en bas a gauche et
+  ne bouge jamais : au bout d'une heure on ne la voit plus. Entre 1 et 10
+  minutes, elle brille maintenant quelques instants et le mot « Remarques »
+  monte au-dessus en fondu, comme les degats au-dessus d'un ennemi dans un jeu.
+  DELAI TIRE AU HASARD A CHAQUE FOIS, et c'est le point : un battement regulier
+  redevient du decor aussi vite que l'ampoule fixe. Elle passe son tour, sans
+  rien jouer, si l'onglet est en arriere-plan ou si le panneau des remarques est
+  deja ouvert — briller devant personne ne previent de rien.
+  DEUX DETAILS QUI COMPTENT : le mot ne recoit aucun clic (pointer-events none),
+  sinon il intercepterait celui destine a l'ampoule au moment ou il la
+  recouvre ; et reposer la classe d'animation dans la foulee ne la REJOUE pas
+  tant qu'on n'a pas relu une dimension de l'element — sans cette relecture, le
+  navigateur ne voit aucun changement et le rappel n'a lieu qu'une seule fois.
+  Rien ne bouge pour qui a demande moins d'animations (prefers-reduced-motion).
+
 
 -->
 <head>
@@ -5805,6 +5820,28 @@ body.presentation-mode .presentation-bar {
      MiniChat pose en se montant et retire en s'arretant. */
   .feedback-bubble { position: fixed; bottom: 20px; left: 20px; width: 52px; height: 52px; border-radius: 50%; background: var(--panel-bg); color: var(--text-main); border: 1px solid var(--border); cursor: pointer; font-size: 1.3rem; box-shadow: 0 6px 18px rgba(0,0,0,.35); z-index: var(--z-dropdown); display: flex; align-items: center; justify-content: center; transition: bottom .15s, transform .12s; }
   .feedback-bubble:hover { transform: scale(1.08); }
+  /* RAPPEL DE L'AMPOULE (v601) : elle ne bouge jamais, on finit par ne plus la
+     voir. De temps en temps elle brille quelques instants et le mot monte
+     au-dessus en fondu, comme les degats au-dessus d'un ennemi dans un jeu.
+     Rien n'est cliquable la-dedans : pointer-events none, sinon le mot
+     intercepterait le clic destine a l'ampoule. */
+  .feedback-bubble-hint { position: absolute; bottom: 100%; left: 50%; transform: translate(-50%, 6px); margin-bottom: 8px; padding: 3px 9px; border-radius: 10px; background: var(--panel-bg); border: 1px solid var(--border); color: var(--text-main); font-size: .72rem; font-weight: 700; letter-spacing: .03em; white-space: nowrap; pointer-events: none; opacity: 0; box-shadow: 0 4px 12px rgba(0,0,0,.3); }
+  .feedback-bubble.fb-glow { animation: fb-glow 2.4s ease-in-out; }
+  .feedback-bubble.fb-glow .feedback-bubble-hint { animation: fb-hint 2.4s ease-out; }
+  @keyframes fb-glow {
+    0%, 100% { box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+    22%, 78% { box-shadow: 0 6px 18px rgba(0,0,0,.35), 0 0 15px 3px rgba(255,193,7,.45); }
+    50%      { box-shadow: 0 6px 18px rgba(0,0,0,.35), 0 0 24px 7px rgba(255,193,7,.75); }
+  }
+  @keyframes fb-hint {
+    0%   { opacity: 0; transform: translate(-50%, 6px); }
+    18%  { opacity: 1; transform: translate(-50%, -2px); }
+    68%  { opacity: 1; transform: translate(-50%, -8px); }
+    100% { opacity: 0; transform: translate(-50%, -20px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .feedback-bubble.fb-glow, .feedback-bubble.fb-glow .feedback-bubble-hint { animation: none; }
+  }
   .feedback-bubble-badge { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; border-radius: 10px; background: #e94560; color: white; font-size: 11px; font-weight: 700; display: none; align-items: center; justify-content: center; padding: 0 5px; }
   .fb-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
   .fb-item:hover { background: var(--highlight); }
@@ -67118,17 +67155,27 @@ ${window.location.origin}${window.location.pathname}
       badge.className = 'feedback-bubble-badge';
       badge.id = 'fb-badge';
       b.appendChild(badge);
+      // Le mot du rappel vit en permanence dans l'ampoule, invisible : il est
+      // seulement joue par l'animation. Le recreer a chaque fois ne servirait
+      // qu'a fabriquer du dechet dans la page.
+      const hint = document.createElement('span');
+      hint.className = 'feedback-bubble-hint';
+      hint.setAttribute('aria-hidden', 'true');
+      hint.textContent = 'Remarques';
+      b.appendChild(hint);
       root.appendChild(b);
       document.body.appendChild(root);
       Feedback._refreshBadge();
       Feedback._flushIfDue();
       Feedback._scheduleMidnight();
+      Feedback._scheduleGlow();
     },
 
     unmount: () => {
       const r = document.getElementById('feedback-root');
       if (r) r.remove();
       if (Feedback._timer) { clearTimeout(Feedback._timer); Feedback._timer = null; }
+      if (Feedback._glowTimer) { clearTimeout(Feedback._glowTimer); Feedback._glowTimer = null; }
     },
 
     _refreshBadge: () => {
@@ -67137,6 +67184,43 @@ ${window.location.origin}${window.location.pathname}
       const n = Feedback.queue().length;
       el.textContent = n > 9 ? '9+' : String(n);
       el.style.display = n > 0 ? 'flex' : 'none';
+    },
+
+    // ---- RAPPEL DE L'AMPOULE (v601) ----
+    // Elle est en bas a gauche et ne bouge jamais : on finit par ne plus la
+    // voir. Entre 1 et 10 minutes, elle brille quelques instants et le mot
+    // « Remarques » monte au-dessus en fondu. Le delai est RETIRE AU HASARD a
+    // chaque fois, jamais fixe : un battement regulier devient du decor au bout
+    // d'une heure, et on ne le voit plus non plus.
+    GLOW_MIN_MS: 60000,
+    GLOW_MAX_MS: 600000,
+    GLOW_MS: 2400,
+    _glowTimer: null,
+
+    _scheduleGlow: () => {
+      if (Feedback._glowTimer) clearTimeout(Feedback._glowTimer);
+      const etendue = Feedback.GLOW_MAX_MS - Feedback.GLOW_MIN_MS;
+      const ms = Feedback.GLOW_MIN_MS + Math.floor(Math.random() * (etendue + 1));
+      Feedback._glowTimer = setTimeout(() => {
+        Feedback._glowTimer = null;
+        Feedback._glow();
+        Feedback._scheduleGlow();
+      }, ms);
+    },
+
+    _glow: () => {
+      const b = document.querySelector('.feedback-bubble');
+      // ONGLET EN ARRIERE-PLAN ou panneau des remarques deja ouvert : on passe
+      // notre tour sans rien jouer. Briller dans un onglet que personne ne
+      // regarde ne previendrait de rien, et le prochain rendez-vous est deja
+      // pris par l'appelant.
+      if (!b || document.hidden || document.getElementById('fb-ov')) return;
+      b.classList.remove('fb-glow');
+      void b.offsetWidth;   // sans cette relecture, reposer la classe dans la
+                            // foulee ne REJOUE pas l'animation : le navigateur
+                            // ne voit aucun changement.
+      b.classList.add('fb-glow');
+      setTimeout(() => b.classList.remove('fb-glow'), Feedback.GLOW_MS + 100);
     },
 
     // ---- declenchement a minuit ----
