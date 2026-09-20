@@ -1,5 +1,63 @@
 
   const StoreSave = {
+      // ====================================================================
+      // ECRITURE D'UNE SEULE SCENE (v601) — PREALABLE AU VERROU PAR SCENE
+      // ====================================================================
+      // save() envoie la LISTE COMPLETE des scenes. Deux personnes qui ecrivent
+      // chacune la sienne s'ecrasent, la derniere gagne. Aujourd'hui le verrou
+      // par DOMAINE l'empeche, en bloquant d'un coup Scenario, Sequencier et
+      // Depouillement. Descendre le verrou a la scene sans descendre l'ecriture
+      // ferait donc PERDRE de la securite, pas en gagner.
+      // saveScene n'ecrit que LA scene donnee, cote serveur, sans toucher aux
+      // autres (fonction patch_project_scene, sql/ecriture_par_scene.sql).
+      //
+      // REPLI AUTOMATIQUE : si la fonction n'existe pas encore sur la base, on
+      // retombe sur save(). Le code peut donc partir avant le SQL sans rien
+      // casser, et l'ecriture fine s'active d'elle-meme le jour ou le SQL est
+      // applique. Le repli ne se declenche QUE sur « fonction inconnue » : une
+      // erreur de droit ou de reseau ne doit pas se transformer en reecriture
+      // complete, silencieuse et bien plus large que demande.
+      _sceneRpcAbsente: false,
+      saveScene: async (scene) => {
+          if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) return false;
+          if(!scene || !scene.id || !state.currentProjectId) return false;
+          if(StoreSave._sceneRpcAbsente) { StoreSave.save(); return false; }
+          try {
+              const propre = JSON.parse(JSON.stringify(scene, (k, v) => v === undefined ? null : v));
+              const { error } = await supabase.rpc('patch_project_scene', {
+                  p_id: state.currentProjectId,
+                  p_scene: propre
+              });
+              if(error) {
+                  const msg = String(error.message || '');
+                  // 42883 = fonction inconnue cote Postgres ; PostgREST renvoie
+                  // aussi un 404 avec « Could not find the function ».
+                  if(error.code === '42883' || /could not find the function|does not exist/i.test(msg)) {
+                      StoreSave._sceneRpcAbsente = true;
+                      console.warn('[Store] patch_project_scene absente : ecriture par scene desactivee, repli sur la sauvegarde complete.');
+                      StoreSave.save();
+                      return false;
+                  }
+                  console.warn('[Store] saveScene :', msg);
+                  return false;
+              }
+              // La baseline doit suivre, sinon la fusion temps reel croirait que
+              // cette scene est encore « modifiee localement » et refuserait les
+              // versions suivantes venues des autres.
+              if(state.savedBaseline && Array.isArray(state.savedBaseline.scenes)) {
+                  const i = state.savedBaseline.scenes.findIndex(x => x && String(x.id) === String(scene.id));
+                  const copie = JSON.parse(JSON.stringify(scene));
+                  if(i >= 0) state.savedBaseline.scenes[i] = copie;
+                  else state.savedBaseline.scenes.push(copie);
+              }
+              StoreRealtime.broadcastPatch();
+              return true;
+          } catch(e) {
+              console.warn('[Store] saveScene :', e && e.message);
+              return false;
+          }
+      },
+
       save: async () => { 
           if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) return; // fiche moteur profil : jamais de sauvegarde projet
           if(!state.currentProjectId || !state.currentUser || state.currentRole === 'viewer') return;

@@ -129,13 +129,24 @@ Rien d'ouvert côté code au 20 septembre en dehors des chantiers ci-dessous.
     fusionner scene par scene et ne garder que celle que je tiens. Se tromper
     la, c'est perdre le texte de quelqu'un SANS message d'erreur — le pire des
     defauts. C'est la partie a construire lentement et a eprouver.
-    ETAPES PROPOSEES, dans cet ordre : (1) ecriture par scene cote serveur et
-    cote navigateur, verrou de domaine INCHANGE — on ne gagne rien de visible
-    mais on enleve le piege ; (2) fusion temps reel par scene, toujours sans
-    toucher au verrou ; (3) alors seulement, verrou par scene et bandeau
-    « cette scene est en cours d'ecriture par X » ; (4) notifications d'en-tete
-    pour l'ordre et les liens. A CHAQUE ETAPE on peut s'arreter sans rien
-    casser.
+    ETAPES. (1) et (2) SONT FAITES le 20 septembre, verrou de domaine inchange :
+    rien ne change a l'usage, le piege est enleve. RESTENT :
+      (3) VERROU PAR SCENE et bandeau « cette scene est ecrite par X ». C'est la
+          seule etape VISIBLE, et la plus delicate. Decision deja prise avec le
+          developpeur : le badge d'onglet ne disparait pas, il cesse simplement
+          de VERROUILLER — il continue d'annoncer qui travaille la, et le verrou
+          reel descend a la scene.
+          A VERIFIER AVANT DE COMMENCER : LockDomains.defs.scenes couvre aussi
+          seasons, episodes, tags, groups et scriptMeta. Ces cles-la ne sont PAS
+          des scenes et doivent garder un verrou de domaine : sinon deux
+          personnes qui renomment une saison s'ecrasent, sans filet cette fois.
+          Le domaine « scenes » doit donc etre COUPE EN DEUX, pas supprime.
+      (4) Notifications d'en-tete pour l'ordre et les liens (« ta scene a ete
+          deplacee », « le decor a change »), qui ne bloquent rien.
+    PERTE ASSUMEE, CONNUE ET MESUREE : si quelqu'un SUPPRIME une scene pendant
+    que j'y ecris, la suppression gagne et mon texte part avec. C'est le seul
+    cas de perte des huit testes. L'etape (3) le fermera — une scene tenue par
+    quelqu'un ne pourra plus etre supprimee par un autre.
 
 [ ] AVENIR DU FORUM — a trancher. Il est SUSPENDU depuis un moment
     (Forum.suspended = true : le menu y mene, un message le dit, on revient au
@@ -16370,6 +16381,61 @@ const LockManager = {
       // tailler un patch par destinataire, c'est ce plafond qu'il faudra respecter.
       BROADCAST_MAX: 180000, // ~180 Ko : marge sous le plafond broadcast (256 Ko en plan Free)
 
+      // ====================================================================
+      // FUSION DES SCENES, UNE PAR UNE (v601)
+      // ====================================================================
+      // locales  : ce que j'ai a l'ecran, mes modifications non enregistrees
+      //            comprises.
+      // base     : ce que le serveur m'avait envoye la derniere fois. C'est la
+      //            REFERENCE qui dit lesquelles J'AI touchees.
+      // distantes: ce que le serveur vient de me renvoyer.
+      //
+      // REGLE : une scene que j'ai modifiee depuis la derniere synchro reste la
+      // MIENNE ; toutes les autres prennent la version du serveur. L'ORDRE est
+      // celui du serveur — deplacer une scene n'est pas un conflit, c'est une
+      // information (cf. RESTE A FAIRE). Une scene que j'ai creee et qui n'est
+      // pas encore partie n'est jamais perdue : elle est rajoutee a la fin.
+      //
+      // CE QUI EST VOLONTAIREMENT SIMPLE : on compare des scenes ENTIERES, pas
+      // champ par champ. Deux personnes sur la MEME scene, la derniere gagne —
+      // c'est precisement ce que le verrou par scene empechera. Fusionner plus
+      // finement sans verrou donnerait une illusion de securite.
+      _fusionScenes: (locales, base, distantes) => {
+          const cle = (sc) => String((sc && sc.id) !== undefined && sc.id !== null ? sc.id : '');
+          const parCle = (liste) => {
+              const m = new Map();
+              (liste || []).forEach(sc => { const k = cle(sc); if(k) m.set(k, sc); });
+              return m;
+          };
+          const mBase = parCle(base);
+          const mLocale = parCle(locales);
+          const vues = new Set();
+
+          const fusionnees = (distantes || []).map(scDistante => {
+              const k = cle(scDistante);
+              if(!k) return scDistante;
+              vues.add(k);
+              const scLocale = mLocale.get(k);
+              if(!scLocale) return scDistante;           // scene que je n'ai pas encore
+              const scBase = mBase.get(k);
+              const jeLaiTouchee = JSON.stringify(scLocale) !== JSON.stringify(scBase);
+              return jeLaiTouchee ? scLocale : scDistante;
+          });
+
+          // Mes scenes encore inconnues du serveur (creees a l'instant, pas
+          // encore enregistrees) : elles ne doivent pas disparaitre de l'ecran.
+          // Celles que je NE connaissais pas non plus (absentes de la base) sont
+          // les miennes ; celles que la base connaissait mais que le serveur ne
+          // renvoie plus ont ete SUPPRIMEES par quelqu'un — on ne les remet pas.
+          (locales || []).forEach(scLocale => {
+              const k = cle(scLocale);
+              if(!k || vues.has(k)) return;
+              if(mBase.has(k)) return;                   // supprimee ailleurs : on la laisse partir
+              fusionnees.push(scLocale);
+          });
+          return fusionnees;
+      },
+
       // Applique un jeu de clés distantes sur state.data (merge sélectif + rendu)
       applyRemote: (val) => {
           if(!val) return;
@@ -16377,6 +16443,21 @@ const LockManager = {
           const base_ = state.savedBaseline;
           if(base_) {
               for(const k in val) {
+                  // SCENES : FUSION ELEMENT PAR ELEMENT (v601). Pour toutes les
+                  // autres cles, la regle reste « une modification locale non
+                  // enregistree protege la cle ENTIERE ». Appliquee aux scenes,
+                  // elle voulait dire : des que j'ai une phrase non sauvegardee,
+                  // je refuse TOUT ce qui vient des autres sur les scenes — donc
+                  // je ne vois plus leur travail, et je m'eloigne d'eux sans le
+                  // savoir. C'est tolerable tant qu'un verrou de domaine garantit
+                  // que personne d'autre n'ecrit ; ca ne le sera plus quand le
+                  // verrou descendra a la scene.
+                  // On garde donc MES scenes modifiees, et on prend les leurs.
+                  if(k === 'scenes' && Array.isArray(val[k]) && Array.isArray(state.data[k]) && Array.isArray(base_[k])) {
+                      state.data[k] = StoreRealtime._fusionScenes(state.data[k], base_[k], val[k]);
+                      base_[k] = JSON.parse(JSON.stringify(val[k]));
+                      continue;
+                  }
                   if(JSON.stringify(state.data[k]) !== JSON.stringify(base_[k])) continue; // modif locale en cours : on protège
                   state.data[k] = val[k];
                   base_[k] = JSON.parse(JSON.stringify(val[k]));
@@ -16593,6 +16674,64 @@ const LockManager = {
 
   // StoreSave — sous-module B.1.5 : sauvegarde Supabase avec retry exponentiel + debounce + flush
   const StoreSave = {
+      // ====================================================================
+      // ECRITURE D'UNE SEULE SCENE (v601) — PREALABLE AU VERROU PAR SCENE
+      // ====================================================================
+      // save() envoie la LISTE COMPLETE des scenes. Deux personnes qui ecrivent
+      // chacune la sienne s'ecrasent, la derniere gagne. Aujourd'hui le verrou
+      // par DOMAINE l'empeche, en bloquant d'un coup Scenario, Sequencier et
+      // Depouillement. Descendre le verrou a la scene sans descendre l'ecriture
+      // ferait donc PERDRE de la securite, pas en gagner.
+      // saveScene n'ecrit que LA scene donnee, cote serveur, sans toucher aux
+      // autres (fonction patch_project_scene, sql/ecriture_par_scene.sql).
+      //
+      // REPLI AUTOMATIQUE : si la fonction n'existe pas encore sur la base, on
+      // retombe sur save(). Le code peut donc partir avant le SQL sans rien
+      // casser, et l'ecriture fine s'active d'elle-meme le jour ou le SQL est
+      // applique. Le repli ne se declenche QUE sur « fonction inconnue » : une
+      // erreur de droit ou de reseau ne doit pas se transformer en reecriture
+      // complete, silencieuse et bien plus large que demande.
+      _sceneRpcAbsente: false,
+      saveScene: async (scene) => {
+          if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) return false;
+          if(!scene || !scene.id || !state.currentProjectId) return false;
+          if(StoreSave._sceneRpcAbsente) { StoreSave.save(); return false; }
+          try {
+              const propre = JSON.parse(JSON.stringify(scene, (k, v) => v === undefined ? null : v));
+              const { error } = await supabase.rpc('patch_project_scene', {
+                  p_id: state.currentProjectId,
+                  p_scene: propre
+              });
+              if(error) {
+                  const msg = String(error.message || '');
+                  // 42883 = fonction inconnue cote Postgres ; PostgREST renvoie
+                  // aussi un 404 avec « Could not find the function ».
+                  if(error.code === '42883' || /could not find the function|does not exist/i.test(msg)) {
+                      StoreSave._sceneRpcAbsente = true;
+                      console.warn('[Store] patch_project_scene absente : ecriture par scene desactivee, repli sur la sauvegarde complete.');
+                      StoreSave.save();
+                      return false;
+                  }
+                  console.warn('[Store] saveScene :', msg);
+                  return false;
+              }
+              // La baseline doit suivre, sinon la fusion temps reel croirait que
+              // cette scene est encore « modifiee localement » et refuserait les
+              // versions suivantes venues des autres.
+              if(state.savedBaseline && Array.isArray(state.savedBaseline.scenes)) {
+                  const i = state.savedBaseline.scenes.findIndex(x => x && String(x.id) === String(scene.id));
+                  const copie = JSON.parse(JSON.stringify(scene));
+                  if(i >= 0) state.savedBaseline.scenes[i] = copie;
+                  else state.savedBaseline.scenes.push(copie);
+              }
+              StoreRealtime.broadcastPatch();
+              return true;
+          } catch(e) {
+              console.warn('[Store] saveScene :', e && e.message);
+              return false;
+          }
+      },
+
       save: async () => { 
           if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) return; // fiche moteur profil : jamais de sauvegarde projet
           if(!state.currentProjectId || !state.currentUser || state.currentRole === 'viewer') return;

@@ -9,6 +9,61 @@
       // tailler un patch par destinataire, c'est ce plafond qu'il faudra respecter.
       BROADCAST_MAX: 180000, // ~180 Ko : marge sous le plafond broadcast (256 Ko en plan Free)
 
+      // ====================================================================
+      // FUSION DES SCENES, UNE PAR UNE (v601)
+      // ====================================================================
+      // locales  : ce que j'ai a l'ecran, mes modifications non enregistrees
+      //            comprises.
+      // base     : ce que le serveur m'avait envoye la derniere fois. C'est la
+      //            REFERENCE qui dit lesquelles J'AI touchees.
+      // distantes: ce que le serveur vient de me renvoyer.
+      //
+      // REGLE : une scene que j'ai modifiee depuis la derniere synchro reste la
+      // MIENNE ; toutes les autres prennent la version du serveur. L'ORDRE est
+      // celui du serveur — deplacer une scene n'est pas un conflit, c'est une
+      // information (cf. RESTE A FAIRE). Une scene que j'ai creee et qui n'est
+      // pas encore partie n'est jamais perdue : elle est rajoutee a la fin.
+      //
+      // CE QUI EST VOLONTAIREMENT SIMPLE : on compare des scenes ENTIERES, pas
+      // champ par champ. Deux personnes sur la MEME scene, la derniere gagne —
+      // c'est precisement ce que le verrou par scene empechera. Fusionner plus
+      // finement sans verrou donnerait une illusion de securite.
+      _fusionScenes: (locales, base, distantes) => {
+          const cle = (sc) => String((sc && sc.id) !== undefined && sc.id !== null ? sc.id : '');
+          const parCle = (liste) => {
+              const m = new Map();
+              (liste || []).forEach(sc => { const k = cle(sc); if(k) m.set(k, sc); });
+              return m;
+          };
+          const mBase = parCle(base);
+          const mLocale = parCle(locales);
+          const vues = new Set();
+
+          const fusionnees = (distantes || []).map(scDistante => {
+              const k = cle(scDistante);
+              if(!k) return scDistante;
+              vues.add(k);
+              const scLocale = mLocale.get(k);
+              if(!scLocale) return scDistante;           // scene que je n'ai pas encore
+              const scBase = mBase.get(k);
+              const jeLaiTouchee = JSON.stringify(scLocale) !== JSON.stringify(scBase);
+              return jeLaiTouchee ? scLocale : scDistante;
+          });
+
+          // Mes scenes encore inconnues du serveur (creees a l'instant, pas
+          // encore enregistrees) : elles ne doivent pas disparaitre de l'ecran.
+          // Celles que je NE connaissais pas non plus (absentes de la base) sont
+          // les miennes ; celles que la base connaissait mais que le serveur ne
+          // renvoie plus ont ete SUPPRIMEES par quelqu'un — on ne les remet pas.
+          (locales || []).forEach(scLocale => {
+              const k = cle(scLocale);
+              if(!k || vues.has(k)) return;
+              if(mBase.has(k)) return;                   // supprimee ailleurs : on la laisse partir
+              fusionnees.push(scLocale);
+          });
+          return fusionnees;
+      },
+
       // Applique un jeu de clés distantes sur state.data (merge sélectif + rendu)
       applyRemote: (val) => {
           if(!val) return;
@@ -16,6 +71,21 @@
           const base_ = state.savedBaseline;
           if(base_) {
               for(const k in val) {
+                  // SCENES : FUSION ELEMENT PAR ELEMENT (v601). Pour toutes les
+                  // autres cles, la regle reste « une modification locale non
+                  // enregistree protege la cle ENTIERE ». Appliquee aux scenes,
+                  // elle voulait dire : des que j'ai une phrase non sauvegardee,
+                  // je refuse TOUT ce qui vient des autres sur les scenes — donc
+                  // je ne vois plus leur travail, et je m'eloigne d'eux sans le
+                  // savoir. C'est tolerable tant qu'un verrou de domaine garantit
+                  // que personne d'autre n'ecrit ; ca ne le sera plus quand le
+                  // verrou descendra a la scene.
+                  // On garde donc MES scenes modifiees, et on prend les leurs.
+                  if(k === 'scenes' && Array.isArray(val[k]) && Array.isArray(state.data[k]) && Array.isArray(base_[k])) {
+                      state.data[k] = StoreRealtime._fusionScenes(state.data[k], base_[k], val[k]);
+                      base_[k] = JSON.parse(JSON.stringify(val[k]));
+                      continue;
+                  }
                   if(JSON.stringify(state.data[k]) !== JSON.stringify(base_[k])) continue; // modif locale en cours : on protège
                   state.data[k] = val[k];
                   base_[k] = JSON.parse(JSON.stringify(val[k]));
