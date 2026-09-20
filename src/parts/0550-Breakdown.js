@@ -5495,9 +5495,10 @@ const Storyboard = {
         card.dataset.shotId = shot.id;
         
         let imageHTML = '';
-        if(shot.imageType === 'upload' && shot.imageUrl) {
-            imageHTML = `<img src="${shot.imageUrl}" alt="Plan ${sceneIndex}.${idx + 1}">`;
-        } else if(shot.imageType === 'drawing' && shot.drawingData) {
+        const contenu = Storyboard.contenuPlan(shot);
+        if(contenu.fond) {
+            imageHTML = `<img src="${Utils.safeMediaUrl(contenu.fond)}" alt="Plan ${sceneIndex}.${idx + 1}">`;
+        } else if(!contenu.vide) {
             imageHTML = `<canvas id="compact-preview-${shot.id}" width="800" height="600" style="max-width: 100%; max-height: 100%; object-fit: contain;"></canvas>`;
         } else {
             imageHTML = `<div style="color: #999; font-size: 2rem;">🎨</div>`;
@@ -5557,11 +5558,12 @@ const Storyboard = {
         
         // Render drawing preview + overlay
         setTimeout(() => {
-            if(shot.imageType === 'drawing' && shot.drawingData) {
+            const c0 = Storyboard.contenuPlan(shot);
+            if(c0.calques) {
                 const canvas = document.getElementById(`compact-preview-${shot.id}`);
                 if(canvas) {
                     const ctx = canvas.getContext('2d');
-                    DrawingEditor.renderDrawingData(ctx, shot.drawingData, `compact-preview-${shot.id}`);
+                    DrawingEditor.renderDrawingData(ctx, c0.calques, `compact-preview-${shot.id}`);
                 }
             }
             
@@ -5678,15 +5680,40 @@ const Storyboard = {
         Store.save();
     },
     
+    // ====================================================================
+    // SOURCE UNIQUE D'UNE VIGNETTE DE PLAN (v601)
+    // ====================================================================
+    // Un plan portait son image a DEUX endroits : la RACINE (ancien format) et
+    // la zone « original », celle qu'ecrit l'editeur de dessin. Trois ecrans les
+    // lisaient differemment — l'onglet la racine, l'editeur la zone, l'export
+    // tantot l'une tantot l'autre — d'ou des images visibles ici et absentes la.
+    // DESORMAIS UNE SEULE SOURCE : LA ZONE. Ce que montre l'editeur de dessin
+    // est ce qui s'affiche partout et ce qui sort au PDF. Rien dans l'editeur =
+    // case vide, ce qui est la reponse honnete.
+    // LA RACINE N'EST PLUS LUE DU TOUT. Elle reste dans les donnees, et les
+    // projets d'avant ne perdent rien : au chargement, Store recopie deja la
+    // racine dans la zone quand celle-ci n'existe pas (migration « drawings »).
+    // Les seuls plans qui deviennent vides sont ceux ou la zone existait DEJA en
+    // restant vide a cote d'une image de racine — cas qu'aucun ecran de
+    // l'application ne sait produire.
+    contenuPlan: (shot) => {
+        const z = (shot && shot.drawings && shot.drawings.original) || null;
+        const objets = (z && Array.isArray(z.objects)) ? z.objects : [];
+        const fond = (z && z.imageType === 'upload' && z.imageUrl) ? z.imageUrl : null;
+        const calques = (z && z.drawingData) || null;
+        return { fond, calques, objets, vide: !fond && !calques && objets.length === 0 };
+    },
+
     createShotCard: (shot, idx) => {
         const card = document.createElement('div');
         card.className = 'shot-card';
         card.dataset.shotId = shot.id;
         
         let imagePreview = '';
-        if(shot.imageType === 'upload' && shot.imageUrl) {
-            imagePreview = `<img src="${shot.imageUrl}" alt="Plan ${idx + 1}">`;
-        } else if(shot.imageType === 'drawing' && shot.drawingData) {
+        const contenu = Storyboard.contenuPlan(shot);
+        if(contenu.fond) {
+            imagePreview = `<img src="${Utils.safeMediaUrl(contenu.fond)}" alt="Plan ${idx + 1}">`;
+        } else if(!contenu.vide) {
             imagePreview = `<canvas id="preview-${shot.id}" width="800" height="600"></canvas>`;
         } else {
             imagePreview = `<div class="shot-upload-zone">
@@ -5804,11 +5831,12 @@ const Storyboard = {
         
         // Render drawing preview if exists
         setTimeout(() => {
-            if(shot.imageType === 'drawing' && shot.drawingData) {
+            const c1 = Storyboard.contenuPlan(shot);
+            if(c1.calques) {
                 const canvas = document.getElementById(`preview-${shot.id}`);
                 if(canvas) {
                     const ctx = canvas.getContext('2d');
-                    DrawingEditor.renderDrawingData(ctx, shot.drawingData, `preview-${shot.id}`);
+                    DrawingEditor.renderDrawingData(ctx, c1.calques, `preview-${shot.id}`);
                 }
             }
             
@@ -6883,15 +6911,10 @@ const StoryboardExport = {
         // RIEN N'EST EFFACE : l'ancienne image dort dans les donnees et
         // reapparaitrait si on vidait la zone. On choisit ce qu'on REGARDE, pas
         // ce qu'on garde.
-        const zoneOrig = (shot.drawings && shot.drawings.original) || null;
-        const zonePleine = !!(zoneOrig && (zoneOrig.drawingData
-                                        || (zoneOrig.imageType === 'upload' && zoneOrig.imageUrl)
-                                        || (Array.isArray(zoneOrig.objects) && zoneOrig.objects.length > 0)));
-        const fondUrl = zonePleine
-            ? ((zoneOrig.imageType === 'upload' && zoneOrig.imageUrl) ? zoneOrig.imageUrl : null)
-            : ((shot.imageType === 'upload' && shot.imageUrl) ? shot.imageUrl : null);
-        const calques = zonePleine ? (zoneOrig.drawingData || null) : (shot.drawingData || null);
-        const objets = (zonePleine && Array.isArray(zoneOrig.objects)) ? zoneOrig.objects : [];
+        const contenu = Storyboard.contenuPlan(shot);
+        const fondUrl = contenu.fond;
+        const calques = contenu.calques;
+        const objets = contenu.objets;
 
         if(fondUrl || calques || objets.length > 0) {
             let etape = Promise.resolve();
