@@ -1665,15 +1665,9 @@ const Stats = {
         };
         
         // ========= EN-TÊTE EN BANDEAU GRIS (cohérent avec les autres sections) =========
-        doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-        doc.rect(margin, y, usableWidth, 9, 'F');
-        doc.setFillColor(...PdfTheme.accentFor('Statistiques'));
-        doc.rect(margin, y, 1.8, 9, 'F');
-        doc.setTextColor(...PdfTheme.COLORS.WHITE);
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'bold');
-        doc.text('RAPPORT DE STATISTIQUES', margin + 4, y + 6.2);
-        y += 12;
+        y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                        title: 'Rapport de statistiques',
+                                        accent: PdfTheme.accentFor('Statistiques') });
         if(scopeLabel) {
             doc.setFont('helvetica', 'italic');
             doc.setFontSize(9.5);
@@ -2086,6 +2080,64 @@ const Stats = {
     },
     // Couleur d'accent d'une section (repli : bleu identitaire)
     accentFor: (sectionName) => PdfTheme.SECTION_COLORS[sectionName] || PdfTheme.COLORS.BANNER_BLUE,
+
+    // Eclaircit une couleur vers le blanc. f = 0 rend la couleur, f = 1 le blanc.
+    tint: (c, f) => [Math.round(c[0] + (255 - c[0]) * f),
+                     Math.round(c[1] + (255 - c[1]) * f),
+                     Math.round(c[2] + (255 - c[2]) * f)],
+
+    // ============================================================
+    // TITRE DE SECTION (v601) — UNE SEULE PORTE
+    // ============================================================
+    // Remplace le bandeau gris fonce pleine largeur, juge trop lourd : une page
+    // de dossier en comptait parfois cinq, et le noir plein mange l'encre a
+    // l'impression sans rien apporter a la lecture.
+    // Le dessin reprend le vocabulaire DEJA pose sur les pages de garde : une
+    // barre a la couleur de la section, le titre en gris tres fonce, un filet
+    // fin dessous. Rien de neuf a apprendre en feuilletant le dossier.
+    // TOUS LES EXPORTS PASSENT PAR ICI : changer le style se fait en un endroit,
+    // au lieu des quinze copies du bandeau qui existaient avant.
+    // Renvoie le y SUIVANT (apres le titre et son espace), pour que l'appelant
+    // ecrive « y = PdfTheme.sectionBand(...) » sans recalculer l'avance.
+    HEADER_H: 13.5,
+    sectionBand: (doc, o = {}) => {
+        const x = (o.x !== undefined) ? o.x : 25;
+        const y = o.y || 0;
+        const w = o.width || (doc.internal.pageSize.getWidth() - x * 2);
+        const accent = o.accent || PdfTheme.COLORS.BANNER_BLUE;
+        const clean = (t) => PdfTheme.cleanText ? PdfTheme.cleanText(t || '') : (t || '');
+        const titre = clean(o.title).toUpperCase();
+
+        // Barre d'accent, a gauche du titre
+        doc.setFillColor(...accent);
+        doc.rect(x, y, 2.4, 7.4, 'F');
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(o.size || 11.5);
+        doc.setTextColor(...PdfTheme.COLORS.TEXT_DARK);
+        doc.text(titre, x + 5.4, y + 5.6);
+
+        // Texte secondaire a droite (date, effectif...), quand il y en a un
+        if(o.right) {
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(...PdfTheme.COLORS.TEXT_SECONDARY);
+            doc.text(clean(o.right), x + w, y + 5.6, { align: 'right' });
+        }
+
+        // Filet fin sous toute la largeur, a la couleur de la section eclaircie
+        doc.setDrawColor(...PdfTheme.tint(accent, 0.55));
+        doc.setLineWidth(0.4);
+        doc.line(x, y + 8.6, x + w, y + 8.6);
+
+        // On rend au suivant un etat neutre : sans cela, le premier appelant qui
+        // oubliait de reposer sa couleur ecrivait son paragraphe en gris clair.
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...PdfTheme.COLORS.TEXT_BODY);
+        doc.setDrawColor(...PdfTheme.COLORS.BORDER);
+        doc.setLineWidth(0.2);
+        return y + PdfTheme.HEADER_H;
+    },
     
     // Mapping section → rôles à chercher dans state.data.crew (par ordre de priorité)
     AUTHOR_ROLES: {
@@ -3494,16 +3546,11 @@ const MoteurArchive = {
                 doc.addPage();
                 yPos = margin;
             }
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(margin, yPos, pageWidth - margin * 2, 10, 'F');
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.setFontSize(12);
-            doc.setFont('helvetica', 'bold');
-            // Phase C.1 : retirer les emojis qui plantent en latin-1
-            doc.text(PdfTheme.cleanText(title), margin + 5, yPos + 7);
+            const yApres = PdfTheme.sectionBand(doc, { x: margin, y: yPos, width: pageWidth - margin * 2,
+                                                      title, size: 12,
+                                                      accent: PdfTheme.accentFor('Rapport de production') });
             doc.setTextColor(...PdfTheme.COLORS.TEXT_PRIMARY);
-            doc.setFont('helvetica', 'normal');
-            return yPos + 15;
+            return yApres + 1.5;
         };
         
         const addKeyValue = (key, value, yPos) => {

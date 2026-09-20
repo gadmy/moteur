@@ -971,14 +971,9 @@ const orgGroups = (state.data.groups || []).filter(g => g.type === 'org');
 
         const drawGroupHeader = (name, count) => {
             ensureSpace(14);
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(margin, y, usableWidth, 9, 'F');
-            doc.setFillColor(...PdfTheme.accentFor('Asso / Entreprises'));
-            doc.rect(margin, y, 1.8, 9, 'F');
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.setFontSize(11); doc.setFont('helvetica', 'bold');
-            doc.text(`${cleanT(name).toUpperCase()} (${count})`, margin + 4, y + 6.2);
-            y += 12;
+            y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                            title: cleanT(name), right: String(count),
+                                            accent: PdfTheme.accentFor('Asso / Entreprises') });
         };
 
         const drawPhoto = (url, x, py, w, h) => {
@@ -4337,13 +4332,8 @@ const Presentation = {
         // Helper section
         const section = (title) => {
             if(y > pageHeight - 30) { doc.addPage(); y = margin; }
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(margin, y, pageWidth - margin * 2, 9, 'F');
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.setFontSize(11);
-            doc.setFont('helvetica', 'bold');
-            doc.text(PdfTheme.cleanText(title), margin + 4, y + 6.2);
-            y += 12;
+            y = PdfTheme.sectionBand(doc, { x: margin, y, width: pageWidth - margin * 2,
+                                            title, accent: PdfTheme.accentFor('Présentation') });
         };
         const keyVal = (key, val) => {
             if(!val) return;
@@ -4631,13 +4621,9 @@ const ExpensesExport = {
         y += 48;
         
         // ===== TABLEAU CATÉGORIES CNC =====
-        doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-        doc.roundedRect(margin, y, pageWidth - margin * 2, 9, 1.5, 1.5, 'F');
-        doc.setTextColor(...PdfTheme.COLORS.WHITE);
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'bold');
-        doc.text('RÉPARTITION PAR CATÉGORIE CNC', margin + 5, y + 6.5);
-        y += 13;
+        y = PdfTheme.sectionBand(doc, { x: margin, y, width: pageWidth - margin * 2,
+                                        title: 'Répartition par catégorie CNC', size: 10,
+                                        accent: PdfTheme.accentFor('Budget') });
         
         // En-têtes
         doc.setFillColor(...PdfTheme.COLORS.BG_LIGHTER);
@@ -4704,13 +4690,10 @@ const ExpensesExport = {
         if(!opts.simple && expenses.length > 0) {
             if(y > pageHeight - 50) { doc.addPage(); y = margin; }
             
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.roundedRect(margin, y, pageWidth - margin * 2, 9, 1.5, 1.5, 'F');
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.setFontSize(10);
-            doc.setFont('helvetica', 'bold');
-            doc.text('LISTE DES DÉPENSES (' + expenses.length + ')', margin + 5, y + 6.5);
-            y += 13;
+            y = PdfTheme.sectionBand(doc, { x: margin, y, width: pageWidth - margin * 2,
+                                            title: 'Liste des dépenses', size: 10,
+                                            right: String(expenses.length),
+                                            accent: PdfTheme.accentFor('Budget') });
             
             y = drawExpenseHeaders(y);
             
@@ -11523,9 +11506,10 @@ const UniverseProfileModal = {
                 addInfo('Département', deptName);
             }
             addInfo('Expérience', profile.experience);
-            if(profile.equipment && profile.equipment.length > 0) {
-                addInfo('Matériel', profile.equipment.join(', '));
-            }
+            // v601 : « equipment » n'a jamais existe sur un profil — la ligne ne
+            // s'est donc jamais affichee. Les vrais champs sont cameras et lenses.
+            if(profile.cameras && profile.cameras.length > 0) addInfo('Caméras', profile.cameras.join(', '));
+            if(profile.lenses && profile.lenses.length > 0) addInfo('Objectifs', profile.lenses.join(', '));
             y += 4;
         }
         

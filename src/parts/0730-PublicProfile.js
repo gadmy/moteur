@@ -254,10 +254,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             role: '',
             cameras: [],
             lenses: [],
-            lights: [],
-            sounds: [],
-            grips: [],
-            makeups: [],
             otherEquipment: [],
             // Commun
             dailyRate: '',
@@ -584,6 +580,10 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         // entrees avec un niveau par defaut, sinon la liste s'afficherait vide
         // au-dessus d'un texte pourtant rempli.
         ProfileSkills.migrer(draft);
+        // Materiel (v601) : la reprise a deja eu lieu au chargement du profil
+        // (ProfileGear.descendre) ; ici on s'assure seulement que les deux
+        // listes existent, pour que l'editeur ait quelque chose a dessiner.
+        if(kind === 'crew') ProfileGear.migrer(draft);
         PublicProfile._engineMode = true;
         PublicProfile._engineProfile = draft;
         // Le moteur suppose un projet ouvert (state.data + role). Sur la page profil il n'y en
@@ -753,9 +753,10 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                 if(rang) rang.remove();
             }
             const bloc = document.createElement('div');
-            bloc.innerHTML = ProfileSkills.blocHtml(kind !== 'crew');
+            bloc.innerHTML = ProfileSkills.blocHtml(kind !== 'crew')
+                + (kind === 'crew' ? ProfileGear.blocHtml() : '');
             pskCible.appendChild(bloc);
-            setTimeout(() => ProfileSkills.render(), 0);
+            setTimeout(() => { ProfileSkills.render(); if(kind === 'crew') ProfileGear.render(); }, 0);
         }
         const contactBody = card.querySelector('.fid-block[data-block-id="contact"] .fid-block-body');
         if(contactBody) {
@@ -1345,10 +1346,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                         role: extraData.role || '',
                         cameras: extraData.cameras || [],
                         lenses: extraData.lenses || [],
-                        lights: extraData.lights || [],
-                        sounds: extraData.sounds || [],
-                        grips: extraData.grips || [],
-                        makeups: extraData.makeups || [],
                         otherEquipment: extraData.otherEquipment || [],
                         crewGalleryPhotos: extraData.crewGalleryPhotos || [],
                         // Association
@@ -1402,6 +1399,13 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             // des casquettes vers le profil, pour les profils d'avant. Ce qui est
             // remonte ici repart en base a la prochaine sauvegarde.
             PublicProfile.profiles.forEach(p => PublicProfile._liftCommonToProfile(p));
+            // v601 : le MATERIEL descend du profil plat vers la premiere fiche
+            // technicien, ou il s'edite desormais. AU CHARGEMENT et pas a
+            // l'ouverture de la fiche : la sauvegarde recalcule les champs plats
+            // depuis les fiches, donc un profil enregistre avant d'avoir ouvert
+            // sa fiche technicien aurait vu son materiel efface sans jamais
+            // avoir ete repris.
+            PublicProfile.profiles.forEach(p => ProfileGear.descendre(p));
 
             // S'assurer que currentProfileIndex est valide
             if(PublicProfile.currentProfileIndex >= PublicProfile.profiles.length) {
@@ -1441,6 +1445,39 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         // Seul le type courant restait a en tirer : il se deduit des casquettes
         // actives, donc du PROFIL, sans passer par le DOM.
         if(profile) profile.type = PublicProfile._facetToType(PublicProfile.firstEnabledFacet(profile)) || profile.type || '';
+
+        // MATERIEL -> PROFIL PLAT (v601). Meme raison que le departement en
+        // v600 : la recherche ne regarde QUE les champs plats, jamais l'interieur
+        // des casquettes. On prend la REUNION des fiches technicien visibles —
+        // une personne peut en tenir plusieurs, et la question posee par le
+        // filtre est « possede-t-elle ce boitier ? », pas « sur laquelle de ses
+        // fiches ». Une fiche refermee ou masquee de l'Univers n'y entre pas :
+        // se retirer de la recherche doit aussi en retirer son materiel.
+        // ICI ET PAS DANS LA FICHE : « Effacer » une carte vide la casquette
+        // sans passer par la fiche, et le calcul aurait ete saute — on serait
+        // reste trouvable pour du materiel qu'on venait d'effacer.
+        // On ECRASE, y compris par du vide, pour la meme raison.
+        // Le recalcul ne vaut que si la personne A des fiches technicien. Sans
+        // cette garde, un profil qui n'en a aucune — mais qui porte encore du
+        // materiel a plat, saisi du temps de l'ancien formulaire — se serait vu
+        // effacer cette saisie par une sauvegarde faite depuis sa carte
+        // comedien, sans que rien ne l'ait jamais reprise.
+        if(profile && profile.facets && Array.isArray(profile.facets.crew) && profile.facets.crew.length) {
+            ['cameras', 'lenses'].forEach(cle => {
+                const vus = [];
+                PublicProfile.crewArr(profile.facets).forEach(cf => {
+                    if(!cf || !cf.enabled || cf.visible === false) return;
+                    (Array.isArray(cf[cle]) ? cf[cle] : []).forEach(v => {
+                        const t = String(v || '').trim();
+                        if(t && !vus.some(x => x.toLowerCase() === t.toLowerCase())) vus.push(t);
+                    });
+                });
+                profile[cle] = vus;
+            });
+            // « otherEquipment » n'est PAS vide ici : la reprise le lit au
+            // chargement, et l'effacer priverait d'un tour un profil charge
+            // avant cette version. Il ne sert plus a rien, il ne nuit pas.
+        }
         
         if(!profile.type) {
             Utils.toast('Veuillez choisir un type de profil.', 'warning');
@@ -1571,10 +1608,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                     role: profile.role || '',
                     cameras: profile.cameras || [],
                     lenses: profile.lenses || [],
-                    lights: profile.lights || [],
-                    sounds: profile.sounds || [],
-                    grips: profile.grips || [],
-                    makeups: profile.makeups || [],
                     otherEquipment: profile.otherEquipment || [],
                     crewGalleryPhotos: profile.crewGalleryPhotos || [],
                     // Association
@@ -1681,7 +1714,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         // Champs spécifiques à la casquette (stockés à plat)
         const SPEC = {
             actor: ['height','weight','age','eyeColor','hairColor','hairLength','ethnicity','corpulence','sports','sportsWithLevels','actingStyles','galleryPhotos'],
-            crew:  ['department','cameras','lenses','lights','sounds','grips','makeups','otherEquipment','crewGalleryPhotos'],
+            crew:  ['department','cameras','lenses','otherEquipment','crewGalleryPhotos'],
             asso:  ['assoName','assoLogo','assoType','assoSiret','assoYear','assoPresident','assoMembers','assoMission','assoActivities','assoServices','assoFacebook','assoInstagram','assoLinkedin','assoYoutube','assoEmail','assoPhone','assoWebsite','assoDemoreel','assoDemoreels'],
             ent:   ['entName','entLogo','entType','entSiret','entLegal','entYear','entEmployees','entDirector','entContact','entDescription','entServices','entEmail','entPhone','entWebsite','entVimeo','entImdb','entDemoreel','entDemoreels']
         };
@@ -2652,7 +2685,7 @@ const GlobalSearch = {
             </div>
             <div class="global-search-filters-row">
                 <input type="text" class="global-search-input min-w-200" id="gs-camera" placeholder="📷 Caméra (RED, ARRI, Sony...)" data-tooltip="📷 Caméra (RED, ARRI, Sony...)" oninput="app.GlobalSearch.search()">
-                <input type="text" class="global-search-input min-w-200" id="gs-equipment" placeholder="🔧 Matériel (stabilisateur, drone...)" data-tooltip="🔧 Matériel (stabilisateur, drone...)" oninput="app.GlobalSearch.search()">
+                <input type="text" class="global-search-input min-w-200" id="gs-equipment" placeholder="🔧 Matériel (caméra, objectifs...)" data-tooltip="🔧 Matériel (caméra, objectifs...)" oninput="app.GlobalSearch.search()">
                 <label style="display:flex; align-items:center; gap:5px; padding:8px; background:var(--input-bg); border:1px solid var(--border); border-radius:6px; cursor:pointer;">
                     <input type="checkbox" id="gs-vehicle" onchange="app.GlobalSearch.search()"> 🚗 Véhicule
                 </label>
@@ -2751,8 +2784,11 @@ const GlobalSearch = {
                 if(role) results = results.filter(r => (r.role || '').toLowerCase().includes(role));
                 if(camera) results = results.filter(r => (r.cameras || []).some(c => c.toLowerCase().includes(camera)));
                 if(equipment) {
+                    // v601 : deux listes seulement, cameras et series d'objectifs.
+                    // Lumiere, son, machinerie et maquillage ont ete ecartes — on
+                    // cherche un boitier ou des optiques, presque jamais une perche.
                     results = results.filter(r => {
-                        const allEquip = [...(r.cameras || []), ...(r.lenses || []), ...(r.otherEquipment || [])].join(' ').toLowerCase();
+                        const allEquip = [...(r.cameras || []), ...(r.lenses || [])].join(' ').toLowerCase();
                         return allEquip.includes(equipment);
                     });
                 }
@@ -2878,7 +2914,7 @@ const GlobalSearch = {
                 <p><strong>Fonction:</strong> ${Utils.escape(person.role || 'N/A')}</p>
                 ${person.cameras && person.cameras.length > 0 ? `<p><strong>Caméras:</strong> ${Utils.escape(person.cameras.join(', '))}</p>` : ''}
                 ${person.lenses && person.lenses.length > 0 ? `<p><strong>Objectifs:</strong> ${Utils.escape(person.lenses.join(', '))}</p>` : ''}
-                ${person.otherEquipment && person.otherEquipment.length > 0 ? `<p><strong>Autre matériel:</strong> ${Utils.escape(person.otherEquipment.join(', '))}</p>` : ''}
+                ${person.lenses && person.lenses.length > 0 ? `<p><strong>Objectifs:</strong> ${Utils.escape(person.lenses.join(', '))}</p>` : ''}
             `;
         }
         

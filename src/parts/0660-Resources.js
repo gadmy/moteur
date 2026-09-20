@@ -758,16 +758,10 @@
           
           const drawCatHeader = (catKey, count) => {
               ensureSpace(14);
-              doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-              doc.rect(margin, y, usableWidth, 9, 'F');
-              doc.setFillColor(...PdfTheme.accentFor('Ressources'));
-              doc.rect(margin, y, 1.8, 9, 'F');
-              doc.setTextColor(...PdfTheme.COLORS.WHITE);
-              doc.setFontSize(11);
-              doc.setFont('helvetica', 'bold');
               const lbl = (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText(catLabels[catKey] || catKey) : (catLabels[catKey] || catKey);
-              doc.text(`${lbl.toUpperCase()} (${count})`, margin + 4, y + 6.2);
-              y += 12;
+              y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                              title: lbl, right: String(count),
+                                              accent: PdfTheme.accentFor('Ressources') });
           };
           
           const drawPhoto = (url, x, y, w, h) => {

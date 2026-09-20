@@ -68,16 +68,10 @@
         
         const drawDeptHeader = (deptName, count) => {
             ensureSpace(14);
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(margin, y, usableWidth, 9, 'F');
-            doc.setFillColor(...PdfTheme.accentFor('Équipe'));
-            doc.rect(margin, y, 1.8, 9, 'F');
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.setFontSize(11);
-            doc.setFont('helvetica', 'bold');
             const lbl = (PdfTheme && PdfTheme.cleanText) ? PdfTheme.cleanText(deptName) : deptName;
-            doc.text(`${lbl.toUpperCase()} (${count})`, margin + 4, y + 6.2);
-            y += 12;
+            y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                            title: lbl, right: count + (count > 1 ? ' personnes' : ' personne'),
+                                            accent: PdfTheme.accentFor('Équipe') });
         };
         
         const drawPhoto = (url, x, y, w, h) => {

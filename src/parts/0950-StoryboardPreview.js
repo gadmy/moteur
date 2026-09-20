@@ -2630,24 +2630,7 @@ const Forum = {
         scenario: { icon: '📝', name: 'Scénario', desc: 'Écriture, structure, dialogues' },
         realisation: { icon: '🎬', name: 'Réalisation', desc: 'Mise en scène, direction' },
         production: { icon: '💼', name: 'Production', desc: 'Financement, logistique' },
-        postprod: { icon: '✂️', name: 'Post-production', desc: 'Montage, VFX, son' },
-        retours_general: { icon: '🐛', name: '🐛 Général', desc: 'Bugs généraux', parent: 'retours' },
-        retours_editeur: { icon: '📝', name: '📝 Éditeur Scénario', desc: 'Éditeur de scénario', parent: 'retours' },
-        retours_sequencier: { icon: '🎬', name: '🎬 Séquencier', desc: 'Séquencier et planning', parent: 'retours' },
-        retours_depouillement: { icon: '📋', name: '📋 Dépouillement', desc: 'Dépouillement', parent: 'retours' },
-        retours_storyboard: { icon: '🎨', name: '🎨 Storyboard', desc: 'Storyboard', parent: 'retours' },
-        retours_moodboard: { icon: '🖼️', name: '🖼️ Moodboard', desc: 'Moodboard', parent: 'retours' },
-        retours_equipe: { icon: '👥', name: '👥 Équipe', desc: 'Gestion équipe', parent: 'retours' },
-        retours_budget: { icon: '💰', name: '💰 Budget', desc: 'Budget et dépenses', parent: 'retours' },
-        retours_contrats: { icon: '📄', name: '📄 Contrats', desc: 'Contrats', parent: 'retours' },
-        retours_univers: { icon: '🌍', name: '🌍 Univers', desc: 'Univers et profils', parent: 'retours' },
-        retours_forum: { icon: '💬', name: '💬 Forum', desc: 'Forum communautaire', parent: 'retours' },
-        retours_fil: { icon: '📰', name: '📰 Le Fil', desc: 'Le Fil actualité', parent: 'retours' },
-        retours_guide: { icon: '❓', name: '❓ Guide', desc: 'Guide et aide', parent: 'retours' },
-        retours_cours: { icon: '🎓', name: '🎓 Cours', desc: 'Cours cinéma', parent: 'retours' },
-        retours_profil: { icon: '👤', name: '👤 Mon Profil', desc: 'Profil utilisateur', parent: 'retours' },
-        retours_messages: { icon: '✉️', name: '✉️ Messages', desc: 'Messagerie', parent: 'retours' },
-        retours_design: { icon: '🎨', name: '🎨 Design/Thèmes', desc: 'Design et thèmes', parent: 'retours' }
+        postprod: { icon: '✂️', name: 'Post-production', desc: 'Montage, VFX, son' }
     },
     
     // ===================== NAVIGATION & CHARGEMENT =====================
@@ -7171,21 +7154,24 @@ const Synopsis = {
         if(opts.includeDirector && state.data.directorNote) sections.push({ title: 'Note du réalisateur', html: state.data.directorNote });
         if(opts.includeProducer && state.data.producerNote) sections.push({ title: 'Note du producteur', html: state.data.producerNote });
         
+        // PLUS DE SAUT DE PAGE SYSTEMATIQUE (v601). Chaque section ouvrait une
+        // page neuve : un synopsis d'un tiers de page laissait donc deux tiers de
+        // blanc avant le resume court, lui aussi court, et ainsi de suite. Un
+        // dossier de six sections faisait six pages presque vides.
+        // LA REGLE EST DESORMAIS CELLE DU BON SENS TYPOGRAPHIQUE : on enchaine,
+        // sauf s'il ne reste pas de quoi poser le titre ET quelques lignes
+        // dessous. Un titre seul en bas de page est pire qu'un blanc.
+        const PLACE_MIN = 42;   // mm : le titre, son filet, et environ 4 lignes
         sections.forEach((section, idx) => {
-            // Nouvelle page pour chaque section (sauf la 1ère)
             if(idx > 0) {
-                doc.addPage();
-                y = margin;
+                y += 8;                   // respiration entre deux sections
+                ensureSpace(PLACE_MIN);   // saute la page seulement si c'est trop juste
             }
             
-            // Titre de section : bandeau gris foncé pleine largeur (cohérent avec les autres sections)
-            doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-            doc.rect(margin, y, usableWidth, 9, 'F');
-            doc.setTextColor(...PdfTheme.COLORS.WHITE);
-            doc.setFontSize(11);
-            doc.setFont('helvetica', 'bold');
-            doc.text(section.title.toUpperCase(), margin + 4, y + 6.2);
-            y += 14;
+            // Titre de section — porte unique PdfTheme.sectionBand (v601).
+            y = PdfTheme.sectionBand(doc, { x: margin, y, width: usableWidth,
+                                            title: section.title,
+                                            accent: PdfTheme.accentFor('Synopsis') });
             
             // Parser et rendre les blocs
             const blocks = Synopsis._parseRichHtml(section.html);

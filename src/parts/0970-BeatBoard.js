@@ -1407,13 +1407,9 @@
                   if(y > pageHeight - 30) { doc.addPage(); y = margin; }
                   
                   // En-tête saison
-                  doc.setFillColor(...PdfTheme.COLORS.BANNER_DARK);
-                  doc.rect(margin, y, pageWidth - margin * 2, 9, 'F');
-                  doc.setTextColor(...PdfTheme.COLORS.WHITE);
-                  doc.setFontSize(11);
-                  doc.setFont('helvetica', 'bold');
-                  doc.text(PdfTheme.cleanText(season.title || 'Saison').toUpperCase(), margin + 4, y + 6.2);
-                  y += 12;
+                  y = PdfTheme.sectionBand(doc, { x: margin, y, width: pageWidth - margin * 2,
+                                                  title: season.title || 'Saison',
+                                                  accent: PdfTheme.accentFor('Séquencier') });
                   
                   // Épisodes de cette saison
                   const seasonEps = episodes.filter(e => e.seasonId === season.id);

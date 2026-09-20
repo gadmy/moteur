@@ -55,6 +55,38 @@
           }
         ]
       },
+      episodes: {
+        tab: 'episodes',
+        tabs: ['seasons', 'episodes'],
+        titre: 'Saisons et episodes',
+        desc: "Reserve aux projets de type Serie : decouper en saisons et en episodes, et passer de l'un a l'autre.",
+        available: function () { return !!state.currentProjectId && state.currentProjectType === 'series'; },
+        unavailable: "Cette visite ne concerne que les projets de type Serie. Le type se choisit a la CREATION du projet et ne se change pas ensuite.",
+        steps: [
+          {
+            title: 'Un projet en episodes',
+            body: "Quand tu crees un projet, tu choisis Film ou Serie. En serie, deux onglets d'ecriture apparaissent en plus : Saisons et Episodes. Tout le reste du projet — casting, equipe, decors, budget — reste COMMUN a la serie entiere.",
+            target: null,
+            onEnter: function () { try { if (typeof UI !== 'undefined' && UI.switchTab) UI.switchTab('seasons'); } catch (e) {} }
+          },
+          {
+            title: 'Les saisons',
+            body: "Une carte par saison, avec son numero, un titre facultatif et le nombre d'episodes qu'elle contient. Tu les reordonnes par glisser-deposer, et « Voir episodes » bascule sur les episodes de cette saison.",
+            target: '#seasons-grid'
+          },
+          {
+            title: 'Les episodes',
+            body: "Meme principe : une carte par episode de la saison en cours, avec une vignette que tu peux remplacer. C'est ici qu'on en ajoute ou qu'on en retire.",
+            target: '#episodes-grid',
+            onEnter: function () { try { if (typeof UI !== 'undefined' && UI.switchTab) UI.switchTab('episodes'); } catch (e) {} }
+          },
+          {
+            title: 'Le selecteur du bandeau',
+            body: "C'est la piece maitresse : les deux menus S.. / E.. en haut choisissent la saison et l'episode COURANTS. Scenario, sequencier, beat board et depouillement ne montrent alors que les scenes de cet episode — une scene ecrite appartient a l'episode actif au moment ou on la cree.",
+            target: '#header-episode-wrapper'
+          }
+        ]
+      },
       synopsis: {
         tab: 'synopsis',
         titre: 'Synopsis et resumes',
@@ -241,13 +273,13 @@
           },
           {
             title: 'Tu peux avoir plusieurs casquettes',
-            body: "Comedien, technicien, association, entreprise. Coche celles qui te correspondent : on est souvent plusieurs choses a la fois sur un tournage.",
-            target: '#profile-all-sections'
+            body: "Comedien, technicien, association, entreprise : une carte par casquette. Clique sur une carte grisee pour l'activer et ouvrir sa fiche ; la croix la regrise. Cote technicien, le « + » ajoute une DEUXIEME fiche si tu tiens plusieurs specialites.",
+            target: '#facet-tabs'
           },
           {
             title: 'Visible ou non',
-            body: "Chaque casquette a son propre interrupteur de visibilite. Tu peux etre cherchable comme technicien sans l'etre comme comedien.",
-            target: '#profile-status'
+            body: "Chaque carte a sa case « 👁 Univers » : tu peux etre cherchable comme technicien sans l'etre comme comedien. Et « 🧹 Effacer » ne vide que cette casquette, sans toucher aux autres.",
+            target: '.facet-card-vis'
           },
           {
             title: 'Ce que ca declenche',
@@ -805,7 +837,13 @@
     chapterForTab: function (tabName) {
       if (!tabName) return null;
       for (var id in this.chapters) {
-        if (this.chapters[id] && this.chapters[id].tab === tabName) return id;
+        var ch = this.chapters[id];
+        if (!ch) continue;
+        // « tabs » sert aux chapitres qui couvrent DEUX onglets a la fois
+        // (Saisons et Episodes) : sans lui, « visite de l'onglet en cours »
+        // ne repondrait que depuis l'un des deux.
+        if (ch.tab === tabName) return id;
+        if (ch.tabs && ch.tabs.indexOf(tabName) !== -1) return id;
       }
       return null;
     },
@@ -930,6 +968,7 @@
       { grp: 'Projet', items: [
         { ch: 'presentation' },
         { grp: 'Ecriture', items: [
+          { ch: 'episodes' },
           { ch: 'synopsis' }, { ch: 'board' }, { ch: 'titlepage' },
           { ch: 'script' }, { ch: 'moodboard' }, { ch: 'storyboard' }
         ] },
