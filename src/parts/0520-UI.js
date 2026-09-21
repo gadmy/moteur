@@ -551,6 +551,19 @@
       // ===== NAVIGATION ONGLETS (cœur) =====
       // ============================================================
       switchTab: (tabName) => { 
+    // v601 — LE SENS DE LA PAGE SUIT LE SENS DU DEPLACEMENT. Une page qui se
+    // tourne toujours du meme cote quand on REVIENT en arriere sonne faux :
+    // c'est le seul detail qui separe le geste d'un simple effet. On lit le
+    // rang des deux onglets dans la barre AVANT de toucher aux classes, qui
+    // sont justement ce qui nous dit d'ou l'on vient.
+    let _sensPage = 1;
+    try {
+        const boutons = [...document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]')]
+            .filter(b => b.getClientRects && b.getClientRects().length > 0);
+        const avant = boutons.findIndex(b => b.classList.contains('active'));
+        const apres = boutons.findIndex(b => b.dataset.tab === tabName);
+        if(avant >= 0 && apres >= 0 && apres < avant) _sensPage = -1;
+    } catch(e) {}
     // Persister pour F5
     try { NavMemory.setTab(UI.currentCategory || null, tabName); } catch(e) {}
     
@@ -576,7 +589,9 @@
     
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active')); 
     document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active')); 
-    document.getElementById('tab-' + tabName).classList.add('active'); 
+    const _page = document.getElementById('tab-' + tabName);
+    _page.classList.toggle('page-retour', _sensPage < 0);
+    _page.classList.add('active'); 
     // v569 : ciblage par data-tab (fiable même après réorganisation par glisser-déposer),
     // remplace un ancien ciblage par position dans une liste figée et incomplète
     // (il manquait moodboard et scriptreport), qui aurait pu marquer le mauvais

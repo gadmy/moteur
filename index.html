@@ -1610,6 +1610,29 @@ vv601 (20 septembre 2026) — EN COURS.
   est tantot un input tantot une liste deroulante. Le compte par type rangeait
   les trois listes ensemble et laissait un trou. On compte par RANG.
 
+  LA PAGE QUI SE TOURNE, EN CHANGEANT D'ONGLET. La page ARRIVANTE pivote sur
+  sa charniere, comme une feuille qu'on rabat.
+  ET LE SENS SUIT LE DEPLACEMENT : la charniere est a GAUCHE quand on avance
+  d'un onglet, a DROITE quand on revient en arriere. C'est le seul detail qui
+  separe le geste d'un simple effet — une page qui se tourne toujours du meme
+  cote quand on REMONTE sonne faux. Le rang des deux onglets se lit dans la
+  barre AVANT de toucher aux classes, puisque ce sont elles qui disent d'ou
+  l'on vient.
+  LA PAGE QUI PART N'EST PAS ANIMEE, ET C'EST UN CHOIX. Pour la faire pivoter
+  il faudrait la garder affichee en meme temps que la nouvelle, donc la sortir
+  du flux — la hauteur de la page sauterait — et surtout dessiner DEUX onglets
+  a la fois. L'oeil suit ce qui arrive ; le pivot suffit a donner le geste.
+  J'AI CRU QUE CA COUTERAIT CHER, ET J'AI MESURE AVANT DE RENONCER. Un onglet
+  de cinq cents scenes fait 96 866 pixels de haut : je m'attendais a des images
+  sautees pendant la rotation. Resultat sur ce cas : 16,7 ms d'image mediane
+  AVEC comme SANS l'animation, et zero image longue. Le navigateur ne dessine
+  que les tuiles visibles, et la rotation se fait sur la carte graphique. La
+  precaution que j'allais prendre — desactiver l'effet sur les onglets lourds —
+  n'avait aucune raison d'etre, et elle aurait ajoute du code pour rien.
+  VERIFIE AUSSI : aucune barre de defilement horizontale pendant le tour, dans
+  les deux sens. Et le reglage « moins de mouvement » du systeme l'eteint,
+  comme le reste.
+
   LA SOURIS PRES DU BORD FAIT DEFILER LA LIGNE D'ONGLETS. Demande du
   developpeur apres coup, et elle repare un trou que la refonte avait creee :
   au doigt on glisse, au clavier on tabule, mais A LA SOURIS il fallait
@@ -4649,8 +4672,30 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
 
 /* ===== ANIMATIONS GLOBALES SUBTILES ===== */
 
-/* Transition entre onglets — fondu + léger glissement vers le haut */
-.tab-content.active { animation: subtleFadeUp 0.25s ease-out; }
+/* v601 — LA PAGE QUI SE TOURNE, EN CHANGEANT D'ONGLET.
+   La page ARRIVANTE pivote sur sa charniere gauche, comme une feuille qu'on
+   rabat. La page qui part, elle, n'est pas animee — et c'est un choix, pas un
+   oubli : pour la faire pivoter il faudrait la garder affichee en meme temps
+   que la nouvelle, donc la sortir du flux, donc faire sauter la hauteur de la
+   page ; et surtout il faudrait dessiner DEUX onglets a la fois, alors qu'un
+   scenario de cinq cents scenes en represente deja un seul tres lourd.
+   Le pivot suffit a donner le geste. L'oeil suit ce qui ARRIVE.
+   La perspective est portee par la transformation elle-meme : pas besoin
+   d'aller toucher au conteneur, qui sert a dix autres choses. */
+.tab-content.active { animation: pageTournee 0.34s cubic-bezier(0.22, 0.61, 0.36, 1); transform-origin: left center; backface-visibility: hidden; }
+@keyframes pageTournee {
+  from { opacity: 0; transform: perspective(1600px) rotateY(-14deg) translateX(-10px); }
+  55%  { opacity: 1; }
+  to   { opacity: 1; transform: perspective(1600px) rotateY(0deg) translateX(0); }
+}
+/* On REVIENT en arriere : la page se rabat de l'autre cote. Sans cela, le
+   geste sonne faux des qu'on remonte d'un onglet. */
+.tab-content.active.page-retour { transform-origin: right center; animation-name: pageTourneeRetour; }
+@keyframes pageTourneeRetour {
+  from { opacity: 0; transform: perspective(1600px) rotateY(14deg) translateX(10px); }
+  55%  { opacity: 1; }
+  to   { opacity: 1; transform: perspective(1600px) rotateY(0deg) translateX(0); }
+}
 
 /* Boutons d'onglets — transition douce hover */
 .tab-category, .tab-subbtn, .tab-btn { transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
@@ -26171,6 +26216,19 @@ initCategoriesDragDrop: () => {
       // ===== NAVIGATION ONGLETS (cœur) =====
       // ============================================================
       switchTab: (tabName) => { 
+    // v601 — LE SENS DE LA PAGE SUIT LE SENS DU DEPLACEMENT. Une page qui se
+    // tourne toujours du meme cote quand on REVIENT en arriere sonne faux :
+    // c'est le seul detail qui separe le geste d'un simple effet. On lit le
+    // rang des deux onglets dans la barre AVANT de toucher aux classes, qui
+    // sont justement ce qui nous dit d'ou l'on vient.
+    let _sensPage = 1;
+    try {
+        const boutons = [...document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]')]
+            .filter(b => b.getClientRects && b.getClientRects().length > 0);
+        const avant = boutons.findIndex(b => b.classList.contains('active'));
+        const apres = boutons.findIndex(b => b.dataset.tab === tabName);
+        if(avant >= 0 && apres >= 0 && apres < avant) _sensPage = -1;
+    } catch(e) {}
     // Persister pour F5
     try { NavMemory.setTab(UI.currentCategory || null, tabName); } catch(e) {}
     
@@ -26196,7 +26254,9 @@ initCategoriesDragDrop: () => {
     
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active')); 
     document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active')); 
-    document.getElementById('tab-' + tabName).classList.add('active'); 
+    const _page = document.getElementById('tab-' + tabName);
+    _page.classList.toggle('page-retour', _sensPage < 0);
+    _page.classList.add('active'); 
     // v569 : ciblage par data-tab (fiable même après réorganisation par glisser-déposer),
     // remplace un ancien ciblage par position dans une liste figée et incomplète
     // (il manquait moodboard et scriptreport), qui aurait pu marquer le mauvais
