@@ -45,7 +45,7 @@
       //  Sauf quand la carte EST le contenu de la fenetre : la fiche d'un
       //  personnage reutilise le dessin de sa carte de liste. On la distingue
       //  a ce qui l'entoure, pas a sa forme.
-      CARTES_DE_LISTE: '.data-card, .crew-card, .compact-card, .shot-card, .moodboard-board-tab, .sr-fiche, .ccol-ctr',
+      CARTES_DE_LISTE: '.data-card, .crew-card, .compact-card, .shot-card, .shot-compact-card, .moodboard-board-tab, .sr-fiche, .sr-shot-item, .ccol-ctr',
       FENETRES: '#card-edit-modal, .shot-edit-modal, #drawing-modal, #planning-modal, .modal, .modal-overlay',
       // Une fenetre qui vient de s'ouvrir n'est pas encore dessinee : on lui
       // laisse le temps d'apparaitre avant de conclure qu'elle est fermee.
@@ -310,9 +310,18 @@
                       if(em) pastille.style.background = Utils.getColor(em);
                       pastille.textContent = (qui[0] || '?').toUpperCase();
                       badge.appendChild(pastille);
+                      // LE CADENAS EST A PART DU MOT. Sur les petites cartes —
+                      // vignette de plan, ligne de depouillement — le libelle
+                      // est masque faute de place ; s'il portait le cadenas,
+                      // il n'y aurait plus AUCUN symbole, juste une initiale
+                      // de couleur qu'on peut prendre pour autre chose.
+                      const cad = document.createElement('span');
+                      cad.className = 'zone-lock-cadenas';
+                      cad.textContent = '🔒';
+                      badge.appendChild(cad);
                       const txt = document.createElement('span');
                       txt.className = 'zone-lock-texte';
-                      txt.textContent = '🔒 Verrouillée';
+                      txt.textContent = 'Verrouillée';
                       badge.appendChild(txt);
                       el.appendChild(badge);
                   });

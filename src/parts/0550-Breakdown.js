@@ -5581,6 +5581,13 @@ const Storyboard = {
         card.className = 'shot-compact-card';
         card.draggable = state.currentRole !== 'viewer';
         card.dataset.shotId = shot.id;
+        // v601 — LA VIGNETTE DIT DE QUEL PLAN ELLE PARLE. C'est elle qu'on
+        // regarde dans la grille du storyboard : sans cet identifiant, le
+        // cadenas n'avait nulle part ou se poser, et l'on n'apprenait qu'un
+        // plan etait occupe qu'en essayant de l'ouvrir. (La carte detaillee,
+        // createShotCard, ne sert QUE dans la fenetre d'edition — c'est ce
+        // qui m'avait fait croire la grille couverte.)
+        card.dataset.fiche = 'shot:' + shot.id;
         
         let imageHTML = '';
         const contenu = Storyboard.contenuPlan(shot);

@@ -43,7 +43,7 @@
       //                              fenetre d'edition, la ou se trouvent les
       //                              champs. Elle vit dans le contenu, donc
       //                              elle disparait quand on ouvre autre chose.
-      zones: '.data-card[data-fiche], .crew-card[data-fiche], .compact-card[data-fiche], .shot-card[data-fiche], .moodboard-board-tab[data-fiche], #moodboardCanvasWrapper[data-fiche], .ccol-ctr[data-fiche], .sr-fiche[data-fiche], .sr-sheet[data-fiche], #shotEditContent[data-fiche], #drawing-modal[data-fiche], .fiche-fenetre[data-fiche]',
+      zones: '.data-card[data-fiche], .crew-card[data-fiche], .compact-card[data-fiche], .shot-card[data-fiche], .shot-compact-card[data-fiche], .moodboard-board-tab[data-fiche], #moodboardCanvasWrapper[data-fiche], .ccol-ctr[data-fiche], .sr-fiche[data-fiche], .sr-shot-item[data-fiche], .sr-sheet[data-fiche], #shotEditContent[data-fiche], #drawing-modal[data-fiche], .fiche-fenetre[data-fiche]',
       // Le verrou se PREND la ou l'on ecrit : sur les cartes modifiables et
       // dans les fenetres. Parcourir une liste de ressources ne verrouille rien.
       zonesEcriture: '.data-card[data-fiche], .crew-card[data-fiche], .sr-sheet[data-fiche], #shotEditContent[data-fiche], .fiche-fenetre[data-fiche]',

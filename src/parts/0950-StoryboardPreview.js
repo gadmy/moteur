@@ -9158,7 +9158,7 @@ const ScriptReport = {
                     ${shots.map((shot, shotIdx) => {
                         const hasReport = ScriptReport.hasReport(scene.id, shot.id);
                         const isActiveShot = ScriptReport.currentShotId === shot.id;
-                        return `<div class="sr-shot-item ${isActiveShot ? 'active' : ''} ${hasReport ? 'has-report' : ''}" onclick="event.stopPropagation(); app.ScriptReport.selectShot('${scene.id}', '${shot.id}')">
+                        return `<div class="sr-shot-item ${isActiveShot ? 'active' : ''} ${hasReport ? 'has-report' : ''}" data-fiche="rapport:${Utils.escape(String(scene.id) + '_' + String(shot.id))}" onclick="event.stopPropagation(); app.ScriptReport.selectShot('${scene.id}', '${shot.id}')">
                             Plan ${shotIdx + 1}${shot.name ? ' - ' + Utils.escape(shot.name) : ''}
                         </div>`;
                     }).join('')}

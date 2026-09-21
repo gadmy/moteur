@@ -1389,7 +1389,9 @@ const Contracts = {
             + '<button class="merge-btn" title="Dupliquer" onclick="event.stopPropagation(); app.Contracts.duplicate(\'' + ct.id + '\')">📋</button>'
             + '<button class="delete-btn" title="Supprimer" onclick="event.stopPropagation(); app.Contracts.removeContract(\'' + ct.id + '\')">🗑️</button>'
             + '</div>';
-        return '<div class="compact-card" onclick="app.Contracts.openFromList(\'' + ct.id + '\')">'
+        // v601 : la carte de la liste dit de quel contrat elle parle, pour que
+        // le cadenas s'y pose comme sur les trois colonnes.
+        return '<div class="compact-card" data-fiche="contract:' + esc(String(ct.id)) + '" onclick="app.Contracts.openFromList(\'' + ct.id + '\')">'
             + actions
             + '<div class="compact-card-photo">' + (typeIcon[ct.type] || '📄') + '</div>'
             + '<div class="compact-card-name">' + title + '</div>'
