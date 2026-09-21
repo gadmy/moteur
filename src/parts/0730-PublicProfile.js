@@ -2087,10 +2087,14 @@ const Permissions = {
         return CONFIG.permissionSections.some(s => (perms || {})[s.id] === 'write') ? 'editor' : 'viewer';
     },
 
+    // v601 : meme regle de sortie pour TOUS les chemins — une section que le
+    // preset ne connait pas vaut lecture, jamais blocage (voir applyPreset).
+    // Un seul des quatre chemins normalisait ; les trois autres refermaient les
+    // six sections ajoutees depuis.
     getForMember: (member, type) => {
         // type = 'actor' ou 'crew'
         if(type === 'actor') {
-            return CONFIG.defaultPermissions['comedien'];
+            return Permissions._normalize(CONFIG.defaultPermissions['comedien']);
         }
         
         // Pour les techniciens, chercher par rôle
@@ -2098,16 +2102,16 @@ const Permissions = {
         
         // Chercher une correspondance exacte
         if(CONFIG.defaultPermissions[role]) {
-            return CONFIG.defaultPermissions[role];
+            return Permissions._normalize(CONFIG.defaultPermissions[role]);
         }
         
         // Vérifier si c'est un chef de poste (contient "Chef" ou "Directeur")
         if(role.includes('Chef') || role.includes('Directeur') || role.includes('Réalisateur')) {
-            return CONFIG.defaultPermissions['chef_de_poste'];
+            return Permissions._normalize(CONFIG.defaultPermissions['chef_de_poste']);
         }
         
         // Par défaut, technicien standard
-        return CONFIG.defaultPermissions['technicien'];
+        return Permissions._normalize(CONFIG.defaultPermissions['technicien']);
     },
     
     // Obtenir les permissions actuelles d'un utilisateur sur le projet
@@ -2416,8 +2420,18 @@ const Permissions = {
         
         // v570 : les trois presets de role remplissent la ligne entiere.
         const rp = Permissions.ROLE_PRESETS[preset];
-        const perms = rp ? Permissions._rolePresetPerms(rp.mode) : CONFIG.defaultPermissions[preset];
-        if(!perms) return;
+        const brut = rp ? Permissions._rolePresetPerms(rp.mode) : CONFIG.defaultPermissions[preset];
+        if(!brut) return;
+        // v601 — UN PRESET NE DOIT PAS FERMER CE QU'IL NE CONNAIT PAS. Les
+        // presets de METIER (comedien, technicien, chef de poste, et les douze
+        // intitules) ont ete ecrits avant six sections du tableau :
+        // presentation, moodboard, ressources, rapports de script, depenses,
+        // contrats. Elles n'y figurent donc pas — et la ligne les remplissait a
+        // « aucun acces ». Choisir « Comedien » RETIRAIT six acces sans le dire.
+        // _normalize applique la regle que le reste de l'application suit deja :
+        // une section absente vaut LECTURE, jamais blocage. Ajouter une section
+        // au tableau demain ne refermera donc rien derriere nous.
+        const perms = Permissions._normalize(brut);
         
         CONFIG.permissionSections.forEach(s => {
             const select = document.getElementById(`perm-${emailKey}-${s.id}`);
