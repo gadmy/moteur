@@ -25,8 +25,13 @@
           // Les cles restent ecrites ici pour memoire : characters, actors.
           planning:     { label: 'Planning',     keys: ['shootingDays','workplanOverrides','publicCallsheets'],                       tabs: ['planning'] },
           budget:       { label: 'Budget',       keys: ['budget','expenses'],                                                         tabs: ['expenses'] },
-          crew:         { label: 'Équipe',       keys: ['crew','orgs'],                                                               tabs: ['crew','orgs'] },
-          locations:    { label: 'Décors',       keys: ['locations'],                                                                 tabs: ['locs'] },
+          // v601 — EQUIPE ET DECORS PASSENT AU VERROU PAR FICHE (FicheLock),
+          // leurs cartes se modifiant directement dans la liste. Les
+          // STRUCTURES restent sur un verrou d'onglet : leur carte n'a aucun
+          // champ, on les modifie dans une fenetre — un verrou fin ne s'y
+          // accrocherait pas, et le retirer aurait fait perdre le filet.
+          // Cles laissees pour memoire : crew, locations.
+          orgs:         { label: 'Asso / Entreprises', keys: ['orgs'],                                                                tabs: ['orgs'] },
           resources:    { label: 'Ressources',   keys: ['resources'],                                                                 tabs: ['resources'] },
           storyboard:   { label: 'Storyboard',   keys: ['shots'],                                                                     tabs: ['storyboard'] },
           moodboard:    { label: 'Moodboard',    keys: ['moodboards'],                                                                tabs: ['moodboard'] },
@@ -561,7 +566,9 @@ const LockManager = {
                   board:     (typeof SceneLock !== 'undefined') ? SceneLock : null,
                   synopsis:  (typeof SynopsisLock !== 'undefined') ? SynopsisLock : null,
                   chars:     (typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  actors:    (typeof FicheLock !== 'undefined') ? FicheLock : null
+                  actors:    (typeof FicheLock !== 'undefined') ? FicheLock : null,
+                  locs:      (typeof FicheLock !== 'undefined') ? FicheLock : null,
+                  crew:      (typeof FicheLock !== 'undefined') ? FicheLock : null
               };
               document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => {
                   const famille = familles[btn.dataset.tab];
@@ -577,7 +584,8 @@ const LockManager = {
                   const em = (l.holder_email || '').toLowerCase();
                   if(em) av.style.background = Utils.getColor(em);
                   av.textContent = autres.length > 1 ? String(autres.length) : (LockManager._who(l)[0] || '?').toUpperCase();
-                  const quoi = { synopsis: 'section', chars: 'fiche', actors: 'fiche' }[btn.dataset.tab] || 'scène';
+                  const quoi = (btn.dataset.tab === 'synopsis') ? 'section'
+                             : (['chars','actors','locs','crew'].indexOf(btn.dataset.tab) >= 0 ? 'fiche' : 'scène');
                   av.title = autres.length > 1
                       ? ('✍️ ' + autres.length + ' ' + quoi + 's en cours d\'écriture — les autres restent ouvertes')
                       : ('✍️ ' + LockManager._who(l) + ' écrit une ' + quoi + ' — les autres restent ouvertes');

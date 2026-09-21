@@ -105,7 +105,7 @@
             // Cette meme fonction sert la LISTE et la FICHE ouverte en fenetre
             // (CardModal.open reutilise ce rendu) : les deux sont donc couvertes
             // d'un coup, sans avoir a y penser deux fois.
-            if(item && item.id && (kindOf === 'character' || kindOf === 'actor')) div.dataset.fiche = kindOf + ':' + item.id;
+            if(item && item.id && kindOf) div.dataset.fiche = kindOf + ':' + item.id;
             
             const delBtn = isView ? '' : `<button onclick="app.Actions.deleteDataItem('${type}', ${idx})" style="color:var(--danger);border:none;background:none;cursor:pointer">🗑️</button>`; 
             
@@ -472,6 +472,11 @@
         
         const card = document.createElement('div');
         card.className = 'crew-card fid-card';
+        // v601 : verrou par fiche (voir FicheLock). La carte d'equipe porte DIX
+        // champs modifiables directement dessus — le curseur s'y pose vraiment,
+        // donc le verrou s'accroche vraiment. C'est la condition qu'on verifie
+        // AVANT de retirer un verrou d'onglet, depuis l'affaire des scenes.
+        if(member && member.id) card.dataset.fiche = 'crew:' + member.id;
 
         // v600 : une fonction DEJA ENREGISTREE mais absente du referentiel (saisie
         // a la main, ou departement change depuis) est ajoutee a la liste et

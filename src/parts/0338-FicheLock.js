@@ -26,13 +26,27 @@
   const FicheLock = VerrouFin.creer({
       nom: 'FicheLock',
       prefixe: 'fiche:',
-      zones: '.data-card[data-fiche]',
+      // La carte d'equipe ne porte pas la meme classe que les autres : elle est
+      // dessinee par une fonction a part. On NOMME donc les deux, plutot que de
+      // se fier a « tout element portant data-fiche » — c'est ce qui avait fait
+      // atterrir le badge des scenes sur des pastilles de commentaire et des
+      // cases d'export.
+      zones: '.data-card[data-fiche], .crew-card[data-fiche]',
       idDe: (el) => el.getAttribute('data-fiche') || ''
   });
 
   // La cle de collection derriere une espece, et l'inverse. Le verrou parle en
   // « character », l'enregistrement en « characters ».
-  FicheLock.COLL = { character: 'characters', actor: 'actors' };
+  // Les especes couvertes. Une espece n'entre ici QUE si ses fiches se
+  // modifient directement sur leur carte : c'est la que le curseur se pose,
+  // donc la que le verrou s'accroche. Verifie avant d'ajouter — personnages,
+  // comediens, decors et equipe portent de dix a vingt champs sur la carte ;
+  // ressources, structures et plans de storyboard n'en portent AUCUN (ils se
+  // modifient dans une fenetre), et leur retirer le verrou d'onglet aurait
+  // donc fait PERDRE de la securite au lieu d'en gagner. C'est exactement le
+  // piege des scenes, ou le refus etait pose sur un chemin que personne
+  // n'empruntait.
+  FicheLock.COLL = { character: 'characters', actor: 'actors', location: 'locations', crew: 'crew' };
 
   // Les fiches tenues par QUELQU'UN D'AUTRE, rangees par collection :
   // { characters: { id -> qui }, actors: { ... } }. Lue par la sauvegarde, qui
