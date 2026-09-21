@@ -4749,11 +4749,24 @@ const CardModal = {
     },
     
     open: (type, idx) => {
+        const item = state.data[type][idx];
+        if(!item) return;
+        // v601 — C'EST UNE PORTE. On y entrait sans rien prendre : cliquer une
+        // vignette de Casting ou de Decors n'allumait donc rien chez les
+        // autres, alors que UI.openFiche — l'autre chemin vers la meme fiche —
+        // prenait bien le verrou. Deux entrees pour une meme piece, une seule
+        // gardee.
+        {
+            const esp = { characters: 'character', actors: 'actor', locations: 'location' }[type];
+            const nom = { characters: 'Ce personnage', actors: 'Cette fiche comédien', locations: 'Ce décor' }[type];
+            if(esp) {
+                try { if(typeof FicheLock !== 'undefined'
+                         && FicheLock.ouvrir(esp, item.id, nom) === false) return; } catch(e) {}
+            }
+        }
         CardModal.currentType = type;
         CardModal.currentIdx = idx;
-        const item = state.data[type][idx];
-        CardModal.currentId = item ? item.id : null;
-        if(!item) return;
+        CardModal.currentId = item.id;
         
         const modal = document.getElementById('card-edit-modal');
         const title = document.getElementById('card-edit-modal-title');
@@ -5177,6 +5190,7 @@ const CardModal = {
             const idx = state.data.crew.indexOf(member);
             const card = document.createElement('div');
             card.className = 'compact-card';
+            if(member && member.id) card.dataset.fiche = 'crew:' + member.id;   // v601 : voir ci-dessus
             card.onclick = () => CardModal.openCrew(idx);
             if(!isView) { card.setAttribute('draggable', 'true'); card.dataset.dndColl = 'crew'; card.dataset.dndIdx = idx; }
             
@@ -5205,11 +5219,13 @@ const CardModal = {
     
     // Ouvrir le modal pour un membre de l'équipe
     openCrew: (idx) => {
+        const member = state.data.crew[idx];
+        if(!member) return;
+        try { if(typeof FicheLock !== 'undefined'
+                 && FicheLock.ouvrir('crew', member.id, 'Cette fiche') === false) return; } catch(e) {}
         CardModal.currentType = 'crew';
         CardModal.currentIdx = idx;
-        const member = state.data.crew[idx];
-        CardModal.currentId = member ? member.id : null;
-        if(!member) return;
+        CardModal.currentId = member.id;
         
         const modal = document.getElementById('card-edit-modal');
         const title = document.getElementById('card-edit-modal-title');
@@ -5261,6 +5277,17 @@ const CardModal = {
             const idx = state.data[type].indexOf(item);
             const card = document.createElement('div');
             card.className = 'compact-card';
+            // v601 — LA VIGNETTE DIT DE QUELLE FICHE ELLE PARLE. Casting et
+            // Decors s'affichent par defaut en vignettes, et c'est CETTE
+            // fonction qui les dessine — pas renderDataCards, qui ne sert
+            // qu'au mode detaille et a la fenetre. Sans cet identifiant, le
+            // cadenas n'avait nulle part ou se poser : on n'apprenait qu'une
+            // fiche etait occupee qu'en essayant de l'ouvrir. Meme defaut, et
+            // meme cause, que la grille du storyboard.
+            {
+                const esp = { characters: 'character', actors: 'actor', locations: 'location' }[type];
+                if(esp && item && item.id) card.dataset.fiche = esp + ':' + item.id;
+            }
             card.onclick = () => CardModal.open(type, idx);
             if(!isView) { card.setAttribute('draggable', 'true'); card.dataset.dndColl = type; card.dataset.dndIdx = idx; }
             

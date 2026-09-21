@@ -5906,7 +5906,7 @@ const Storyboard = {
                     ${CONFIG.shotTypes.map(t => `<option value="${t}" ${shot.shotType === t ? 'selected' : ''}>${t}</option>`).join('')}
                 </select>
                 
-                <span class="shot-field-nom">Mouvement de caméra</span>
+                <span class="shot-field-nom" title="Mouvement de caméra">Mvt de caméra</span>
                 <select class="shot-input" onchange="app.Storyboard.updateShot('${shot.id}', 'cameraMove', this.value)" ${isView ? 'disabled' : ''}>
                     <option value="">Mouvement...</option>
                     ${CONFIG.cameraMoves.map(m => `<option value="${m}" ${shot.cameraMove === m ? 'selected' : ''}>${m}</option>`).join('')}
