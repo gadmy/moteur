@@ -137,7 +137,10 @@ const LockManager = {
               }
               LockManager.applyUI();
               const d = LockManager.currentDomain;
-              if(d && LockManager.currentEditable && !map[d] && !LockManager._yieldedRecently(d)) LockManager.acquire(d);
+              // v601 : en veille, on ne reprend RIEN tout seul — sinon la
+              // relecture periodique des verrous reprendrait la section dans
+              // les vingt secondes, et la mise en veille n'aurait servi a rien.
+              if(d && LockManager.currentEditable && !map[d] && !LockManager._yieldedRecently(d) && !LockManager.enVeille) LockManager.acquire(d);
           } catch(e) { console.warn('[LockManager] Échec du poll des verrous:', e && e.message); }
       },
 
@@ -148,7 +151,49 @@ const LockManager = {
       held: {},
       winDomains: {},   // domaines pris par MES fenetres flottantes (interrupteur Modification)
       lastActivity: 0,
-      _activity: () => { LockManager.lastActivity = Date.now(); },
+      _activity: () => {
+          LockManager.lastActivity = Date.now();
+          if(LockManager.enVeille) LockManager._reveiller();
+      },
+
+      // ==================================================================
+      //  INACTIVITE : ON MET EN VEILLE, ON N'EJECTE PLUS (v601)
+      // ==================================================================
+      //  Avant : trois minutes sans rien toucher renvoyaient au tableau de
+      //  bord. Le but etait bon — ne pas laisser quelqu'un bloquer une section
+      //  pendant qu'il est parti boire un cafe — mais le remede etait brutal :
+      //  on perdait sa page, son onglet, l'endroit ou l'on en etait.
+      //  Maintenant : on RESTE dans le projet, on rend seulement ce qu'on
+      //  tenait. Le curseur sort de la zone, les verrous tombent, et c'est le
+      //  clic suivant qui les reprend.
+      //  POURQUOI SORTIR LE CURSEUR ET PAS SEULEMENT LACHER LES VERROUS : ce
+      //  sont les verrous fins qui suivent le curseur. Le laisser dans la scene
+      //  le ferait reprendre dans la foulee, et on n'aurait rien lache du tout.
+      enVeille: false,
+
+      _endormir: async () => {
+          LockManager.enVeille = true;
+          try {
+              const a = document.activeElement;
+              if(a && a.blur && a !== document.body) a.blur();
+              const sel = document.getSelection();
+              if(sel && sel.removeAllRanges) sel.removeAllRanges();
+          } catch(e) {}
+          try { if(typeof VerrouFin !== 'undefined') VerrouFin.libererTout(); } catch(e) {}
+          const d = LockManager.currentDomain;
+          if(d) { try { await LockManager.release(d); } catch(e) {} }
+          LockManager.applyUI();
+      },
+
+      // Le premier clic ou la premiere touche reprend la main. Sans cela on
+      // resterait en lecture seule sans comprendre pourquoi.
+      _reveiller: () => {
+          if(!LockManager.enVeille) return;
+          LockManager.enVeille = false;
+          const d = LockManager.currentDomain;
+          if(d && LockManager.currentEditable && !LockManager.isAlone()) LockManager.acquire(d);
+          LockManager.applyUI();
+      },
       previewTimer: null,
       previewTab: null,
       previewPrev: null,
@@ -179,7 +224,7 @@ const LockManager = {
       // La présence a changé : quelqu'un arrive → je réclame mon onglet courant ; et on rafraîchit l'UI.
       onPresenceChange: () => {
           const d = LockManager.currentDomain;
-          if(!LockManager.isAlone() && d && LockManager.currentEditable
+          if(!LockManager.isAlone() && d && LockManager.currentEditable && !LockManager.enVeille
              && !LockManager._mine((state.domainLocks||{})[d]) && !LockManager.held[d]
              && !LockManager._yieldedRecently(d)) {
               LockManager.acquire(d);
@@ -654,13 +699,14 @@ const LockManager = {
           const _ejInEditor = els.appView && els.appView.style.display !== 'none';
           const _ejMyEmail = ((state.currentUser && state.currentUser.email) || '').toLowerCase();
           const _ejOthers = (state.dbPresence || []).some(r => r.project_id === state.currentProjectId && (r.user_email || '').toLowerCase() !== _ejMyEmail);
-          if(state.currentProjectId && _ejInEditor && _ejOthers && LockManager.lastActivity
+          if(state.currentProjectId && _ejInEditor && _ejOthers && !LockManager.enVeille && LockManager.lastActivity
              && (Date.now() - LockManager.lastActivity > 180000)) {
               LockManager.lastActivity = Date.now();
-              try { await StoreSave.save(); } catch(e) { console.warn('[LockManager] Sauvegarde avant éjection inactivité échouée:', e && e.message); }
-              Utils.toast('Inactif depuis 3 min : retour au tableau de bord (travail enregistré).', 'info', 6000);
-              NavMemory.setProject(null); NavMemory.setTab(null, null);
-              UI.showDashboard();
+              // On enregistre AVANT de lacher : c'est ce que faisait l'ejection,
+              // et c'est la seule partie qu'il ne fallait surtout pas perdre.
+              try { await StoreSave.save(); } catch(e) { console.warn('[LockManager] Sauvegarde avant mise en veille échouée:', e && e.message); }
+              await LockManager._endormir();
+              Utils.toast('Inactif depuis 3 min : vos sections sont libérées pour les autres (travail enregistré). Cliquez pour reprendre la main.', 'info', 8000);
               return;
           }
           // v601 : les verrous de SCENE battent au meme rythme que les domaines.
