@@ -265,7 +265,17 @@
           
           if(!success) {
               console.error('Erreur sauvegarde après', attempt, 'tentatives:', lastError);
-              Utils.toast(`Erreur de sauvegarde après ${attempt} tentatives. Vérifiez votre connexion.`, 'error');
+              // v601 — UN REFUS DE DROIT N'EST PAS UNE PANNE DE RESEAU. Le
+              // serveur refuse par exemple d'ecrire les droits des membres a
+              // qui n'est pas proprietaire (code 42501) : dire « verifiez votre
+              // connexion » envoie chercher du cote du wifi pendant des heures.
+              // On rend alors la phrase du serveur, qui dit ce qui s'est passe.
+              const refus = lastError && (String(lastError.code) === '42501'
+                  || /refus|forbidden|permission|droit/i.test(String(lastError.message || '')));
+              Utils.toast(refus
+                  ? (String(lastError.message || 'Modification refusée.').replace(/^.*?:\s*/, '') + ' Rien n\'a été enregistré.')
+                  : `Erreur de sauvegarde après ${attempt} tentatives. Vérifiez votre connexion.`,
+                  'error', refus ? 9000 : 4000);
               if(syncIndicator) {
                   syncIndicator.textContent = '❌';
                   syncIndicator.title = 'Échec de la sauvegarde';
