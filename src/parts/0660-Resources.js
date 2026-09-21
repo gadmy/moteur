@@ -135,8 +135,10 @@
           // lecture, ecriture bloquee), comme partout ailleurs.
           const resource = (state.data.resources || []).find(r => r.id === id);
           if(!resource) return;
-          // v601 : ouvrir la fiche, c'est la prendre (voir FicheLock.ouvrir).
-          try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir('resource', id); } catch(e) {}
+          // v601 : ouvrir la fiche, c'est la prendre — et si quelqu'un d'autre
+          // la tient, on ne l'ouvre pas (voir FicheLock.ouvrir).
+          try { if(typeof FicheLock !== 'undefined'
+                   && FicheLock.ouvrir('resource', id, 'Cette ressource') === false) return; } catch(e) {}
           // Une ressource ouverte depuis le depouillement ou la toile reste une
           // fiche de l'onglet Ressources : c'est son droit qui commande.
           const roRes = (typeof Permissions !== 'undefined' && Permissions.canEditFiche && !Permissions.canEditFiche('resource'))

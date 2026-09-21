@@ -459,7 +459,8 @@
           // meme fiche a deux sans que rien ne s'allume, puisqu'on peut la lire
           // et la parcourir sans jamais poser le curseur. C'est l'OUVERTURE qui
           // marque l'intention, pas la frappe.
-          try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir(kind, id); } catch(e) {}
+          // Le refus est pose APRES le controle d'acces ci-dessous : inutile de
+          // reserver une fiche qu'on n'a pas le droit d'ouvrir.
           // GARDE UNIQUE (26 aout) : l'acces se verifie ICI, pour les onze
           // familles. Avant, seuls le jour, la depense et le plan etaient
           // controles — on pouvait ouvrir une fiche comedien depuis le
@@ -472,6 +473,10 @@
               Utils.toast("Vous n'avez pas accès " + (noms[kind] || 'à cette section') + '.', 'error');
               return;
           }
+          // v601 — ON PREVIENT AVANT D'ENTRER. Si quelqu'un d'autre tient la
+          // fiche, on ne l'ouvre pas du tout : entrer pour decouvrir ensuite
+          // qu'on ne peut rien enregistrer est la pire des deux solutions.
+          try { if(typeof FicheLock !== 'undefined' && FicheLock.ouvrir(kind, id) === false) return; } catch(e) {}
           // ETAPE 8b / 8c (25 aout) — CINQ FAMILLES QUI N'AVAIENT PAS DE PORTE.
           // Elles sont traitees AVANT la resolution par FICHE_TAB : leur fenetre
           // ne vit pas dans une collection state.data ouverte par CardModal, et

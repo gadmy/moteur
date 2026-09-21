@@ -43,7 +43,7 @@
       //                              fenetre d'edition, la ou se trouvent les
       //                              champs. Elle vit dans le contenu, donc
       //                              elle disparait quand on ouvre autre chose.
-      zones: '.data-card[data-fiche], .crew-card[data-fiche], .compact-card[data-fiche], .shot-card[data-fiche], .moodboard-board-tab[data-fiche], #moodboardCanvasWrapper[data-fiche], .ccol-ctr[data-fiche], .sr-fiche[data-fiche], .sr-sheet[data-fiche], #shotEditContent[data-fiche], .fiche-fenetre[data-fiche]',
+      zones: '.data-card[data-fiche], .crew-card[data-fiche], .compact-card[data-fiche], .shot-card[data-fiche], .moodboard-board-tab[data-fiche], #moodboardCanvasWrapper[data-fiche], .ccol-ctr[data-fiche], .sr-fiche[data-fiche], .sr-sheet[data-fiche], #shotEditContent[data-fiche], #drawing-modal[data-fiche], .fiche-fenetre[data-fiche]',
       // Le verrou se PREND la ou l'on ecrit : sur les cartes modifiables et
       // dans les fenetres. Parcourir une liste de ressources ne verrouille rien.
       zonesEcriture: '.data-card[data-fiche], .crew-card[data-fiche], .sr-sheet[data-fiche], #shotEditContent[data-fiche], .fiche-fenetre[data-fiche]',
@@ -59,15 +59,44 @@
   //  ON NE PREND RIEN EN LECTURE SEULE : consulter ne doit bloquer personne.
   //  ET RIEN NON PLUS si quelqu'un d'autre la tient deja — le badge le dit,
   //  inutile d'insister.
-  FicheLock.ouvrir = (espece, id) => {
+  //  ET L'ON PREVIENT AVANT D'ENTRER, PAS APRES (v601). Premiere version :
+  //  ouvrir une fiche deja tenue ne prenait rien, mais la fiche s'ouvrait
+  //  quand meme — on se retrouvait dedans, a lire des champs qu'on ne pouvait
+  //  pas enregistrer, sans savoir pourquoi. Remarque du developpeur :
+  //  « on doit etre prevenu AVANT de rentrer dans une fiche qu'elle est
+  //  occupee ». C'est aussi la seule facon tenable pour l'editeur de dessin :
+  //  il contient des dizaines de boutons, les neutraliser un par un serait une
+  //  usine a gaz — on garde la porte fermee, et le cadenas se voit DEHORS, sur
+  //  la vignette du plan.
+  //  RENVOIE false QUAND IL FAUT RENONCER A OUVRIR, true sinon. En cas de
+  //  doute (famille inconnue, panne) on renvoie true : un verrou qui n'a pas
+  //  marche ne doit jamais empecher de travailler.
+  FicheLock.occupeePar = (espece, id) => {
       try {
-          if(!espece || !id) return;
-          if(!FicheLock.COLL[espece]) return;          // famille sans verrou fin
-          if(state.currentRole === 'viewer') return;
-          const cle = espece + ':' + id;
-          if(FicheLock.detenteur(cle)) return;
-          FicheLock.prendreParPorte(cle);
-      } catch(e) { console.warn('[FicheLock] ouverture :', e && e.message); }
+          if(!espece || !id || !FicheLock.COLL[espece]) return '';
+          const l = FicheLock.detenteur(espece + ':' + id);
+          return l ? (LockManager._who(l) || 'quelqu\'un') : '';
+      } catch(e) { return ''; }
+  };
+
+  FicheLock.ouvrir = (espece, id, libelle) => {
+      try {
+          if(!espece || !id) return true;
+          if(!FicheLock.COLL[espece]) return true;     // famille sans verrou fin
+          // Simple lecture : on n'ouvre rien a personne et on ne prend rien.
+          // Consulter une fiche ne doit bloquer ni soi-meme ni les autres.
+          if(state.currentRole === 'viewer') return true;
+          if(typeof Permissions !== 'undefined' && Permissions.canEditFiche
+             && !Permissions.canEditFiche(espece)) return true;
+          const qui = FicheLock.occupeePar(espece, id);
+          if(qui) {
+              Utils.toast('🔒 ' + (libelle || 'Cette fiche') + ' est ouverte par ' + qui
+                          + '. Réessayez quand la personne l\'aura quittée.', 'error', 5000);
+              return false;
+          }
+          FicheLock.prendreParPorte(espece + ':' + id);
+          return true;
+      } catch(e) { console.warn('[FicheLock] ouverture :', e && e.message); return true; }
   };
 
   // La cle de collection derriere une espece, et l'inverse. Le verrou parle en

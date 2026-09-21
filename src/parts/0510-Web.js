@@ -601,6 +601,20 @@
           Web.layout();
           
           canvas.querySelectorAll('.web-node, .web-empty').forEach(el => el.remove());
+          // v601 — LES TROIS ACTIONS D'UNE FICHE, au survol. Elles etaient
+          // cachees dans un menu au clic droit ; le clic droit sert maintenant a
+          // RECULER. Elles arretent la propagation : sans cela, cliquer
+          // « Imprimer » recentrerait aussi la toile sur la fiche.
+          // La fabrique est sortie de la boucle pour servir AUSSI la fiche du
+          // centre : elle en est une, elle doit avoir les memes boutons.
+          const actionsDe = (n, i) => {
+              if(!Web._nodeIsFiche(n)) return '';
+              return `<div class="web-node-actions">
+                        <button class="web-node-btn" title="Imprimer cette fiche" onmousedown="event.stopPropagation();" onclick="event.stopPropagation(); app.Web.imprimerNode(${i});">🖨️</button>
+                        <button class="web-node-btn" title="Ouvrir la fiche" onmousedown="event.stopPropagation();" onclick="event.stopPropagation(); app.Web.openNode(${i});">📄</button>
+                        <button class="web-node-btn" title="Voir dans le projet" onmousedown="event.stopPropagation();" onclick="event.stopPropagation(); app.Web.revealInProject(${i});">📍</button>
+                     </div>`;
+          };
           const html = Web.nodes.map((n, i) => {
               const col = Web.COLORS[n.kind] || '#999';
               // Le centre de la racine ne porte pas de nom de famille : ce
@@ -609,7 +623,13 @@
                   ? `<div class="web-node-kind">🎬 Projet</div><div class="web-node-label">${esc(n.label)}</div>`
                   : `<div class="web-node-kind">${Links.icon(n.kind)} ${esc(Links.kindLabel(n.kind))}</div>
                             <div class="web-node-label">${esc(n.label)}</div>`;
-              if(n.center) return `<div class="web-node is-center" data-i="${i}" style="--c:${col}" title="${racine ? 'Le projet — point de départ de la toile' : 'Fiche au centre — déplaçable'}">${tete}</div>`;
+              if(n.center) {
+                  const actC = actionsDe(n, i);
+                  const tC = racine ? 'Le projet — point de départ de la toile' : 'Fiche au centre — déplaçable';
+                  return actC
+                      ? `<div class="web-node is-center a-actions" data-i="${i}" style="--c:${col}" title="${tC}"><div class="web-node-inner">${tete}</div>${actC}</div>`
+                      : `<div class="web-node is-center" data-i="${i}" style="--c:${col}" title="${tC}">${tete}</div>`;
+              }
               if(n.famille) {
                   // Bulle de famille : « 30 scènes ». Elle n'ouvre pas de fiche,
                   // elle DESCEND d'un cran dans la toile.
@@ -642,15 +662,20 @@
               // qui avance.
               // Ces boutons arretent la propagation : sans cela, cliquer
               // « Imprimer » recentrerait aussi la toile sur la fiche.
-              const actions = Web._nodeIsFiche(n)
-                  ? `<div class="web-node-actions">
-                        <button class="web-node-btn" title="Imprimer cette fiche" onmousedown="event.stopPropagation();" onclick="event.stopPropagation(); app.Web.imprimerNode(${i});">🖨️</button>
-                        <button class="web-node-btn" title="Ouvrir la fiche" onmousedown="event.stopPropagation();" onclick="event.stopPropagation(); app.Web.openNode(${i});">📄</button>
-                        <button class="web-node-btn" title="Voir dans le projet" onmousedown="event.stopPropagation();" onclick="event.stopPropagation(); app.Web.revealInProject(${i});">📍</button>
-                     </div>`
-                  : '';
-              return `<div class="web-node" data-i="${i}" style="--c:${col}" title="Clic : mettre au centre — clic droit : revenir en arrière">
-                          ${tete}<div class="web-node-rel">${esc(n.rel)}</div>${actions}
+              const actions = actionsDe(n, i);
+              // v601 — LES BOUTONS PASSENT AU-DESSUS DE LA FICHE. Ils sont poses
+              // sur le bord haut, or la pastille coupe ce qui depasse (c'est ce
+              // qui garde les longs noms dans leur cadre) : ils arrivaient donc
+              // tranches en deux. On deplace la coupe d'un cran vers l'interieur
+              // — un enveloppe qui ne contient QUE le texte — et la pastille
+              // laisse desormais sortir ses boutons.
+              if(!actions) {
+                  return `<div class="web-node" data-i="${i}" style="--c:${col}" title="Clic : mettre au centre — clic droit : revenir en arrière">
+                              ${tete}<div class="web-node-rel">${esc(n.rel)}</div>
+                          </div>`;
+              }
+              return `<div class="web-node a-actions" data-i="${i}" style="--c:${col}" title="Clic : mettre au centre — clic droit : revenir en arrière">
+                          <div class="web-node-inner">${tete}<div class="web-node-rel">${esc(n.rel)}</div></div>${actions}
                       </div>`;
           }).join('');
           canvas.insertAdjacentHTML('beforeend', html);

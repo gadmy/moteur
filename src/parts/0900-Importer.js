@@ -795,7 +795,8 @@ const orgGroups = (state.data.groups || []).filter(g => g.type === 'org');
     },
     edit: (i) => {
         const o = Orgs._list()[i]; if(!o) return;
-        try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir('org', o.id); } catch(e) {}
+        try { if(typeof FicheLock !== 'undefined'
+                 && FicheLock.ouvrir('org', o.id, 'Cette structure') === false) return; } catch(e) {}
         const modal = document.getElementById('card-edit-modal');
         const body = document.getElementById('card-edit-modal-body');
         const titleEl = document.getElementById('card-edit-modal-title');
@@ -2060,8 +2061,9 @@ const Contracts = {
     },
 
     openExisting: (id) => {
-        try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir('contract', id); } catch(e) {}
         const ct = Contracts.store.get(id); if(!ct) return;
+        try { if(typeof FicheLock !== 'undefined'
+                 && FicheLock.ouvrir('contract', id, 'Ce contrat') === false) return; } catch(e) {}
         const list = ct.partyType === 'actor' ? (state.data.actors||[]) : (ct.partyType === 'org' ? (state.data.orgs||[]) : (state.data.crew||[]));
         let obj = ct.partyId ? list.find(x => x.id === ct.partyId) : null;
         if(!obj) obj = list.find(x => { const fc = (ct.partyType==='org' && typeof Orgs !== 'undefined' && Orgs._fiche) ? Orgs._fiche(x) : x; return ((fc && fc.name) || x.name) === ct.partyName; });

@@ -32,6 +32,26 @@
       HORS_JEU: '.modal, .modal-overlay, .confirm-modal-overlay, .fb-ov, .tour-panel-ov, [id*="export"], [id*="chooser"], [class*="chooser"]',
 
       // ------------------------------------------------------------------
+      //  CE QUI COMPTE COMME « FENETRE ENCORE OUVERTE »
+      // ------------------------------------------------------------------
+      //  Un verrou pris en OUVRANT une fiche se rend quand la fenetre se
+      //  referme. On ne se fie pas a une fermeture qu'on aurait oublie de
+      //  brancher : on regarde si la zone est encore a l'ecran.
+      //  MAIS UNE CARTE DE LISTE N'EST PAS UNE PORTE. La vignette d'un plan,
+      //  la carte d'un personnage, l'onglet d'une planche restent affiches
+      //  quand la fenetre se ferme : s'ils comptaient, le verrou ne serait
+      //  JAMAIS rendu — on tiendrait la fiche jusqu'a l'expiration des trois
+      //  minutes, et les autres la verraient occupee pour rien.
+      //  Sauf quand la carte EST le contenu de la fenetre : la fiche d'un
+      //  personnage reutilise le dessin de sa carte de liste. On la distingue
+      //  a ce qui l'entoure, pas a sa forme.
+      CARTES_DE_LISTE: '.data-card, .crew-card, .compact-card, .shot-card, .moodboard-board-tab, .sr-fiche, .ccol-ctr',
+      FENETRES: '#card-edit-modal, .shot-edit-modal, #drawing-modal, #planning-modal, .modal, .modal-overlay',
+      // Une fenetre qui vient de s'ouvrir n'est pas encore dessinee : on lui
+      // laisse le temps d'apparaitre avant de conclure qu'elle est fermee.
+      DELAI_PORTE: 3000,
+
+      // ------------------------------------------------------------------
       //  CREATION D'UNE FAMILLE
       // ------------------------------------------------------------------
       //  prefixe       : 'scene:' — ce qui distingue les clefs de cette famille.
@@ -50,7 +70,8 @@
               _idDe: config.idDe,
               _enCours: {},
               _minuteurSortie: null,
-              _porte: null,   // element tenu parce qu'on a OUVERT sa fenetre
+              _porte: null,      // element tenu parce qu'on a OUVERT sa fenetre
+              _porteDepuis: 0,   // quand — pour ne pas la fermer avant qu'elle paraisse
 
               clef: (id) => V.PREFIXE + String(id || ''),
 
@@ -198,6 +219,7 @@
               prendreParPorte: async (id_) => {
                   if(!id_) return false;
                   V._porte = String(id_);
+                  V._porteDepuis = Date.now();
                   const ok = await V.prendre(id_);
                   if(!ok) V._porte = null;
                   return ok;
@@ -213,10 +235,15 @@
               // dessinent plus rien — meme principe que le mode fiche du profil.
               _porteEncoreOuverte: () => {
                   if(!V._porte) return false;
+                  if(Date.now() - (V._porteDepuis || 0) < VerrouFin.DELAI_PORTE) return true;
                   try {
                       const zones = document.querySelectorAll(V.ZONES);
                       for(const el of zones) {
                           if(String(V._idDe(el) || '') !== V._porte) continue;
+                          // Une carte de liste ne tient pas la porte ouverte —
+                          // sauf si c'est elle qu'on lit dans la fenetre.
+                          if(el.matches(VerrouFin.CARTES_DE_LISTE)
+                             && !el.closest(VerrouFin.FENETRES)) continue;
                           if(el.getClientRects && el.getClientRects().length > 0) return true;
                       }
                   } catch(e) { return true; }
@@ -306,6 +333,10 @@
               // fermeture a brancher une par une — et aucune a oublier.
               try { if(V._porte && !V._porteEncoreOuverte()) V.rendreLaPorte(); } catch(e) {}
           });
+          // Les pastilles d'onglet vivent sur des boutons reconstruits a chaque
+          // navigation : elles disparaissaient avec eux jusqu'a la relecture
+          // suivante. On les repose au meme rythme que les cadenas de zone.
+          try { if(typeof LockManager !== 'undefined' && LockManager.pastillesFines) LockManager.pastillesFines(); } catch(e) {}
       },
       battreTout: async () => {
           for(const V of VerrouFin._liste) { try { await V.battre(); } catch(e) {} }

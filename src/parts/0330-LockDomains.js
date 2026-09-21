@@ -528,6 +528,88 @@ const LockManager = {
           if(newDomain && LockManager.currentEditable && !LockManager.isAlone()) LockManager.acquire(newDomain);
       },
 
+      // ==================================================================
+      //  LA PASTILLE « QUELQU'UN ECRIT ICI » DES ONGLETS A VERROU FIN (v601)
+      // ==================================================================
+      //  Scenario, Sequencier, Depouillement, les listes de fiches : ces
+      //  onglets ne se verrouillent plus d'un bloc. Savoir que quelqu'un y
+      //  travaille reste utile — on l'annonce, sans empecher personne d'entrer.
+      //
+      //  DEUX DEFAUTS CORRIGES ICI, SIGNALES PAR LE DEVELOPPEUR (« parfois on
+      //  les voit, parfois non, et parfois elles prennent plusieurs onglets
+      //  sans qu'on comprenne ») :
+      //
+      //  1) L'ESPECE ETAIT IGNOREE. Les dix onglets de fiches partagent UNE
+      //     famille de verrous (« fiche: »), et l'on comptait TOUT ce qu'elle
+      //     tenait. Verrouiller un personnage allumait donc aussi Comediens,
+      //     Decors, Equipe, Ressources, Structures, Storyboard, Mood board,
+      //     Contrats et Rapports — dix pastilles pour une seule fiche. On
+      //     filtre maintenant sur l'espece propre a l'onglet.
+      //  2) ELLES DISPARAISSAIENT AU MOINDRE REDESSIN. Les boutons d'onglet
+      //     sont reconstruits a chaque navigation, ce qui emportait la
+      //     pastille avec eux ; elle ne revenait qu'a la relecture suivante,
+      //     jusqu'a vingt secondes plus tard. On les repose donc au meme
+      //     rythme que les cadenas de zone, c'est-a-dire des que la page
+      //     bouge — et SANS RIEN TOUCHER quand rien n'a change, sinon la
+      //     surveillance de la page declencherait sa propre surveillance.
+      ESPECE_ONGLET: { chars: 'character', actors: 'actor', locs: 'location', crew: 'crew',
+                       resources: 'resource', orgs: 'org', storyboard: 'shot',
+                       moodboard: 'board', contracts: 'contract', scriptreport: 'rapport' },
+      MOT_ONGLET: { synopsis: 'section', moodboard: 'planche', contracts: 'contrat',
+                    scriptreport: 'rapport', chars: 'fiche', actors: 'fiche', locs: 'fiche',
+                    crew: 'fiche', resources: 'fiche', orgs: 'fiche', storyboard: 'fiche' },
+
+      pastillesFines: () => {
+          try {
+              const familleDe = (tab) => {
+                  if(tab === 'script' || tab === 'breakdown' || tab === 'board')
+                      return (typeof SceneLock !== 'undefined') ? SceneLock : null;
+                  if(tab === 'synopsis')
+                      return (typeof SynopsisLock !== 'undefined') ? SynopsisLock : null;
+                  if(LockManager.ESPECE_ONGLET[tab])
+                      return (typeof FicheLock !== 'undefined') ? FicheLock : null;
+                  return null;
+              };
+              document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => {
+                  const tab = btn.dataset.tab;
+                  const vieux = btn.querySelector('.dlock-avatar-scene');
+                  const famille = familleDe(tab);
+                  let autres = [];
+                  let tenues = {};
+                  if(famille) {
+                      tenues = famille.tous();
+                      // L'espece de l'onglet : « fiche:character:12 » ne concerne
+                      // que Personnages. Sans ce filtre, une seule fiche tenue
+                      // allumait les dix onglets de la famille.
+                      const espece = LockManager.ESPECE_ONGLET[tab];
+                      autres = Object.keys(tenues).filter(id => {
+                          if(LockManager._mine(tenues[id])) return false;
+                          if(!espece) return true;
+                          return String(id).indexOf(espece + ':') === 0;
+                      });
+                  }
+                  // La signature dit ce que la pastille montre DEJA. Tant
+                  // qu'elle ne change pas, on ne touche pas au bouton.
+                  const l = autres.length ? tenues[autres[0]] : null;
+                  const signature = autres.length ? (autres.length + '|' + String(l.holder_uid || '')) : '';
+                  if((vieux ? vieux.dataset.sig || '' : '') === signature) return;
+                  if(vieux) vieux.remove();
+                  if(!signature) return;
+                  const av = document.createElement('span');
+                  av.className = 'dlock-avatar-tab dlock-avatar-scene';
+                  av.dataset.sig = signature;
+                  const em = (l.holder_email || '').toLowerCase();
+                  if(em) av.style.background = Utils.getColor(em);
+                  av.textContent = autres.length > 1 ? String(autres.length) : (LockManager._who(l)[0] || '?').toUpperCase();
+                  const quoi = LockManager.MOT_ONGLET[tab] || 'scène';
+                  av.title = autres.length > 1
+                      ? ('✍️ ' + autres.length + ' ' + quoi + 's en cours d\'écriture — les autres restent ouvertes')
+                      : ('✍️ ' + LockManager._who(l) + ' écrit une ' + quoi + ' — les autres restent ouvertes');
+                  btn.appendChild(av);
+              });
+          } catch(e) { console.warn('[Lock] pastille de zone :', e && e.message); }
+      },
+
       applyUI: () => {
           try { if(typeof WindowManager !== 'undefined' && WindowManager.wins) WindowManager._arbitrate(); } catch(_) {}
           // v601 : les verrous PAR SCENE se redessinent au meme rythme que ceux
@@ -570,54 +652,7 @@ const LockManager = {
           };
           // sous-onglets (mode catégories) + onglets plats
           document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => markBtn(btn, lockFor(btn.dataset.tab)));
-          // v601 — LE BADGE D'ONGLET RESTE, IL CESSE SEULEMENT DE VERROUILLER.
-          // Scenario, Sequencier et Depouillement n'ont plus de domaine : ils ne
-          // se bloquent donc plus. Mais savoir que quelqu'un ecrit LA reste utile
-          // — on continue de l'annoncer, sans empecher personne d'entrer.
-          try {
-              // Chaque onglet sans domaine dit ce qui s'y passe, via la famille
-              // de verrous fins qui le couvre.
-              const familles = {
-                  script:    (typeof SceneLock !== 'undefined') ? SceneLock : null,
-                  breakdown: (typeof SceneLock !== 'undefined') ? SceneLock : null,
-                  board:     (typeof SceneLock !== 'undefined') ? SceneLock : null,
-                  synopsis:  (typeof SynopsisLock !== 'undefined') ? SynopsisLock : null,
-                  chars:     (typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  actors:    (typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  locs:      (typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  crew:      (typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  resources: (typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  orgs:      (typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  storyboard:(typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  moodboard: (typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  contracts: (typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  scriptreport: (typeof FicheLock !== 'undefined') ? FicheLock : null
-              };
-              document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => {
-                  const famille = familles[btn.dataset.tab];
-                  if(!famille) return;
-                  const tenues = famille.tous();
-                  const autres = Object.keys(tenues).filter(id => !LockManager._mine(tenues[id]));
-                  const vieux = btn.querySelector('.dlock-avatar-scene');
-                  if(vieux) vieux.remove();
-                  if(!autres.length) return;
-                  const l = tenues[autres[0]];
-                  const av = document.createElement('span');
-                  av.className = 'dlock-avatar-tab dlock-avatar-scene';
-                  const em = (l.holder_email || '').toLowerCase();
-                  if(em) av.style.background = Utils.getColor(em);
-                  av.textContent = autres.length > 1 ? String(autres.length) : (LockManager._who(l)[0] || '?').toUpperCase();
-                  const quoi = (btn.dataset.tab === 'synopsis') ? 'section'
-                             : (btn.dataset.tab === 'moodboard' ? 'planche'
-                             : (btn.dataset.tab === 'contracts' ? 'contrat'
-                             : (btn.dataset.tab === 'scriptreport' ? 'rapport'
-                             : (['chars','actors','locs','crew','resources','orgs','storyboard'].indexOf(btn.dataset.tab) >= 0 ? 'fiche' : 'scène'))));
-                  av.title = autres.length > 1
-                      ? ('✍️ ' + autres.length + ' ' + quoi + 's en cours d\'écriture — les autres restent ouvertes')
-                      : ('✍️ ' + LockManager._who(l) + ' écrit une ' + quoi + ' — les autres restent ouvertes');
-                  btn.appendChild(av);
-              });
-          } catch(e) { console.warn('[Lock] badge de scene :', e && e.message); }
+          LockManager.pastillesFines();
           // Spectateurs : badge gris pour chaque personne qui REGARDE le domaine (sans le modifier)
           document.querySelectorAll('.dlock-watcher').forEach(el => el.remove());
           const myEm = ((state.currentUser && state.currentUser.email) || '').toLowerCase();

@@ -2566,6 +2566,16 @@ const MoodBoard = {
     },
 
     selectBoard: (boardId) => {
+        // v601 — ON PREVIENT AVANT D'ENTRER : une planche tenue par quelqu'un
+        // d'autre ne s'ouvre pas du tout. On reste sur celle qu'on regardait.
+        try {
+            const peutEcrire0 = (typeof MoodBoard.canWrite !== 'function') || MoodBoard.canWrite();
+            if(boardId && peutEcrire0 && typeof FicheLock !== 'undefined'
+               && FicheLock.occupeePar('board', boardId)) {
+                FicheLock.ouvrir('board', boardId, 'Cette planche');   // affiche le refus
+                return;
+            }
+        } catch(e) {}
         MoodBoard.currentBoardId = boardId;
         MoodBoard.selectedElementId = null;
         // v601 — VERROU PAR PLANCHE. Une planche n'est pas une carte dans une
@@ -6526,9 +6536,16 @@ const Storyboard = {
         const roShot = (typeof Permissions !== 'undefined' && Permissions.canEditFiche)
             ? !Permissions.canEditFiche('shot') : (state.currentRole === 'viewer');
         
-        Storyboard.currentEditingShotId = shotId;
         const shot = state.data.shots.find(s => s.id === shotId);
         if(!shot) return;
+        // v601 — ON PREVIENT AVANT D'ENTRER. Un plan tenu par quelqu'un d'autre
+        // ne s'ouvre pas : le cadenas se voit DEHORS, sur la vignette.
+        // En lecture seule (roShot) on ouvre quand meme : regarder ne gene rien.
+        if(!roShot) {
+            try { if(typeof FicheLock !== 'undefined'
+                     && FicheLock.ouvrir('shot', shot.id, 'Ce plan') === false) return; } catch(e) {}
+        }
+        Storyboard.currentEditingShotId = shotId;
         
         const sceneIndex = state.data.scenes.findIndex(s => s.id === shot.sceneId) + 1;
         const shotIndex = state.data.shots.filter(s => s.sceneId === shot.sceneId && s.order <= shot.order).length;
@@ -6546,7 +6563,6 @@ const Storyboard = {
         // ouvrir le meme plan sans que rien ne s'allume — c'est ce que le
         // developpeur a vu.
         content.dataset.fiche = 'shot:' + shot.id;
-        try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir('shot', shot.id); } catch(e) {}
         // Verrou visuel + bouton de sauvegarde masque : un bouton qui ne peut
         // rien enregistrer vaut mieux cache qu'affiche.
         content.classList.add('perm-ro-scope');
@@ -7431,9 +7447,22 @@ const DrawingEditor = {
         // l'editeur sur un plan EST l'intention de le modifier — c'est donc
         // l'ouverture qui prend le verrou, et la fermeture qui le rend.
         // Meme raisonnement a tenir le jour ou l'on fera le mood board.
-        if(shotId) { try { FicheLock.ouvrir('shot', shotId); } catch(e) {} }
+        // ET SI QUELQU'UN Y EST, ON N'OUVRE PAS DU TOUT. L'editeur compte des
+        // dizaines de boutons : les neutraliser un par un serait une usine a
+        // gaz, et un seul oubli suffirait a effacer le dessin d'un autre. La
+        // porte fermee est la seule garde qu'on peut tenir — le cadenas, lui,
+        // se voit DEHORS, sur la vignette du plan.
+        if(shotId) {
+            try { if(typeof FicheLock !== 'undefined'
+                     && FicheLock.ouvrir('shot', shotId, 'Ce plan') === false) return; } catch(e) {}
+        }
         DrawingEditor.moodboardCallback = moodboardCallback;
         const modal = document.getElementById('drawing-modal');
+        // v601 — LA FENETRE DE DESSIN DIT QUEL PLAN ELLE TIENT. C'est ce qui
+        // permet de rendre le verrou quand elle se ferme sans avoir a brancher
+        // la fermeture : la vignette du plan, elle, reste affichee derriere et
+        // ne peut donc pas servir de preuve.
+        if(shotId) modal.dataset.fiche = 'shot:' + shotId; else delete modal.dataset.fiche;
         modal.style.display = 'flex';
         
         DrawingEditor.canvas = document.getElementById('drawingCanvas');
@@ -7637,9 +7666,6 @@ const DrawingEditor = {
     },
     
     close: async () => {
-        // v601 : on rend le verrou du plan en quittant l'editeur (voir open).
-        try { if(typeof FicheLock !== 'undefined') FicheLock.rendreLaPorte(); } catch(e) {}
-
         const shotId = DrawingEditor.currentShotId;
         const callback = DrawingEditor.moodboardCallback;
         
@@ -7651,6 +7677,17 @@ const DrawingEditor = {
         // passer par cette fenêtre) garde la confirmation : c'est alors le
         // seul moment où l'on peut demander.
         const insideEditModal = !callback && shotId && Storyboard.currentEditingShotId === shotId;
+        // v601 — ON REND LE VERROU DU PLAN EN QUITTANT L'EDITEUR (voir open),
+        // MAIS PAS DANS DEUX CAS.
+        //  1) La fenetre « Edition Plan » est restee ouverte DERRIERE sur le
+        //     meme plan : c'est elle qui le tient maintenant, et lacher ici
+        //     laisserait sans verrou quelqu'un encore en train d'y travailler.
+        //  2) On dessinait pour le MOOD BOARD (callback) : la porte ouverte
+        //     est celle de la PLANCHE, pas d'un plan. La rendre ici aurait
+        //     deverrouille la planche sous les doigts de son auteur.
+        if(shotId && !insideEditModal) {
+            try { if(typeof FicheLock !== 'undefined') FicheLock.rendreLaPorte(); } catch(e) {}
+        }
         const shouldSave = insideEditModal || await ConfirmModal.show({ title: 'Sauvegarder ?', message: 'Voulez-vous sauvegarder les modifications apportées à ce dessin ?', icon: '💾', confirmText: 'Sauvegarder' });
         
         if(shouldSave) {
@@ -7682,7 +7719,8 @@ const DrawingEditor = {
                 await DrawingEditor.save();
             }
         }
-        document.getElementById('drawing-modal').style.display = 'none';
+        const _dm = document.getElementById('drawing-modal');
+        if(_dm) { delete _dm.dataset.fiche; _dm.style.display = 'none'; }
         DrawingEditor.currentShotId = null;
         DrawingEditor.moodboardCallback = null;
         DrawingEditor.layers = [];
