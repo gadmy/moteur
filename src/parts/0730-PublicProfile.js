@@ -2416,7 +2416,18 @@ const Permissions = {
             <tbody>`;
         
         members.forEach((member, idx) => {
-            const emailKey = member.email ? Utils.sanitizeEmail(member.email) : `${type}_${idx}`;
+            // v601 — JAMAIS LE RANG COMME CLEF. Une fiche sans adresse prenait
+            // « crew_3 » : son RANG dans la liste. Reordonner l'equipe aurait
+            // decale les droits de tout le monde, en silence. On prend
+            // l'identifiant de la fiche, qui ne bouge pas.
+            // (Une fiche sans adresse ne peut de toute facon pas etre invitee :
+            // sa ligne ne sert a personne. Mais une clef qui se deplace est un
+            // piege qu'on ne veut pas laisser derriere soi — et il ne coutait
+            // qu'une ligne a retirer. Verifie en base le 21 septembre : aucune
+            // clef positionnelle n'existait encore, la correction est donc
+            // purement preventive, sans rien a reprendre.)
+            const emailKey = member.email ? Utils.sanitizeEmail(member.email)
+                           : (member.id ? type + ':' + member.id : `${type}_${idx}`);
             // v570 : la cle est une adresse assainie ; on garde l'adresse reelle pour
             // pouvoir ecrire le role deduit dans project_members a la sauvegarde.
             if(member.email) Permissions._emailByKey[emailKey] = member.email;
