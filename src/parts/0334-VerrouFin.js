@@ -115,6 +115,7 @@
                       // Liberer les autres APRES avoir obtenu celui-ci : si la
                       // prise echoue, on ne s'est pas desarme pour rien.
                       if(obtenu) await V.libererSauf(id);
+                      if(obtenu) LockManager.signaler();   // les autres relisent aussitot
                       VerrouFin.marquerTout();
                       return obtenu;
                   } catch(e) {
@@ -137,6 +138,9 @@
                       console.warn('[' + V.NOM + '] liberation echouee, expiration dans 3 min :', e && e.message);
                   }
                   if(state.domainLocks) delete state.domainLocks[V.clef(id)];
+                  // C'est LA liberation qui compte : sans annonce, les autres
+                  // gardent le cadenas affiche jusqu'a la relecture periodique.
+                  try { LockManager.signaler(); } catch(e) {}
                   VerrouFin.marquerTout();
               },
 

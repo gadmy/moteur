@@ -1418,6 +1418,29 @@ vv601 (20 septembre 2026) — EN COURS.
   apres le regroupement, plus 12 pour le synopsis et 8 pour la liberation et la
   surveillance. Refondre du code qui marche ne se fait pas sans filet.
 
+  UN VERROU RENDU DOIT SE VOIR TOUT DE SUITE, PAS DANS VINGT SECONDES.
+  Signale sur le Synopsis : A passe du synopsis au resume court, et B voit les
+  DEUX sections prises par A.
+  MESURE D'ABORD, COMME IL SE DOIT : le serveur ne contenait AUCUN verrou de
+  synopsis en attente, et la scene rejouee a l'identique — prise, changement de
+  section, liberation, affichage — passe tous ses tests. Le mecanisme est donc
+  juste ; c'est la NOUVELLE qui n'arrivait pas.
+  POURQUOI. Chaque poste apprend les verrous des autres par l'evenement de base
+  (project_locks). Cet evenement annonce fidelement les PRISES — une ligne
+  apparait — mais les LIBERATIONS voyagent mal : une suppression n'emporte pas
+  toujours de quoi reconnaitre le projet concerne, et l'evenement est alors
+  ecarte sans un mot. Restait la relecture periodique, posee la veille : vingt
+  secondes a regarder un cadenas qui ment. Assez court pour qu'on ne le voie
+  pas en testant seul, assez long pour sauter aux yeux a deux.
+  LA CORRECTION : on ne depend plus d'un evenement qu'on ne maitrise pas.
+  Chaque poste ANNONCE lui-meme ce qu'il prend et ce qu'il rend, sur le canal
+  deja ouvert pour les verrous. Quelques octets, et les autres relisent
+  aussitot. La relecture periodique reste, en filet.
+  PARTOUT A LA FOIS, ET C'EST L'INTERET D'AVOIR REGROUPE LE MECANISME LA
+  VEILLE : l'annonce est posee dans VerrouFin — donc les scenes ET les sections
+  de synopsis en profitent — et dans les verrous de DOMAINE, qui avaient
+  exactement le meme trou depuis toujours.
+
   ET LE DERNIER PIEGE DE CE TABLEAU : LE RANG SERVAIT DE CLEF. Une fiche sans
   adresse prenait « crew_3 » — sa POSITION dans la liste. Reordonner l'equipe
   aurait decale les droits de tout le monde, en silence. Remarque juste du
@@ -15979,6 +16002,18 @@ const LockManager = {
               .on('postgres_changes', { event: '*', schema: 'public', table: 'project_locks', filter: 'project_id=eq.' + projectId }, () => {
                   LockManager.refresh(projectId);
               })
+              // v601 — ON NE DEPEND PLUS DU SEUL EVENEMENT DE BASE. Celui-ci
+              // annonce fidelement les PRISES de verrou (une ligne apparait),
+              // mais les LIBERATIONS (une ligne disparait) voyagent mal : une
+              // suppression n'emporte pas toujours de quoi reconnaitre le
+              // projet concerne, et l'evenement est alors ecarte en silence.
+              // Resultat vu a deux : la personne quitte une section, celle-ci
+              // reste affichee comme prise chez les autres jusqu'a la relecture
+              // periodique — vingt secondes a regarder un cadenas qui ment.
+              // Chaque poste ANNONCE donc lui-meme ce qu'il prend et ce qu'il
+              // rend, sur le meme canal. Quelques octets, et les autres relisent
+              // aussitot. Le canal ne se renvoie pas ses propres messages.
+              .on('broadcast', { event: 'verrous' }, () => { LockManager.refresh(projectId); })
               .subscribe();
           LockManager.lastActivity = Date.now();
           document.addEventListener('pointerdown', LockManager._activity, true);
@@ -16029,6 +16064,14 @@ const LockManager = {
               // les vingt secondes, et la mise en veille n'aurait servi a rien.
               if(d && LockManager.currentEditable && !map[d] && !LockManager._yieldedRecently(d) && !LockManager.enVeille) LockManager.acquire(d);
           } catch(e) { console.warn('[LockManager] Échec du poll des verrous:', e && e.message); }
+      },
+
+      // « Je viens de prendre ou de rendre quelque chose » — a appeler apres
+      // toute prise ou liberation, fine ou de domaine. Sans effet si le canal
+      // n'est pas encore ouvert : la relecture periodique reste le filet.
+      signaler: () => {
+          try { if(LockManager.channel) LockManager.channel.send({ type: 'broadcast', event: 'verrous', payload: {} }); }
+          catch(e) { /* confort : le filet periodique passera */ }
       },
 
       _uid: () => (state.currentUser && (state.currentUser.uid || state.currentUser.id)) || null,
@@ -16268,7 +16311,7 @@ const LockManager = {
               state.domainLocks = state.domainLocks || {};
               if(lock) state.domainLocks[domain] = lock;
               const got = LockManager._mine(lock);
-              if(got) LockManager.held[domain] = true;
+              if(got) { LockManager.held[domain] = true; LockManager.signaler(); }
               if(LockManager.currentDomain !== domain && !LockManager.winDomains[domain] && got) { LockManager.release(domain); return false; }
               LockManager.applyUI();
               return got;
@@ -16282,6 +16325,7 @@ const LockManager = {
           delete LockManager.held[domain];
           try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: domain, p_uid: LockManager._uid() }); } catch(e) { console.warn('[LockManager] lock_release échoué (' + domain + '), le verrou expirera par TTL:', e && e.message); }
           if(state.domainLocks) delete state.domainLocks[domain];
+          LockManager.signaler();
           LockManager.applyUI();
       },
 
@@ -16750,6 +16794,7 @@ const LockManager = {
                       // Liberer les autres APRES avoir obtenu celui-ci : si la
                       // prise echoue, on ne s'est pas desarme pour rien.
                       if(obtenu) await V.libererSauf(id);
+                      if(obtenu) LockManager.signaler();   // les autres relisent aussitot
                       VerrouFin.marquerTout();
                       return obtenu;
                   } catch(e) {
@@ -16772,6 +16817,9 @@ const LockManager = {
                       console.warn('[' + V.NOM + '] liberation echouee, expiration dans 3 min :', e && e.message);
                   }
                   if(state.domainLocks) delete state.domainLocks[V.clef(id)];
+                  // C'est LA liberation qui compte : sans annonce, les autres
+                  // gardent le cadenas affiche jusqu'a la relecture periodique.
+                  try { LockManager.signaler(); } catch(e) {}
                   VerrouFin.marquerTout();
               },
 

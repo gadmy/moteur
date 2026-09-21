@@ -92,6 +92,18 @@ const LockManager = {
               .on('postgres_changes', { event: '*', schema: 'public', table: 'project_locks', filter: 'project_id=eq.' + projectId }, () => {
                   LockManager.refresh(projectId);
               })
+              // v601 — ON NE DEPEND PLUS DU SEUL EVENEMENT DE BASE. Celui-ci
+              // annonce fidelement les PRISES de verrou (une ligne apparait),
+              // mais les LIBERATIONS (une ligne disparait) voyagent mal : une
+              // suppression n'emporte pas toujours de quoi reconnaitre le
+              // projet concerne, et l'evenement est alors ecarte en silence.
+              // Resultat vu a deux : la personne quitte une section, celle-ci
+              // reste affichee comme prise chez les autres jusqu'a la relecture
+              // periodique — vingt secondes a regarder un cadenas qui ment.
+              // Chaque poste ANNONCE donc lui-meme ce qu'il prend et ce qu'il
+              // rend, sur le meme canal. Quelques octets, et les autres relisent
+              // aussitot. Le canal ne se renvoie pas ses propres messages.
+              .on('broadcast', { event: 'verrous' }, () => { LockManager.refresh(projectId); })
               .subscribe();
           LockManager.lastActivity = Date.now();
           document.addEventListener('pointerdown', LockManager._activity, true);
@@ -142,6 +154,14 @@ const LockManager = {
               // les vingt secondes, et la mise en veille n'aurait servi a rien.
               if(d && LockManager.currentEditable && !map[d] && !LockManager._yieldedRecently(d) && !LockManager.enVeille) LockManager.acquire(d);
           } catch(e) { console.warn('[LockManager] Échec du poll des verrous:', e && e.message); }
+      },
+
+      // « Je viens de prendre ou de rendre quelque chose » — a appeler apres
+      // toute prise ou liberation, fine ou de domaine. Sans effet si le canal
+      // n'est pas encore ouvert : la relecture periodique reste le filet.
+      signaler: () => {
+          try { if(LockManager.channel) LockManager.channel.send({ type: 'broadcast', event: 'verrous', payload: {} }); }
+          catch(e) { /* confort : le filet periodique passera */ }
       },
 
       _uid: () => (state.currentUser && (state.currentUser.uid || state.currentUser.id)) || null,
@@ -381,7 +401,7 @@ const LockManager = {
               state.domainLocks = state.domainLocks || {};
               if(lock) state.domainLocks[domain] = lock;
               const got = LockManager._mine(lock);
-              if(got) LockManager.held[domain] = true;
+              if(got) { LockManager.held[domain] = true; LockManager.signaler(); }
               if(LockManager.currentDomain !== domain && !LockManager.winDomains[domain] && got) { LockManager.release(domain); return false; }
               LockManager.applyUI();
               return got;
@@ -395,6 +415,7 @@ const LockManager = {
           delete LockManager.held[domain];
           try { await supabase.rpc('lock_release', { p_id: state.currentProjectId, p_key: domain, p_uid: LockManager._uid() }); } catch(e) { console.warn('[LockManager] lock_release échoué (' + domain + '), le verrou expirera par TTL:', e && e.message); }
           if(state.domainLocks) delete state.domainLocks[domain];
+          LockManager.signaler();
           LockManager.applyUI();
       },
 
