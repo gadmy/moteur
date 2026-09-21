@@ -88,6 +88,45 @@
       // scene passent vraiment. Renvoie aussi la liste de celles qu'on a du
       // reprendre, pour pouvoir le DIRE — une modification qui disparait sans
       // un mot est pire que pas de verrou du tout.
+      // ====================================================================
+      // MEME CHOSE, MAIS POUR UN DICTIONNAIRE (v601)
+      // ====================================================================
+      // Les rapports de script ne sont pas ranges dans une LISTE mais dans un
+      // DICTIONNAIRE : une entree par plan, sous la clef « scene_plan ». C'est
+      // la seule difference avec les onze autres collections — chaque entree
+      // reste une fiche, avec une clef stable et un contenu a elle.
+      // MEMES REGLES : je garde ce que j'ai touche, je prends le reste du
+      // serveur, je rends la sienne pour ce qu'il TIENT, mes suppressions
+      // tiennent, et une entree creee ailleurs n'est pas effacee.
+      // _refusees est pose en propriete CACHEE : sur un objet, une propriete
+      // ordinaire partirait dans l'enregistrement.
+      _carteAJour: (mienne, base, fraiche, interdits) => {
+          const m = mienne || {}, b = base || {}, f = fraiche || {};
+          const bloques = new Set((interdits || []).map(String));
+          const refusees = [];
+          const out = {};
+          const clefs = new Set(Object.keys(m).concat(Object.keys(f)));
+          clefs.forEach(k => {
+              const chezMoi = (k in m), chezEux = (k in f);
+              const jeLaiTouchee = JSON.stringify(m[k]) !== JSON.stringify(b[k]);
+              if(!chezEux) {
+                  // Absente du serveur : la mienne si je viens de la creer,
+                  // rien si elle a ete supprimee ailleurs.
+                  if(!(k in b) && chezMoi) out[k] = m[k];
+                  return;
+              }
+              if(bloques.has(k)) {            // tenue par quelqu'un d'autre
+                  if(jeLaiTouchee) refusees.push(k);
+                  out[k] = f[k];
+                  return;
+              }
+              if(!chezMoi && jeLaiTouchee) return;   // je l'ai supprimee : elle part
+              out[k] = jeLaiTouchee ? m[k] : f[k];
+          });
+          try { Object.defineProperty(out, '_refusees', { value: refusees, enumerable: false }); } catch(e) {}
+          return out;
+      },
+
       // v601 : la meme mecanique sert les SCENES et les FICHES (personnages,
       // comediens). Rien de specifique aux scenes n'y est reste — c'est une
       // liste d'objets a identifiant, quelle qu'elle soit.

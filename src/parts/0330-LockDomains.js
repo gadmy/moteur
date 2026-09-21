@@ -11,12 +11,14 @@
           // s'ecraseraient, cette fois sans rien pour l'empecher.
           // Ils restent donc sur un verrou de domaine, sous leur vrai nom.
           structure:    { label: 'Structure du récit', keys: ['seasons','episodes','tags','groups','scriptMeta'],               tabs: ['seasons','episodes'] },
-          // v570 : Rapports de script sorti du domaine 'scenes'. Verifie ligne a ligne :
-          // il LIT les scenes (8 fois) et les plans (6 fois) mais n'en ecrit AUCUN ;
-          // sa seule ecriture est scriptReports. Un verrou protege ce qu'on ECRIT, pas
-          // ce qu'on lit — une lecture legerement en retard ne perd rien (c'est deja le
-          // cas entre ce module et le Storyboard, domaine separe de longue date).
-          scriptreport: { label: 'Rapports de script', keys: ['scriptReports'],                                                 tabs: ['scriptreport'] },
+          // v601 — LES RAPPORTS DE SCRIPT PASSENT AU VERROU PAR RAPPORT. Chacun
+          // a une clef stable (« scene_plan ») et un contenu a lui : c'est une
+          // fiche, rangee dans un dictionnaire plutot que dans une liste. Je
+          // l'avais classe « cas mixte » avec les Depenses, a tort — le budget
+          // est un objet unique, un rapport non. Cle pour memoire :
+          // scriptReports.
+          // (v570, conserve : ce module LIT les scenes et les plans mais n'en
+          // ecrit aucun ; sa seule ecriture est scriptReports.)
           // v601 — LE CASTING PASSE AU VERROU PAR FICHE (FicheLock). Sur les sept
           // onglets qui s'y pretaient, c'est celui ou deux personnes travaillent
           // vraiment en meme temps : on remplit une distribution a plusieurs.
@@ -588,7 +590,8 @@ const LockManager = {
                   orgs:      (typeof FicheLock !== 'undefined') ? FicheLock : null,
                   storyboard:(typeof FicheLock !== 'undefined') ? FicheLock : null,
                   moodboard: (typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  contracts: (typeof FicheLock !== 'undefined') ? FicheLock : null
+                  contracts: (typeof FicheLock !== 'undefined') ? FicheLock : null,
+                  scriptreport: (typeof FicheLock !== 'undefined') ? FicheLock : null
               };
               document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => {
                   const famille = familles[btn.dataset.tab];
@@ -607,7 +610,8 @@ const LockManager = {
                   const quoi = (btn.dataset.tab === 'synopsis') ? 'section'
                              : (btn.dataset.tab === 'moodboard' ? 'planche'
                              : (btn.dataset.tab === 'contracts' ? 'contrat'
-                             : (['chars','actors','locs','crew','resources','orgs','storyboard'].indexOf(btn.dataset.tab) >= 0 ? 'fiche' : 'scène')));
+                             : (btn.dataset.tab === 'scriptreport' ? 'rapport'
+                             : (['chars','actors','locs','crew','resources','orgs','storyboard'].indexOf(btn.dataset.tab) >= 0 ? 'fiche' : 'scène'))));
                   av.title = autres.length > 1
                       ? ('✍️ ' + autres.length + ' ' + quoi + 's en cours d\'écriture — les autres restent ouvertes')
                       : ('✍️ ' + LockManager._who(l) + ' écrit une ' + quoi + ' — les autres restent ouvertes');

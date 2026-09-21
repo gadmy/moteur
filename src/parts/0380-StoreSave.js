@@ -224,7 +224,11 @@
               let seulSurLeProjet = true;
               try { seulSurLeProjet = LockManager.isAlone(); } catch(e) {}
               const aRelire = seulSurLeProjet ? [] : LISTES.filter(c => Array.isArray(savePatch[c]));
-              if(aRelire.length) {
+              // Les rapports de script sont ranges dans un dictionnaire et non
+              // dans une liste ; meme regle, autre fusion (voir _carteAJour).
+              const carteARelire = (!seulSurLeProjet && savePatch.scriptReports
+                                    && typeof savePatch.scriptReports === 'object') ? 'scriptReports' : null;
+              if(aRelire.length || carteARelire) {
                   // Qui tient quoi, par collection : les scenes d'un cote, les
                   // fiches de l'autre — deux familles de verrous, une seule
                   // table d'interdits.
@@ -246,6 +250,15 @@
                       const { data: frais, error: errFrais } = await supabase.rpc('project_data_for_me', { p_id: id });
                       if(!errFrais && frais) {
                           const refuses = [];
+                          if(carteARelire && frais[carteARelire] && typeof frais[carteARelire] === 'object') {
+                              const bloques = Object.keys(interdits[carteARelire] || {});
+                              const fusion = StoreRealtime._carteAJour(
+                                  savePatch[carteARelire], (saveBase && saveBase[carteARelire]) || {},
+                                  frais[carteARelire], bloques);
+                              savePatch[carteARelire] = fusion;
+                              state.data[carteARelire] = fusion;
+                              (fusion._refusees || []).forEach(k => refuses.push((interdits[carteARelire] || {})[k]));
+                          }
                           aRelire.forEach(coll => {
                               if(!Array.isArray(frais[coll])) return;
                               const bloques = Object.keys(interdits[coll] || {});

@@ -9317,9 +9317,17 @@ const ScriptReport = {
             </div>`;
         }
         
+        // v601 — VERROU PAR RAPPORT. Un rapport de script EST une fiche : il a
+        // une clef stable (« scene_plan ») et un contenu a lui. Il etait reste
+        // sur un verrou d'onglet parce que je l'avais classe « cas mixte » avec
+        // les Depenses — a tort : le budget est un objet unique, un rapport
+        // non. La seule vraie particularite est que les rapports sont ranges
+        // dans un DICTIONNAIRE et non dans une liste, ce qui ne change rien au
+        // verrou et demande seulement une fusion a part (StoreRealtime._carteAJour).
+        // C'est ici que sont les champs : c'est donc ici que le verrou s'accroche.
         container.innerHTML = `
             ${navHtml}
-            <div class="sr-sheet">
+            <div class="sr-sheet" data-fiche="rapport:${Utils.escape(String(key))}">
                 <!-- Ligne 1: FILM / DÉCOR / DATE / PLAN / EFFET -->
                 <div class="sr-sheet-row" style="grid-template-columns: 1fr 1fr 120px 100px 180px;">
                     <div class="sr-sheet-cell"><strong>FILM :</strong><br><input type="text" value="${Utils.escape(report.film || autoFill.film)}" onchange="app.ScriptReport.updateField('${key}', ${idx}, 'film', this.value)" class="w-full"></div>
@@ -9648,10 +9656,10 @@ const ScriptReport = {
                 const shot = allShots.find(s => s.id === it.shotId);
                 const shotLabel = shot ? (shot.title || `Plan ${shot.id.slice(-4)}`) : `Plan ?`;
                 if(it.reports.length === 1) {
-                    return `<div class="sr-fiche selected" data-key="${it.key}" data-idx="0" data-scene="${sceneId}">${Utils.escape(shotLabel)}</div>`;
+                    return `<div class="sr-fiche selected" data-fiche="rapport:${it.key}" data-key="${it.key}" data-idx="0" data-scene="${sceneId}">${Utils.escape(shotLabel)}</div>`;
                 }
                 return it.reports.map((r, ridx) => {
-                    return `<div class="sr-fiche selected" data-key="${it.key}" data-idx="${ridx}" data-scene="${sceneId}">${Utils.escape(shotLabel)} <span class="sr-take">prise ${ridx + 1}</span></div>`;
+                    return `<div class="sr-fiche selected" data-fiche="rapport:${it.key}" data-key="${it.key}" data-idx="${ridx}" data-scene="${sceneId}">${Utils.escape(shotLabel)} <span class="sr-take">prise ${ridx + 1}</span></div>`;
                 }).join('');
             }).join('');
             return `<div class="sr-col">

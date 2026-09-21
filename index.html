@@ -165,14 +165,14 @@ Rien d'ouvert côté code au 20 septembre en dehors des chantiers ci-dessous.
     PAR SCENE : Scenario, Sequencier, Depouillement. PAR SECTION : Synopsis.
     PAR FICHE : Personnages, Comedien.nes, Decors, Equipe, Ressources,
     Structures, Storyboard (par plan), Moodboard (par planche).
-    PAR CONTRAT : Contrats.
+    PAR CONTRAT : Contrats. PAR RAPPORT : Rapports de script.
     RESTENT ENTIERS, ET POUR UNE RAISON QUI TIENT : Titre et Presentation (un
     seul document, on ne peut pas le couper), Saisons et Episodes (la structure
     du recit), Planning (deplacer une scene touche DEUX jours a la fois),
-    Depenses et Rapports de script (cas mixtes : chaque element est une fiche
-    mais le budget et les totaux sont des objets uniques — a couper en deux
-    avant de descendre, comme on l'a fait pour « scenes »). Statistiques n'a
-    besoin de rien, il est en lecture seule.
+    Depenses (le budget est un objet unique qu'on ne peut pas couper ; il
+    faudrait separer le budget des depenses avant de descendre — abandonne a
+    la demande du developpeur). Statistiques n'a besoin de rien, il est en
+    lecture seule.
     A NOTER : les MODELES de contrat n'ont aucun verrou et n'en auront pas —
     on ne les edite pas, on les cree et on les applique. Ils sont proteges par
     la fusion element par element de la sauvegarde, qui empeche deux creations
@@ -1440,6 +1440,27 @@ vv601 (20 septembre 2026) — EN COURS.
   VERIFIE PAR LES MEMES TESTS : les 23 du verrou par scene rejoues a l'identique
   apres le regroupement, plus 12 pour le synopsis et 8 pour la liberation et la
   surveillance. Refondre du code qui marche ne se fait pas sans filet.
+
+  LES RAPPORTS DE SCRIPT AUSSI. « Chaque rapport de script est une fiche ou
+  pas ? Pourquoi ca ne serait pas possible ? » Troisieme fois que la question
+  fait tomber une de mes categories. Reponse : c'est une fiche, et c'etait
+  possible.
+  J'AVAIS CLASSE RAPPORTS ET DEPENSES ENSEMBLE sous « cas mixte : chaque
+  element est une fiche mais le total est un objet unique ». Vrai pour les
+  Depenses — le budget est un seul objet, qu'on ne peut pas couper. FAUX pour
+  les rapports : il n'y a pas de total, juste des rapports. Ranger deux choses
+  ensemble parce qu'elles se ressemblent de loin, c'est ce qui m'a fait passer
+  a cote trois fois de suite.
+  LA SEULE VRAIE PARTICULARITE : les rapports sont ranges dans un DICTIONNAIRE
+  et non dans une liste — une entree par plan, sous la clef « scene_plan ».
+  Cela ne change rien au verrou (une clef stable suffit) et demande seulement
+  une fusion a part a la sauvegarde. Elle suit les memes regles que celle des
+  listes : je garde ce que j'ai touche, je prends le reste du serveur, je rends
+  la sienne pour ce qu'il tient, mes suppressions tiennent, et une entree creee
+  ailleurs n'est pas effacee.
+  UN DETAIL QUI AURAIT FUITE EN BASE : la liste des refus est posee sur l'objet
+  en propriete CACHEE. Sur une liste, une propriete ordinaire est ignoree par
+  l'enregistrement ; sur un objet, elle serait partie avec.
 
   ET LES CONTRATS AUSSI — MEME ERREUR QUE POUR LES RESSOURCES, EN PLUS BETE.
   « Et pour les contrats ? Normalement chaque contrat est une fiche, non ? »
@@ -16081,12 +16102,14 @@ showDashboard: async () => {
           // s'ecraseraient, cette fois sans rien pour l'empecher.
           // Ils restent donc sur un verrou de domaine, sous leur vrai nom.
           structure:    { label: 'Structure du récit', keys: ['seasons','episodes','tags','groups','scriptMeta'],               tabs: ['seasons','episodes'] },
-          // v570 : Rapports de script sorti du domaine 'scenes'. Verifie ligne a ligne :
-          // il LIT les scenes (8 fois) et les plans (6 fois) mais n'en ecrit AUCUN ;
-          // sa seule ecriture est scriptReports. Un verrou protege ce qu'on ECRIT, pas
-          // ce qu'on lit — une lecture legerement en retard ne perd rien (c'est deja le
-          // cas entre ce module et le Storyboard, domaine separe de longue date).
-          scriptreport: { label: 'Rapports de script', keys: ['scriptReports'],                                                 tabs: ['scriptreport'] },
+          // v601 — LES RAPPORTS DE SCRIPT PASSENT AU VERROU PAR RAPPORT. Chacun
+          // a une clef stable (« scene_plan ») et un contenu a lui : c'est une
+          // fiche, rangee dans un dictionnaire plutot que dans une liste. Je
+          // l'avais classe « cas mixte » avec les Depenses, a tort — le budget
+          // est un objet unique, un rapport non. Cle pour memoire :
+          // scriptReports.
+          // (v570, conserve : ce module LIT les scenes et les plans mais n'en
+          // ecrit aucun ; sa seule ecriture est scriptReports.)
           // v601 — LE CASTING PASSE AU VERROU PAR FICHE (FicheLock). Sur les sept
           // onglets qui s'y pretaient, c'est celui ou deux personnes travaillent
           // vraiment en meme temps : on remplit une distribution a plusieurs.
@@ -16658,7 +16681,8 @@ const LockManager = {
                   orgs:      (typeof FicheLock !== 'undefined') ? FicheLock : null,
                   storyboard:(typeof FicheLock !== 'undefined') ? FicheLock : null,
                   moodboard: (typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  contracts: (typeof FicheLock !== 'undefined') ? FicheLock : null
+                  contracts: (typeof FicheLock !== 'undefined') ? FicheLock : null,
+                  scriptreport: (typeof FicheLock !== 'undefined') ? FicheLock : null
               };
               document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => {
                   const famille = familles[btn.dataset.tab];
@@ -16677,7 +16701,8 @@ const LockManager = {
                   const quoi = (btn.dataset.tab === 'synopsis') ? 'section'
                              : (btn.dataset.tab === 'moodboard' ? 'planche'
                              : (btn.dataset.tab === 'contracts' ? 'contrat'
-                             : (['chars','actors','locs','crew','resources','orgs','storyboard'].indexOf(btn.dataset.tab) >= 0 ? 'fiche' : 'scène')));
+                             : (btn.dataset.tab === 'scriptreport' ? 'rapport'
+                             : (['chars','actors','locs','crew','resources','orgs','storyboard'].indexOf(btn.dataset.tab) >= 0 ? 'fiche' : 'scène'))));
                   av.title = autres.length > 1
                       ? ('✍️ ' + autres.length + ' ' + quoi + 's en cours d\'écriture — les autres restent ouvertes')
                       : ('✍️ ' + LockManager._who(l) + ' écrit une ' + quoi + ' — les autres restent ouvertes');
@@ -17519,10 +17544,10 @@ const LockManager = {
       //                              fenetre d'edition, la ou se trouvent les
       //                              champs. Elle vit dans le contenu, donc
       //                              elle disparait quand on ouvre autre chose.
-      zones: '.data-card[data-fiche], .crew-card[data-fiche], .compact-card[data-fiche], .shot-card[data-fiche], .moodboard-board-tab[data-fiche], #moodboardCanvasWrapper[data-fiche], .ccol-ctr[data-fiche], .fiche-fenetre[data-fiche]',
+      zones: '.data-card[data-fiche], .crew-card[data-fiche], .compact-card[data-fiche], .shot-card[data-fiche], .moodboard-board-tab[data-fiche], #moodboardCanvasWrapper[data-fiche], .ccol-ctr[data-fiche], .sr-fiche[data-fiche], .sr-sheet[data-fiche], .fiche-fenetre[data-fiche]',
       // Le verrou se PREND la ou l'on ecrit : sur les cartes modifiables et
       // dans les fenetres. Parcourir une liste de ressources ne verrouille rien.
-      zonesEcriture: '.data-card[data-fiche], .crew-card[data-fiche], .fiche-fenetre[data-fiche]',
+      zonesEcriture: '.data-card[data-fiche], .crew-card[data-fiche], .sr-sheet[data-fiche], .fiche-fenetre[data-fiche]',
       idDe: (el) => el.getAttribute('data-fiche') || ''
   });
 
@@ -17540,7 +17565,7 @@ const LockManager = {
   // quand l'editeur de dessin s'ouvre (voir DrawingEditor.open).
   FicheLock.COLL = { character: 'characters', actor: 'actors', location: 'locations',
                      crew: 'crew', resource: 'resources', org: 'orgs', shot: 'shots',
-                     board: 'moodboards', contract: 'contracts' };
+                     board: 'moodboards', contract: 'contracts', rapport: 'scriptReports' };
 
   // Les fiches tenues par QUELQU'UN D'AUTRE, rangees par collection :
   // { characters: { id -> qui }, actors: { ... } }. Lue par la sauvegarde, qui
@@ -18105,6 +18130,45 @@ const LockManager = {
       // scene passent vraiment. Renvoie aussi la liste de celles qu'on a du
       // reprendre, pour pouvoir le DIRE — une modification qui disparait sans
       // un mot est pire que pas de verrou du tout.
+      // ====================================================================
+      // MEME CHOSE, MAIS POUR UN DICTIONNAIRE (v601)
+      // ====================================================================
+      // Les rapports de script ne sont pas ranges dans une LISTE mais dans un
+      // DICTIONNAIRE : une entree par plan, sous la clef « scene_plan ». C'est
+      // la seule difference avec les onze autres collections — chaque entree
+      // reste une fiche, avec une clef stable et un contenu a elle.
+      // MEMES REGLES : je garde ce que j'ai touche, je prends le reste du
+      // serveur, je rends la sienne pour ce qu'il TIENT, mes suppressions
+      // tiennent, et une entree creee ailleurs n'est pas effacee.
+      // _refusees est pose en propriete CACHEE : sur un objet, une propriete
+      // ordinaire partirait dans l'enregistrement.
+      _carteAJour: (mienne, base, fraiche, interdits) => {
+          const m = mienne || {}, b = base || {}, f = fraiche || {};
+          const bloques = new Set((interdits || []).map(String));
+          const refusees = [];
+          const out = {};
+          const clefs = new Set(Object.keys(m).concat(Object.keys(f)));
+          clefs.forEach(k => {
+              const chezMoi = (k in m), chezEux = (k in f);
+              const jeLaiTouchee = JSON.stringify(m[k]) !== JSON.stringify(b[k]);
+              if(!chezEux) {
+                  // Absente du serveur : la mienne si je viens de la creer,
+                  // rien si elle a ete supprimee ailleurs.
+                  if(!(k in b) && chezMoi) out[k] = m[k];
+                  return;
+              }
+              if(bloques.has(k)) {            // tenue par quelqu'un d'autre
+                  if(jeLaiTouchee) refusees.push(k);
+                  out[k] = f[k];
+                  return;
+              }
+              if(!chezMoi && jeLaiTouchee) return;   // je l'ai supprimee : elle part
+              out[k] = jeLaiTouchee ? m[k] : f[k];
+          });
+          try { Object.defineProperty(out, '_refusees', { value: refusees, enumerable: false }); } catch(e) {}
+          return out;
+      },
+
       // v601 : la meme mecanique sert les SCENES et les FICHES (personnages,
       // comediens). Rien de specifique aux scenes n'y est reste — c'est une
       // liste d'objets a identifiant, quelle qu'elle soit.
@@ -18610,7 +18674,11 @@ const LockManager = {
               let seulSurLeProjet = true;
               try { seulSurLeProjet = LockManager.isAlone(); } catch(e) {}
               const aRelire = seulSurLeProjet ? [] : LISTES.filter(c => Array.isArray(savePatch[c]));
-              if(aRelire.length) {
+              // Les rapports de script sont ranges dans un dictionnaire et non
+              // dans une liste ; meme regle, autre fusion (voir _carteAJour).
+              const carteARelire = (!seulSurLeProjet && savePatch.scriptReports
+                                    && typeof savePatch.scriptReports === 'object') ? 'scriptReports' : null;
+              if(aRelire.length || carteARelire) {
                   // Qui tient quoi, par collection : les scenes d'un cote, les
                   // fiches de l'autre — deux familles de verrous, une seule
                   // table d'interdits.
@@ -18632,6 +18700,15 @@ const LockManager = {
                       const { data: frais, error: errFrais } = await supabase.rpc('project_data_for_me', { p_id: id });
                       if(!errFrais && frais) {
                           const refuses = [];
+                          if(carteARelire && frais[carteARelire] && typeof frais[carteARelire] === 'object') {
+                              const bloques = Object.keys(interdits[carteARelire] || {});
+                              const fusion = StoreRealtime._carteAJour(
+                                  savePatch[carteARelire], (saveBase && saveBase[carteARelire]) || {},
+                                  frais[carteARelire], bloques);
+                              savePatch[carteARelire] = fusion;
+                              state.data[carteARelire] = fusion;
+                              (fusion._refusees || []).forEach(k => refuses.push((interdits[carteARelire] || {})[k]));
+                          }
                           aRelire.forEach(coll => {
                               if(!Array.isArray(frais[coll])) return;
                               const bloques = Object.keys(interdits[coll] || {});
@@ -82022,9 +82099,17 @@ const ScriptReport = {
             </div>`;
         }
         
+        // v601 — VERROU PAR RAPPORT. Un rapport de script EST une fiche : il a
+        // une clef stable (« scene_plan ») et un contenu a lui. Il etait reste
+        // sur un verrou d'onglet parce que je l'avais classe « cas mixte » avec
+        // les Depenses — a tort : le budget est un objet unique, un rapport
+        // non. La seule vraie particularite est que les rapports sont ranges
+        // dans un DICTIONNAIRE et non dans une liste, ce qui ne change rien au
+        // verrou et demande seulement une fusion a part (StoreRealtime._carteAJour).
+        // C'est ici que sont les champs : c'est donc ici que le verrou s'accroche.
         container.innerHTML = `
             ${navHtml}
-            <div class="sr-sheet">
+            <div class="sr-sheet" data-fiche="rapport:${Utils.escape(String(key))}">
                 <!-- Ligne 1: FILM / DÉCOR / DATE / PLAN / EFFET -->
                 <div class="sr-sheet-row" style="grid-template-columns: 1fr 1fr 120px 100px 180px;">
                     <div class="sr-sheet-cell"><strong>FILM :</strong><br><input type="text" value="${Utils.escape(report.film || autoFill.film)}" onchange="app.ScriptReport.updateField('${key}', ${idx}, 'film', this.value)" class="w-full"></div>
@@ -82353,10 +82438,10 @@ const ScriptReport = {
                 const shot = allShots.find(s => s.id === it.shotId);
                 const shotLabel = shot ? (shot.title || `Plan ${shot.id.slice(-4)}`) : `Plan ?`;
                 if(it.reports.length === 1) {
-                    return `<div class="sr-fiche selected" data-key="${it.key}" data-idx="0" data-scene="${sceneId}">${Utils.escape(shotLabel)}</div>`;
+                    return `<div class="sr-fiche selected" data-fiche="rapport:${it.key}" data-key="${it.key}" data-idx="0" data-scene="${sceneId}">${Utils.escape(shotLabel)}</div>`;
                 }
                 return it.reports.map((r, ridx) => {
-                    return `<div class="sr-fiche selected" data-key="${it.key}" data-idx="${ridx}" data-scene="${sceneId}">${Utils.escape(shotLabel)} <span class="sr-take">prise ${ridx + 1}</span></div>`;
+                    return `<div class="sr-fiche selected" data-fiche="rapport:${it.key}" data-key="${it.key}" data-idx="${ridx}" data-scene="${sceneId}">${Utils.escape(shotLabel)} <span class="sr-take">prise ${ridx + 1}</span></div>`;
                 }).join('');
             }).join('');
             return `<div class="sr-col">
