@@ -76,21 +76,71 @@
           }
       },
 
-      save: async () => { 
+      // ====================================================================
+      //  LE VERROU DE SAUVEGARDE NE PEUT PLUS RESTER COINCE (v601)
+      // ====================================================================
+      //  savingInProgress empeche deux sauvegardes de se chevaucher. Il etait
+      //  leve a la main au debut et rabaisse a la main a la fin — SANS filet.
+      //  La moindre exception entre les deux (une donnee circulaire que
+      //  JSON.stringify refuse, une migration qui echoue, un module absent) le
+      //  laissait leve POUR TOUJOURS. Et des lors, toute sauvegarde suivante
+      //  ressortait aussitot, en silence : pas d'erreur, pas de message, rien
+      //  dans la console. L'ecran annonce « enregistre », rien ne part, et ca
+      //  ne se repare qu'en rechargeant la page.
+      //  C'est ce qui a ete signale sur « Gerer les acces » — mais ca touchait
+      //  TOUTE l'application, le scenario comme le planning.
+      //  MEME FAMILLE QUE LE MODE FICHE DE TOUT A L'HEURE : un etat tenu a la
+      //  main finit toujours par rester coince. Ici on ne peut pas le LIRE
+      //  ailleurs — alors on garantit sa descente par un « finally », qui
+      //  s'execute meme quand tout casse, et on ajoute une limite de temps au
+      //  cas ou un chemin nous echapperait encore.
+      VERROU_MAX_MS: 30000,
+
+      // A taper dans la console quand « ca dit enregistre mais rien ne bouge ».
+      // Dit en trois lignes ce qui, autrement, demande de lire le code.
+      etat: () => ({
+          sauvegarde_en_cours: !!state.savingInProgress,
+          depuis_secondes: state.savingInProgress ? Math.round((Date.now() - (state._savingDepuis || 0)) / 1000) : 0,
+          demande_en_attente: !!state.pendingSave,
+          mode_fiche_profil: !!(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode),
+          projet_ouvert: !!state.currentProjectId,
+          sections_non_recues: (state.dataMissingKeys || []).slice()
+      }),
+      save: async () => {
           // RENVOIE false, et ne se tait plus : un appelant qui annonce « enregistre »
           // doit pouvoir savoir que rien n'est parti (voir Permissions.saveAll).
           if(typeof PublicProfile !== 'undefined' && PublicProfile._engineActif()) return false; // fiche moteur profil : jamais de sauvegarde projet
           if(!state.currentProjectId || !state.currentUser || state.currentRole === 'viewer') return;
-          
-          // Verrou anti-concurrence : si un save est déjà en cours, on note la demande et on sortira
-          // Quand le save courant se termine, on relance automatiquement (cf. fin de la fonction)
+
           if(state.savingInProgress) {
-              state.pendingSave = true;
-              return;
+              // Verrou anti-concurrence : une sauvegarde est en cours, on note la
+              // demande et elle repartira a la fin de celle-la.
+              if(Date.now() - (state._savingDepuis || 0) < StoreSave.VERROU_MAX_MS) {
+                  state.pendingSave = true;
+                  return;
+              }
+              // Passe ce delai, la sauvegarde precedente n'a pas pu se terminer
+              // normalement. On repart plutot que de se taire indefiniment.
+              console.warn('[Store] verrou de sauvegarde jamais relache (' + StoreSave.VERROU_MAX_MS + ' ms) : on repart.');
           }
-          
-          // Marquer qu'une sauvegarde est en cours
-          state.savingInProgress = true; 
+          state.savingInProgress = true;
+          state._savingDepuis = Date.now();
+          try {
+              return await StoreSave._sauvegarder();
+          } catch(e) {
+              // Une exception ici ne doit plus disparaitre sans laisser de trace.
+              console.error('[Store] sauvegarde interrompue :', e);
+              try { Utils.toast('La sauvegarde a été interrompue. Vos modifications ne sont pas enregistrées.', 'error', 9000); } catch(_) {}
+              return false;
+          } finally {
+              state.savingInProgress = false;
+              if(state.pendingSave) { state.pendingSave = false; StoreSave.save(); }
+          }
+      },
+
+      // Le corps de la sauvegarde. Il ne touche plus au verrou : c'est save()
+      // ci-dessus qui le tient et garantit sa descente.
+      _sauvegarder: async () => {
           
           // [Phase D] Snapshots auto désactivés : remplacés par le journal d'actions enrichi
           
@@ -122,12 +172,7 @@
               // cote serveur : deux verrous valent mieux qu'un pour une perte de
               // donnees silencieuse.
               (state.dataMissingKeys || []).forEach(k => { delete savePatch[k]; });
-              if(Object.keys(savePatch).length === 0) {
-                  // Rien n'a changé : pas d'écriture inutile
-                  state.savingInProgress = false;
-                  if(state.pendingSave) { state.pendingSave = false; StoreSave.save(); }
-                  return;
-              }
+              if(Object.keys(savePatch).length === 0) return; // rien n'a changé : pas d'écriture inutile
               // v601 — SECTIONS DU SYNOPSIS TENUES PAR QUELQU'UN D'AUTRE.
               // Plus simple que pour les scenes, et pour une bonne raison : les
               // six textes du synopsis sont six CLES SEPAREES. Il n'y a donc
@@ -149,11 +194,7 @@
                               + ' : vos modifications n\'ont pas été enregistrées.', 'warning', 9000);
                           try { ['synopsis','short','long','intent','director','producer'].forEach(t => Synopsis.renderTree(t)); } catch(e) {}
                       }
-                      if(Object.keys(savePatch).length === 0) {
-                          state.savingInProgress = false;
-                          if(state.pendingSave) { state.pendingSave = false; StoreSave.save(); }
-                          return;
-                      }
+                      if(Object.keys(savePatch).length === 0) return;
                   } catch(e) { console.warn('[Store] sections verrouillees :', e && e.message); }
               }
               // v601 — LE VRAI POINT DE PASSAGE DE TOUTE ECRITURE DE SCENE.
@@ -285,13 +326,9 @@
                       syncIndicator.title = '';
                   }, 4000);
               }
-              state.savingInProgress = false;
-              // Si une nouvelle demande arrive après l'échec, on tentera quand même
-              if(state.pendingSave) {
-                  state.pendingSave = false;
-                  setTimeout(() => StoreSave.save(), 5000); // retry après 5s
-              }
-              return;
+              // Une nouvelle demande arrivee pendant l'echec sera relancee par
+              // save(), qui reprend la main juste apres.
+              return false;
           }
           
           // Indicateur de sync : terminé (avec mention du retry si applicable)
@@ -311,20 +348,15 @@
           // Diffusion du diff aux autres onglets (canal broadcast : quelques Ko, indépendant du poids du projet)
           StoreRealtime.broadcastPatch(savePatch);
           
-          // Marquer que la sauvegarde est terminée
-          state.savingInProgress = false;
           
           // Notifier les autres onglets de la modification
           if(typeof SessionManager !== 'undefined') {
               SessionManager.notifyDataUpdate();
           }
           
-          // Verrou anti-concurrence : si une demande de save a eu lieu pendant qu'on sauvegardait,
-          // on relance maintenant pour ne pas perdre la modif
-          if(state.pendingSave) {
-              state.pendingSave = false;
-              StoreSave.save();
-          }
+          // Une demande arrivee pendant la sauvegarde est relancee par save(),
+          // qui reprend la main juste apres — ici on ne touche plus au verrou.
+          return true;
       },
       
       // Debounce timer pour saveDebounced
