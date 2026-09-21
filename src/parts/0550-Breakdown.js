@@ -82,6 +82,7 @@
           let onclick = '';
           let titre = txt;
           if(k && rec) { onclick = ` onclick="app.UI.openFiche('${k}', '${esc(String(rec.id))}')"`; titre = 'Ouvrir la fiche de ' + txt; }
+          else if(link && link.masque) { titre = txt + ' — fiche rattachée, mais vous n\'avez pas accès à cette section.'; }
           else if(kind && canEdit) { onclick = ` onclick="app.Breakdown.resolveItem('${scene.id}', '${esc(cat)}', ${i})"`; titre = 'Aucune fiche — cliquez pour en créer une ou rattacher l\u2019élément'; }
           // La carte GARDE la classe .bd-tag : c'est elle que lit le trace de
           // liaison vers le scenario. v594 : simplifiee en ligne (photo + nom
@@ -201,6 +202,19 @@
       
       // Compteur porte par le bouton : le nombre d'elements sans fiche doit se
       // voir sans avoir a ouvrir la fenetre, sinon personne ne pense a la lire.
+      // v601 — LES FAMILLES HORS DE MA PORTEE, EN CLAIR. Le controle les ignore
+      // (voir scanLinks) ; il faut le DIRE, sinon « tout est rattaché » ferait
+      // croire a une verification complete alors qu'elle est partielle.
+      famillesMasquees: () => {
+          const out = [];
+          try {
+              Object.keys(Breakdown.FICHE_COLL).forEach(k => {
+                  if(Links.masquee(k)) out.push(Links.kindLabel(k));
+              });
+          } catch(e) {}
+          return out;
+      },
+
       refreshAuditBadge: () => {
           const btn = document.getElementById('bd-audit-btn');
           if(!btn) return;
@@ -209,7 +223,11 @@
               const s = Breakdown.scanLinks();
               n = s.evident.length + s.ambigu.length + s.absent.length;
           } catch(e) { return; }
-          btn.textContent = n ? `🔗 ${n} sans fiche` : '🔗 Tout est rattaché';
+          const masquees = Breakdown.famillesMasquees();
+          btn.title = masquees.length
+              ? 'Contrôle partiel : ' + masquees.join(', ') + ' — vous n\'avez pas accès à ces sections.'
+              : 'Contrôle des liens entre le dépouillement et les fiches.';
+          btn.textContent = n ? `🔗 ${n} sans fiche` : (masquees.length ? '🔗 Tout est rattaché (partiel)' : '🔗 Tout est rattaché');
           btn.style.borderColor = n ? '#ef6c00' : 'var(--border)';
           btn.style.color = n ? '#ef6c00' : 'var(--text-sec)';
       },
@@ -866,6 +884,11 @@
               Object.keys(sc.breakdown).forEach(cat => {
                   const kind = Utils.bdKindOf(cat);
                   if(!kind) return; // categorie sans fiche cible : rien a rattacher
+                  // v601 : famille hors de ma portee — je ne peux RIEN conclure
+                  // sur ses fiches. Ni qu'elles manquent, ni qu'elles sont en
+                  // double. On passe : un etat des lieux sur des donnees qu'on
+                  // n'a pas est pire que pas d'etat des lieux du tout.
+                  if(Links.masquee(kind)) return;
                   const arr = sc.breakdown[cat];
                   if(!Array.isArray(arr)) return;
                   arr.forEach((it, i) => {
@@ -1021,6 +1044,9 @@
                   <div style="text-align:left; font-size:0.88rem; color:var(--text-sec); line-height:1.45; margin-bottom:14px;">
                       Sur ${s.total} éléments dépouillés, ${s.lies} sont rattachés à une fiche.
                   </div>
+                  ${Breakdown.famillesMasquees().length ? `<div style="text-align:left; font-size:0.85rem; line-height:1.45; margin-bottom:14px; padding:8px 10px; border-radius:6px; border:1px solid rgba(59,130,246,.45); background:rgba(59,130,246,.10);">
+                      Contrôle <strong>partiel</strong> : ${Utils.escape(Breakdown.famillesMasquees().join(', '))} ${Breakdown.famillesMasquees().length > 1 ? 'ne sont pas vérifiés' : 'n\'est pas vérifié'}, vous n'avez pas accès à ${Breakdown.famillesMasquees().length > 1 ? 'ces sections' : 'cette section'} du projet.
+                  </div>` : ''}
                   ${ligne(s.evident.length, 'correspondent exactement à une fiche existante.', 'var(--success)')}
                   ${ligne(uniques.size, `noms n'ont aucune fiche (${s.absent.length} occurrence${s.absent.length > 1 ? 's' : ''}).`, '#ef6c00')}
                   ${s.ambigu.length ? `<div style="display:block; text-align:left; margin-bottom:8px; font-size:0.9rem; color:var(--text-main);">
@@ -1114,6 +1140,13 @@
           if(!item) return;
           const kind = Utils.bdKind(item) || Utils.bdKindOf(cat);
           if(!kind) return;
+          // v601 : on ne rattache ni ne cree dans une famille qu'on n'a pas le
+          // droit de lire — on ne verrait pas les fiches existantes, donc on en
+          // fabriquerait forcement des doublons.
+          if(Links.masquee(kind)) {
+              Utils.toast('Vous n\'avez pas accès à cette section du projet : demandez à la personne qui gère les accès.', 'info', 7000);
+              return;
+          }
           const text = Utils.bdText(item);
           const coll = Breakdown.FICHE_COLL[kind];
           const famille = Breakdown.FICHE_LABEL[kind];
@@ -1322,7 +1355,13 @@
           // une collection ici (c'est ce qui laissait les vehicules de regie
           // et les structures hors du depouillement).
           const rec = Links.record(kind, id);
-          return rec ? { kind, rec } : null;
+          if(rec) return { kind, rec };
+          // v601 : la fiche est peut-etre la, simplement hors de ma portee.
+          // L'element PORTE un identifiant : le lien existe, je ne peux pas le
+          // suivre. Le dire « non rattache » serait faux et pousserait a creer
+          // un doublon de ce qui existe deja.
+          if(Links.masquee(kind)) return { kind, rec: null, masque: true };
+          return null;
       },
       
       // Identifiant de fiche a rattacher a un element qu'on vient de depouiller.

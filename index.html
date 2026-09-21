@@ -114,6 +114,11 @@ Rien d'ouvert côté code au 20 septembre en dehors des chantiers ci-dessous.
       UNE NOUVELLE FAMILLE se declare en quelques lignes avec VerrouFin.creer :
       un prefixe de clef, ses zones, comment lire leur identifiant. Tout le
       reste est commun et ne se recopie pas.
+    - AVANT DE CONCLURE QU'UNE DONNEE MANQUE, DEMANDER SI ON AVAIT LE DROIT DE
+      LA VOIR (Links.masquee). Le cloisonnement recree VIDES les cles qu'on n'a
+      pas le droit de lire : un tableau vide n'est pas une reponse, c'est
+      parfois une porte fermee. Tout ce qui propose de CREER ce qui manque ou
+      de SUPPRIMER ce qui ne sert plus doit poser cette question d'abord.
     - TOUTE ECRITURE DE SCENE PASSE PAR StoreSave.save, jamais par saveScene,
       que personne n'appelle encore. C'est donc dans save() que vit le refus.
       Un nouveau chemin d'ecriture qui contournerait save() contournerait aussi
@@ -1395,6 +1400,43 @@ vv601 (20 septembre 2026) — EN COURS.
   VERIFIE PAR LES MEMES TESTS : les 23 du verrou par scene rejoues a l'identique
   apres le regroupement, plus 12 pour le synopsis et 8 pour la liberation et la
   surveillance. Refondre du code qui marche ne se fait pas sans filet.
+
+  « JE NE TROUVE PAS LA FICHE » ET « JE N'AI PAS LE DROIT DE LA VOIR » SONT DEUX
+  CHOSES DIFFERENTES. Signale le 21 septembre sur un vrai projet a deux : B a
+  acces au Depouillement mais pas aux onglets Personnages, Decors et Ressources.
+  Chez A tout est rattache ; chez B, le depouillement declarait TOUS ses
+  elements « sans fiche » et lui proposait d'en creer des centaines — en double
+  de celles qui existent deja, et invisibles pour lui.
+  CAUSE : le cloisonnement (v578) retire de la reponse serveur les cles
+  auxquelles on n'a pas acces, et Store.getEmpty les recree VIDES pour que le
+  reste de l'application ne plante pas. Un tableau vide et un tableau qu'on n'a
+  pas le droit de lire se ressemblent trait pour trait — et tout ce qui conclut
+  a une absence s'y trompait.
+  LE GARDE-FOU EXISTAIT DEJA POUR L'ECRITURE, pas pour la LECTURE : la
+  sauvegarde retire du paquet les cles cachees (sinon on effacerait le budget de
+  tout le monde en enregistrant), et le declencheur SQL dit la meme chose cote
+  serveur. Rien n'avait ete pose du cote des conclusions qu'on TIRE de ces
+  tableaux vides. Aucune donnee n'a donc ete perdue — les fiches creees par B
+  n'auraient meme pas ete enregistrees — mais l'ecran mentait, et la reparation
+  proposee aurait fabrique le desordre qu'elle pretendait corriger.
+  CORRECTION, UNE SEULE PORTE : Links.masquee(famille) repond a la question
+  « cette famille m'est-elle cachee ? », a cote de la table qui relie deja les
+  familles a leurs collections. Ce qui en decoule :
+    - le controle des liens IGNORE les familles hors de portee — on ne conclut
+      rien sur des donnees qu'on n'a pas — et le DIT, en toutes lettres, dans
+      la fenetre de controle comme sur le compteur (« partiel ») ;
+    - un element dont la fiche est cachee est montre RATTACHE, pas orphelin,
+      avec pour explication « fiche rattachée, mais vous n'avez pas accès a
+      cette section » ;
+    - on ne rattache ni ne cree dans une famille cachee : on ne verrait pas les
+      fiches existantes, donc on en fabriquerait forcement des doublons ;
+    - meme regle dans l'autre sens, la ou elle manquait aussi : sans acces aux
+      scenes, on ne propose plus de supprimer un decor ou un personnage « qui
+      ne sert plus dans aucune scene ». Celui-la n'avait encore blesse
+      personne, mais c'est exactement le meme raisonnement — et lui EFFACE.
+  LA REGLE, pour tout ce qu'on ecrira ensuite : AVANT DE CONCLURE QU'UNE DONNEE
+  MANQUE, DEMANDER SI ON AVAIT LE DROIT DE LA VOIR. Un tableau vide n'est pas
+  une reponse, c'est parfois une porte fermee.
 
   LA LECON, ET ELLE EST DURE : les trois etapes precedentes etaient justes dans
   leur mecanique et fausses dans leur PREMISSE. On avait construit sur « les
@@ -23034,7 +23076,22 @@ initCategoriesDragDrop: () => {
           if(!coll || !id) return null;
           return (state.data[coll] || []).find(x => x && String(x.id) === String(id)) || null;
       },
-      exists: (kind, id) => !!Links.record(kind, id),
+      // v601 — UNE FAMILLE QU'ON N'A PAS LE DROIT DE LIRE N'EST PAS UNE FAMILLE
+      // VIDE. Le cloisonnement (v578) retire de la reponse serveur les cles
+      // auxquelles on n'a pas acces, et Store.getEmpty les recree VIDES pour que
+      // le reste de l'application ne plante pas. Consequence, decouverte sur un
+      // vrai projet a deux : une personne qui a le Depouillement mais pas les
+      // onglets Personnages, Decors et Ressources voyait TOUS les elements
+      // depouilles comme « sans fiche » — et le controle lui proposait d'en
+      // creer des centaines, en double de celles qui existent deja.
+      // « Je ne trouve pas la fiche » et « je n'ai pas le droit de la voir »
+      // sont deux choses differentes. Tout ce qui conclut a une absence doit
+      // poser la question ICI d'abord.
+      masquee: (kind) => {
+          const coll = Links.COLL[kind];
+          return !!(coll && (state.dataMissingKeys || []).indexOf(coll) >= 0);
+      },
+      exists: (kind, id) => !!Links.record(kind, id) || (!!id && Links.masquee(kind)),
       // Nom affichable d'un objet, quelle que soit sa famille. Les quatre cas
       // particuliers ne portent pas de champ 'name' utilisable tel quel : le
       // jour se nomme par sa date, la scene par son rang, la structure par sa
@@ -25558,6 +25615,10 @@ initCategoriesDragDrop: () => {
       
       // Propose de supprimer un lieu orphelin
       askDeleteOrphanLocation: async (locationName) => {
+          // v601 : meme regle que pour le depouillement — si les scenes me sont
+          // cachees, je ne peux pas conclure qu'un decor n'y sert plus. Proposer
+          // de le supprimer serait proposer d'effacer ce que je ne vois pas.
+          if(typeof Links !== 'undefined' && Links.masquee('scene')) return;
           const loc = state.data.locations.find(l => l.name.toUpperCase() === locationName.toUpperCase());
           if(!loc) return;
           
@@ -25580,6 +25641,9 @@ initCategoriesDragDrop: () => {
       // Propose de supprimer des personnages orphelins
       askDeleteOrphanCharacters: async (characterNames) => {
           if(!characterNames || characterNames.length === 0) return;
+          // v601 : voir askDeleteOrphanLocation. Sans acces aux scenes, « plus
+          // utilise dans aucune scene » ne veut rien dire.
+          if(typeof Links !== 'undefined' && Links.masquee('scene')) return;
           
           const orphans = characterNames.filter(name => {
               return state.data.characters.find(c => c.name.toUpperCase() === name.toUpperCase());
@@ -27898,6 +27962,7 @@ initCategoriesDragDrop: () => {
           let onclick = '';
           let titre = txt;
           if(k && rec) { onclick = ` onclick="app.UI.openFiche('${k}', '${esc(String(rec.id))}')"`; titre = 'Ouvrir la fiche de ' + txt; }
+          else if(link && link.masque) { titre = txt + ' — fiche rattachée, mais vous n\'avez pas accès à cette section.'; }
           else if(kind && canEdit) { onclick = ` onclick="app.Breakdown.resolveItem('${scene.id}', '${esc(cat)}', ${i})"`; titre = 'Aucune fiche — cliquez pour en créer une ou rattacher l\u2019élément'; }
           // La carte GARDE la classe .bd-tag : c'est elle que lit le trace de
           // liaison vers le scenario. v594 : simplifiee en ligne (photo + nom
@@ -28017,6 +28082,19 @@ initCategoriesDragDrop: () => {
       
       // Compteur porte par le bouton : le nombre d'elements sans fiche doit se
       // voir sans avoir a ouvrir la fenetre, sinon personne ne pense a la lire.
+      // v601 — LES FAMILLES HORS DE MA PORTEE, EN CLAIR. Le controle les ignore
+      // (voir scanLinks) ; il faut le DIRE, sinon « tout est rattaché » ferait
+      // croire a une verification complete alors qu'elle est partielle.
+      famillesMasquees: () => {
+          const out = [];
+          try {
+              Object.keys(Breakdown.FICHE_COLL).forEach(k => {
+                  if(Links.masquee(k)) out.push(Links.kindLabel(k));
+              });
+          } catch(e) {}
+          return out;
+      },
+
       refreshAuditBadge: () => {
           const btn = document.getElementById('bd-audit-btn');
           if(!btn) return;
@@ -28025,7 +28103,11 @@ initCategoriesDragDrop: () => {
               const s = Breakdown.scanLinks();
               n = s.evident.length + s.ambigu.length + s.absent.length;
           } catch(e) { return; }
-          btn.textContent = n ? `🔗 ${n} sans fiche` : '🔗 Tout est rattaché';
+          const masquees = Breakdown.famillesMasquees();
+          btn.title = masquees.length
+              ? 'Contrôle partiel : ' + masquees.join(', ') + ' — vous n\'avez pas accès à ces sections.'
+              : 'Contrôle des liens entre le dépouillement et les fiches.';
+          btn.textContent = n ? `🔗 ${n} sans fiche` : (masquees.length ? '🔗 Tout est rattaché (partiel)' : '🔗 Tout est rattaché');
           btn.style.borderColor = n ? '#ef6c00' : 'var(--border)';
           btn.style.color = n ? '#ef6c00' : 'var(--text-sec)';
       },
@@ -28682,6 +28764,11 @@ initCategoriesDragDrop: () => {
               Object.keys(sc.breakdown).forEach(cat => {
                   const kind = Utils.bdKindOf(cat);
                   if(!kind) return; // categorie sans fiche cible : rien a rattacher
+                  // v601 : famille hors de ma portee — je ne peux RIEN conclure
+                  // sur ses fiches. Ni qu'elles manquent, ni qu'elles sont en
+                  // double. On passe : un etat des lieux sur des donnees qu'on
+                  // n'a pas est pire que pas d'etat des lieux du tout.
+                  if(Links.masquee(kind)) return;
                   const arr = sc.breakdown[cat];
                   if(!Array.isArray(arr)) return;
                   arr.forEach((it, i) => {
@@ -28837,6 +28924,9 @@ initCategoriesDragDrop: () => {
                   <div style="text-align:left; font-size:0.88rem; color:var(--text-sec); line-height:1.45; margin-bottom:14px;">
                       Sur ${s.total} éléments dépouillés, ${s.lies} sont rattachés à une fiche.
                   </div>
+                  ${Breakdown.famillesMasquees().length ? `<div style="text-align:left; font-size:0.85rem; line-height:1.45; margin-bottom:14px; padding:8px 10px; border-radius:6px; border:1px solid rgba(59,130,246,.45); background:rgba(59,130,246,.10);">
+                      Contrôle <strong>partiel</strong> : ${Utils.escape(Breakdown.famillesMasquees().join(', '))} ${Breakdown.famillesMasquees().length > 1 ? 'ne sont pas vérifiés' : 'n\'est pas vérifié'}, vous n'avez pas accès à ${Breakdown.famillesMasquees().length > 1 ? 'ces sections' : 'cette section'} du projet.
+                  </div>` : ''}
                   ${ligne(s.evident.length, 'correspondent exactement à une fiche existante.', 'var(--success)')}
                   ${ligne(uniques.size, `noms n'ont aucune fiche (${s.absent.length} occurrence${s.absent.length > 1 ? 's' : ''}).`, '#ef6c00')}
                   ${s.ambigu.length ? `<div style="display:block; text-align:left; margin-bottom:8px; font-size:0.9rem; color:var(--text-main);">
@@ -28930,6 +29020,13 @@ initCategoriesDragDrop: () => {
           if(!item) return;
           const kind = Utils.bdKind(item) || Utils.bdKindOf(cat);
           if(!kind) return;
+          // v601 : on ne rattache ni ne cree dans une famille qu'on n'a pas le
+          // droit de lire — on ne verrait pas les fiches existantes, donc on en
+          // fabriquerait forcement des doublons.
+          if(Links.masquee(kind)) {
+              Utils.toast('Vous n\'avez pas accès à cette section du projet : demandez à la personne qui gère les accès.', 'info', 7000);
+              return;
+          }
           const text = Utils.bdText(item);
           const coll = Breakdown.FICHE_COLL[kind];
           const famille = Breakdown.FICHE_LABEL[kind];
@@ -29138,7 +29235,13 @@ initCategoriesDragDrop: () => {
           // une collection ici (c'est ce qui laissait les vehicules de regie
           // et les structures hors du depouillement).
           const rec = Links.record(kind, id);
-          return rec ? { kind, rec } : null;
+          if(rec) return { kind, rec };
+          // v601 : la fiche est peut-etre la, simplement hors de ma portee.
+          // L'element PORTE un identifiant : le lien existe, je ne peux pas le
+          // suivre. Le dire « non rattache » serait faux et pousserait a creer
+          // un doublon de ce qui existe deja.
+          if(Links.masquee(kind)) return { kind, rec: null, masque: true };
+          return null;
       },
       
       // Identifiant de fiche a rattacher a un element qu'on vient de depouiller.

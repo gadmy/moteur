@@ -1588,6 +1588,10 @@
       
       // Propose de supprimer un lieu orphelin
       askDeleteOrphanLocation: async (locationName) => {
+          // v601 : meme regle que pour le depouillement — si les scenes me sont
+          // cachees, je ne peux pas conclure qu'un decor n'y sert plus. Proposer
+          // de le supprimer serait proposer d'effacer ce que je ne vois pas.
+          if(typeof Links !== 'undefined' && Links.masquee('scene')) return;
           const loc = state.data.locations.find(l => l.name.toUpperCase() === locationName.toUpperCase());
           if(!loc) return;
           
@@ -1610,6 +1614,9 @@
       // Propose de supprimer des personnages orphelins
       askDeleteOrphanCharacters: async (characterNames) => {
           if(!characterNames || characterNames.length === 0) return;
+          // v601 : voir askDeleteOrphanLocation. Sans acces aux scenes, « plus
+          // utilise dans aucune scene » ne veut rien dire.
+          if(typeof Links !== 'undefined' && Links.masquee('scene')) return;
           
           const orphans = characterNames.filter(name => {
               return state.data.characters.find(c => c.name.toUpperCase() === name.toUpperCase());

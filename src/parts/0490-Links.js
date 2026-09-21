@@ -21,7 +21,22 @@
           if(!coll || !id) return null;
           return (state.data[coll] || []).find(x => x && String(x.id) === String(id)) || null;
       },
-      exists: (kind, id) => !!Links.record(kind, id),
+      // v601 — UNE FAMILLE QU'ON N'A PAS LE DROIT DE LIRE N'EST PAS UNE FAMILLE
+      // VIDE. Le cloisonnement (v578) retire de la reponse serveur les cles
+      // auxquelles on n'a pas acces, et Store.getEmpty les recree VIDES pour que
+      // le reste de l'application ne plante pas. Consequence, decouverte sur un
+      // vrai projet a deux : une personne qui a le Depouillement mais pas les
+      // onglets Personnages, Decors et Ressources voyait TOUS les elements
+      // depouilles comme « sans fiche » — et le controle lui proposait d'en
+      // creer des centaines, en double de celles qui existent deja.
+      // « Je ne trouve pas la fiche » et « je n'ai pas le droit de la voir »
+      // sont deux choses differentes. Tout ce qui conclut a une absence doit
+      // poser la question ICI d'abord.
+      masquee: (kind) => {
+          const coll = Links.COLL[kind];
+          return !!(coll && (state.dataMissingKeys || []).indexOf(coll) >= 0);
+      },
+      exists: (kind, id) => !!Links.record(kind, id) || (!!id && Links.masquee(kind)),
       // Nom affichable d'un objet, quelle que soit sa famille. Les quatre cas
       // particuliers ne portent pas de champ 'name' utilisable tel quel : le
       // jour se nomme par sa date, la scene par son rang, la structure par sa
