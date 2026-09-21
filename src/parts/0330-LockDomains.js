@@ -36,7 +36,11 @@
           // et le plan de storyboard prend son verrou a l'ouverture de
           // l'editeur de dessin. Cles pour memoire : orgs, resources, shots.
 
-          moodboard:    { label: 'Moodboard',    keys: ['moodboards'],                                                                tabs: ['moodboard'] },
+          // v601 — LE MOODBOARD PASSE AU VERROU PAR PLANCHE. Derniere liste a
+          // suivre. Sa forme est particuliere — une toile selectionnee par un
+          // onglet, une seule ouverte a la fois — mais c'est justement ce qui
+          // rend le verrou naturel : on en tient une, et choisir la suivante
+          // rend la precedente. Cle pour memoire : moodboards.
           // v601 — LE SYNOPSIS N'A PLUS DE DOMAINE : il passe au verrou PAR
           // SECTION (SynopsisLock). Ses six textes sont six cles separees, et
           // la sauvegarde n'envoie que les cles modifiees : deux personnes sur
@@ -573,7 +577,8 @@ const LockManager = {
                   crew:      (typeof FicheLock !== 'undefined') ? FicheLock : null,
                   resources: (typeof FicheLock !== 'undefined') ? FicheLock : null,
                   orgs:      (typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  storyboard:(typeof FicheLock !== 'undefined') ? FicheLock : null
+                  storyboard:(typeof FicheLock !== 'undefined') ? FicheLock : null,
+                  moodboard: (typeof FicheLock !== 'undefined') ? FicheLock : null
               };
               document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => {
                   const famille = familles[btn.dataset.tab];
@@ -590,7 +595,8 @@ const LockManager = {
                   if(em) av.style.background = Utils.getColor(em);
                   av.textContent = autres.length > 1 ? String(autres.length) : (LockManager._who(l)[0] || '?').toUpperCase();
                   const quoi = (btn.dataset.tab === 'synopsis') ? 'section'
-                             : (['chars','actors','locs','crew','resources','orgs','storyboard'].indexOf(btn.dataset.tab) >= 0 ? 'fiche' : 'scène');
+                             : (btn.dataset.tab === 'moodboard' ? 'planche'
+                             : (['chars','actors','locs','crew','resources','orgs','storyboard'].indexOf(btn.dataset.tab) >= 0 ? 'fiche' : 'scène'));
                   av.title = autres.length > 1
                       ? ('✍️ ' + autres.length + ' ' + quoi + 's en cours d\'écriture — les autres restent ouvertes')
                       : ('✍️ ' + LockManager._who(l) + ' écrit une ' + quoi + ' — les autres restent ouvertes');

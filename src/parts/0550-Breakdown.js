@@ -2539,7 +2539,7 @@ const MoodBoard = {
             const isActive = board.id === MoodBoard.currentBoardId;
             const linkedIcon = board.linkedTo ? '🔗 ' : '';
             return `
-                <div class="moodboard-board-tab ${isActive ? 'active' : ''}" onclick="app.MoodBoard.selectBoard('${board.id}')">
+                <div class="moodboard-board-tab ${isActive ? 'active' : ''}" data-fiche="board:${Utils.escape(String(board.id))}" onclick="app.MoodBoard.selectBoard('${board.id}')">
                     ${linkedIcon}${Utils.escape(board.name)}
                     <span class="tab-close" onclick="event.stopPropagation(); app.MoodBoard.deleteBoard('${board.id}')">×</span>
                 </div>
@@ -2554,9 +2554,33 @@ const MoodBoard = {
         `;
     },
     
+    // La toile dit quelle planche elle montre : c'est elle qui portera le
+    // cadenas et la mention « verrouillée » quand la planche est tenue par
+    // quelqu'un d'autre. Repose apres chaque changement de planche.
+    _marquerToile: () => {
+        const toile = document.getElementById('moodboardCanvasWrapper');
+        if(!toile) return;
+        if(MoodBoard.currentBoardId) toile.dataset.fiche = 'board:' + MoodBoard.currentBoardId;
+        else delete toile.dataset.fiche;
+        try { if(typeof VerrouFin !== 'undefined') VerrouFin.marquerTout(); } catch(e) {}
+    },
+
     selectBoard: (boardId) => {
         MoodBoard.currentBoardId = boardId;
         MoodBoard.selectedElementId = null;
+        // v601 — VERROU PAR PLANCHE. Une planche n'est pas une carte dans une
+        // liste : c'est une TOILE qu'on selectionne, et une seule est ouverte a
+        // la fois. On y compose a la SOURIS, le curseur de texte ne s'y pose
+        // jamais — le declencheur habituel ne verrait donc rien. Le verrou se
+        // prend A LA PORTE, comme pour l'editeur de dessin : choisir une
+        // planche, c'est venir y travailler. Et comme on n'en tient qu'un a la
+        // fois, choisir la suivante rend la precedente sans rien de plus.
+        // ON NE PREND RIEN EN LECTURE SEULE : consulter ne bloque personne.
+        try {
+            const peutEcrire = (typeof MoodBoard.canWrite !== 'function') || MoodBoard.canWrite();
+            if(boardId && peutEcrire && typeof FicheLock !== 'undefined') FicheLock.prendre('board:' + boardId);
+            MoodBoard._marquerToile();
+        } catch(e) {}
         
         // S'assurer que la planche a un tableau elements
         const board = MoodBoard.getCurrentBoard();
