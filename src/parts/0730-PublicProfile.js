@@ -1936,7 +1936,10 @@ const Permissions = {
             return '<span title="Tant que la personne n\'a pas accepté, elle n\'a aucun accès">' + Utils.escape(member.role) + '</span>';
         }
         const lab = (member._rawRole === 'editor') ? '✏️ Éditeur' : '👁️ Lecture seule';
-        return '<span id="perm-derived-' + emailKey + '" title="Rôle déduit des cases de cette ligne : au moins une ✏️ donne Éditeur.">' + lab + '</span>';
+        // v601 : repere par DONNEE et non par identifiant. Une meme personne peut
+        // avoir DEUX lignes (comedien ET technicien) : deux identifiants
+        // identiques dans la page, dont un seul serait jamais retrouve.
+        return '<span data-derived="' + emailKey + '" title="Rôle déduit des cases de cette ligne : au moins une ✏️ donne Éditeur.">' + lab + '</span>';
     },
 
     // v582 — La colonne « Peut inviter » a ete RETIREE (decision de
@@ -2449,7 +2452,7 @@ const Permissions = {
                 </td>
                 ${sections.map(s => `
                     <td class="rotated-cell">
-                        <select class="perm-select" id="perm-${emailKey}-${s.id}" data-email="${emailKey}" data-section="${s.id}" title="${Utils.escape(s.label)}" onchange="app.Permissions._refreshDerived('${emailKey}')">
+                        <select class="perm-select" id="perm-${type}-${idx}-${emailKey}-${s.id}" data-email="${emailKey}" data-section="${s.id}" title="${Utils.escape(s.label)}" onchange="app.Permissions.surChangement('${emailKey}', '${s.id}', this.value)">
                             <option value="none" ${currentPerms[s.id] === 'none' ? 'selected' : ''}>❌</option>
                             <option value="read" ${currentPerms[s.id] === 'read' ? 'selected' : ''}>👁️</option>
                             <option value="write" ${currentPerms[s.id] === 'write' ? 'selected' : ''}>✏️</option>
@@ -2493,27 +2496,58 @@ const Permissions = {
         // au tableau demain ne refermera donc rien derriere nous.
         const perms = Permissions._normalize(brut);
         
+        // v601 : par DONNEE, pour couvrir les deux lignes d'une meme personne.
+        // Par identifiant, on n'en servait qu'une — et l'autre reecrivait tout.
         CONFIG.permissionSections.forEach(s => {
-            const select = document.getElementById(`perm-${emailKey}-${s.id}`);
-            if(select) {
-                select.value = perms[s.id] || 'none';
-            }
+            Permissions._lignesDe(emailKey)
+                .filter(sel => sel.dataset.section === s.id)
+                .forEach(sel => { sel.value = perms[s.id] || 'none'; });
         });
         Permissions._refreshDerived(emailKey);
     },
 
+    // ======================================================================
+    //  UNE PERSONNE PEUT AVOIR DEUX LIGNES — ET UN SEUL JEU DE DROITS (v601)
+    // ======================================================================
+    //  Mesure sur un vrai projet : la meme adresse figurait a la fois dans les
+    //  COMEDIENS et dans l'EQUIPE, et une autre revenait SEPT fois en figuration.
+    //  Or les droits se rangent par ADRESSE, pas par ligne : deux lignes, une
+    //  seule entree. La sauvegarde ecrivait case par case en parcourant la page,
+    //  donc la DERNIERE ligne lue gagnait — celle qu'on n'avait pas touchee.
+    //  On reglait une case, on enregistrait, et la ligne jumelle restee sur
+    //  l'ancienne valeur la reecrivait a l'identique. Rien ne changeait en base,
+    //  et l'ecran annoncait « enregistre ».
+    //  LA REGLE : un changement se pose sur TOUTES les lignes de la personne.
+    //  Peu importe alors laquelle est lue en dernier, elles disent la meme chose.
+    surChangement: (emailKey, section, valeur) => {
+        try {
+            const fenetre = document.getElementById('permissions-modal') || document;
+            fenetre.querySelectorAll('select[data-email="' + CSS.escape(emailKey) + '"][data-section="' + CSS.escape(section) + '"]')
+                   .forEach(sel => { if(sel.value !== valeur) sel.value = valeur; });
+        } catch(e) { console.warn('[Permissions] propagation :', e && e.message); }
+        Permissions._refreshDerived(emailKey);
+    },
+
+    // Toutes les lignes d'une personne (elle peut en avoir plusieurs).
+    _lignesDe: (emailKey) => {
+        const fenetre = document.getElementById('permissions-modal') || document;
+        try { return [...fenetre.querySelectorAll('select[data-email="' + CSS.escape(emailKey) + '"]')]; }
+        catch(e) { return []; }
+    },
+
     // Met a jour l'etiquette de role deduite d'une ligne, sans attendre la sauvegarde.
     _refreshDerived: (emailKey) => {
-        const cell = document.getElementById('perm-derived-' + emailKey);
-        if(!cell) return;
+        const fenetre = document.getElementById('permissions-modal') || document;
+        let cellules = [];
+        try { cellules = [...fenetre.querySelectorAll('[data-derived="' + CSS.escape(emailKey) + '"]')]; } catch(e) { return; }
+        if(!cellules.length) return;
         const perms = {};
-        CONFIG.permissionSections.forEach(s => {
-            const sel = document.getElementById(`perm-${emailKey}-${s.id}`);
-            if(sel) perms[s.id] = sel.value;
-        });
+        Permissions._lignesDe(emailKey).forEach(sel => { perms[sel.dataset.section] = sel.value; });
         const r = Permissions._deriveRole(perms);
-        cell.textContent = (r === 'editor') ? '✏️ Éditeur' : '👁️ Lecture seule';
-        cell.title = 'Rôle déduit des cases de cette ligne : au moins une ✏️ donne Éditeur.';
+        cellules.forEach(cell => {
+            cell.textContent = (r === 'editor') ? '✏️ Éditeur' : '👁️ Lecture seule';
+            cell.title = 'Rôle déduit des cases de cette personne : au moins une ✏️ donne Éditeur.';
+        });
     },
     
     saveAll: async () => {
@@ -2535,12 +2569,34 @@ const Permissions = {
         }
         const permsByEmail = {};
         
+        // v601 — DEUX LIGNES POUR UNE MEME PERSONNE NE DOIVENT PLUS S'ANNULER.
+        // Les droits se rangent par ADRESSE ; une personne inscrite a la fois
+        // chez les comediens et dans l'equipe a DEUX lignes pour UNE entree. On
+        // ecrivait case par case en parcourant la page : la derniere ligne lue
+        // gagnait, y compris quand c'etait la jumelle qu'on n'avait pas touchee.
+        // Les deux lignes sont normalement tenues en phase par surChangement ;
+        // ce filet-ci couvre le cas ou elles divergeraient quand meme — la
+        // valeur qui DIFFERE de l'enregistre est forcement celle qu'on vient de
+        // regler, l'autre n'etant qu'une copie de ce qui est deja en base.
+        const dejaEnBase = state.data.memberPermissions || {};
+        const divergences = [];
         allSelects.forEach(select => {
             const email = select.dataset.email;
             const section = select.dataset.section;
             if(!permsByEmail[email]) permsByEmail[email] = {};
+            const dejaLu = permsByEmail[email][section];
+            if(dejaLu !== undefined && dejaLu !== select.value) {
+                divergences.push(email + '/' + section);
+                const ancien = (dejaEnBase[email] || {})[section];
+                // On garde celle qui n'est PAS la valeur enregistree.
+                permsByEmail[email][section] = (dejaLu !== ancien) ? dejaLu : select.value;
+                return;
+            }
             permsByEmail[email][section] = select.value;
         });
+        if(divergences.length) {
+            console.warn('[Permissions] lignes en double desaccordees, on garde la valeur modifiee :', divergences.join(', '));
+        }
         
         // Ajouter les permissions de chat par défaut
         Object.keys(permsByEmail).forEach(email => {
