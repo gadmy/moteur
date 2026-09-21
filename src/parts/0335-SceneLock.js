@@ -264,10 +264,34 @@
           } catch(e) { return ''; }
       },
 
+      // QUITTER UNE SCENE LA REND. La premiere version gardait le verrou tant
+      // qu'on n'en prenait pas un autre : on pouvait donc partir au Planning et
+      // laisser sa scene bloquee indefiniment, puisque le battement de coeur la
+      // maintenait en vie. Ce n'est pas ce qu'on attend — on quitte, ca se
+      // deverrouille.
+      // MAIS PAS DU PREMIER COUP : cliquer un bouton de la barre d'outils sort
+      // le curseur de la scene pour y revenir aussitot. Rendre la main a chaque
+      // aller-retour ferait clignoter le verrou et enverrait une rafale
+      // d'ecritures. On attend donc un moment de calme avant de lacher.
+      DELAI_SORTIE: 20000,
+      _minuteurSortie: null,
+
       _suivreCurseur: async () => {
           if(state.currentRole === 'viewer') return;
           const id = SceneLock._sceneDuCurseur();
-          if(!id) return;                       // curseur hors d'une scene : on garde la sienne
+          if(!id) {
+              // Curseur hors de toute scene : on rendra la main si ca dure.
+              if(!SceneLock._minuteurSortie) {
+                  SceneLock._minuteurSortie = setTimeout(() => {
+                      SceneLock._minuteurSortie = null;
+                      if(SceneLock._sceneDuCurseur()) return;   // revenu entre-temps
+                      SceneLock.libererToutes();
+                  }, SceneLock.DELAI_SORTIE);
+              }
+              return;
+          }
+          clearTimeout(SceneLock._minuteurSortie);
+          SceneLock._minuteurSortie = null;
           if(SceneLock.tenueParMoi(id)) return; // deja a moi
           if(SceneLock.detenteur(id)) return;   // tenue par un autre : le badge le dit deja
           await SceneLock.prendre(id);

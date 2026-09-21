@@ -116,6 +116,23 @@ Rien d'ouvert côté code au 20 septembre en dehors des chantiers ci-dessous.
       Un nouveau chemin d'ecriture qui contournerait save() contournerait aussi
       le verrou.
 
+[ ] PRESETS DE DROITS HORS SERVICE (signale le 21 septembre). Dans
+    Projet > Gerer les acces, les boutons de la colonne « preset » ne font plus
+    rien. Non diagnostique. A REGARDER EN PREMIER : ces boutons posaient des
+    cases de permissions par lot ; les permissions ont change deux fois depuis
+    (v570, role deduit des cases ; v600, referentiel des postes). Un preset qui
+    nomme des onglets ou des postes disparus ne trouve plus sa cible et ne dit
+    rien — meme famille de defaut que le materiel mort-vivant de v601.
+
+[ ] PREMIER PROFIL : UNE FENETRE D'ACCUEIL. Demande du 21 septembre. Quelqu'un
+    qui arrive sur le site pour la premiere fois se retrouve devant un profil
+    vide sans savoir par ou commencer. On veut une fenetre dediee qui l'aide a
+    creer son premier profil. A CADRER AVANT DE CODER : quelles casquettes on
+    propose d'emblee, ce qui est obligatoire et ce qui attend, et comment on
+    sort de la fenetre sans se sentir coince. La visite guidee existe deja et
+    couvre l'editeur de projet : voir si cette fenetre la prolonge ou s'en
+    separe.
+
 [ ] AVENIR DU FORUM — a trancher. Il est SUSPENDU depuis un moment
     (Forum.suspended = true : le menu y mene, un message le dit, on revient au
     tableau de bord). Question posee le 20 septembre : est-ce que des gens
@@ -1313,6 +1330,33 @@ vv601 (20 septembre 2026) — EN COURS.
   texte, sinon chaque touche frappee relancerait le calcul), et le badge n'est
   refait que si la personne qui tient la scene a CHANGE. Mesure : le systeme se
   stabilise apres un seul passage, et n'en fait plus aucun ensuite.
+
+  ET LE VRAI COUPABLE, TROUVE AU PREMIER ESSAI A DEUX (21 septembre). Symptome
+  du developpeur : « A prend la scene 1, B la voit verrouillee, bien ; A passe a
+  la scene 2, et B voit les DEUX occupees — ca ne se deverrouille jamais. »
+  VERIFIE EN BASE, ET CE N'ETAIT PAS LE CODE DU VERROU : A libere bien la scene
+  1, la ligne disparait du serveur. C'est B qui ne l'apprenait jamais.
+  LA TABLE DES VERROUS N'ETAIT PAS DIFFUSEE EN TEMPS REEL. LockManager s'abonne
+  aux changements de project_locks depuis des mois ; la table n'etait pas dans
+  la publication. L'abonnement REUSSISSAIT et restait muet — un abonnement a une
+  table non publiee ne renvoie aucune erreur. Chaque poste gardait donc la photo
+  des verrous prise a l'ouverture du projet. Cela valait aussi pour les verrous
+  de DOMAINE : le badge « quelqu'un travaille ici » n'a jamais bouge en direct,
+  il apparaissait a l'ouverture et n'en repartait plus.
+  DEUX CORRECTIONS. Cote base, project_locks rejoint la publication, avec
+  REPLICA IDENTITY FULL — sans elle la ligne effacee n'arrive qu'avec sa cle
+  primaire, le filtre par projet ne la reconnait pas, et l'on verrait les prises
+  sans jamais voir les LIBERATIONS, c'est-a-dire tout sauf ce qu'on cherche
+  (sql/verrous_temps_reel.sql). Cote navigateur, on ne fait plus dependre
+  l'affichage d'un seul canal : les verrous sont relus toutes les vingt
+  secondes. Un canal muet ne pourra plus figer l'ecran en silence.
+  ET QUITTER UNE SCENE LA REND, ENFIN. La premiere version gardait le verrou
+  tant qu'on n'en prenait pas un autre : on pouvait partir au Planning et
+  laisser sa scene bloquee indefiniment, le battement de coeur la maintenant en
+  vie. Desormais, apres vingt secondes de curseur hors de toute scene, on rend
+  la main. Pas tout de suite : cliquer un bouton de la barre d'outils sort le
+  curseur pour y revenir aussitot, et lacher a chaque aller-retour ferait
+  clignoter le verrou.
 
   LA LECON, ET ELLE EST DURE : les trois etapes precedentes etaient justes dans
   leur mecanique et fausses dans leur PREMISSE. On avait construit sur « les
@@ -15546,6 +15590,7 @@ showDashboard: async () => {
   // LockManager — Phase 2 : verrous d'édition PAR DOMAINE (table project_locks, autorité serveur + temps réel).
 const LockManager = {
       heartbeatTimer: null,
+      pollTimer: null,
       currentDomain: null,
       pendingDomain: null,
       channel: null,
@@ -15574,6 +15619,17 @@ const LockManager = {
           // _hoverIn / _hoverOut / _catPreview / _previewStart conserves mais plus branches.
           if(LockManager.heartbeatTimer) clearInterval(LockManager.heartbeatTimer);
           LockManager.heartbeatTimer = setInterval(LockManager._tick, 60000);
+          // v601 — FILET : ON RELIT LES VERROUS, MEME SANS EVENEMENT.
+          // L'abonnement ci-dessus etait le SEUL moyen d'apprendre qu'un verrou
+          // avait bouge. Il a passe des mois a ne rien recevoir : la table
+          // n'etait pas diffusee cote serveur (corrige le 21 septembre). Rien
+          // ne s'en plaignait — l'abonnement reussissait, il arrivait juste
+          // toujours vide, et chaque poste gardait la photo des verrous prise a
+          // l'ouverture du projet. Un canal muet ne doit plus pouvoir figer
+          // l'affichage : on relit la table toutes les vingt secondes. C'est
+          // une poignee de lignes, le cout est negligeable devant le defaut.
+          if(LockManager.pollTimer) clearInterval(LockManager.pollTimer);
+          LockManager.pollTimer = setInterval(() => LockManager.refresh(projectId), 20000);
       },
 
       refresh: async (projectId) => {
@@ -16138,6 +16194,7 @@ const LockManager = {
           document.removeEventListener('mouseover', LockManager._hoverIn, true);
           document.removeEventListener('mouseout', LockManager._hoverOut, true);
           if(LockManager.heartbeatTimer) { clearInterval(LockManager.heartbeatTimer); LockManager.heartbeatTimer = null; }
+          if(LockManager.pollTimer) { clearInterval(LockManager.pollTimer); LockManager.pollTimer = null; }
           const mineSet = new Set(Object.keys(LockManager.held||{}));
           Object.keys(state.domainLocks||{}).forEach(k => { if(LockManager._mine(state.domainLocks[k])) mineSet.add(k); });
           for(const k of mineSet) {
@@ -16418,10 +16475,34 @@ const LockManager = {
           } catch(e) { return ''; }
       },
 
+      // QUITTER UNE SCENE LA REND. La premiere version gardait le verrou tant
+      // qu'on n'en prenait pas un autre : on pouvait donc partir au Planning et
+      // laisser sa scene bloquee indefiniment, puisque le battement de coeur la
+      // maintenait en vie. Ce n'est pas ce qu'on attend — on quitte, ca se
+      // deverrouille.
+      // MAIS PAS DU PREMIER COUP : cliquer un bouton de la barre d'outils sort
+      // le curseur de la scene pour y revenir aussitot. Rendre la main a chaque
+      // aller-retour ferait clignoter le verrou et enverrait une rafale
+      // d'ecritures. On attend donc un moment de calme avant de lacher.
+      DELAI_SORTIE: 20000,
+      _minuteurSortie: null,
+
       _suivreCurseur: async () => {
           if(state.currentRole === 'viewer') return;
           const id = SceneLock._sceneDuCurseur();
-          if(!id) return;                       // curseur hors d'une scene : on garde la sienne
+          if(!id) {
+              // Curseur hors de toute scene : on rendra la main si ca dure.
+              if(!SceneLock._minuteurSortie) {
+                  SceneLock._minuteurSortie = setTimeout(() => {
+                      SceneLock._minuteurSortie = null;
+                      if(SceneLock._sceneDuCurseur()) return;   // revenu entre-temps
+                      SceneLock.libererToutes();
+                  }, SceneLock.DELAI_SORTIE);
+              }
+              return;
+          }
+          clearTimeout(SceneLock._minuteurSortie);
+          SceneLock._minuteurSortie = null;
           if(SceneLock.tenueParMoi(id)) return; // deja a moi
           if(SceneLock.detenteur(id)) return;   // tenue par un autre : le badge le dit deja
           await SceneLock.prendre(id);

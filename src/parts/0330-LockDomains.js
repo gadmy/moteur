@@ -63,6 +63,7 @@
   // LockManager — Phase 2 : verrous d'édition PAR DOMAINE (table project_locks, autorité serveur + temps réel).
 const LockManager = {
       heartbeatTimer: null,
+      pollTimer: null,
       currentDomain: null,
       pendingDomain: null,
       channel: null,
@@ -91,6 +92,17 @@ const LockManager = {
           // _hoverIn / _hoverOut / _catPreview / _previewStart conserves mais plus branches.
           if(LockManager.heartbeatTimer) clearInterval(LockManager.heartbeatTimer);
           LockManager.heartbeatTimer = setInterval(LockManager._tick, 60000);
+          // v601 — FILET : ON RELIT LES VERROUS, MEME SANS EVENEMENT.
+          // L'abonnement ci-dessus etait le SEUL moyen d'apprendre qu'un verrou
+          // avait bouge. Il a passe des mois a ne rien recevoir : la table
+          // n'etait pas diffusee cote serveur (corrige le 21 septembre). Rien
+          // ne s'en plaignait — l'abonnement reussissait, il arrivait juste
+          // toujours vide, et chaque poste gardait la photo des verrous prise a
+          // l'ouverture du projet. Un canal muet ne doit plus pouvoir figer
+          // l'affichage : on relit la table toutes les vingt secondes. C'est
+          // une poignee de lignes, le cout est negligeable devant le defaut.
+          if(LockManager.pollTimer) clearInterval(LockManager.pollTimer);
+          LockManager.pollTimer = setInterval(() => LockManager.refresh(projectId), 20000);
       },
 
       refresh: async (projectId) => {
@@ -655,6 +667,7 @@ const LockManager = {
           document.removeEventListener('mouseover', LockManager._hoverIn, true);
           document.removeEventListener('mouseout', LockManager._hoverOut, true);
           if(LockManager.heartbeatTimer) { clearInterval(LockManager.heartbeatTimer); LockManager.heartbeatTimer = null; }
+          if(LockManager.pollTimer) { clearInterval(LockManager.pollTimer); LockManager.pollTimer = null; }
           const mineSet = new Set(Object.keys(LockManager.held||{}));
           Object.keys(state.domainLocks||{}).forEach(k => { if(LockManager._mine(state.domainLocks[k])) mineSet.add(k); });
           for(const k of mineSet) {
