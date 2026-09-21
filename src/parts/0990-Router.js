@@ -9,7 +9,14 @@
           '/monprofil':   () => PublicProfile.open(),
           '/contacts':    () => Contacts.open(),
           '/univers':     () => Universe.openFromMenu(),
-          '/forum':       () => Forum.open(),
+          // v601 — L'ACCES AU FORUM EST RETIRE, LE CODE EST GARDE. Le module
+          // Forum reste entier (il n'a rien coute a laisser, et le rouvrir un
+          // jour ne demandera pas de le reecrire) ; c'est la PORTE qui est
+          // condamnee. Il n'en restait qu'une : cette adresse. Le menu, lui,
+          // etait deja masque depuis v585.
+          // POUR ROUVRIR : remettre la ligne ci-dessous, retirer d-none sur
+          // l'entree de menu (0060-markup) et passer Forum.suspended a false.
+          //   '/forum':       () => Forum.open(),
           '/cours':       () => Courses.open(),
           '/admin':       () => { if(Admin.isAdmin && Admin.isAdmin()) Admin.show(); else UI.showDashboard(); },
           '/connexion':   () => Landing.showAuth('login'),
