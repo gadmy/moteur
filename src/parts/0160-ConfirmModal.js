@@ -7,7 +7,14 @@
               
               const overlay = document.createElement('div');
               overlay.className = 'confirm-modal-overlay';
-              overlay.onclick = (e) => { if(e.target === overlay) { overlay.remove(); resolve(type === 'prompt' ? null : false); } };
+              // v601 : elle arrivait en fondu et partait d'un coup. La reponse
+              // est rendue TOUT DE SUITE — on ne fait pas attendre l'appelant
+              // pour une animation — et la fenetre s'efface derriere.
+              const fermer = () => {
+                  overlay.classList.add('se-ferme');
+                  setTimeout(() => { try { overlay.remove(); } catch(e) {} }, 170);
+              };
+              overlay.onclick = (e) => { if(e.target === overlay) { fermer(); resolve(type === 'prompt' ? null : false); } };
               
               const btnClass = dangerous ? 'danger' : 'confirm';
               const inputHtml = type === 'prompt' ? `<input type="${inputType === 'password' ? 'password' : 'text'}" class="confirm-modal-input" id="confirm-modal-input" placeholder="${inputPlaceholder}" data-tooltip="${inputPlaceholder}" value="${inputValue}">` : '';
@@ -33,8 +40,8 @@
               
               if(input) { input.focus(); input.select(); input.onkeydown = (e) => { if(e.key === 'Enter') okBtn.click(); if(e.key === 'Escape' && cancelBtn) cancelBtn.click(); }; }
               
-              okBtn.onclick = () => { overlay.remove(); resolve(type === 'prompt' ? (input ? input.value : true) : true); };
-              if(cancelBtn) cancelBtn.onclick = () => { overlay.remove(); resolve(type === 'prompt' ? null : false); };
+              okBtn.onclick = () => { fermer(); resolve(type === 'prompt' ? (input ? input.value : true) : true); };
+              if(cancelBtn) cancelBtn.onclick = () => { fermer(); resolve(type === 'prompt' ? null : false); };
               
               // Focus sur le bouton OK si pas d'input
               if(!input) okBtn.focus();

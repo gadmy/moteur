@@ -6596,7 +6596,7 @@ const Storyboard = {
             }
         }
         
-        document.getElementById('shot-edit-modal').classList.remove('active');
+        Utils.fermetureDouce(document.getElementById('shot-edit-modal'), 'active');
         Storyboard.currentEditingShotId = null;
         Storyboard.renderShots();
     },

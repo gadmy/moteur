@@ -4016,6 +4016,7 @@ const FicheBlocks = {
                 entrees.forEach(e => FicheBlocks._relire(e.target));
             });
         } catch(e) { FicheBlocks._observateur = null; }
+        FicheBlocks._poserBords();
         let x0 = 0, y0 = 0, vise = null;
         document.addEventListener('touchstart', (ev) => {
             vise = null;
@@ -4063,6 +4064,57 @@ const FicheBlocks = {
     // La ligne deborde-t-elle ? Si oui, ses bords s'estompent pour le dire.
     // Relu a chaque affichage : la largeur depend de la fenetre et du nombre
     // d'onglets, qui varie d'une famille a l'autre.
+    // ==================================================================
+    //  LA SOURIS PRES DU BORD FAIT DEFILER LA LIGNE (v601)
+    // ==================================================================
+    //  Au clavier et au doigt, on atteint les onglets caches ; a la souris,
+    //  il fallait attraper une barre de defilement qu'on a justement masquee.
+    //  Approcher le bord suffit maintenant. La vitesse suit la PROXIMITE :
+    //  a peine entre dans la zone on avance lentement, colle au bord on
+    //  avance vite — sinon on depasse toujours ce qu'on visait.
+    //  ON S'ARRETE DES QUE LA BARRE NE DEBORDE PLUS OU QUE LA SOURIS PART :
+    //  une boucle d'animation qui tourne pour rien est une boucle oubliee.
+    ZONE_BORD: 46,        // largeur de la zone sensible, en pixels
+    VITESSE_BORD: 9,      // pixels par image au plus fort
+    _defilement: null,
+    _poserBords: () => {
+        document.addEventListener('mouseover', (ev) => {
+            const barre = ev.target && ev.target.closest ? ev.target.closest('.fid-tabbar') : null;
+            if(barre) FicheBlocks._suivreBord(barre);
+        });
+        document.addEventListener('mousemove', (ev) => {
+            const d = FicheBlocks._defilement;
+            if(d) d.x = ev.clientX;
+        });
+    },
+    _suivreBord: (barre) => {
+        if(FicheBlocks._defilement && FicheBlocks._defilement.barre === barre) return;
+        FicheBlocks._defilement = { barre: barre, x: null };
+        const partir = () => {
+            if(FicheBlocks._defilement && FicheBlocks._defilement.barre === barre) FicheBlocks._defilement = null;
+            barre.removeEventListener('mouseleave', partir);
+        };
+        barre.addEventListener('mouseleave', partir);
+        const pas = () => {
+            const d = FicheBlocks._defilement;
+            if(!d || d.barre !== barre || !barre.isConnected) return;
+            requestAnimationFrame(pas);
+            if(d.x === null) return;
+            if(barre.scrollWidth <= barre.clientWidth + 4) return;   // rien a faire defiler
+            const r = barre.getBoundingClientRect();
+            const aGauche = d.x - r.left;
+            const aDroite = r.right - d.x;
+            let v = 0;
+            if(aGauche >= 0 && aGauche < FicheBlocks.ZONE_BORD) {
+                v = -FicheBlocks.VITESSE_BORD * (1 - aGauche / FicheBlocks.ZONE_BORD);
+            } else if(aDroite >= 0 && aDroite < FicheBlocks.ZONE_BORD) {
+                v = FicheBlocks.VITESSE_BORD * (1 - aDroite / FicheBlocks.ZONE_BORD);
+            }
+            if(v) barre.scrollLeft += v;
+        };
+        requestAnimationFrame(pas);
+    },
+
     _observateur: null,
     _relire: (barre) => {
         try { barre.classList.toggle('a-defilement', barre.scrollWidth > barre.clientWidth + 4); } catch(e) {}
@@ -4942,7 +4994,7 @@ const CardModal = {
     
     close: () => {
         const modal = document.getElementById('card-edit-modal');
-        modal.classList.remove('visible');
+        Utils.fermetureDouce(modal);   // v601 : elle s'en va en fondu
         CardModal.currentType = null;
         CardModal.currentIdx = null;
         CardModal.currentId = null;
@@ -5269,7 +5321,7 @@ const CardModal = {
         if(!modal || !modal.classList.contains('visible')) return;
         if(CardModal.currentType !== type) return;
         if(id && CardModal.currentId && CardModal.currentId !== id) return;
-        modal.classList.remove('visible');
+        Utils.fermetureDouce(modal);
         CardModal.currentType = null;
         CardModal.currentIdx = null;
         CardModal.currentId = null;

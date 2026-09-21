@@ -1,6 +1,33 @@
 
   const Utils = {
       sanitizeEmail: (email) => email.replace(/\./g, ','),
+
+      // ==================================================================
+      //  FERMER EN DOUCEUR (v601)
+      // ==================================================================
+      //  Une fenetre s'ouvre en fondu depuis toujours, mais elle DISPARAISSAIT
+      //  d'un coup : la classe qui l'affiche est retiree, et « display: none »
+      //  ne s'anime pas. C'est ce qui donnait au site son cote sec.
+      //  LE PRINCIPE, et c'est lui qui evite une coordination fragile : la
+      //  classe d'ouverture est retiree TOUT DE SUITE — tout ce qui demande
+      //  « la fiche est-elle ouverte ? » repond juste a l'instant meme — et
+      //  une classe de SORTIE la garde a l'ecran, inerte, le temps du fondu.
+      //  Le style ne l'applique que si la classe d'ouverture est absente : si
+      //  l'on rouvre dans la foulee, l'ouverture reprend la main sans qu'on
+      //  ait a annuler quoi que ce soit.
+      fermetureDouce: (el, classeOuverte) => {
+          try {
+              if(!el) return;
+              const ouverte = classeOuverte || 'visible';
+              if(!el.classList.contains(ouverte)) return;   // rien a fondre
+              el.classList.remove(ouverte);
+              el.classList.add('se-ferme');
+              clearTimeout(el._fondu);
+              el._fondu = setTimeout(() => { el.classList.remove('se-ferme'); }, 220);
+          } catch(e) {
+              try { el.classList.remove(classeOuverte || 'visible'); } catch(_) {}
+          }
+      },
       // Poids d'un projet, EN MEGAOCTETS SEULEMENT (v601). La double unite
       // « X Ko (Y Mo) » n'apprenait rien et encombrait la carte du projet. Une
       // seule porte : tous les endroits qui affichent un poids passent par ici.
