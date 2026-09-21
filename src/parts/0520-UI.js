@@ -454,6 +454,12 @@
       FICHE_TAB: { resource: 'resources', character: 'characters', actor: 'actors', crew: 'crew', location: 'locations' },
       openFiche: (kind, id) => {
           if(!kind || !id) return;
+          // v601 — OUVRIR UNE FICHE, C'EST LA PRENDRE. Le verrou fin se prenait
+          // quand le curseur entrait dans un champ : on pouvait donc ouvrir la
+          // meme fiche a deux sans que rien ne s'allume, puisqu'on peut la lire
+          // et la parcourir sans jamais poser le curseur. C'est l'OUVERTURE qui
+          // marque l'intention, pas la frappe.
+          try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir(kind, id); } catch(e) {}
           // GARDE UNIQUE (26 aout) : l'acces se verifie ICI, pour les onze
           // familles. Avant, seuls le jour, la depense et le plan etaient
           // controles — on pouvait ouvrir une fiche comedien depuis le

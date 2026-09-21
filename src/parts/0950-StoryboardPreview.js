@@ -9185,6 +9185,7 @@ const ScriptReport = {
     selectShot: (sceneId, shotId) => {
         ScriptReport.currentSceneId = sceneId;
         ScriptReport.currentShotId = shotId;
+        try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir('rapport', sceneId + '_' + shotId); } catch(e) {}
         ScriptReport.currentReportIdx = 0;
         ScriptReport.renderScenesList();
         ScriptReport.renderSheet(sceneId, shotId);

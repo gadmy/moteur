@@ -2578,7 +2578,7 @@ const MoodBoard = {
         // ON NE PREND RIEN EN LECTURE SEULE : consulter ne bloque personne.
         try {
             const peutEcrire = (typeof MoodBoard.canWrite !== 'function') || MoodBoard.canWrite();
-            if(boardId && peutEcrire && typeof FicheLock !== 'undefined') FicheLock.prendre('board:' + boardId);
+            if(boardId && peutEcrire && typeof FicheLock !== 'undefined') FicheLock.ouvrir('board', boardId);
             MoodBoard._marquerToile();
         } catch(e) {}
         
@@ -6539,6 +6539,14 @@ const Storyboard = {
         
         const content = document.getElementById('shotEditContent');
         content.innerHTML = Storyboard.createShotCard(shot, shotIndex - 1).innerHTML;
+        // v601 — LA FENETRE D'EDITION D'UN PLAN PORTE SON IDENTIFIANT, et le
+        // verrou se prend en l'OUVRANT. Elle reprend le dessin de la vignette
+        // par son CONTENU (.innerHTML) : l'enveloppe de la vignette, qui
+        // portait l'identifiant, restait donc dehors. Deux personnes pouvaient
+        // ouvrir le meme plan sans que rien ne s'allume — c'est ce que le
+        // developpeur a vu.
+        content.dataset.fiche = 'shot:' + shot.id;
+        try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir('shot', shot.id); } catch(e) {}
         // Verrou visuel + bouton de sauvegarde masque : un bouton qui ne peut
         // rien enregistrer vaut mieux cache qu'affiche.
         content.classList.add('perm-ro-scope');
@@ -6579,6 +6587,7 @@ const Storyboard = {
         
         const content = document.getElementById('shotEditContent');
         content.innerHTML = Storyboard.createShotCard(shot, shotIndex - 1).innerHTML;
+        content.dataset.fiche = 'shot:' + shot.id;   // v601 : le redessin garde la marque
         
         // Re-setup change detection
         content.querySelectorAll('input, textarea, select').forEach(input => {
@@ -7422,7 +7431,7 @@ const DrawingEditor = {
         // l'editeur sur un plan EST l'intention de le modifier — c'est donc
         // l'ouverture qui prend le verrou, et la fermeture qui le rend.
         // Meme raisonnement a tenir le jour ou l'on fera le mood board.
-        if(shotId) { try { FicheLock.prendre('shot:' + shotId); } catch(e) {} }
+        if(shotId) { try { FicheLock.ouvrir('shot', shotId); } catch(e) {} }
         DrawingEditor.moodboardCallback = moodboardCallback;
         const modal = document.getElementById('drawing-modal');
         modal.style.display = 'flex';
@@ -7629,7 +7638,7 @@ const DrawingEditor = {
     
     close: async () => {
         // v601 : on rend le verrou du plan en quittant l'editeur (voir open).
-        try { if(DrawingEditor.currentShotId) FicheLock.liberer('shot:' + DrawingEditor.currentShotId); } catch(e) {}
+        try { if(typeof FicheLock !== 'undefined') FicheLock.rendreLaPorte(); } catch(e) {}
 
         const shotId = DrawingEditor.currentShotId;
         const callback = DrawingEditor.moodboardCallback;

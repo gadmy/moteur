@@ -50,6 +50,7 @@
               _idDe: config.idDe,
               _enCours: {},
               _minuteurSortie: null,
+              _porte: null,   // element tenu parce qu'on a OUVERT sa fenetre
 
               clef: (id) => V.PREFIXE + String(id || ''),
 
@@ -178,6 +179,50 @@
                   } catch(e) { return ''; }
               },
 
+              // ------------------------------------------------------------------
+              //  PRENDRE A LA PORTE, ET PAS AU CURSEUR (v601)
+              // ------------------------------------------------------------------
+              //  Le curseur convient a ce qui s'ecrit A MEME l'ecran — une scene
+              //  dans le scenario, une section de synopsis. Il ne convient PAS a
+              //  ce qu'on OUVRE : on peut rester dix minutes dans une fiche de
+              //  personnage ou dans l'editeur de dessin sans jamais poser le
+              //  curseur dans un champ. Deux personnes pouvaient donc ouvrir le
+              //  meme plan sans que rien ne s'allume — signale par le
+              //  developpeur, qui a aussi donne la bonne regle : c'est
+              //  L'OUVERTURE qui doit prendre le verrou.
+              //  UN VERROU PRIS A LA PORTE NE SE REND PAS AU MINUTEUR : tant que
+              //  la fenetre est ouverte, on la tient, meme sans toucher a rien.
+              //  Sans cette exception, l'editeur de dessin — ou l'on travaille a
+              //  la souris — se serait deverrouille tout seul au bout de vingt
+              //  secondes, sous les doigts de celui qui dessine.
+              prendreParPorte: async (id_) => {
+                  if(!id_) return false;
+                  V._porte = String(id_);
+                  const ok = await V.prendre(id_);
+                  if(!ok) V._porte = null;
+                  return ok;
+              },
+              rendreLaPorte: async () => {
+                  const id = V._porte;
+                  V._porte = null;
+                  if(id) await V.liberer(id);
+              },
+              // La fenetre a-t-elle disparu ? On ne se fie pas a une fermeture
+              // qu'on aurait oublie de brancher : on regarde si la zone est
+              // encore A L'ECRAN. Un onglet masque ou une fenetre fermee ne
+              // dessinent plus rien — meme principe que le mode fiche du profil.
+              _porteEncoreOuverte: () => {
+                  if(!V._porte) return false;
+                  try {
+                      const zones = document.querySelectorAll(V.ZONES);
+                      for(const el of zones) {
+                          if(String(V._idDe(el) || '') !== V._porte) continue;
+                          if(el.getClientRects && el.getClientRects().length > 0) return true;
+                      }
+                  } catch(e) { return true; }
+                  return false;
+              },
+
               // QUITTER REND LA MAIN, mais pas du premier coup : cliquer un
               // bouton de la barre d'outils sort le curseur pour y revenir
               // aussitot, et lacher a chaque aller-retour ferait clignoter le
@@ -186,6 +231,8 @@
                   if(state.currentRole === 'viewer') return;
                   const id = V.idDuCurseur();
                   if(!id) {
+                      // Une fenetre ouverte tient le verrou toute seule.
+                      if(V._porte) return;
                       if(!V._minuteurSortie && V.miennes().length) {
                           V._minuteurSortie = setTimeout(() => {
                               V._minuteurSortie = null;
@@ -254,6 +301,10 @@
       marquerTout: () => {
           VerrouFin._liste.forEach(V => {
               try { V.marquer(); } catch(e) { console.warn('[' + V.NOM + '] affichage :', e && e.message); }
+              // La page vient de bouger : si la fenetre qui tenait un verrou
+              // n'est plus a l'ecran, on rend la main. On n'a ainsi aucune
+              // fermeture a brancher une par une — et aucune a oublier.
+              try { if(V._porte && !V._porteEncoreOuverte()) V.rendreLaPorte(); } catch(e) {}
           });
       },
       battreTout: async () => {

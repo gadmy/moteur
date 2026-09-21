@@ -43,12 +43,32 @@
       //                              fenetre d'edition, la ou se trouvent les
       //                              champs. Elle vit dans le contenu, donc
       //                              elle disparait quand on ouvre autre chose.
-      zones: '.data-card[data-fiche], .crew-card[data-fiche], .compact-card[data-fiche], .shot-card[data-fiche], .moodboard-board-tab[data-fiche], #moodboardCanvasWrapper[data-fiche], .ccol-ctr[data-fiche], .sr-fiche[data-fiche], .sr-sheet[data-fiche], .fiche-fenetre[data-fiche]',
+      zones: '.data-card[data-fiche], .crew-card[data-fiche], .compact-card[data-fiche], .shot-card[data-fiche], .moodboard-board-tab[data-fiche], #moodboardCanvasWrapper[data-fiche], .ccol-ctr[data-fiche], .sr-fiche[data-fiche], .sr-sheet[data-fiche], #shotEditContent[data-fiche], .fiche-fenetre[data-fiche]',
       // Le verrou se PREND la ou l'on ecrit : sur les cartes modifiables et
       // dans les fenetres. Parcourir une liste de ressources ne verrouille rien.
-      zonesEcriture: '.data-card[data-fiche], .crew-card[data-fiche], .sr-sheet[data-fiche], .fiche-fenetre[data-fiche]',
+      zonesEcriture: '.data-card[data-fiche], .crew-card[data-fiche], .sr-sheet[data-fiche], #shotEditContent[data-fiche], .fiche-fenetre[data-fiche]',
       idDe: (el) => el.getAttribute('data-fiche') || ''
   });
+
+  // ======================================================================
+  //  ON PREND LE VERROU EN OUVRANT LA FICHE (v601)
+  // ======================================================================
+  //  La porte unique : UI.openFiche, par ou passent les onze familles. Les
+  //  quelques editeurs qui ne s'ouvrent pas par la (ressource, structure,
+  //  contrat, plan, rapport, planche) appellent ceci directement.
+  //  ON NE PREND RIEN EN LECTURE SEULE : consulter ne doit bloquer personne.
+  //  ET RIEN NON PLUS si quelqu'un d'autre la tient deja — le badge le dit,
+  //  inutile d'insister.
+  FicheLock.ouvrir = (espece, id) => {
+      try {
+          if(!espece || !id) return;
+          if(!FicheLock.COLL[espece]) return;          // famille sans verrou fin
+          if(state.currentRole === 'viewer') return;
+          const cle = espece + ':' + id;
+          if(FicheLock.detenteur(cle)) return;
+          FicheLock.prendreParPorte(cle);
+      } catch(e) { console.warn('[FicheLock] ouverture :', e && e.message); }
+  };
 
   // La cle de collection derriere une espece, et l'inverse. Le verrou parle en
   // « character », l'enregistrement en « characters ».

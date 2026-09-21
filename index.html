@@ -1441,6 +1441,42 @@ vv601 (20 septembre 2026) — EN COURS.
   apres le regroupement, plus 12 pour le synopsis et 8 pour la liberation et la
   surveillance. Refondre du code qui marche ne se fait pas sans filet.
 
+  ON PREND LE VERROU EN OUVRANT LA FICHE, PAS EN TAPANT DEDANS. Signale par le
+  developpeur, qui a diagnostique lui-meme : « j'arrive a aller sur deux
+  comptes differents sur le meme plan sans voir le verrou du premier ». Puis,
+  dans le meme message, la bonne regle : il faut verrouiller AU CLIC QUI FAIT
+  ENTRER dans l'editeur ou dans la fiche.
+  IL AVAIT RAISON, ET MON DECLENCHEUR ETAIT MAL CHOISI. Le curseur convient a
+  ce qui s'ecrit A MEME L'ECRAN — une scene dans le scenario, une section de
+  synopsis : on y tape, donc le curseur y entre. Il ne convient PAS a ce qu'on
+  OUVRE : on peut rester dix minutes dans une fiche de personnage ou dans
+  l'editeur de dessin sans jamais poser le curseur dans un champ. J'avais pris
+  le geste le plus visible pour le bon geste.
+  LES ONZE FAMILLES PASSENT PAR UNE PORTE UNIQUE, UI.openFiche — poser le
+  verrou la couvre tout d'un coup. Les six editeurs qui ne passent pas par elle
+  (ressource, structure, contrat, plan, rapport, planche) l'appellent
+  directement.
+  ET UN PIEGE QUE CELA REVELE : un verrou pris a la porte ne doit PAS etre rendu
+  par le minuteur de sortie. Celui-ci rend la main apres vingt secondes de
+  curseur hors de toute zone — or dans l'editeur de dessin, le curseur n'y est
+  JAMAIS. L'editeur se serait deverrouille tout seul sous les doigts de celui
+  qui dessine. Tant qu'une fenetre est ouverte, elle tient son verrou.
+  LA FERMETURE N'EST BRANCHEE NULLE PART, ET C'EST VOULU : a chaque fois que la
+  page bouge, on regarde si la zone qui tenait le verrou est encore A L'ECRAN.
+  Si elle a disparu — fenetre fermee, onglet quitte — on rend la main. Sept
+  fermetures a brancher, c'est sept occasions d'en oublier une ; une preuve
+  qu'on relit, c'est zero.
+  TROUVE EN CORRIGEANT, ET PIRE QUE LE DEFAUT : j'avais ecrit la nouvelle
+  fonction « ouvrir: (...) => {} » alors qu'on n'etait plus dans un objet. En
+  JavaScript, cela se PARSE sans erreur — c'est une etiquette suivie d'une
+  expression — et ne cree rien du tout. La verification de syntaxe ne voit
+  rien, le navigateur non plus : la fonction est simplement absente au moment
+  de l'appel. Un controle de surface a ete ajoute a la batterie de tests : il
+  verifie que les cinquante-deux fonctions annoncees par les quatre modules de
+  verrou existent VRAIMENT. C'est le meme defaut que saveScene appele par
+  personne, sous une autre forme — du code qui a l'air d'etre la et qui n'y est
+  pas.
+
   LA TOILE : LE CLIC DROIT RECULE, LES ACTIONS PASSENT AU SURVOL. Les deux
   actions d'une fiche (l'ouvrir, la voir dans le projet) etaient cachees dans
   un menu au CLIC DROIT. Personne n'y pense : sur une toile ou l'on navigue au
@@ -17028,6 +17064,7 @@ const LockManager = {
               _idDe: config.idDe,
               _enCours: {},
               _minuteurSortie: null,
+              _porte: null,   // element tenu parce qu'on a OUVERT sa fenetre
 
               clef: (id) => V.PREFIXE + String(id || ''),
 
@@ -17156,6 +17193,50 @@ const LockManager = {
                   } catch(e) { return ''; }
               },
 
+              // ------------------------------------------------------------------
+              //  PRENDRE A LA PORTE, ET PAS AU CURSEUR (v601)
+              // ------------------------------------------------------------------
+              //  Le curseur convient a ce qui s'ecrit A MEME l'ecran — une scene
+              //  dans le scenario, une section de synopsis. Il ne convient PAS a
+              //  ce qu'on OUVRE : on peut rester dix minutes dans une fiche de
+              //  personnage ou dans l'editeur de dessin sans jamais poser le
+              //  curseur dans un champ. Deux personnes pouvaient donc ouvrir le
+              //  meme plan sans que rien ne s'allume — signale par le
+              //  developpeur, qui a aussi donne la bonne regle : c'est
+              //  L'OUVERTURE qui doit prendre le verrou.
+              //  UN VERROU PRIS A LA PORTE NE SE REND PAS AU MINUTEUR : tant que
+              //  la fenetre est ouverte, on la tient, meme sans toucher a rien.
+              //  Sans cette exception, l'editeur de dessin — ou l'on travaille a
+              //  la souris — se serait deverrouille tout seul au bout de vingt
+              //  secondes, sous les doigts de celui qui dessine.
+              prendreParPorte: async (id_) => {
+                  if(!id_) return false;
+                  V._porte = String(id_);
+                  const ok = await V.prendre(id_);
+                  if(!ok) V._porte = null;
+                  return ok;
+              },
+              rendreLaPorte: async () => {
+                  const id = V._porte;
+                  V._porte = null;
+                  if(id) await V.liberer(id);
+              },
+              // La fenetre a-t-elle disparu ? On ne se fie pas a une fermeture
+              // qu'on aurait oublie de brancher : on regarde si la zone est
+              // encore A L'ECRAN. Un onglet masque ou une fenetre fermee ne
+              // dessinent plus rien — meme principe que le mode fiche du profil.
+              _porteEncoreOuverte: () => {
+                  if(!V._porte) return false;
+                  try {
+                      const zones = document.querySelectorAll(V.ZONES);
+                      for(const el of zones) {
+                          if(String(V._idDe(el) || '') !== V._porte) continue;
+                          if(el.getClientRects && el.getClientRects().length > 0) return true;
+                      }
+                  } catch(e) { return true; }
+                  return false;
+              },
+
               // QUITTER REND LA MAIN, mais pas du premier coup : cliquer un
               // bouton de la barre d'outils sort le curseur pour y revenir
               // aussitot, et lacher a chaque aller-retour ferait clignoter le
@@ -17164,6 +17245,8 @@ const LockManager = {
                   if(state.currentRole === 'viewer') return;
                   const id = V.idDuCurseur();
                   if(!id) {
+                      // Une fenetre ouverte tient le verrou toute seule.
+                      if(V._porte) return;
                       if(!V._minuteurSortie && V.miennes().length) {
                           V._minuteurSortie = setTimeout(() => {
                               V._minuteurSortie = null;
@@ -17232,6 +17315,10 @@ const LockManager = {
       marquerTout: () => {
           VerrouFin._liste.forEach(V => {
               try { V.marquer(); } catch(e) { console.warn('[' + V.NOM + '] affichage :', e && e.message); }
+              // La page vient de bouger : si la fenetre qui tenait un verrou
+              // n'est plus a l'ecran, on rend la main. On n'a ainsi aucune
+              // fermeture a brancher une par une — et aucune a oublier.
+              try { if(V._porte && !V._porteEncoreOuverte()) V.rendreLaPorte(); } catch(e) {}
           });
       },
       battreTout: async () => {
@@ -17612,12 +17699,32 @@ const LockManager = {
       //                              fenetre d'edition, la ou se trouvent les
       //                              champs. Elle vit dans le contenu, donc
       //                              elle disparait quand on ouvre autre chose.
-      zones: '.data-card[data-fiche], .crew-card[data-fiche], .compact-card[data-fiche], .shot-card[data-fiche], .moodboard-board-tab[data-fiche], #moodboardCanvasWrapper[data-fiche], .ccol-ctr[data-fiche], .sr-fiche[data-fiche], .sr-sheet[data-fiche], .fiche-fenetre[data-fiche]',
+      zones: '.data-card[data-fiche], .crew-card[data-fiche], .compact-card[data-fiche], .shot-card[data-fiche], .moodboard-board-tab[data-fiche], #moodboardCanvasWrapper[data-fiche], .ccol-ctr[data-fiche], .sr-fiche[data-fiche], .sr-sheet[data-fiche], #shotEditContent[data-fiche], .fiche-fenetre[data-fiche]',
       // Le verrou se PREND la ou l'on ecrit : sur les cartes modifiables et
       // dans les fenetres. Parcourir une liste de ressources ne verrouille rien.
-      zonesEcriture: '.data-card[data-fiche], .crew-card[data-fiche], .sr-sheet[data-fiche], .fiche-fenetre[data-fiche]',
+      zonesEcriture: '.data-card[data-fiche], .crew-card[data-fiche], .sr-sheet[data-fiche], #shotEditContent[data-fiche], .fiche-fenetre[data-fiche]',
       idDe: (el) => el.getAttribute('data-fiche') || ''
   });
+
+  // ======================================================================
+  //  ON PREND LE VERROU EN OUVRANT LA FICHE (v601)
+  // ======================================================================
+  //  La porte unique : UI.openFiche, par ou passent les onze familles. Les
+  //  quelques editeurs qui ne s'ouvrent pas par la (ressource, structure,
+  //  contrat, plan, rapport, planche) appellent ceci directement.
+  //  ON NE PREND RIEN EN LECTURE SEULE : consulter ne doit bloquer personne.
+  //  ET RIEN NON PLUS si quelqu'un d'autre la tient deja — le badge le dit,
+  //  inutile d'insister.
+  FicheLock.ouvrir = (espece, id) => {
+      try {
+          if(!espece || !id) return;
+          if(!FicheLock.COLL[espece]) return;          // famille sans verrou fin
+          if(state.currentRole === 'viewer') return;
+          const cle = espece + ':' + id;
+          if(FicheLock.detenteur(cle)) return;
+          FicheLock.prendreParPorte(cle);
+      } catch(e) { console.warn('[FicheLock] ouverture :', e && e.message); }
+  };
 
   // La cle de collection derriere une espece, et l'inverse. Le verrou parle en
   // « character », l'enregistrement en « characters ».
@@ -25441,6 +25548,12 @@ initCategoriesDragDrop: () => {
       FICHE_TAB: { resource: 'resources', character: 'characters', actor: 'actors', crew: 'crew', location: 'locations' },
       openFiche: (kind, id) => {
           if(!kind || !id) return;
+          // v601 — OUVRIR UNE FICHE, C'EST LA PRENDRE. Le verrou fin se prenait
+          // quand le curseur entrait dans un champ : on pouvait donc ouvrir la
+          // meme fiche a deux sans que rien ne s'allume, puisqu'on peut la lire
+          // et la parcourir sans jamais poser le curseur. C'est l'OUVERTURE qui
+          // marque l'intention, pas la frappe.
+          try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir(kind, id); } catch(e) {}
           // GARDE UNIQUE (26 aout) : l'acces se verifie ICI, pour les onze
           // familles. Avant, seuls le jour, la depense et le plan etaient
           // controles — on pouvait ouvrir une fiche comedien depuis le
@@ -31421,7 +31534,7 @@ const MoodBoard = {
         // ON NE PREND RIEN EN LECTURE SEULE : consulter ne bloque personne.
         try {
             const peutEcrire = (typeof MoodBoard.canWrite !== 'function') || MoodBoard.canWrite();
-            if(boardId && peutEcrire && typeof FicheLock !== 'undefined') FicheLock.prendre('board:' + boardId);
+            if(boardId && peutEcrire && typeof FicheLock !== 'undefined') FicheLock.ouvrir('board', boardId);
             MoodBoard._marquerToile();
         } catch(e) {}
         
@@ -35382,6 +35495,14 @@ const Storyboard = {
         
         const content = document.getElementById('shotEditContent');
         content.innerHTML = Storyboard.createShotCard(shot, shotIndex - 1).innerHTML;
+        // v601 — LA FENETRE D'EDITION D'UN PLAN PORTE SON IDENTIFIANT, et le
+        // verrou se prend en l'OUVRANT. Elle reprend le dessin de la vignette
+        // par son CONTENU (.innerHTML) : l'enveloppe de la vignette, qui
+        // portait l'identifiant, restait donc dehors. Deux personnes pouvaient
+        // ouvrir le meme plan sans que rien ne s'allume — c'est ce que le
+        // developpeur a vu.
+        content.dataset.fiche = 'shot:' + shot.id;
+        try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir('shot', shot.id); } catch(e) {}
         // Verrou visuel + bouton de sauvegarde masque : un bouton qui ne peut
         // rien enregistrer vaut mieux cache qu'affiche.
         content.classList.add('perm-ro-scope');
@@ -35422,6 +35543,7 @@ const Storyboard = {
         
         const content = document.getElementById('shotEditContent');
         content.innerHTML = Storyboard.createShotCard(shot, shotIndex - 1).innerHTML;
+        content.dataset.fiche = 'shot:' + shot.id;   // v601 : le redessin garde la marque
         
         // Re-setup change detection
         content.querySelectorAll('input, textarea, select').forEach(input => {
@@ -36265,7 +36387,7 @@ const DrawingEditor = {
         // l'editeur sur un plan EST l'intention de le modifier — c'est donc
         // l'ouverture qui prend le verrou, et la fermeture qui le rend.
         // Meme raisonnement a tenir le jour ou l'on fera le mood board.
-        if(shotId) { try { FicheLock.prendre('shot:' + shotId); } catch(e) {} }
+        if(shotId) { try { FicheLock.ouvrir('shot', shotId); } catch(e) {} }
         DrawingEditor.moodboardCallback = moodboardCallback;
         const modal = document.getElementById('drawing-modal');
         modal.style.display = 'flex';
@@ -36472,7 +36594,7 @@ const DrawingEditor = {
     
     close: async () => {
         // v601 : on rend le verrou du plan en quittant l'editeur (voir open).
-        try { if(DrawingEditor.currentShotId) FicheLock.liberer('shot:' + DrawingEditor.currentShotId); } catch(e) {}
+        try { if(typeof FicheLock !== 'undefined') FicheLock.rendreLaPorte(); } catch(e) {}
 
         const shotId = DrawingEditor.currentShotId;
         const callback = DrawingEditor.moodboardCallback;
@@ -40001,6 +40123,8 @@ const DrawingEditor = {
           // lecture, ecriture bloquee), comme partout ailleurs.
           const resource = (state.data.resources || []).find(r => r.id === id);
           if(!resource) return;
+          // v601 : ouvrir la fiche, c'est la prendre (voir FicheLock.ouvrir).
+          try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir('resource', id); } catch(e) {}
           // Une ressource ouverte depuis le depouillement ou la toile reste une
           // fiche de l'onglet Ressources : c'est son droit qui commande.
           const roRes = (typeof Permissions !== 'undefined' && Permissions.canEditFiche && !Permissions.canEditFiche('resource'))
@@ -57439,6 +57563,7 @@ const orgGroups = (state.data.groups || []).filter(g => g.type === 'org');
     },
     edit: (i) => {
         const o = Orgs._list()[i]; if(!o) return;
+        try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir('org', o.id); } catch(e) {}
         const modal = document.getElementById('card-edit-modal');
         const body = document.getElementById('card-edit-modal-body');
         const titleEl = document.getElementById('card-edit-modal-title');
@@ -58703,6 +58828,7 @@ const Contracts = {
     },
 
     openExisting: (id) => {
+        try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir('contract', id); } catch(e) {}
         const ct = Contracts.store.get(id); if(!ct) return;
         const list = ct.partyType === 'actor' ? (state.data.actors||[]) : (ct.partyType === 'org' ? (state.data.orgs||[]) : (state.data.crew||[]));
         let obj = ct.partyId ? list.find(x => x.id === ct.partyId) : null;
@@ -82091,6 +82217,7 @@ const ScriptReport = {
     selectShot: (sceneId, shotId) => {
         ScriptReport.currentSceneId = sceneId;
         ScriptReport.currentShotId = shotId;
+        try { if(typeof FicheLock !== 'undefined') FicheLock.ouvrir('rapport', sceneId + '_' + shotId); } catch(e) {}
         ScriptReport.currentReportIdx = 0;
         ScriptReport.renderScenesList();
         ScriptReport.renderSheet(sceneId, shotId);
