@@ -1540,7 +1540,7 @@ const Contracts = {
                 const tlabel = Contracts._typeLabel[ct.type] || ct.type;
                 const slabel = Contracts._statusLabel[ct.status] || ct.status;
                 const open = Contracts._editing === ct.id;
-                return '<div class="ccol-ctr' + (open ? ' ccol-ctr-open' : '') + '" onclick="app.Contracts.openExisting(\'' + ct.id + '\')">'
+                return '<div class="ccol-ctr' + (open ? ' ccol-ctr-open' : '') + '" data-fiche="contract:' + esc(String(ct.id)) + '" onclick="app.Contracts.openExisting(\'' + ct.id + '\')">'
                     + '<button class="ccol-ctr-del" title="Supprimer ce contrat" onclick="event.stopPropagation(); app.Contracts.removeContract(\'' + ct.id + '\')">×</button>'
                     + '<div class="ccol-ctr-title">' + (ct.title ? esc(ct.title) : tlabel) + '</div>'
                     + '<div class="ccol-ctr-meta">' + tlabel + ' <span class="ctr-badge ctr-badge-' + (ct.status || 'draft') + '">' + slabel + '</span></div></div>';
@@ -1896,7 +1896,14 @@ const Contracts = {
             + '<button class="ctr-pal-btn" onclick="app.Contracts.insertSnippet(\'clauses\')">Clauses-types (selon le contrat)</button>'
             + '</div>';
         const col3 = document.getElementById('ccol-3'); if(!col3) return;
-        col3.innerHTML = '<div class="ctr-ed">'
+        // v601 — VERROU PAR CONTRAT. Chaque contrat est une fiche : il a un
+        // identifiant, une liste, et un editeur a lui. Il etait reste sur un
+        // verrou d'onglet parce que j'avais range « Contrats » avec le Planning
+        // et les Depenses, sous « travail qui touche plusieurs elements a la
+        // fois » — ce qui etait faux, et le developpeur l'a vu tout de suite.
+        // C'est ICI que se trouvent les champs (titre, statut, et le document
+        // lui-meme, modifiable directement), donc ici que le verrou s'accroche.
+        col3.innerHTML = '<div class="ctr-ed fiche-fenetre" data-fiche="contract:' + String(Contracts._editing || '') + '">'
             + '<div class="contracts-header ctr-editor-header">'
             + '<input id="ctr-title" class="ctr-title-input" placeholder="Titre du contrat (optionnel)" data-tooltip="Titre du contrat (optionnel)" value="'+Contracts._escapeAttr(ct.title || '')+'">'
             + '<select id="ctr-status" class="ctr-status-sel"><option value="draft">Brouillon</option><option value="to_sign">À signer</option><option value="signed">Signé</option><option value="archived">Archivé</option></select>'

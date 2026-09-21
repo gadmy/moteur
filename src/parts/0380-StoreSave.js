@@ -197,83 +197,75 @@
                       if(Object.keys(savePatch).length === 0) return;
                   } catch(e) { console.warn('[Store] sections verrouillees :', e && e.message); }
               }
-              // v601 — FICHES TENUES PAR QUELQU'UN D'AUTRE (personnages, comediens).
-              // Meme regle que pour les scenes, et meme mecanique : on relit le
-              // serveur et on reprend SA version des fiches qu'il tient, meme si
-              // on les a modifiees. La difference avec le synopsis, c'est qu'ici
-              // il s'agit de LISTES : on ne peut pas retirer une cle entiere du
-              // paquet sans jeter aussi le travail des autres lignes.
-              if(typeof FicheLock !== 'undefined' && typeof StoreRealtime !== 'undefined' && saveBase) {
-                  let seulF = true;
-                  try { seulF = LockManager.isAlone(); } catch(e) {}
-                  const interdites = seulF ? {} : FicheLock.interdites();
-                  const collsAVoir = Object.keys(interdites).filter(c => Array.isArray(savePatch[c]));
-                  if(collsAVoir.length) {
-                      try {
-                          const { data: frais, error: errF } = await supabase.rpc('project_data_for_me', { p_id: id });
-                          if(!errF && frais) {
-                              const refusees = [];
-                              collsAVoir.forEach(coll => {
-                                  if(!Array.isArray(frais[coll])) return;
-                                  const fusion = StoreRealtime._listeAJour(
-                                      savePatch[coll], (saveBase && saveBase[coll]) || [], frais[coll],
-                                      Object.keys(interdites[coll]));
-                                  savePatch[coll] = fusion;
-                                  state.data[coll] = fusion;
-                                  (fusion._refusees || []).forEach(fid => refusees.push(interdites[coll][fid]));
-                              });
-                              if(refusees.length) {
-                                  Utils.toast('Fiche verrouillée par ' + refusees[0]
-                                      + ' : vos modifications n\'ont pas été enregistrées.', 'warning', 9000);
-                                  try { UI.renderAll(); } catch(e) {}
-                              }
-                          }
-                      } catch(e) { console.warn('[Store] relecture des fiches impossible :', e && e.message); }
-                  }
-              }
-              // v601 — LE VRAI POINT DE PASSAGE DE TOUTE ECRITURE DE SCENE.
-              // C'EST ICI, ET NULLE PART AILLEURS, que les modifications de scene
-              // partent : aucun ecran n'appelle saveScene, tous passent par la
-              // sauvegarde complete. Le refus devait donc etre pose ici — pose
-              // ailleurs, il ne refusait rien.
-              // DEUX CHOSES EN UNE RELECTURE : on reprend la version du serveur
-              // pour les scenes qu'on n'a pas touchees (sinon deplacer une scene
-              // ecraserait ce que le voisin vient d'ecrire dans une autre), ET
-              // pour celles qu'il TIENT, meme si on les a touchees — c'est le
-              // refus d'ecriture.
-              // UNE LECTURE DE PLUS, ET SEULEMENT A PLUSIEURS : seul sur le
-              // projet, rien ne change.
-              if(savePatch.scenes && typeof SceneLock !== 'undefined' && typeof StoreRealtime !== 'undefined') {
-                  let seul = true;
-                  try { seul = LockManager.isAlone(); } catch(e) {}
-                  if(!seul) {
-                      let occupees = [];
-                      try { occupees = Object.keys(SceneLock.tous()).filter(sid => !SceneLock.tenuParMoi(sid)); } catch(e) {}
-                      try {
-                          const { data: frais, error: errFrais } = await supabase.rpc('project_data_for_me', { p_id: id });
-                          if(!errFrais && frais && Array.isArray(frais.scenes)) {
-                              const fusion = StoreRealtime._scenesAJour(savePatch.scenes, (saveBase && saveBase.scenes) || [], frais.scenes, occupees);
-                              savePatch.scenes = fusion;
-                              state.data.scenes = fusion;
-                              // Une modification refusee doit se VOIR. Elle vient
-                              // d'etre remplacee a l'ecran par la version de
-                              // l'autre : sans message, on croirait avoir ecrit.
-                              const refusees = (fusion && fusion._refusees) || [];
-                              if(refusees.length) {
-                                  const q = SceneLock.qui(refusees[0]);
-                                  Utils.toast('Scène verrouillée' + (q ? ' par ' + q : '')
-                                      + ' : vos modifications sur ' + (refusees.length > 1 ? refusees.length + ' scènes n\'ont' : 'cette scène n\'ont')
-                                      + ' pas été enregistrées.', 'warning', 9000);
-                                  try { UI.renderScript(); } catch(e) {}
-                              }
-                          }
-                      } catch(e) {
-                          // Relecture impossible : on envoie quand meme. Le verrou de
-                          // scene a deja ecarte le cas frequent (deux ecritures sur la
-                          // MEME scene) ; renoncer a sauvegarder ferait perdre a coup sur
-                          // ce qu'on essaie de proteger par precaution.
-                          console.warn('[Store] relecture avant envoi impossible :', e && e.message);
+              // ==============================================================
+              //  UNE SEULE REGLE POUR TOUTES LES LISTES (v601)
+              // ==============================================================
+              //  Scenes, personnages, comediens, decors, equipe, ressources,
+              //  structures, plans, planches, contrats, modeles : ce sont tous
+              //  des TABLEAUX D'OBJETS A IDENTIFIANT, et ils partagent deux
+              //  dangers. D'abord, envoyer le tableau entier pour changer UN
+              //  element renvoie aussi notre copie des autres — si quelqu'un
+              //  vient d'en modifier un, on l'efface. Ensuite, un element tenu
+              //  par quelqu'un d'autre ne doit jamais partir avec.
+              //  ON RELIT DONC LE SERVEUR UNE FOIS, avant d'envoyer, et on
+              //  reprend SA version de ce qu'on n'a pas touche et de ce qu'il
+              //  tient — en gardant NOTRE ordre et nos ajouts.
+              //  CELA COUVRE AUSSI CE QUI N'A PAS DE VERROU : les modeles de
+              //  contrat ne s'editent pas, on les cree et on les applique. Deux
+              //  creations simultanees ne peuvent plus s'annuler, sans qu'il
+              //  ait fallu inventer un verrou pour ca.
+              //  ET SEULEMENT A PLUSIEURS : seul sur le projet, on n'ajoute pas
+              //  une lecture a chaque enregistrement.
+              //  CETTE REGLE REMPLACE DEUX BLOCS SEPARES — un pour les scenes,
+              //  un pour les fiches — qui faisaient la meme chose a deux
+              //  endroits, avec deux lectures du serveur au lieu d'une.
+              const LISTES = ['scenes','characters','actors','locations','crew','resources',
+                              'orgs','shots','moodboards','contracts','contractTemplates'];
+              let seulSurLeProjet = true;
+              try { seulSurLeProjet = LockManager.isAlone(); } catch(e) {}
+              const aRelire = seulSurLeProjet ? [] : LISTES.filter(c => Array.isArray(savePatch[c]));
+              if(aRelire.length) {
+                  // Qui tient quoi, par collection : les scenes d'un cote, les
+                  // fiches de l'autre — deux familles de verrous, une seule
+                  // table d'interdits.
+                  const interdits = {};
+                  try {
+                      if(typeof FicheLock !== 'undefined') {
+                          const parColl = FicheLock.interdites();
+                          for(const c in parColl) interdits[c] = parColl[c];
                       }
+                      if(typeof SceneLock !== 'undefined') {
+                          const sc = {};
+                          Object.keys(SceneLock.tous()).forEach(sid => {
+                              if(!SceneLock.tenuParMoi(sid)) sc[sid] = SceneLock.qui(sid);
+                          });
+                          if(Object.keys(sc).length) interdits.scenes = sc;
+                      }
+                  } catch(e) {}
+                  try {
+                      const { data: frais, error: errFrais } = await supabase.rpc('project_data_for_me', { p_id: id });
+                      if(!errFrais && frais) {
+                          const refuses = [];
+                          aRelire.forEach(coll => {
+                              if(!Array.isArray(frais[coll])) return;
+                              const bloques = Object.keys(interdits[coll] || {});
+                              const fusion = StoreRealtime._listeAJour(
+                                  savePatch[coll], (saveBase && saveBase[coll]) || [], frais[coll], bloques);
+                              savePatch[coll] = fusion;
+                              state.data[coll] = fusion;
+                              (fusion._refusees || []).forEach(eid => refuses.push((interdits[coll] || {})[eid]));
+                          });
+                          if(refuses.length) {
+                              Utils.toast('Verrouillé par ' + refuses[0]
+                                  + ' : vos modifications n\'ont pas été enregistrées.', 'warning', 9000);
+                              try { UI.renderAll(); } catch(e) {}
+                          }
+                      }
+                  } catch(e) {
+                      // Relecture impossible : on envoie quand meme. Renoncer a
+                      // sauvegarder ferait perdre a coup sur ce qu'on essaie de
+                      // proteger par precaution.
+                      console.warn('[Store] relecture avant envoi impossible :', e && e.message);
                   }
               }
           } 

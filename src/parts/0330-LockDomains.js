@@ -59,7 +59,16 @@
           // personnes qui y travaillaient en meme temps s'ecrasaient, sans
           // badge et sans message. Un verrou d'onglet suffit — un contrat se
           // redige rarement a deux.
-          contrats:     { label: 'Contrats',     keys: ['contracts','contractTemplates','contractTemplatesHidden'],                     tabs: ['contracts'] },
+          // v601 — CHAQUE CONTRAT EST UNE FICHE, et passe au verrou par fiche.
+          // Il etait reste entier par une erreur de rangement de ma part :
+          // classe avec le Planning sous « travail qui touche plusieurs
+          // elements a la fois », ce qu'il n'est pas. Cle pour memoire :
+          // contracts.
+          // LES MODELES, EUX, NE SONT PAS DES FICHES qu'on ouvre : on les cree
+          // depuis un contrat et on les applique, on ne les edite pas. Ils
+          // n'ont donc pas d'editeur a verrouiller — leur protection tient a la
+          // fusion element par element posee a la sauvegarde, qui empeche deux
+          // creations simultanees de s'annuler. Le domaine disparait avec eux.
           comments:     { label: 'Commentaires', keys: ['comments'],                                                                  tabs: [] }
       },
       forTab: (tabName) => {
@@ -578,7 +587,8 @@ const LockManager = {
                   resources: (typeof FicheLock !== 'undefined') ? FicheLock : null,
                   orgs:      (typeof FicheLock !== 'undefined') ? FicheLock : null,
                   storyboard:(typeof FicheLock !== 'undefined') ? FicheLock : null,
-                  moodboard: (typeof FicheLock !== 'undefined') ? FicheLock : null
+                  moodboard: (typeof FicheLock !== 'undefined') ? FicheLock : null,
+                  contracts: (typeof FicheLock !== 'undefined') ? FicheLock : null
               };
               document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => {
                   const famille = familles[btn.dataset.tab];
@@ -596,7 +606,8 @@ const LockManager = {
                   av.textContent = autres.length > 1 ? String(autres.length) : (LockManager._who(l)[0] || '?').toUpperCase();
                   const quoi = (btn.dataset.tab === 'synopsis') ? 'section'
                              : (btn.dataset.tab === 'moodboard' ? 'planche'
-                             : (['chars','actors','locs','crew','resources','orgs','storyboard'].indexOf(btn.dataset.tab) >= 0 ? 'fiche' : 'scène'));
+                             : (btn.dataset.tab === 'contracts' ? 'contrat'
+                             : (['chars','actors','locs','crew','resources','orgs','storyboard'].indexOf(btn.dataset.tab) >= 0 ? 'fiche' : 'scène')));
                   av.title = autres.length > 1
                       ? ('✍️ ' + autres.length + ' ' + quoi + 's en cours d\'écriture — les autres restent ouvertes')
                       : ('✍️ ' + LockManager._who(l) + ' écrit une ' + quoi + ' — les autres restent ouvertes');
