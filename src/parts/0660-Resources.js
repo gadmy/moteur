@@ -51,7 +51,7 @@
                       <button class="web-btn" onclick="event.stopPropagation(); app.Web.open('resource', '${res.id}')" title="Voir dans la toile">🕸️</button>
                   </div>`;
               return `
-                  <div class="compact-card" data-category="${res.category}"${dnd} onclick="app.Resources.edit('${res.id}')">
+                  <div class="compact-card" data-fiche="resource:${res.id}" data-category="${res.category}"${dnd} onclick="app.Resources.edit('${res.id}')">
                       ${actions}
                       <div class="compact-card-photo">${photo}</div>
                       <div class="compact-card-name">${Utils.escape(res.name)}</div>
@@ -121,7 +121,7 @@
           
           const overlay = await UI.showModal({
               title: '➕ Nouvelle Ressource',
-              html: modalHtml,
+              html: htmlAvecMarque,
               confirmText: 'Créer',
               onConfirm: () => Resources.saveFromForm()
           });
@@ -144,10 +144,20 @@
               ? '<div class="perm-ro-scope is-perm-readonly"><div class="perm-ro-banner">👁 Lecture seule — vous n\'avez pas les droits de modification sur les ressources.</div>'
                 + Resources.getFormHtml(resource) + '</div>'
               : Resources.getFormHtml(resource);
+
+          // v601 — LA FENETRE DIT DE QUELLE FICHE ELLE PARLE (verrou par fiche).
+          // Une ressource ne se modifie PAS sur sa carte : elle n'y a aucun
+          // champ. Tout se passe ici, dans cette fenetre. C'est donc ICI qu'il
+          // faut poser l'identifiant, sinon le curseur ne rencontre jamais de
+          // zone verrouillable et le verrou ne s'accroche jamais.
+          // L'enveloppe est A L'INTERIEUR du contenu : la fenetre se ferme avec
+          // son contenu, l'enveloppe disparait donc d'elle-meme.
+          const htmlAvecMarque = '<div class="fiche-fenetre" data-fiche="resource:'
+              + Utils.escape(String(resource.id)) + '">' + modalHtml + '</div>';
           
           const overlay = await UI.showModal({
               title: roRes ? '👁 Ressource (lecture seule)' : '✏️ Modifier la Ressource',
-              html: modalHtml,
+              html: htmlAvecMarque,
               confirmText: 'Enregistrer',
               cancelText: roRes ? 'Fermer' : 'Annuler',
               onConfirm: () => { if(roRes) return; Resources.saveFromForm(id); }

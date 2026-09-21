@@ -5762,6 +5762,7 @@ const Storyboard = {
         const card = document.createElement('div');
         card.className = 'shot-card';
         card.dataset.shotId = shot.id;
+        card.dataset.fiche = 'shot:' + shot.id;   // v601 : verrou par fiche
         
         let imagePreview = '';
         const contenu = Storyboard.contenuPlan(shot);
@@ -7384,6 +7385,13 @@ const DrawingEditor = {
         }
         DrawingEditor.currentShotId = shotId;
         DrawingEditor.currentKind = kind;
+        // v601 — ON PREND LE VERROU A LA PORTE, PAS AU CURSEUR. Ici on dessine
+        // a la SOURIS sur une toile : le curseur de texte ne se pose nulle
+        // part, donc le declencheur habituel ne verrait jamais rien. Ouvrir
+        // l'editeur sur un plan EST l'intention de le modifier — c'est donc
+        // l'ouverture qui prend le verrou, et la fermeture qui le rend.
+        // Meme raisonnement a tenir le jour ou l'on fera le mood board.
+        if(shotId) { try { FicheLock.prendre('shot:' + shotId); } catch(e) {} }
         DrawingEditor.moodboardCallback = moodboardCallback;
         const modal = document.getElementById('drawing-modal');
         modal.style.display = 'flex';
@@ -7589,6 +7597,9 @@ const DrawingEditor = {
     },
     
     close: async () => {
+        // v601 : on rend le verrou du plan en quittant l'editeur (voir open).
+        try { if(DrawingEditor.currentShotId) FicheLock.liberer('shot:' + DrawingEditor.currentShotId); } catch(e) {}
+
         const shotId = DrawingEditor.currentShotId;
         const callback = DrawingEditor.moodboardCallback;
         

@@ -781,7 +781,7 @@ const orgGroups = (state.data.groups || []).filter(g => g.type === 'org');
                     <button class="web-btn" onclick="event.stopPropagation(); app.Web.open('org', '${o.id}')" title="Voir dans la toile">🕸️</button>
                 </div>`;
             const dnd = isView ? '' : ` draggable="true" data-dnd-coll="orgs" data-dnd-idx="${i}"`;
-            return `<div class="compact-card"${dnd} onclick="app.Orgs.edit(${i})">${actions}${o._offline ? '<div class="compact-card-badge card-offline" title="Hors ligne — masqué de l’Univers">🚧</div>' : ''}<div class="compact-card-photo">${logo}</div><div class="compact-card-name">${esc(fc.name || o.name || 'Sans nom')}</div><div class="compact-card-role">${typeLabel}</div></div>`;
+            return `<div class="compact-card" data-fiche="org:${Utils.escape(String(o.id || ''))}"${dnd} onclick="app.Orgs.edit(${i})">${actions}${o._offline ? '<div class="compact-card-badge card-offline" title="Hors ligne — masqué de l’Univers">🚧</div>' : ''}<div class="compact-card-photo">${logo}</div><div class="compact-card-name">${esc(fc.name || o.name || 'Sans nom')}</div><div class="compact-card-role">${typeLabel}</div></div>`;
         };
         const idxPairs = list.map((o, i) => [o, i]);
         let sections = '';
@@ -801,7 +801,10 @@ const orgGroups = (state.data.groups || []).filter(g => g.type === 'org');
         const fc = Orgs._fiche(o);
         const ic = (fc.kind === 'asso') ? '🏛️' : '🏢';
         if(titleEl) titleEl.textContent = ic + ' ' + ((fc.kind === 'asso') ? 'Association' : 'Entreprise');
-        if(body) body.innerHTML = Orgs._detailHtml(o, i);
+        // v601 : voir Resources.edit — la structure se modifie dans cette
+        // fenetre, pas sur sa carte. L'identifiant se pose donc ici.
+        if(body) body.innerHTML = '<div class="fiche-fenetre" data-fiche="org:'
+            + Utils.escape(String(o.id || '')) + '">' + Orgs._detailHtml(o, i) + '</div>';
         CardModal.applyRights('org');
         if(modal) modal.classList.add('visible');
         if(body) requestAnimationFrame(() => { try { FicheBlocks.balance(body); } catch(e) {} });

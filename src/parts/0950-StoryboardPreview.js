@@ -5068,7 +5068,11 @@ const CardModal = {
         const titleEl = document.getElementById('card-edit-modal-title');
         const body = document.getElementById('card-edit-modal-body');
         if(titleEl) titleEl.textContent = '🎬 Plan ' + (rang > 0 ? rang : '') + (shot.name ? ' — ' + shot.name : '');
+        // v601 : le plan se modifie dans cette fenetre. L'identifiant y est pose
+        // pour le verrou par fiche (voir FicheLock) ; l'enveloppe vit dans le
+        // contenu, elle disparait donc quand on ouvre autre chose.
         if(body) body.innerHTML = `
+            <div class="fiche-fenetre" data-fiche="shot:${Utils.escape(String(shot.id))}">
             ${apercu}
             <div style="padding:10px 12px; background:var(--bg); border-radius:8px; border:1px solid var(--border); margin-bottom:12px;">
                 ${scene
@@ -5108,6 +5112,7 @@ const CardModal = {
             <label class="form-label-block">🔧 Direction technique</label>
             <textarea class="data-desc" style="min-height:60px;" onchange="app.CardModal.setShotField('${esc(String(shot.id))}','technicalDirection',this.value)" ${dis}>${esc(shot.technicalDirection || '')}</textarea>
             ${daysHtml}
+            </div>
         `;
         CardModal.applyRights('shot');
         if(modal) modal.classList.add('visible');

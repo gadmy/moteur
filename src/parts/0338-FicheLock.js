@@ -31,22 +31,39 @@
       // se fier a « tout element portant data-fiche » — c'est ce qui avait fait
       // atterrir le badge des scenes sur des pastilles de commentaire et des
       // cases d'export.
-      zones: '.data-card[data-fiche], .crew-card[data-fiche]',
+      // Trois formes de zone, nommees une par une :
+      //   .data-card / .crew-card  — les cartes de liste ou l'on modifie
+      //                              directement (personnages, comediens,
+      //                              decors, equipe) ;
+      //   .compact-card            — les cartes de liste qui ne servent qu'a
+      //                              MONTRER (ressources, structures) : on les
+      //                              marque pour que le cadenas s'y voie, mais
+      //                              le verrou se prend dans leur fenetre ;
+      //   .fiche-fenetre           — l'enveloppe posee dans le corps d'une
+      //                              fenetre d'edition, la ou se trouvent les
+      //                              champs. Elle vit dans le contenu, donc
+      //                              elle disparait quand on ouvre autre chose.
+      zones: '.data-card[data-fiche], .crew-card[data-fiche], .compact-card[data-fiche], .shot-card[data-fiche], .fiche-fenetre[data-fiche]',
+      // Le verrou se PREND la ou l'on ecrit : sur les cartes modifiables et
+      // dans les fenetres. Parcourir une liste de ressources ne verrouille rien.
+      zonesEcriture: '.data-card[data-fiche], .crew-card[data-fiche], .fiche-fenetre[data-fiche]',
       idDe: (el) => el.getAttribute('data-fiche') || ''
   });
 
   // La cle de collection derriere une espece, et l'inverse. Le verrou parle en
   // « character », l'enregistrement en « characters ».
-  // Les especes couvertes. Une espece n'entre ici QUE si ses fiches se
-  // modifient directement sur leur carte : c'est la que le curseur se pose,
-  // donc la que le verrou s'accroche. Verifie avant d'ajouter — personnages,
-  // comediens, decors et equipe portent de dix a vingt champs sur la carte ;
-  // ressources, structures et plans de storyboard n'en portent AUCUN (ils se
-  // modifient dans une fenetre), et leur retirer le verrou d'onglet aurait
-  // donc fait PERDRE de la securite au lieu d'en gagner. C'est exactement le
-  // piege des scenes, ou le refus etait pose sur un chemin que personne
-  // n'empruntait.
-  FicheLock.COLL = { character: 'characters', actor: 'actors', location: 'locations', crew: 'crew' };
+  // Les especes couvertes. LA CONDITION N'EST PAS « la carte est modifiable »,
+  // c'est « il existe QUELQUE PART une zone ou le curseur se pose pour modifier
+  // cette fiche ». Premiere lecture : les ressources et les structures n'ont
+  // aucun champ sur leur carte, donc on les avait laissees de cote. Remarque
+  // juste du developpeur : ce sont des fiches comme les autres, et leur FENETRE
+  // est pleine de champs. C'est la fenetre qu'il fallait marquer — ce qu'on
+  // avait deja fait pour la fiche de scene sans en tirer la regle.
+  // Le plan de storyboard va plus loin encore : on y dessine a la SOURIS, le
+  // curseur de texte ne s'y pose jamais. Son verrou se prend donc A LA PORTE,
+  // quand l'editeur de dessin s'ouvre (voir DrawingEditor.open).
+  FicheLock.COLL = { character: 'characters', actor: 'actors', location: 'locations',
+                     crew: 'crew', resource: 'resources', org: 'orgs', shot: 'shots' };
 
   // Les fiches tenues par QUELQU'UN D'AUTRE, rangees par collection :
   // { characters: { id -> qui }, actors: { ... } }. Lue par la sauvegarde, qui
