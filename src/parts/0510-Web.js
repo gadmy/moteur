@@ -180,6 +180,31 @@
           document.body.appendChild(menu);
           setTimeout(() => { document.addEventListener('click', Web.hideNodeMenu, { once: true }); }, 10);
       },
+      // IMPRIMER UNE FICHE, QUELLE QUE SOIT SA FAMILLE. Les exports PDF
+      // existants travaillent par FAMILLE ENTIERE (tous les personnages, tous
+      // les decors) : aucun ne sait sortir une fiche seule, et onze familles
+      // n'en ont pas du tout. Plutot que d'en ecrire onze, on ouvre la fiche et
+      // on demande au navigateur d'imprimer CETTE fenetre-la — une regle
+      // d'impression masque tout le reste. Marche partout, de la meme facon.
+      imprimerNode: (i) => {
+          const n = Web.nodes[i];
+          if(!Web._nodeIsFiche(n)) return;
+          Web.openNode(i);
+          // Laisser la fenetre se dessiner avant d'appeler l'impression :
+          // imprimer trop tot sort une page vide.
+          setTimeout(() => {
+              document.body.classList.add('impression-fiche');
+              const fini = () => {
+                  document.body.classList.remove('impression-fiche');
+                  window.removeEventListener('afterprint', fini);
+              };
+              window.addEventListener('afterprint', fini);
+              try { window.print(); } catch(e) { fini(); }
+              // Filet : certains navigateurs n'annoncent pas la fin.
+              setTimeout(fini, 60000);
+          }, 350);
+      },
+
       openNode: (i) => {
           const n = Web.nodes[i];
           if(!Web._nodeIsFiche(n)) return;
@@ -609,11 +634,32 @@
                               ${tete}<div class="web-node-rel">non rattaché</div>
                           </div>`;
               }
-              return `<div class="web-node" data-i="${i}" style="--c:${col}" title="Clic : mettre au centre — glisser : déplacer">
-                          ${tete}<div class="web-node-rel">${esc(n.rel)}</div>
+              // v601 — LES TROIS ACTIONS SORTENT DU CLIC DROIT. Elles etaient
+              // cachees dans un menu contextuel : personne ne pense a faire un
+              // clic droit sur une toile ou l'on navigue au clic gauche. Elles
+              // apparaissent maintenant au SURVOL de la fiche, et le clic droit
+              // est rendu a la navigation — reculer, symetrique du clic gauche
+              // qui avance.
+              // Ces boutons arretent la propagation : sans cela, cliquer
+              // « Imprimer » recentrerait aussi la toile sur la fiche.
+              const actions = Web._nodeIsFiche(n)
+                  ? `<div class="web-node-actions">
+                        <button class="web-node-btn" title="Imprimer cette fiche" onmousedown="event.stopPropagation();" onclick="event.stopPropagation(); app.Web.imprimerNode(${i});">🖨️</button>
+                        <button class="web-node-btn" title="Ouvrir la fiche" onmousedown="event.stopPropagation();" onclick="event.stopPropagation(); app.Web.openNode(${i});">📄</button>
+                        <button class="web-node-btn" title="Voir dans le projet" onmousedown="event.stopPropagation();" onclick="event.stopPropagation(); app.Web.revealInProject(${i});">📍</button>
+                     </div>`
+                  : '';
+              return `<div class="web-node" data-i="${i}" style="--c:${col}" title="Clic : mettre au centre — clic droit : revenir en arrière">
+                          ${tete}<div class="web-node-rel">${esc(n.rel)}</div>${actions}
                       </div>`;
           }).join('');
           canvas.insertAdjacentHTML('beforeend', html);
+          // Reculer marche aussi en cliquant droit dans le VIDE : on ne vise pas
+          // une pastille quand on veut revenir en arriere.
+          if(!canvas._reculBranche) {
+              canvas._reculBranche = true;
+              canvas.addEventListener('contextmenu', (ev) => { ev.preventDefault(); Web.back(); });
+          }
           
           // Les gestionnaires sont poses en JS et non en attribut : le clic et
           // le glisser partagent le meme geste, seul le deplacement les separe.
@@ -622,7 +668,10 @@
               if(isNaN(i) || !Web.nodes[i]) return;
               Web.nodes[i].el = el;
               el.addEventListener('mousedown', (ev) => Web.onDown(ev, i));
-              el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); Web.showNodeMenu(ev, i); });
+              // v601 : le clic droit ne montre plus de menu, il RECULE. Le geste
+              // est desormais symetrique — gauche pour avancer, droit pour
+              // revenir — ce qui est la seule chose qu'on fait vraiment ici.
+              el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); Web.back(); });
           });
           Web.paint();
           

@@ -5879,31 +5879,38 @@ const Storyboard = {
             </div>
             
             <div class="shot-meta-grid">
+                <span class="shot-field-nom">Nom du plan</span>
                 <input type="text" class="shot-input" placeholder="Nom du plan" data-tooltip="Nom du plan" value="${Utils.escape(shot.name || '')}" 
                     onchange="app.Storyboard.updateShot('${shot.id}', 'name', this.value)" ${isView ? 'disabled' : ''}>
                 
+                <span class="shot-field-nom">Type de plan</span>
                 <select class="shot-input" onchange="app.Storyboard.updateShot('${shot.id}', 'shotType', this.value)" ${isView ? 'disabled' : ''}>
                     <option value="">Type de plan...</option>
                     ${CONFIG.shotTypes.map(t => `<option value="${t}" ${shot.shotType === t ? 'selected' : ''}>${t}</option>`).join('')}
                 </select>
                 
+                <span class="shot-field-nom">Mouvement de caméra</span>
                 <select class="shot-input" onchange="app.Storyboard.updateShot('${shot.id}', 'cameraMove', this.value)" ${isView ? 'disabled' : ''}>
                     <option value="">Mouvement...</option>
                     ${CONFIG.cameraMoves.map(m => `<option value="${m}" ${shot.cameraMove === m ? 'selected' : ''}>${m}</option>`).join('')}
                 </select>
                 
+                <span class="shot-field-nom">Prise de vue</span>
                 <select class="shot-input" onchange="app.Storyboard.updateShot('${shot.id}', 'cameraMode', this.value)" ${isView ? 'disabled' : ''}>
                     <option value="">Mode caméra...</option>
                     ${CONFIG.cameraModes.map(m => `<option value="${m}" ${shot.cameraMode === m ? 'selected' : ''}>${m}</option>`).join('')}
                 </select>
             </div>
             
+            <span class="shot-field-nom">Description du plan</span>
             <textarea class="shot-textarea" placeholder="Description du plan..." data-tooltip="Description du plan..." 
                 onchange="app.Storyboard.updateShot('${shot.id}', 'description', this.value)" ${isView ? 'disabled' : ''}>${shot.description || ''}</textarea>
             
+            <span class="shot-field-nom">Direction des acteurs</span>
             <textarea class="shot-textarea" placeholder="Direction des acteurs..." data-tooltip="Direction des acteurs..." 
                 onchange="app.Storyboard.updateShot('${shot.id}', 'actorDirection', this.value)" ${isView ? 'disabled' : ''}>${shot.actorDirection || ''}</textarea>
             
+            <span class="shot-field-nom">Direction technique</span>
             <textarea class="shot-textarea" placeholder="Direction technique..." data-tooltip="Direction technique..." 
                 onchange="app.Storyboard.updateShot('${shot.id}', 'technicalDirection', this.value)" ${isView ? 'disabled' : ''}>${shot.technicalDirection || ''}</textarea>
         `;
