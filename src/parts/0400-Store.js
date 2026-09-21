@@ -788,6 +788,11 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               }
               
               state.data = safeData; state.currentProjectId = id;
+              // v601 : ouvrir un projet met fin au mode « fiche moteur », quoi qu'il
+              // se soit passe sur la page Profil. Deuxieme filet apres
+              // PublicProfile._engineActif : un drapeau reste a true bloquait
+              // TOUTE sauvegarde du projet, en silence.
+              try { if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) PublicProfile._engineRecoller(); } catch(e) {}
               state.savedBaseline = JSON.parse(JSON.stringify(safeData)); // Phase 0 : état de référence pour sauvegarde partielle / merge sélectif
               // Lot 4 : migration hygiène URLs publiques 'projects' -> paths (one-shot, idempotent, gated par flag). APRÈS la baseline => la diff URL->path est réelle et sera persistée au prochain save.
               // v599 — LE DRAPEAU DEVIENT VERSIONNE. Il valait true/false : une

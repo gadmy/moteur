@@ -125,9 +125,7 @@ Rien d'ouvert côté code au 20 septembre en dehors des chantiers ci-dessous.
       le verrou.
 
 [ ] POIDS DU PROJET SUR SA FICHE DU HUB (21 septembre). Deux corrections :
-    a) NE GARDER QUE LES MO. Utils.formatWeight rend « X Ko (Y Mo) » ; la
-       double unite n'apprend rien et encombre la carte. Une seule porte a
-       changer, tous les appelants suivent.
+    a) FAIT le 21 septembre : Utils.formatWeight ne rend plus que des Mo.
     b) AFFICHER UNE LIMITE — MAIS IL FAUT D'ABORD LA DECIDER. Mesure du 21
        septembre : IL N'Y EN A AUCUNE, ni dans le navigateur, ni en base (aucun
        declencheur de taille sur la table des projets, aucun plafond sur le
@@ -147,6 +145,22 @@ Rien d'ouvert côté code au 20 septembre en dehors des chantiers ci-dessous.
        A DECIDER AUSSI : que se passe-t-il quand on approche ? Un simple
        avertissement en couleur, ou un refus d'ajouter des images ? Un refus
        sans porte de sortie bloquerait un tournage en cours.
+    c) NE CHARGER QUE L'ONGLET AFFICHE ? Piste du developpeur, et c'est la
+       bonne question : si le projet ne se chargeait plus en entier, le
+       plafond du navigateur disparaitrait et il n'y aurait plus grand-chose a
+       limiter. MAIS CE N'EST PAS UN REGLAGE, C'EST UNE REFONTE : tout
+       l'applicatif travaille sur un state.data COMPLET en memoire — la
+       recherche globale balaye toutes les familles, le depouillement lit les
+       fiches, le planning lit les scenes, les exports lisent tout. Charger par
+       morceaux voudrait dire savoir, pour chaque ecran, de quoi il a besoin
+       et quoi aller chercher quand il ne l'a pas.
+       CE QUI SERAIT DEJA ENORME ET BIEN PLUS SIMPLE : sortir les IMAGES du
+       document. Ce sont elles qui pesent, pas le texte — le plus gros projet
+       fait 5,2 Mo et son scenario tient en quelques centaines de kilo-octets.
+       Les media sont deja dans un bac separe pour une partie d'entre eux ; le
+       reste vit encore EN DUR dans les donnees (images encodees). Les en
+       sortir reglerait le poids sans toucher a l'architecture. A CHIFFRER
+       D'ABORD : quelle part du projet est de l'image encodee en dur.
 
 [ ] INACTIVITE : NE PLUS EJECTER, JUSTE DEVERROUILLER (demande du 21
     septembre). Aujourd'hui, trois minutes sans toucher a rien renvoient au
@@ -170,15 +184,9 @@ Rien d'ouvert côté code au 20 septembre en dehors des chantiers ci-dessous.
     l'onglet courant. Prevoir aussi de les REPRENDRE a la premiere frappe, sans
     quoi on se retrouverait en lecture seule sans comprendre pourquoi.
 
-[ ] GERER LES ACCES : L'ENREGISTREMENT, A CONFIRMER. Signale le 21 septembre
-    (« ca n'enregistre plus »). UN defaut trouve et corrige le jour meme (les
-    presets qui refermaient six sections, voir vv601), mais RIEN NE PROUVE que
-    c'etait celui-la : le reste a ete verifie et repond correctement — les 738
-    boutons de l'application pointent tous vers une fonction qui existe, et le
-    tableau des droits, les presets et la recolte des cases passent tous leurs
-    tests dans un vrai DOM. A REPRENDRE avec ce qui s'affiche vraiment a
-    l'ecran au moment du clic (message de reussite, message d'erreur, ou rien)
-    et le journal de la console.
+[x] GERER LES ACCES : RESOLU le 21 septembre. La cause n'etait pas dans les
+    droits : le mode « fiche moteur » restait coince et faisait repartir TOUTE
+    sauvegarde de projet en silence. Detail au journal de vv601.
 
 [ ] DROITS DES MEMBRES : AUCUNE PROTECTION COTE SERVEUR (trouve le 21
     septembre en cherchant le defaut ci-dessus). La cle memberPermissions ne
@@ -1461,6 +1469,41 @@ vv601 (20 septembre 2026) — EN COURS.
   VERIFIE PAR LES MEMES TESTS : les 23 du verrou par scene rejoues a l'identique
   apres le regroupement, plus 12 pour le synopsis et 8 pour la liberation et la
   surveillance. Refondre du code qui marche ne se fait pas sans filet.
+
+  « ENREGISTRE » ALORS QUE RIEN N'ETAIT PARTI — LE MODE FICHE RESTAIT COINCE.
+  La vraie cause du signalement du 21 septembre, trouvee grace a une precision
+  du developpeur : le message de REUSSITE s'affichait, et la console etait
+  VIDE. Deux faits qui, ensemble, ne laissent qu'un endroit possible — une
+  sortie silencieuse de la sauvegarde, avant toute ecriture.
+  C'ETAIT LA PREMIERE LIGNE DE save(). Quand on edite une casquette depuis la
+  page Profil, le moteur a besoin d'un projet : on lui en PRETE un vide, et le
+  drapeau _engineMode empeche la sauvegarde de projet de partir — sans quoi on
+  enregistrerait ce decor pret A LA PLACE du vrai projet. La garde est juste.
+  LE DEFAUT EST QU'ELLE NE REDESCENDAIT QUE PAR LA PORTE PREVUE : tout ce qui
+  faisait disparaitre le volet autrement — une navigation, un rendu qui refait
+  la page — laissait le drapeau leve. Et alors TOUTE sauvegarde de projet
+  repartait aussitot, sans erreur, sans message, sans rien dans la console.
+  CE N'ETAIT DONC PAS UN DEFAUT DES DROITS : « Gerer les acces » n'a fait que
+  le REVELER, parce que c'est le seul ecran qui annonce lui-meme la reussite.
+  Tout le reste — scenario, depouillement, planning — se taisait pareil.
+  DEUX REPARATIONS, ET UNE TROISIEME PAR PRINCIPE :
+    - ON NE FAIT PLUS CONFIANCE AU DRAPEAU SEUL. Le volet est la preuve : s'il
+      n'est plus a l'ecran, le mode est termine quoi qu'en dise le drapeau, et
+      l'on remet en place le projet et le role qu'on avait pretes.
+    - OUVRIR UN PROJET remet le mode a zero, deuxieme filet.
+    - ET LA SAUVEGARDE NE SE TAIT PLUS quand elle refuse : elle renvoie false,
+      et « Gerer les acces » dit alors que rien n'a ete enregistre au lieu
+      d'annoncer une reussite. Un ecran qui ment sur une sauvegarde coute plus
+      cher que la panne elle-meme : on cherche des heures du mauvais cote.
+  LECON, la meme que pour les verrous de la veille : une garde POSEE SUR UN
+  ETAT QU'ON MET A JOUR A LA MAIN finit toujours par rester coincee. Quand
+  l'etat est deja visible quelque part — ici, un volet present ou absent — il
+  faut le LIRE, pas le recopier.
+
+  LE POIDS DU PROJET S'AFFICHE EN MEGAOCTETS SEULEMENT. « X Ko (Y Mo) »
+  n'apprenait rien et encombrait la carte. Deux decimales sous 10 Mo, une seule
+  au-dessus — a 24 Mo le centieme de mega ne veut plus rien dire — et jamais
+  « 0 Mo » pour un projet qui existe : on montre « < 0,01 Mo ».
 
   UN PRESET DE DROITS NE DOIT PAS FERMER CE QU'IL NE CONNAIT PAS. Cherche apres
   un signalement du 21 septembre sur « Gerer les acces ». Le tableau des droits

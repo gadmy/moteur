@@ -374,6 +374,40 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     // comedien (objet facets.actor), sur une COPIE ; rien n'est ecrit sur les champs
     // communs ni les autres casquettes. Eteint par defaut.
     _engineMode: false,
+
+    // ======================================================================
+    //  LE MODE « FICHE MOTEUR » NE DOIT PAS POUVOIR RESTER COINCE (v601)
+    // ======================================================================
+    //  Quand on edite une casquette depuis la page Profil, le moteur a besoin
+    //  d'un projet : on lui en prete un vide, et on met _engineMode a true pour
+    //  que la sauvegarde de PROJET ne parte jamais — elle enregistrerait ce
+    //  decor pret a la place du vrai projet.
+    //  LE DEFAUT : ce drapeau ne redescendait qu'en passant par la fermeture du
+    //  volet. Tout ce qui fait disparaitre le volet autrement — une navigation,
+    //  un rendu qui refait la page, un retour arriere — le laissait a true. Et
+    //  alors TOUTE sauvegarde de projet repartait AUSSITOT, en silence : pas
+    //  d'erreur, pas de message, rien dans la console. L'ecran annoncait
+    //  « enregistre » et rien ne l'etait. C'est ce qui a ete signale le 21
+    //  septembre sur « Gerer les acces » — mais ca touchait tout le reste.
+    //  LA REPARATION : on ne fait plus confiance au drapeau seul. Le volet est
+    //  la preuve. S'il n'est plus a l'ecran, le mode est termine, quoi que dise
+    //  le drapeau — et on remet en place ce qu'on avait prete.
+    _engineActif: () => {
+        if(!PublicProfile._engineMode) return false;
+        if(document.getElementById('comedien-engine-overlay')
+           || document.getElementById('org-engine-overlay')) return true;
+        try { PublicProfile._engineRecoller(); } catch(e) { PublicProfile._engineMode = false; }
+        return false;
+    },
+
+    // Remet le vrai projet en place apres un volet disparu sans fermeture.
+    _engineRecoller: () => {
+        console.warn('[Profil] volet de casquette disparu sans fermeture : mode fiche relache, sauvegardes de projet a nouveau permises.');
+        PublicProfile._engineMode = false;
+        PublicProfile._engineProfile = null;
+        if('_engineSavedData' in PublicProfile) { state.data = PublicProfile._engineSavedData; delete PublicProfile._engineSavedData; }
+        if('_engineSavedRole' in PublicProfile) { state.currentRole = PublicProfile._engineSavedRole; delete PublicProfile._engineSavedRole; }
+    },
     _engineProfile: null,
 
     // Champs qui appartiennent à la FICHE (comédien/technicien), plus au profil commun
@@ -2505,7 +2539,14 @@ const Permissions = {
         } catch(e) { console.warn('[Permissions] mise à jour des rôles:', e && e.message); }
         
         try {
-            await Store.save();
+            // v601 : on ne dit « enregistre » que si ca l'est. La sauvegarde
+            // pouvait refuser en silence (mode fiche moteur reste coince) et
+            // l'ecran annoncait quand meme la reussite — c'est ce qui a ete
+            // signale le 21 septembre.
+            if(await Store.save() === false) {
+                Utils.toast('Enregistrement impossible pour le moment. Rechargez la page et réessayez.', 'error', 8000);
+                return;
+            }
             // v570 : les ❌ font disparaitre des onglets — reconstruire la navigation
             // pour que le proprietaire voie l'effet, et surtout pour l'auto-attribution.
             try { UIHidden.applyHiddenTabs(); UIHidden.applyHiddenCategories(); } catch(e) {}

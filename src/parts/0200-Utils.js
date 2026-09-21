@@ -1,14 +1,17 @@
 
   const Utils = {
       sanitizeEmail: (email) => email.replace(/\./g, ','),
-      // Poids d'un projet : octets -> "X Ko (Y Mo)"
+      // Poids d'un projet, EN MEGAOCTETS SEULEMENT (v601). La double unite
+      // « X Ko (Y Mo) » n'apprenait rien et encombrait la carte du projet. Une
+      // seule porte : tous les endroits qui affichent un poids passent par ici.
+      // Deux decimales sous 10 Mo, une seule au-dessus : a 24 Mo, le centieme
+      // de mega ne veut plus rien dire. Et jamais « 0 Mo » pour un projet qui
+      // existe — on montre le plus petit palier lisible.
       formatWeight: (bytes) => {
           const b = bytes || 0;
-          const ko = b / 1024;
-          const mo = ko / 1024;
-          const koStr = ko.toLocaleString('fr-FR', { maximumFractionDigits: ko < 10 ? 1 : 0 });
-          const moStr = mo.toLocaleString('fr-FR', { maximumFractionDigits: 2 });
-          return koStr + ' Ko (' + moStr + ' Mo)';
+          const mo = b / 1048576;
+          if(b > 0 && mo < 0.01) return '< 0,01 Mo';
+          return mo.toLocaleString('fr-FR', { maximumFractionDigits: mo < 10 ? 2 : 1 }) + ' Mo';
       },
       // v593 : String(...) ajouté — sans ça, escape(nombre) ou escape(objet) plante (throw),
       // au lieu de simplement échapper le texte. Comportement inchangé pour les chaînes

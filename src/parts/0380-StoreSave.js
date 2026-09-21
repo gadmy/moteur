@@ -26,7 +26,7 @@
       // complete, silencieuse et bien plus large que demande.
       _sceneRpcAbsente: false,
       saveScene: async (scene) => {
-          if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) return false;
+          if(typeof PublicProfile !== 'undefined' && PublicProfile._engineActif()) return false;
           if(!scene || !scene.id || !state.currentProjectId) return false;
           // REFUS AU POINT DE PASSAGE, PAS A L'ECRAN (v601). Chaque ecran qui
           // montre une scene pourrait oublier de verifier le verrou — il y en a
@@ -77,7 +77,9 @@
       },
 
       save: async () => { 
-          if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) return; // fiche moteur profil : jamais de sauvegarde projet
+          // RENVOIE false, et ne se tait plus : un appelant qui annonce « enregistre »
+          // doit pouvoir savoir que rien n'est parti (voir Permissions.saveAll).
+          if(typeof PublicProfile !== 'undefined' && PublicProfile._engineActif()) return false; // fiche moteur profil : jamais de sauvegarde projet
           if(!state.currentProjectId || !state.currentUser || state.currentRole === 'viewer') return;
           
           // Verrou anti-concurrence : si un save est déjà en cours, on note la demande et on sortira
@@ -323,7 +325,7 @@
       // Au lieu d'envoyer une requête à chaque modif, on attend 800ms d'inactivité avant d'envoyer la dernière version.
       // Pour les actions "définitives" (suppression, validation modale, fin d'édition), continuer à utiliser Store.save().
       saveDebounced: () => {
-          if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) return; // fiche moteur profil : pas de sauvegarde projet
+          if(typeof PublicProfile !== 'undefined' && PublicProfile._engineActif()) return; // fiche moteur profil : pas de sauvegarde projet
           if(StoreSave._saveDebounceTimer) clearTimeout(StoreSave._saveDebounceTimer);
           // Indicateur visuel "en attente" : opacity réduite
           const syncIndicator = document.getElementById('sync-indicator');
