@@ -6674,7 +6674,49 @@ const StoryboardExport = {
     // On garde donc les URL blob, bornees et videes au changement de projet.
     _blobCache: new Map(),
     _blobEnCours: new Map(),
-    BLOB_CACHE_MAX: 150,
+    // v601 — ON MESURE EN OCTETS, PAS EN NOMBRE D'IMAGES. « 150 images » ne
+    // veut rien dire : 150 vignettes de 50 Ko pesent 7 Mo, 150 planches de 2 Mo
+    // en pesent 300. C'est le poids qui fait ramer le navigateur, c'est donc le
+    // poids qu'on borne. Le nombre reste en second garde-fou, pour qu'un projet
+    // fait de minuscules images n'accumule pas des milliers d'entrees.
+    BLOB_CACHE_OCTETS: 50 * 1024 * 1024,
+    BLOB_CACHE_MAX: 400,
+    _blobPoids: new Map(),   // chemin -> octets
+    _blobTotal: 0,
+
+    // VRAI CLASSEMENT PAR USAGE. Avant, on jetait la plus ANCIENNEMENT CHARGEE
+    // — qui pouvait etre celle qu'on regarde tout le temps, pendant qu'une
+    // image jamais revue restait. Une Map garde l'ordre d'insertion : reposer
+    // une entree deja presente la remet donc en queue, et le premier element
+    // est bien le moins recemment SERVI.
+    _blobToucher: (path) => {
+        const c = StoryboardExport._blobCache;
+        if(!c.has(path)) return;
+        const u = c.get(path);
+        c.delete(path);
+        c.set(path, u);
+    },
+
+    _blobFaireDeLaPlace: () => {
+        const c = StoryboardExport._blobCache;
+        while(c.size && (StoryboardExport._blobTotal > StoryboardExport.BLOB_CACHE_OCTETS
+                         || c.size > StoryboardExport.BLOB_CACHE_MAX)) {
+            const vieux = c.keys().next().value;
+            const u = c.get(vieux);
+            c.delete(vieux);
+            StoryboardExport._blobTotal -= (StoryboardExport._blobPoids.get(vieux) || 0);
+            StoryboardExport._blobPoids.delete(vieux);
+            try { URL.revokeObjectURL(u); } catch(e) {}
+        }
+        if(StoryboardExport._blobTotal < 0) StoryboardExport._blobTotal = 0;
+    },
+
+    // A taper dans la console : combien de place prennent les dessins gardes.
+    blobInfo: () => ({
+        images: StoryboardExport._blobCache.size,
+        poids_mo: +(StoryboardExport._blobTotal / 1048576).toFixed(2),
+        plafond_mo: +(StoryboardExport.BLOB_CACHE_OCTETS / 1048576).toFixed(0)
+    }),
 
     // ---- FILE D'ATTENTE DES TELECHARGEMENTS (v601) ----
     // Une planche de storyboard peint ses dessins dans un CANVAS : il n'y a pas
@@ -6704,6 +6746,8 @@ const StoryboardExport = {
         else StoryboardExport._enVol = Math.max(0, StoryboardExport._enVol - 1);
     },
     videBlobCache: () => {
+        StoryboardExport._blobPoids.clear();
+        StoryboardExport._blobTotal = 0;
         StoryboardExport._blobCache.forEach(u => { try { URL.revokeObjectURL(u); } catch(e) {} });
         StoryboardExport._blobCache.clear();
         StoryboardExport._blobEnCours.clear();
@@ -6714,7 +6758,7 @@ const StoryboardExport = {
             if(!path) return null;
             const cache = StoryboardExport._blobCache;
             const dejaLa = cache.get(path);
-            if(dejaLa) return dejaLa;
+            if(dejaLa) { StoryboardExport._blobToucher(path); return dejaLa; }
             // Deux vignettes peuvent demander le meme dessin en meme temps :
             // sans cela, on le telechargerait deux fois.
             const enCours = StoryboardExport._blobEnCours.get(path);
@@ -6726,13 +6770,10 @@ const StoryboardExport = {
                 finally { StoryboardExport._rendLaPlace(); }
                 if(error || !data) { console.warn('[Storyboard] telechargement echoue :', path, error); return null; }
                 const url = URL.createObjectURL(data);
-                if(cache.size >= StoryboardExport.BLOB_CACHE_MAX) {
-                    const plusAncien = cache.keys().next().value;
-                    const u = cache.get(plusAncien);
-                    cache.delete(plusAncien);
-                    try { URL.revokeObjectURL(u); } catch(e) {}
-                }
                 cache.set(path, url);
+                StoryboardExport._blobPoids.set(path, data.size || 0);
+                StoryboardExport._blobTotal += (data.size || 0);
+                StoryboardExport._blobFaireDeLaPlace();
                 return url;
             })();
             StoryboardExport._blobEnCours.set(path, p);

@@ -546,6 +546,27 @@
           { enAttente: Utils._prefetchFile.length, enCours: Utils._prefetchActifs },
           Utils._prefetchBilan),
 
+      // ==================================================================
+      //  ON PRECHAUFFE L'ONGLET OU L'ON ARRIVE, PAS TOUT LE PROJET (v601)
+      //  ------------------------------------------------------------------
+      //  Avant : a l'ouverture du projet, on lancait toutes les images du
+      //  Storyboard ET du Mood Board. Quelqu'un qui vient ecrire une scene et
+      //  n'ouvrira jamais ces deux onglets payait quand meme le reseau et la
+      //  memoire de plusieurs centaines d'images.
+      //  UNE FOIS PAR ONGLET ET PAR PROJET : y revenir dix fois ne relance
+      //  rien, les images sont deja en cache. Le marqueur est remis a zero a
+      //  l'ouverture d'un projet.
+      _ongletsPrechauffes: {},
+      prechaufferOnglet: (tabName) => {
+          try {
+              const quoi = { storyboard: 'prefetchStoryboardImages', moodboard: 'prefetchMoodboardImages' }[tabName];
+              if(!quoi) return;
+              if(Utils._ongletsPrechauffes[tabName]) return;
+              Utils._ongletsPrechauffes[tabName] = true;
+              Utils[quoi]();
+          } catch(e) { /* confort : jamais bruyant */ }
+      },
+
       prefetchStoryboardImages: () => {
           try {
               if(!state.data || !Array.isArray(state.data.shots) || state.data.shots.length === 0) return;

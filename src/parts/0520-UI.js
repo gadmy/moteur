@@ -629,6 +629,9 @@
           if(tabName === 'orgs') { Orgs.render(); Orgs.syncFromUniverse().then(() => Orgs.render()); }
           if(tabName === 'presentation') Presentation.init();
           if(typeof LockManager !== 'undefined') LockManager.onTabEnter(tabName);
+          // v601 : les images de CET onglet se prechauffent en arrivant, plus
+          // celles de tout le projet a l'ouverture (voir Utils.prechaufferOnglet).
+          try { if(typeof Utils !== 'undefined' && Utils.prechaufferOnglet) Utils.prechaufferOnglet(tabName); } catch(e) {}
           // v570 : verrouillage visuel des champs si l'onglet n'est qu'en lecture (👁️).
           // Apres le rendu de l'onglet, sinon la banniere serait effacee par celui-ci.
           if(typeof Permissions !== 'undefined') Permissions.applyReadOnlyUI();

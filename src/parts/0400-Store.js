@@ -833,8 +833,13 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               if(typeof StoryboardExport !== 'undefined' && StoryboardExport.videBlobCache) StoryboardExport.videBlobCache();
               await Utils.refreshSignedCache(state.data); // Lot D6 : pré-signe les médias 'projects' avant rendu
               Utils.startImgResolver(); // Lot D6 : résolveur DOM des <img> signées
-              Utils.prefetchStoryboardImages(); // v616 : préchauffage silencieux des images du Storyboard
-              Utils.prefetchMoodboardImages(); // v616 : idem pour le Mood Board
+              // v601 — LE PRECHAUFFAGE NE PART PLUS A L'OUVERTURE DU PROJET.
+              // Il lancait TOUTES les images du Storyboard ET du Mood Board des
+              // qu'on entrait dans un projet — meme pour quelqu'un qui venait
+              // ecrire une scene et n'ouvrirait jamais ces deux onglets. Il suit
+              // desormais la personne : voir Utils.prechaufferOnglet, appele
+              // quand on ENTRE dans l'onglet concerne.
+              Utils._ongletsPrechauffes = {};
               state.currentProjectType = project.project_type || 'film'; // S3.4
               state.statsFilter = { scope: 'all', seasonId: null, episodeId: null }; // Stats: filtre de scope par défaut
               NavMemory.setProject(id); // Persistance pour F5
