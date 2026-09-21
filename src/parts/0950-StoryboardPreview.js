@@ -3975,15 +3975,134 @@ const FicheBlocks = {
         if(activeIdx < 0) activeIdx = 0;
         const bar = tabs.map((t, i) => `<button type="button" class="fid-tab${i === activeIdx ? ' is-active' : ''}" data-tab="${Utils.escape(t.id)}" onclick="app.FicheBlocks.switchTab(this)">${t.label}</button>`).join('');
         const panels = tabs.map((t, i) => `<div class="fid-tabpanel${i === activeIdx ? ' is-active' : ''}" data-tab="${Utils.escape(t.id)}">${t.html}</div>`).join('');
+        // v601 : le geste est pose une fois pour toutes, et l'estompe des bords
+        // se relit apres l'affichage — la barre n'existe pas encore ici.
+        FicheBlocks._poserGestes();
+        setTimeout(FicheBlocks._marquerDebordement, 0);
         return `<div class="fid-tabs" data-fiche-kind="${Utils.escape(kind)}"><div class="fid-tabbar" role="tablist">${bar}</div>${panels}</div>`;
     },
     _activeTab: {},
+
+    // ==================================================================
+    //  GLISSER D'UN ONGLET A L'AUTRE (v601)
+    // ==================================================================
+    //  Demande du developpeur : « est-ce que ce ne serait pas plus joli, plus
+    //  moderne, si on devait slider de gauche a droite ? » Oui pour le geste,
+    //  non pour supprimer les onglets : avec cinq ou six sections, la barre
+    //  est la CARTE de la fiche — elle dit ce qui existe sans y aller, et on
+    //  ne lit pas une fiche de gauche a droite, on saute de la photo aux
+    //  notes. Le glisse s'AJOUTE donc, la barre le suit.
+    //
+    //  UN SEUL ECOUTEUR POUR TOUTES LES FICHES, pose une fois. Les brancher a
+    //  chaque rendu, c'est en oublier un — et en empiler dix sur le meme
+    //  element quand la fiche se redessine.
+    //
+    //  ON NE VOLE PAS LE GESTE A CE QUI DEFILE DEJA : une galerie de photos,
+    //  la barre elle-meme, un champ de texte. Sans cette reserve, faire
+    //  defiler ses photos aurait change d'onglet.
+    _gestesPoses: false,
+    _poserGestes: () => {
+        if(FicheBlocks._gestesPoses) return;
+        FicheBlocks._gestesPoses = true;
+        let mt = null;
+        window.addEventListener('resize', () => {
+            clearTimeout(mt);
+            mt = setTimeout(FicheBlocks._marquerDebordement, 150);
+        });
+        // L'estompe ne change que le masque : elle ne modifie aucune taille,
+        // donc surveiller la taille ici ne peut pas tourner en rond.
+        try {
+            FicheBlocks._observateur = new ResizeObserver((entrees) => {
+                entrees.forEach(e => FicheBlocks._relire(e.target));
+            });
+        } catch(e) { FicheBlocks._observateur = null; }
+        let x0 = 0, y0 = 0, vise = null;
+        document.addEventListener('touchstart', (ev) => {
+            vise = null;
+            if(!ev.touches || ev.touches.length !== 1) return;
+            const t = ev.touches[0];
+            const el = t.target;
+            if(!el || !el.closest) return;
+            const tabs = el.closest('.fid-tabs');
+            if(!tabs) return;
+            if(el.closest('.fid-tabbar, input, textarea, select, [contenteditable="true"]')) return;
+            if(FicheBlocks._defileDeja(el, tabs)) return;
+            vise = tabs; x0 = t.clientX; y0 = t.clientY;
+        }, { passive: true });
+        document.addEventListener('touchend', (ev) => {
+            const tabs = vise; vise = null;
+            if(!tabs || !ev.changedTouches || !ev.changedTouches.length) return;
+            const t = ev.changedTouches[0];
+            const dx = t.clientX - x0, dy = t.clientY - y0;
+            // Franchement horizontal, et franchement long : un doigt qui
+            // descend en biais ne doit pas changer de page.
+            if(Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+            FicheBlocks.glisser(tabs, dx < 0 ? 1 : -1);
+        }, { passive: true });
+    },
+    _defileDeja: (el, tabs) => {
+        let n = el;
+        while(n && n !== tabs && n.nodeType === 1) {
+            if(n.scrollWidth > n.clientWidth + 4) {
+                const ov = getComputedStyle(n).overflowX;
+                if(ov === 'auto' || ov === 'scroll') return true;
+            }
+            n = n.parentElement;
+        }
+        return false;
+    },
+    // sens : +1 vers la droite, -1 vers la gauche. ON NE BOUCLE PAS — revenir
+    // au premier apres le dernier fait perdre ou l'on est.
+    glisser: (tabs, sens) => {
+        const btns = [...tabs.querySelectorAll(':scope > .fid-tabbar > .fid-tab')];
+        const i = btns.findIndex(b => b.classList.contains('is-active'));
+        const j = i + sens;
+        if(i < 0 || j < 0 || j >= btns.length) return;
+        FicheBlocks.switchTab(btns[j]);
+    },
+    // La ligne deborde-t-elle ? Si oui, ses bords s'estompent pour le dire.
+    // Relu a chaque affichage : la largeur depend de la fenetre et du nombre
+    // d'onglets, qui varie d'une famille a l'autre.
+    _observateur: null,
+    _relire: (barre) => {
+        try { barre.classList.toggle('a-defilement', barre.scrollWidth > barre.clientWidth + 4); } catch(e) {}
+    },
+    _marquerDebordement: () => {
+        document.querySelectorAll('.fid-tabbar').forEach(barre => {
+            FicheBlocks._relire(barre);
+            // UNE BARRE ENCORE INVISIBLE MESURE ZERO. La fiche est construite
+            // avant que sa fenetre ne s'affiche : mesurer a cet instant donne
+            // toujours « ca ne deborde pas ». Plutot que de deviner le bon
+            // moment, on demande a etre prevenu quand elle prend sa taille.
+            try {
+                if(!barre._suivie && FicheBlocks._observateur) {
+                    barre._suivie = true;
+                    FicheBlocks._observateur.observe(barre);
+                }
+            } catch(e) {}
+        });
+    },
+
     switchTab: (btn) => {
         const tabs = btn.closest('.fid-tabs');
         if(!tabs) return;
         const id = btn.dataset.tab;
         if(tabs.dataset.ficheKind) FicheBlocks._activeTab[tabs.dataset.ficheKind] = id;
+        // v601 : le panneau entre par le cote d'ou l'on vient. On le sait au
+        // rang des onglets, pas au geste : cliquer un onglet plus a droite
+        // doit donner la meme impression que glisser vers la gauche.
+        const rangs = [...tabs.querySelectorAll(':scope > .fid-tabbar > .fid-tab')];
+        const avant = rangs.findIndex(b => b.classList.contains('is-active'));
+        const apres = rangs.indexOf(btn);
+        tabs.style.setProperty('--fid-sens', (apres < avant ? '-10px' : '10px'));
         tabs.querySelectorAll(':scope > .fid-tabbar > .fid-tab').forEach(b => b.classList.toggle('is-active', b.dataset.tab === id));
+        // La ligne ne revient plus a la ligne : l'onglet choisi doit donc etre
+        // ramene dans le champ de vision quand elle defile.
+        try { btn.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); } catch(e) {}
+        // Le profil public pose ses onglets actifs lui-meme, sans passer par
+        // ici au premier affichage : on relit l'estompe a chaque changement
+        // plutot que de compter sur un seul point d'entree.
+        FicheBlocks._marquerDebordement();
         let shown = null;
         tabs.querySelectorAll(':scope > .fid-tabpanel').forEach(p => { const on = p.dataset.tab === id; p.classList.toggle('is-active', on); if(on) shown = p; });
         // Un calendrier de dispo rendu dans un onglet cache doit etre redessine
