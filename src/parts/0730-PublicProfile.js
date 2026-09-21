@@ -2300,10 +2300,36 @@ const Permissions = {
             </div>
         `;
         
+        // v601 — UNE SEULE FENETRE A LA FOIS. Rien n'enlevait l'ancienne avant
+        // d'en poser une nouvelle : deux clics sur le menu en laissaient DEUX
+        // dans la page, invisibles l'une derriere l'autre. Et la sauvegarde
+        // ramassait les cases des DEUX — celles de la fenetre morte, restees
+        // sur les anciennes valeurs, ecrasaient celles qu'on venait de regler.
+        document.querySelectorAll('#permissions-modal, .permissions-modal').forEach(v => v.remove());
         document.body.appendChild(modal);
         Permissions.renderTables();
     },
     
+    // A taper dans la console, fenetre des acces OUVERTE : dit ce que la
+    // sauvegarde verrait si on cliquait Enregistrer a cet instant.
+    etat: () => {
+        const toutes = document.querySelectorAll('#permissions-modal, .permissions-modal');
+        const f = document.getElementById('permissions-modal');
+        const cases = f ? [...f.querySelectorAll('.permissions-table select[data-email]')] : [];
+        const dansToutLeDocument = document.querySelectorAll('.permissions-table select[data-email]').length;
+        return {
+            fenetres_ouvertes: toutes.length,
+            cases_dans_la_fenetre: cases.length,
+            cases_dans_toute_la_page: dansToutLeDocument,
+            lignes: new Set(cases.map(c => c.dataset.email)).size,
+            identique_a_l_enregistre: (() => {
+                const m = {};
+                cases.forEach(c => { (m[c.dataset.email] = m[c.dataset.email] || {})[c.dataset.section] = c.value; });
+                return JSON.stringify(m) === JSON.stringify(state.data.memberPermissions || {});
+            })()
+        };
+    },
+
     closeModal: () => {
         const modal = document.getElementById('permissions-modal');
         if(modal) modal.remove();
@@ -2495,8 +2521,18 @@ const Permissions = {
             state.data.memberPermissions = {};
         }
         
-        // Récupérer toutes les permissions depuis les selects
-        const allSelects = document.querySelectorAll('.permissions-table select[data-email]');
+        // v601 — ON NE LIT QUE LA FENETRE OUVERTE, pas « toutes les cases de la
+        // page ». Chercher dans le document entier, c'est ramasser aussi celles
+        // d'une fenetre restee derriere, dont les valeurs sont perimees — et
+        // comme on ecrit case par case, c'est la DERNIERE lue qui gagne.
+        const fenetre = document.getElementById('permissions-modal');
+        if(!fenetre) { Utils.toast('La fenêtre des accès n\'est plus ouverte : rien n\'a été enregistré.', 'error', 8000); return; }
+        const allSelects = fenetre.querySelectorAll('.permissions-table select[data-email]');
+        if(!allSelects.length) {
+            Utils.toast('Aucune case de droits n\'a pu être lue : rien n\'a été enregistré.', 'error', 8000);
+            console.error('[Permissions] aucun select[data-email] dans la fenêtre — tableau non rendu ?');
+            return;
+        }
         const permsByEmail = {};
         
         allSelects.forEach(select => {
@@ -2514,6 +2550,19 @@ const Permissions = {
             permsByEmail[email].chat_comediens = permsByEmail[email].comediens !== 'none' ? 'write' : 'none';
         });
         
+        // v601 — ON NE DIT PLUS « ENREGISTRE » QUAND RIEN N'A BOUGE. C'est ce
+        // qui a coute trois allers-retours : l'ecran annoncait la reussite, la
+        // base ne changeait pas d'un caractere, et on cherchait le defaut du
+        // cote de la sauvegarde alors que les cases lues etaient deja les
+        // anciennes. Si le tableau rend exactement ce qui est deja enregistre,
+        // il faut le DIRE — c'est une information, pas une panne.
+        const avant = JSON.stringify(state.data.memberPermissions || {});
+        const apres = JSON.stringify(permsByEmail);
+        if(avant === apres) {
+            Utils.toast('Aucun changement à enregistrer : le tableau affiche déjà ce qui est enregistré.', 'info', 7000);
+            console.warn('[Permissions] tableau identique a l\'enregistrement — ' + allSelects.length + ' cases lues.');
+            return;
+        }
         state.data.memberPermissions = permsByEmail;
         
         // v570 — LE ROLE SE DEDUIT DES CASES. Au moins une ✏️ = editeur en base, sinon
