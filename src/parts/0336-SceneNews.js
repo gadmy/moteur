@@ -28,9 +28,9 @@
       _maScene: () => {
           try {
               if(typeof SceneLock !== 'undefined') {
-                  const tenue = Object.keys(SceneLock.tous()).find(id => SceneLock.tenueParMoi(id));
+                  const tenue = Object.keys(SceneLock.tous()).find(id => SceneLock.tenuParMoi(id));
                   if(tenue) return String(tenue);
-                  const curseur = SceneLock._sceneDuCurseur();
+                  const curseur = SceneLock.idDuCurseur();
                   if(curseur) return String(curseur);
               }
               if(state.currentEditingId) return String(state.currentEditingId);

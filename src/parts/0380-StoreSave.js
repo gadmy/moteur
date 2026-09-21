@@ -126,6 +126,34 @@
                   if(state.pendingSave) { state.pendingSave = false; StoreSave.save(); }
                   return;
               }
+              // v601 — SECTIONS DU SYNOPSIS TENUES PAR QUELQU'UN D'AUTRE.
+              // Plus simple que pour les scenes, et pour une bonne raison : les
+              // six textes du synopsis sont six CLES SEPAREES. Il n'y a donc
+              // rien a recoudre — on retire du paquet la cle qu'on n'a pas le
+              // droit d'ecrire, et on remet a l'ecran la derniere version connue
+              // du serveur. Pas de relecture, pas de fusion.
+              if(typeof SynopsisLock !== 'undefined' && saveBase) {
+                  try {
+                      const interdites = SynopsisLock.clesInterdites();
+                      const rendues = [];
+                      for(const cle in interdites) {
+                          if(!(cle in savePatch)) continue;
+                          delete savePatch[cle];
+                          state.data[cle] = saveBase[cle];
+                          rendues.push(interdites[cle]);
+                      }
+                      if(rendues.length) {
+                          Utils.toast('Section verrouillée par ' + rendues[0]
+                              + ' : vos modifications n\'ont pas été enregistrées.', 'warning', 9000);
+                          try { ['synopsis','short','long','intent','director','producer'].forEach(t => Synopsis.renderTree(t)); } catch(e) {}
+                      }
+                      if(Object.keys(savePatch).length === 0) {
+                          state.savingInProgress = false;
+                          if(state.pendingSave) { state.pendingSave = false; StoreSave.save(); }
+                          return;
+                      }
+                  } catch(e) { console.warn('[Store] sections verrouillees :', e && e.message); }
+              }
               // v601 — LE VRAI POINT DE PASSAGE DE TOUTE ECRITURE DE SCENE.
               // C'EST ICI, ET NULLE PART AILLEURS, que les modifications de scene
               // partent : aucun ecran n'appelle saveScene, tous passent par la
@@ -143,7 +171,7 @@
                   try { seul = LockManager.isAlone(); } catch(e) {}
                   if(!seul) {
                       let occupees = [];
-                      try { occupees = Object.keys(SceneLock.tous()).filter(sid => !SceneLock.tenueParMoi(sid)); } catch(e) {}
+                      try { occupees = Object.keys(SceneLock.tous()).filter(sid => !SceneLock.tenuParMoi(sid)); } catch(e) {}
                       try {
                           const { data: frais, error: errFrais } = await supabase.rpc('project_data_for_me', { p_id: id });
                           if(!errFrais && frais && Array.isArray(frais.scenes)) {

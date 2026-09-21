@@ -25,7 +25,15 @@
           resources:    { label: 'Ressources',   keys: ['resources'],                                                                 tabs: ['resources'] },
           storyboard:   { label: 'Storyboard',   keys: ['shots'],                                                                     tabs: ['storyboard'] },
           moodboard:    { label: 'Moodboard',    keys: ['moodboards'],                                                                tabs: ['moodboard'] },
-          synopsis:     { label: 'Synopsis',     keys: ['synopsis','synopsisShort','synopsisLong','synopsisIntent','directorNote','producerNote'], tabs: ['synopsis'] },
+          // v601 — LE SYNOPSIS N'A PLUS DE DOMAINE : il passe au verrou PAR
+          // SECTION (SynopsisLock). Ses six textes sont six cles separees, et
+          // la sauvegarde n'envoie que les cles modifiees : deux personnes sur
+          // deux sections ne s'ecrasaient deja pas. Seul le verrou d'onglet les
+          // empechait de travailler en meme temps — la productrice qui redigeait
+          // sa note bloquait le realisateur sur la sienne. On garde le badge sur
+          // l'onglet, il cesse seulement de VERROUILLER.
+          // Les cles restent ecrites ici pour memoire : synopsis, synopsisShort,
+          // synopsisLong, synopsisIntent, directorNote, producerNote.
           presentation: { label: 'Présentation', keys: ['presentation','titlePage','publicProjectData','isPublicProject'],           tabs: ['presentation','titlepage'] },
           comments:     { label: 'Commentaires', keys: ['comments'],                                                                  tabs: [] }
       },
@@ -422,7 +430,7 @@ const LockManager = {
           try { if(typeof WindowManager !== 'undefined' && WindowManager.wins) WindowManager._arbitrate(); } catch(_) {}
           // v601 : les verrous PAR SCENE se redessinent au meme rythme que ceux
           // de domaine — meme source (state.domainLocks), meme rafraichissement.
-          try { if(typeof SceneLock !== 'undefined') SceneLock.marquerEcrans(); } catch(_) {}
+          try { if(typeof VerrouFin !== 'undefined') VerrouFin.marquerTout(); } catch(_) {}
           // Seul(e) sur le projet : aucun verrou affiché, tout reste éditable
           if(LockManager.isAlone()) {
               document.querySelectorAll('.dlock-avatar-tab, .dlock-badge, .dlock-banner, .dlock-watcher').forEach(el => el.remove());
@@ -465,10 +473,19 @@ const LockManager = {
           // se bloquent donc plus. Mais savoir que quelqu'un ecrit LA reste utile
           // — on continue de l'annoncer, sans empecher personne d'entrer.
           try {
-              const tenues = (typeof SceneLock !== 'undefined') ? SceneLock.tous() : {};
-              const autres = Object.keys(tenues).filter(id => !LockManager._mine(tenues[id]));
+              // Chaque onglet sans domaine dit ce qui s'y passe, via la famille
+              // de verrous fins qui le couvre.
+              const familles = {
+                  script:    (typeof SceneLock !== 'undefined') ? SceneLock : null,
+                  breakdown: (typeof SceneLock !== 'undefined') ? SceneLock : null,
+                  board:     (typeof SceneLock !== 'undefined') ? SceneLock : null,
+                  synopsis:  (typeof SynopsisLock !== 'undefined') ? SynopsisLock : null
+              };
               document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => {
-                  if(['script','breakdown','board'].indexOf(btn.dataset.tab) === -1) return;
+                  const famille = familles[btn.dataset.tab];
+                  if(!famille) return;
+                  const tenues = famille.tous();
+                  const autres = Object.keys(tenues).filter(id => !LockManager._mine(tenues[id]));
                   const vieux = btn.querySelector('.dlock-avatar-scene');
                   if(vieux) vieux.remove();
                   if(!autres.length) return;
@@ -478,9 +495,10 @@ const LockManager = {
                   const em = (l.holder_email || '').toLowerCase();
                   if(em) av.style.background = Utils.getColor(em);
                   av.textContent = autres.length > 1 ? String(autres.length) : (LockManager._who(l)[0] || '?').toUpperCase();
+                  const quoi = (btn.dataset.tab === 'synopsis') ? 'section' : 'scène';
                   av.title = autres.length > 1
-                      ? ('✍️ ' + autres.length + ' scènes en cours d\'écriture — les autres restent ouvertes')
-                      : ('✍️ ' + LockManager._who(l) + ' écrit une scène — les autres restent ouvertes');
+                      ? ('✍️ ' + autres.length + ' ' + quoi + 's en cours d\'écriture — les autres restent ouvertes')
+                      : ('✍️ ' + LockManager._who(l) + ' écrit une ' + quoi + ' — les autres restent ouvertes');
                   btn.appendChild(av);
               });
           } catch(e) { console.warn('[Lock] badge de scene :', e && e.message); }
@@ -646,7 +664,7 @@ const LockManager = {
               return;
           }
           // v601 : les verrous de SCENE battent au meme rythme que les domaines.
-          try { if(typeof SceneLock !== 'undefined') await SceneLock.battre(); } catch(e) {}
+          try { if(typeof VerrouFin !== 'undefined') await VerrouFin.battreTout(); } catch(e) {}
           const doms = {};
           if(LockManager.currentDomain) doms[LockManager.currentDomain] = true;
           Object.keys(LockManager.winDomains || {}).forEach(d => { doms[d] = true; });

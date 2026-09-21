@@ -4955,7 +4955,7 @@ const CardModal = {
             }) + FicheBlocks.renderTabbed(blocks, 'scene')
             + '</div>';
         CardModal.applyRights('scene');
-        try { if(typeof SceneLock !== 'undefined') SceneLock.marquerEcrans(); } catch(e) {}
+        try { if(typeof VerrouFin !== 'undefined') VerrouFin.marquerTout(); } catch(e) {}
         if(modal) modal.classList.add('visible');
         // v581 : les briques sont equilibrees par hauteur une fois visibles
         // (mesure reelle du DOM), meme mecanique que les six autres familles.

@@ -125,7 +125,7 @@
               if(!el) return;
               if(id) el.dataset.sceneId = id; else delete el.dataset.sceneId;
           });
-          try { if(typeof SceneLock !== 'undefined') SceneLock.marquerEcrans(); } catch(e) {}
+          try { if(typeof VerrouFin !== 'undefined') VerrouFin.marquerTout(); } catch(e) {}
       },
 
       renderFiches: (scene) => {
