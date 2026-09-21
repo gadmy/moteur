@@ -197,6 +197,40 @@
                       if(Object.keys(savePatch).length === 0) return;
                   } catch(e) { console.warn('[Store] sections verrouillees :', e && e.message); }
               }
+              // v601 — FICHES TENUES PAR QUELQU'UN D'AUTRE (personnages, comediens).
+              // Meme regle que pour les scenes, et meme mecanique : on relit le
+              // serveur et on reprend SA version des fiches qu'il tient, meme si
+              // on les a modifiees. La difference avec le synopsis, c'est qu'ici
+              // il s'agit de LISTES : on ne peut pas retirer une cle entiere du
+              // paquet sans jeter aussi le travail des autres lignes.
+              if(typeof FicheLock !== 'undefined' && typeof StoreRealtime !== 'undefined' && saveBase) {
+                  let seulF = true;
+                  try { seulF = LockManager.isAlone(); } catch(e) {}
+                  const interdites = seulF ? {} : FicheLock.interdites();
+                  const collsAVoir = Object.keys(interdites).filter(c => Array.isArray(savePatch[c]));
+                  if(collsAVoir.length) {
+                      try {
+                          const { data: frais, error: errF } = await supabase.rpc('project_data_for_me', { p_id: id });
+                          if(!errF && frais) {
+                              const refusees = [];
+                              collsAVoir.forEach(coll => {
+                                  if(!Array.isArray(frais[coll])) return;
+                                  const fusion = StoreRealtime._listeAJour(
+                                      savePatch[coll], (saveBase && saveBase[coll]) || [], frais[coll],
+                                      Object.keys(interdites[coll]));
+                                  savePatch[coll] = fusion;
+                                  state.data[coll] = fusion;
+                                  (fusion._refusees || []).forEach(fid => refusees.push(interdites[coll][fid]));
+                              });
+                              if(refusees.length) {
+                                  Utils.toast('Fiche verrouillée par ' + refusees[0]
+                                      + ' : vos modifications n\'ont pas été enregistrées.', 'warning', 9000);
+                                  try { UI.renderAll(); } catch(e) {}
+                              }
+                          }
+                      } catch(e) { console.warn('[Store] relecture des fiches impossible :', e && e.message); }
+                  }
+              }
               // v601 — LE VRAI POINT DE PASSAGE DE TOUTE ECRITURE DE SCENE.
               // C'EST ICI, ET NULLE PART AILLEURS, que les modifications de scene
               // partent : aucun ecran n'appelle saveScene, tous passent par la

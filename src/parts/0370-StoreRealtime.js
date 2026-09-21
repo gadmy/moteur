@@ -88,6 +88,11 @@
       // scene passent vraiment. Renvoie aussi la liste de celles qu'on a du
       // reprendre, pour pouvoir le DIRE — une modification qui disparait sans
       // un mot est pire que pas de verrou du tout.
+      // v601 : la meme mecanique sert les SCENES et les FICHES (personnages,
+      // comediens). Rien de specifique aux scenes n'y est reste — c'est une
+      // liste d'objets a identifiant, quelle qu'elle soit.
+      _listeAJour: (miennes, base, fraiches, interdites) => StoreRealtime._scenesAJour(miennes, base, fraiches, interdites),
+
       _scenesAJour: (miennes, base, fraiches, interdites) => {
           const cle = (sc) => String((sc && sc.id) !== undefined && sc.id !== null ? sc.id : '');
           const mBase = new Map(); (base || []).forEach(sc => { const k = cle(sc); if(k) mBase.set(k, sc); });

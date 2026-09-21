@@ -17,7 +17,12 @@
           // ce qu'on lit — une lecture legerement en retard ne perd rien (c'est deja le
           // cas entre ce module et le Storyboard, domaine separe de longue date).
           scriptreport: { label: 'Rapports de script', keys: ['scriptReports'],                                                 tabs: ['scriptreport'] },
-          casting:      { label: 'Casting',      keys: ['characters','actors'],                                                       tabs: ['chars','actors'] },
+          // v601 — LE CASTING PASSE AU VERROU PAR FICHE (FicheLock). Sur les sept
+          // onglets qui s'y pretaient, c'est celui ou deux personnes travaillent
+          // vraiment en meme temps : on remplit une distribution a plusieurs.
+          // Les onglets Personnages et Comedien.nes ne se bloquent donc plus
+          // d'un bloc ; le badge reste, il cesse seulement de VERROUILLER.
+          // Les cles restent ecrites ici pour memoire : characters, actors.
           planning:     { label: 'Planning',     keys: ['shootingDays','workplanOverrides','publicCallsheets'],                       tabs: ['planning'] },
           budget:       { label: 'Budget',       keys: ['budget','expenses'],                                                         tabs: ['expenses'] },
           crew:         { label: 'Équipe',       keys: ['crew','orgs'],                                                               tabs: ['crew','orgs'] },
@@ -35,6 +40,15 @@
           // Les cles restent ecrites ici pour memoire : synopsis, synopsisShort,
           // synopsisLong, synopsisIntent, directorNote, producerNote.
           presentation: { label: 'Présentation', keys: ['presentation','titlePage','publicProjectData','isPublicProject'],           tabs: ['presentation','titlepage'] },
+          // v601 — CONTRATS N'AVAIT AUCUN VERROU. Trouve en recensant les
+          // dix-neuf onglets : tous avaient soit un verrou d'onglet, soit un
+          // verrou fin, soit une bonne raison de n'en pas avoir (Statistiques
+          // est en lecture seule). Celui-ci n'avait ni l'un ni l'autre, et pas
+          // de raison : ses trois cles s'ecrivent comme les autres. Deux
+          // personnes qui y travaillaient en meme temps s'ecrasaient, sans
+          // badge et sans message. Un verrou d'onglet suffit — un contrat se
+          // redige rarement a deux.
+          contrats:     { label: 'Contrats',     keys: ['contracts','contractTemplates','contractTemplatesHidden'],                     tabs: ['contracts'] },
           comments:     { label: 'Commentaires', keys: ['comments'],                                                                  tabs: [] }
       },
       forTab: (tabName) => {
@@ -545,7 +559,9 @@ const LockManager = {
                   script:    (typeof SceneLock !== 'undefined') ? SceneLock : null,
                   breakdown: (typeof SceneLock !== 'undefined') ? SceneLock : null,
                   board:     (typeof SceneLock !== 'undefined') ? SceneLock : null,
-                  synopsis:  (typeof SynopsisLock !== 'undefined') ? SynopsisLock : null
+                  synopsis:  (typeof SynopsisLock !== 'undefined') ? SynopsisLock : null,
+                  chars:     (typeof FicheLock !== 'undefined') ? FicheLock : null,
+                  actors:    (typeof FicheLock !== 'undefined') ? FicheLock : null
               };
               document.querySelectorAll('.tab-subbtn[data-tab], .tab-btn[data-tab]').forEach(btn => {
                   const famille = familles[btn.dataset.tab];
@@ -561,7 +577,7 @@ const LockManager = {
                   const em = (l.holder_email || '').toLowerCase();
                   if(em) av.style.background = Utils.getColor(em);
                   av.textContent = autres.length > 1 ? String(autres.length) : (LockManager._who(l)[0] || '?').toUpperCase();
-                  const quoi = (btn.dataset.tab === 'synopsis') ? 'section' : 'scène';
+                  const quoi = { synopsis: 'section', chars: 'fiche', actors: 'fiche' }[btn.dataset.tab] || 'scène';
                   av.title = autres.length > 1
                       ? ('✍️ ' + autres.length + ' ' + quoi + 's en cours d\'écriture — les autres restent ouvertes')
                       : ('✍️ ' + LockManager._who(l) + ' écrit une ' + quoi + ' — les autres restent ouvertes');

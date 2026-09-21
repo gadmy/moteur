@@ -97,7 +97,16 @@
             || (kindOf && typeof Permissions !== 'undefined' && Permissions.canEditFiche && !Permissions.canEditFiche(kindOf));
         items.forEach((item) => { 
             const idx = state.data[type].indexOf(item);
-            const div = document.createElement('div'); div.className = 'data-card'; 
+            const div = document.createElement('div'); div.className = 'data-card';
+            // v601 — LA CARTE DIT DE QUELLE FICHE ELLE PARLE, pour le verrou fin
+            // (voir FicheLock). Personnages et comediens seulement pour l'instant :
+            // decors, ressources et equipe gardent leur verrou d'onglet, et poser
+            // la marque sans retirer le verrou ferait dire deux choses a l'ecran.
+            // Cette meme fonction sert la LISTE et la FICHE ouverte en fenetre
+            // (CardModal.open reutilise ce rendu) : les deux sont donc couvertes
+            // d'un coup, sans avoir a y penser deux fois.
+            if(item && item.id && (kindOf === 'character' || kindOf === 'actor')) div.dataset.fiche = kindOf + ':' + item.id;
+            
             const delBtn = isView ? '' : `<button onclick="app.Actions.deleteDataItem('${type}', ${idx})" style="color:var(--danger);border:none;background:none;cursor:pointer">🗑️</button>`; 
             
             let groupSelect = '';
