@@ -384,28 +384,63 @@
           ['maquilleur', 'maquillage'],
           ['costumier', 'costumes'],
           ['electricien', 'electro', 'lumiere'],
-          ['regisseur', 'regie']
+          ['regisseur', 'regie'],
+          ['cadreur', 'cadre', 'image'],
+          ['scripte', 'script'],
+          ['production', 'producteur'],
+          ['machiniste', 'machinerie', 'grip']
       ],
+      _memeFamille: (mot, liste) => {
+          const f = CastingMatch._famille(mot);
+          return !!f && liste.some(m => CastingMatch._famille(m) === f);
+      },
       _famille: (mot) => {
           for(const fam of CastingMatch.SYNONYMES) {
               if(fam.some(m => CastingMatch._memeMot(m, mot))) return fam[0];
           }
           return null;
       },
+      // LE TECHNICIEN NE DECLARE PAS UN METIER, IL DECLARE UN DEPARTEMENT.
+      //  Mesure du 22 septembre, apres la remarque « tu ne prends plus en
+      //  compte les faux profils » : sur les profils techniciens, le champ
+      //  « role » est VIDE partout — mais « department » est rempli, et il dit
+      //  Costumes, Lumiere, Son, Montage, Etalonnage, Regie, Decors, Image…
+      //  Or chaque poste recherche porte DEJA son departement. Les deux cotes
+      //  se parlaient donc, dans un champ que je ne lisais pas. Encore la meme
+      //  erreur : j'avais cherche le metier la ou JE l'aurais range.
+      //  LES MOTS DU DEPARTEMENT REJOIGNENT DONC CEUX DU POSTE, et toute la
+      //  machinerie deja ecrite (debuts de mots, synonymes) s'y applique :
+      //  « Montage » retrouve « Monteur », « Lumiere » retrouve
+      //  « Electricien », « Cadre » retrouve « Cadreur ».
       noterTechnicien: (profil, facet, need) => {
           const raisons = [];
           const cherche = CastingMatch._mots(need.role || '');
+          const chercheDept = CastingMatch._mots(need.dept || '', true);
           // LE METIER PEUT VIVRE AILLEURS QUE DANS LA CASQUETTE. Le reste de
           // l'application lit le champ du profil quand la casquette est vide ;
           // je ne lisais que la casquette, donc je ne voyais rien la ou les
           // autres ecrans affichent un poste.
           const declare = CastingMatch._mots(facet.role || profil.role || '');
+          const declareDept = CastingMatch._mots(facet.department || profil.department || '', true);
           if(!cherche.length) return { score: 0, raisons: [] };
-          // AUCUN POSTE DECLARE : on ne l'ecarte pas, on le montre en dernier.
-          // Mesure du 22 septembre : sur 288 profils publics, TROIS declarent
-          // un metier. Ne rien proposer serait exact et inutile ; proposer en
-          // disant « poste non precise » laisse la personne juger.
-          if(!declare.length) return { score: 22, raisons: ['poste non précisé'] };
+          if(!declare.length) {
+              // Pas de metier ecrit, mais un DEPARTEMENT : c'est deja une
+              // reponse, et une bonne. On la compare au poste ET a son
+              // departement — « Montage » repond a « Monteur » comme a
+              // « Post-production ».
+              if(declareDept.length) {
+                  const versPoste = declareDept.some(d => cherche.some(m => CastingMatch._memeMot(m, d))
+                                     || CastingMatch._memeFamille(d, cherche));
+                  const versDept = declareDept.some(d => chercheDept.some(m => CastingMatch._memeMot(m, d)));
+                  if(versPoste) return { score: 50, raisons: ['département ' + (facet.department || profil.department)] };
+                  if(versDept)  return { score: 45, raisons: ['département ' + (facet.department || profil.department)] };
+                  // Un departement DECLARE mais different : ce n'est pas son
+                  // rayon. L'ecarter est plus juste que de le montrer partout.
+                  return { score: 0, raisons: [] };
+              }
+              // Rien du tout : on ne l'ecarte pas, on le montre en dernier.
+              return { score: 22, raisons: ['poste non précisé'] };
+          }
           const communs = cherche.filter(m => declare.some(d => CastingMatch._memeMot(m, d)));
           let score = 0;
           if(declare.length === cherche.length && communs.length === cherche.length) {
@@ -444,10 +479,12 @@
       // rapport rapproches par une marque de genre.
       HORS_METIER: ['chef', 'assistant', 'assistante', 'directeur', 'directrice',
                     'premier', 'premiere', 'rice', 'trice', 'euse', 'iere'],
-      _mots: (s) => String(s || '').toLowerCase()
+      // « court » garde les mots de trois lettres : les departements en ont
+      // (« Son »), et les ecarter revenait a ignorer tout le departement Son.
+      _mots: (s, court) => String(s || '').toLowerCase()
           .normalize('NFD').replace(/[̀-ͯ]/g, '')
           .replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)
-          .filter(m => m.length > 3 && CastingMatch.HORS_METIER.indexOf(m) < 0),
+          .filter(m => m.length > (court ? 2 : 3) && CastingMatch.HORS_METIER.indexOf(m) < 0),
       // Deux mots designent le meme metier s'ils sont identiques, ou s'ils
       // commencent pareil sur au moins cinq lettres : « operateur » et
       // « operatrice » se rejoignent sur « operat », « monteur » n'y va pas.
