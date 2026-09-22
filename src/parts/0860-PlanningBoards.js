@@ -70,6 +70,39 @@
         });
         return out;
     },
+    //  ==================================================================
+    //  LE METRAGE : CE QUI DIT QU'UNE JOURNEE EST TROP CHARGEE
+    //  ==================================================================
+    //  La duree estimee existe sur la fiche de scene depuis toujours
+    //  (« Duree estimee (min) », sc.time) et le plan de travail l'ignorait.
+    //  Mesure faite avant d'y toucher : 55 scenes sur 68 en portent une, de
+    //  0,2 a 5 minutes. C'est donc une donnee reelle, pas un champ decoratif.
+    //  ELLE EST STOCKEE EN TEXTE et peut contenir une virgule : « 2,5 » et
+    //  « 2.5 » sont la meme chose pour celui qui la tape, et deux choses
+    //  differentes pour parseFloat. On normalise a la lecture.
+    _dureeDe: (sc) => {
+        const t = String((sc && sc.time) || '').trim().replace(',', '.');
+        if(!t) return 0;
+        const n = parseFloat(t);
+        return (isFinite(n) && n > 0) ? n : 0;
+    },
+    dureeJour: (j) => PlanningBoards._scenesDe(j)
+        .reduce((somme, sc) => somme + PlanningBoards._dureeDe(sc), 0),
+    //  « 4,5 min » plutot que « 4.5 min » : on ecrit comme on parle.
+    _minutes: (n) => (Math.round(n * 10) / 10).toString().replace('.', ',') + ' min',
+    //  LA MOYENNE VIENT DU PROJET LUI-MEME, pas d'un chiffre que j'aurais
+    //  choisi. Une journee « lourde » n'a pas de definition universelle : une
+    //  serie tourne huit minutes par jour, un long-metrage deux. On compare
+    //  donc chaque journee a la moyenne DE CE TOURNAGE, et on le dit dans
+    //  l'infobulle pour que le signal reste interpretable.
+    SEUIL_LOURD: 1.5,
+    dureeMoyenne: () => {
+        const jours = PlanningBoards.journees().filter(l => l.plateau);
+        const avec = jours.filter(l => PlanningBoards.dureeJour(l.jour) > 0);
+        if(!avec.length) return 0;
+        return avec.reduce((s, l) => s + PlanningBoards.dureeJour(l.jour), 0) / avec.length;
+    },
+
     //  CE QUI DECIDE DE L'ORDRE DES JOURS. Un vehicule, un animal, un effet
     //  special ou de la figuration coutent cher et se preparent : on les voit
     //  d'un coup d'oeil, sans deplier le depouillement entier.
@@ -110,8 +143,9 @@
             PlanningBoards._scenesDe(l.jour).forEach(sc => {
                 const d = PlanningBoards._decorDe(sc);
                 if(!d) return;
-                if(!par[d]) par[d] = { jours: [], scenes: 0 };
+                if(!par[d]) par[d] = { jours: [], scenes: 0, min: 0 };
                 par[d].scenes++;
+                par[d].min += PlanningBoards._dureeDe(sc);
                 const eti = l.numero ? ('J' + l.numero) : PlanningBoards._dateCourte(l.jour.startDate || l.jour.date);
                 if(par[d].jours.indexOf(eti) < 0) par[d].jours.push(eti);
             });
@@ -120,7 +154,7 @@
         if(!noms.length) return '';
         const esc = Utils.escape;
         return '<div class="pdt-bloc"><h3 class="pdt-titre">🏠 Par décor</h3>'
-            + '<table class="pdt-table"><thead><tr><th>Décor</th><th>Jours</th><th>Scènes</th><th>Quand</th></tr></thead><tbody>'
+            + '<table class="pdt-table"><thead><tr><th>Décor</th><th>Jours</th><th>Scènes</th><th>Durée</th><th>Quand</th></tr></thead><tbody>'
             + noms.map(n => {
                 // Un decor eclate sur des jours eloignes se voit : c'est
                 // souvent la qu'on peut regrouper.
@@ -128,6 +162,7 @@
                 return '<tr><td>' + esc(n) + '</td>'
                      + '<td class="pdt-num">' + par[n].jours.length + '</td>'
                      + '<td class="pdt-num">' + par[n].scenes + '</td>'
+                     + '<td class="pdt-duree">' + (par[n].min ? PlanningBoards._minutes(par[n].min) : '') + '</td>'
                      + '<td>' + esc(par[n].jours.join(', '))
                      + (eclate ? ' <span class="pdt-alerte" title="Ce décor revient sur plusieurs journées : regroupables ?">⚠</span>' : '')
                      + '</td></tr>';
@@ -151,8 +186,23 @@
             return '<div class="pdt-bloc pdt-complet">✅ Les ' + total + ' scènes du scénario sont placées.</div>';
         }
         const plur = reste.length > 1;
+        // COMBIEN DE MINUTES RESTENT A CASER : « 12 scenes » ne dit pas s'il
+        // faut deux jours ou huit. La duree, si.
+        const min = reste.reduce((somme, sc) => somme + PlanningBoards._dureeDe(sc), 0);
+        const moy = PlanningBoards.dureeMoyenne();
+        const combien = min > 0
+            ? ' <span class="pdt-reste">' + PlanningBoards._minutes(min)
+              + (moy > 0 ? (() => {
+                    // ARRONDI AU PLUS PROCHE, pas au superieur : 4 min a 3,5
+                    // min/jour font « environ 1 jour », pas 2. Un plan de
+                    // travail qu'on soupconne d'exagerer, on cesse de le lire.
+                    const j = Math.max(1, Math.round(min / moy));
+                    return ', soit environ ' + j + ' jour' + (j > 1 ? 's' : '') + ' de plus';
+                  })() : '')
+              + '</span>'
+            : '';
         return '<div class="pdt-bloc pdt-manque"><h3 class="pdt-titre">⚠ ' + reste.length + ' scène'
-            + (plur ? 's' : '') + ' sur ' + total + (plur ? ' ne sont pas encore placées' : ' n’est pas encore placée') + '</h3>'
+            + (plur ? 's' : '') + ' sur ' + total + (plur ? ' ne sont pas encore placées' : ' n’est pas encore placée') + combien + '</h3>'
             + '<div class="pdt-scenes-libres">'
             + reste.map(sc => '<span class="pdt-scene" title="' + esc(sc.title || '') + '">'
                 + esc(sc.number || '?') + '</span>').join(' ')
@@ -206,10 +256,12 @@
         const lignes = PlanningBoards.journees();
         if(!lignes.length) return '';
         const esc = Utils.escape;
+        const moyenne = PlanningBoards.dureeMoyenne();
+        let total = 0;
         let html = '<div class="pdt-bloc"><h3 class="pdt-titre">📆 Les journées</h3>'
                  + '<table class="pdt-table"><thead><tr>'
                  + '<th>Jour</th><th>Date</th><th>Décor</th><th>Effet</th>'
-                 + '<th>Scènes</th><th>Personnages</th><th>À préparer</th>'
+                 + '<th>Scènes</th><th>Durée</th><th>Personnages</th><th>À préparer</th>'
                  + '</tr></thead><tbody>';
         lignes.forEach(l => {
             const j = l.jour;
@@ -233,6 +285,20 @@
                 + '<td>' + (scenes.length
                       ? scenes.map(sc => '<span class="pdt-scene" title="' + esc(sc.title || '') + '">' + esc(sc.number || '?') + '</span>').join(' ')
                       : '') + '</td>'
+                + (() => {
+                    const d = PlanningBoards.dureeJour(j);
+                    total += d;
+                    if(!d) return '<td class="pdt-duree"></td>';
+                    // LOURDE PAR RAPPORT A CE TOURNAGE-CI, pas a un chiffre
+                    // que j'aurais choisi : une serie tourne huit minutes par
+                    // jour, un long-metrage deux.
+                    const lourde = moyenne > 0 && d > moyenne * PlanningBoards.SEUIL_LOURD;
+                    const info = lourde
+                        ? ' title="' + esc(Math.round(d / moyenne * 10) / 10 + '× la moyenne de ce tournage (' + PlanningBoards._minutes(moyenne) + ' par jour)') + '"'
+                        : '';
+                    return '<td class="pdt-duree' + (lourde ? ' est-lourde' : '') + '"' + info + '>'
+                         + PlanningBoards._minutes(d) + (lourde ? ' ⚠' : '') + '</td>';
+                  })()
                 + '<td class="pdt-persos">' + esc(persos.join(', ')) + '</td>'
                 + '<td class="pdt-lourds">' + lourds.map(x => '<span class="pdt-lourd" title="' + esc(x.quoi.join(', ')) + '">' + x.icone + ' ' + x.n + ' ' + esc(x.mot) + '</span>').join(' ') + '</td>'
             + '</tr>';
@@ -240,6 +306,9 @@
         const nPlateau = lignes.filter(l => l.plateau).length;
         const nAutres = lignes.length - nPlateau;
         html += '</tbody></table>'
+             + (total > 0 ? '<div class="pdt-note"><strong>' + PlanningBoards._minutes(total)
+                  + '</strong> placés, soit ' + PlanningBoards._minutes(moyenne)
+                  + ' par jour de tournage en moyenne.</div>' : '')
              + '<div class="pdt-note">' + nPlateau + ' jour' + (nPlateau > 1 ? 's' : '') + ' de tournage'
              + (nAutres ? ' · ' + nAutres + ' autre' + (nAutres > 1 ? 's journées' : ' journée') + ' (repérage, essais, probable…), sans numéro : seuls les jours de plateau se comptent.' : '')
              + '</div></div>';
