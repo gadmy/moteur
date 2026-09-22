@@ -2283,7 +2283,11 @@ const Notifications = {
             'message': '💬',
             'script_comments': '💬',
             'modification': '✏️',
-            'share': '👥'
+            'share': '👥',
+            // v601 : quelqu'un s'est declare indisponible un jour ou il devait
+            // tourner. Ce n'est pas un message ordinaire : le plan de travail
+            // est a refaire.
+            'dispo_annulee': '⚠️'
         };
         return icons[type] || '🔔';
     },
@@ -2355,7 +2359,10 @@ const Notifications = {
         const notif = {
             user_email: toEmail.toLowerCase(),
             type: type,
-            title: type === 'invite' ? '📨 Invitation' : '🔔 Notification',
+            // Le titre dit de quoi il s'agit AVANT d'ouvrir : « Notification »
+            // pour tout ne prevenait de rien.
+            title: type === 'invite' ? '📨 Invitation'
+                 : (type === 'dispo_annulee' ? '⚠️ Disponibilité annulée' : '🔔 Notification'),
             message: message,
             link: projectId,
             read: false

@@ -19,6 +19,110 @@
       return (personType === 'actor') ? state.data.actors[personIdx] : state.data.crew[personIdx];
   },
 
+  //  Ce qui tombe ce jour-la dans MES projets. Hors « Mon profil », rien :
+  //  dans un projet, la fiche d'un comedien n'a pas a afficher les tournages
+  //  qu'il fait ailleurs.
+  // ====================================================================
+  //  SE DIRE INDISPONIBLE UN JOUR OU L'ON TOURNE (v601)
+  // ====================================================================
+  //  On ne BLOQUE pas : c'est la vie de la personne, pas celle du projet.
+  //  On previent, on demande, et si elle confirme, la production l'apprend
+  //  le jour meme plutot que la veille du tournage.
+  //  LES BOUTONS DISENT CE QU'ILS FONT. « Continuer / Annuler » dans une
+  //  fenetre qui parle de tournage se lit dans les deux sens : continuer
+  //  quoi, mon indispo ou mon tournage ? Chaque bouton porte donc sa phrase
+  //  entiere, et la case a cocher oblige a lire avant de confirmer.
+  _sansDemande: false,
+  _tournagesHeurtes: (dates) => {
+      const vus = {}, out = [];
+      (dates || []).forEach(d => {
+          UI._joursProjetsAuJour(d).forEach(j => {
+              if(vus[j.id]) return;
+              vus[j.id] = 1;
+              out.push(j);
+          });
+      });
+      return out;
+  },
+  demanderConflit: (heurts, dates, siJeConfirme) => {
+      const ov = document.createElement('div');
+      ov.className = 'confirm-modal-overlay';
+      ov.id = 'conflit-modal';
+      const jour = (d) => { try { return Planning.jolieDate(d); } catch(e) { return d; } };
+      const quand = (dates.length === 1) ? jour(dates[0])
+                  : ('du ' + jour(dates[0]) + ' au ' + jour(dates[dates.length - 1]));
+      const lignes = heurts.map(j => {
+          const sc = (!j.probable && j.scenes && j.scenes.length)
+              ? '<span>Vous étiez prévu·e sur : ' + Utils.escape(j.scenes.join(', ')) + '</span>' : '';
+          const quoi = j.probable ? '❓ Tournage probable' : '🎬 Tournage';
+          return '<div class="conflit-ligne"><strong>' + quoi + ' — ' + Utils.escape(j.titre || 'projet') + '</strong>'
+               + '<span>' + Utils.escape(jour(j.date)) + '</span>' + sc + '</div>';
+      }).join('');
+      ov.innerHTML = '<div class="confirm-modal-box" style="max-width:520px;">'
+          + '<h3 style="margin:0 0 4px;">Vous jouez pour un projet ce jour-là</h3>'
+          + '<p style="margin:0 0 12px; font-size:.82rem; color:var(--text-sec);">Vous êtes en train de vous déclarer <strong>indisponible</strong> ' + Utils.escape(quand) + '.</p>'
+          + '<div class="conflit-liste">' + lignes + '</div>'
+          + '<label class="conflit-sur"><input type="checkbox" id="conflit-sur"> J’ai compris : la production sera prévenue que je ne suis plus disponible.</label>'
+          + '<div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px; flex-wrap:wrap;">'
+            + '<button class="btn btn--secondary btn--sm" data-act="rien">Non, laisser mon calendrier comme avant</button>'
+            + '<button class="btn btn--primary btn--sm" data-act="ok" id="conflit-ok" disabled>Oui, je ne suis plus disponible</button>'
+          + '</div>'
+      + '</div>';
+      document.body.appendChild(ov);
+      const fermer = () => { const m = document.getElementById('conflit-modal'); if(m) m.remove(); };
+      const sur = ov.querySelector('#conflit-sur'), ok = ov.querySelector('#conflit-ok');
+      if(sur && ok) sur.addEventListener('change', () => { ok.disabled = !sur.checked; });
+      ov.addEventListener('click', (e) => {
+          const act = e.target && e.target.dataset ? e.target.dataset.act : null;
+          if(e.target === ov || act === 'rien') { fermer(); return; }
+          if(act !== 'ok' || (sur && !sur.checked)) return;
+          fermer();
+          try { siJeConfirme(); } catch(err) { console.warn('[Dispos] conflit:', err && err.message); }
+      });
+  },
+  //  Le message part a CHAQUE projet concerne, au porteur et a l'assistant
+  //  realisateur s'il y en a un. Le texte dit la date et, quand il y a une
+  //  feuille de service, les scenes ou la personne etait prevue — sans elle
+  //  (blocage de journee), il n'y a rien a dire de plus.
+  prevenirProduction: async (heurts, dates) => {
+      if(typeof Notifications === 'undefined' || !Notifications.send) return;
+      let moi = '';
+      try {
+          const p = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+          moi = (p && p.name) || (state.currentUser && state.currentUser.email) || 'Quelqu’un';
+      } catch(e) { moi = 'Quelqu’un'; }
+      let envoyes = 0;
+      for(const j of heurts) {
+          const sc = (!j.probable && j.scenes && j.scenes.length)
+              ? ' Il/elle était prévu·e sur : ' + j.scenes.join(', ') + '.' : '';
+          const texte = moi + ' n’est plus disponible le ' + j.date + '.' + sc;
+          for(const dest of (j.destinataires || [])) {
+              try { await Notifications.send(dest, 'dispo_annulee', texte, j.projet); envoyes++; }
+              catch(e) { console.warn('[Dispos] envoi:', e && e.message); }
+          }
+      }
+      Utils.toast(envoyes
+          ? 'Indisponibilité enregistrée. La production a été prévenue.'
+          : 'Indisponibilité enregistrée. Aucun contact de production n’a pu être prévenu — prévenez-les directement.',
+          envoyes ? 'success' : 'warning', 8000);
+  },
+
+  _joursProjetsAuJour: (dateStr) => {
+      try {
+          if(typeof PublicProfile === 'undefined' || !PublicProfile._engineMode) return [];
+          const p = PublicProfile.profiles[PublicProfile.currentProfileIndex];
+          if(!p || !p.id) return [];
+          return PublicProfile.joursAuJour(p.id, dateStr);
+      } catch(e) { return []; }
+  },
+  //  L'infobulle : « tournage probable — nom du projet », et les scenes
+  //  quand il y a une feuille de service.
+  _texteJoursProjets: (jours) => (jours || []).map(j => {
+      const tete = j.probable ? '❓ Tournage probable' : '🎬 Tournage';
+      const sc = (!j.probable && j.scenes && j.scenes.length) ? ' — ' + j.scenes.join(', ') : '';
+      return tete + ' — ' + (j.titre || 'projet') + sc;
+  }).join('\n'),
+
 	renderAvailabilityCalendar: (containerId, personType, personIdx) => {
       const container = document.getElementById(containerId);
       if(!container) return;
@@ -90,15 +194,25 @@
           const isUnavail = isDateUnavailable(dateStr);
           
           const shootingInfo = isDateShooting(dateStr);
+          // v601 : dans MON profil, les jours viennent des projets dont je
+          // suis membre — personne n'ecrit dans mon agenda, c'est mon agenda
+          // qui va les lire (voir PublicProfile.profileDays).
+          const desProjets = UI._joursProjetsAuJour(dateStr);
+          const probable = desProjets.some(j => j.probable);
+          const arrete = desProjets.some(j => !j.probable);
           
           let dayClass = 'availability-calendar-day';
+          if(probable && !arrete) dayClass += ' tournage-probable';
+          if(arrete) dayClass += ' tournage-prevu';
           if(isToday) dayClass += ' today';
           if(shootingInfo) dayClass += ' shooting';
           else if(isAvail) dayClass += ' available';
           if(isUnavail) dayClass += ' unavailable';
           if(isLocked) dayClass += ' locked';
           
-          const shootTitle = shootingInfo ? `title="🎬 J${shootingInfo.dayNumber} - ${shootingInfo.projectName}${shootingInfo.callTime ? ' | Convoc: ' + shootingInfo.callTime : ''}${shootingInfo.location ? ' | ' + shootingInfo.location : ''}"` : '';
+          let shootTitle = shootingInfo ? `title="🎬 J${shootingInfo.dayNumber} - ${shootingInfo.projectName}${shootingInfo.callTime ? ' | Convoc: ' + shootingInfo.callTime : ''}${shootingInfo.location ? ' | ' + shootingInfo.location : ''}"` : '';
+          if(desProjets.length) shootTitle = `title="${Utils.escape(UI._texteJoursProjets(desProjets))}"`;
+          const marque = arrete ? '🎬' : (probable ? '❓' : '');
           
           html += `<div class="${dayClass}" 
               data-date="${dateStr}"
@@ -106,7 +220,7 @@
               ${!isLocked ? `onmousedown="app.UI.startCalendarDrag('${containerId}', '${personType}', ${personIdx}, '${dateStr}', event)"
               onmouseenter="app.UI.continueCalendarDrag('${dateStr}')"
               onmouseup="app.UI.endCalendarDrag()"` : ''}
-              oncontextmenu="return false;">${day}</div>`;
+              oncontextmenu="return false;">${day}${marque ? `<span class="jour-marque">${marque}</span>` : ''}</div>`;
       }
       
       html += `</div></div>`;
@@ -177,6 +291,26 @@
           dates.sort();
           const from = dates[0];
           const to = dates[dates.length - 1];
+          
+          // v601 : se declarer INDISPONIBLE un jour ou l'on tourne se demande
+          // AVANT de poser la plage. On ne bloque pas — on previent, et si la
+          // personne confirme, la production l'apprend le jour meme plutot
+          // que la veille du tournage.
+          if(isRightClick && !UI._sansDemande) {
+              const heurts = UI._tournagesHeurtes(dates);
+              if(heurts.length) {
+                  UI._calendarDrag = { active: false, containerId: UI._calendarDrag.containerId, personType, personIdx, startDate: null, dates: [], isRightClick: false };
+                  document.removeEventListener('mouseup', UI.endCalendarDrag);
+                  UI.demanderConflit(heurts, dates, () => {
+                      UI._calendarDrag = { active: true, containerId: UI._calendarDrag.containerId, personType, personIdx, startDate: from, dates: dates.slice(), isRightClick: true };
+                      UI._sansDemande = true;
+                      UI.endCalendarDrag();
+                      UI._sansDemande = false;
+                      UI.prevenirProduction(heurts, dates);
+                  });
+                  return;
+              }
+          }
           
           const person = UI._personneCalendrier(personType, personIdx);
           if(person) {

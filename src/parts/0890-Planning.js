@@ -18,8 +18,21 @@
         'autre': { icon: '📌', color: '#795548', label: 'Autre' },
         'preparation': { icon: '🧰', color: '#009688', label: 'Préparation' },
         'essais-camera': { icon: '📷', color: '#2196F3', label: 'Essais caméra' },
-        'essais-lumiere': { icon: '💡', color: '#F9A825', label: 'Essais lumière' }
+        'essais-lumiere': { icon: '💡', color: '#F9A825', label: 'Essais lumière' },
+        // v601 - UN JOUR QU'ON PRESSENT SANS L'AVOIR ARRETE. Il se pose d'un
+        // clic droit sur une case vide, sans feuille de service ni scenes :
+        // c'est justement ce qui le distingue d'un jour de tournage, et ce
+        // qu'on veut pouvoir dire a l'equipe avant d'avoir tout cale.
+        // Il porte « probable: true » : c'est SUR CE DRAPEAU que tout le reste
+        // decide (la pastille dans les agendas, le ton du message), jamais sur
+        // la chaine « probable » — une cle de stockage se compare, elle ne
+        // s'ecrit pas deux fois.
+        'probable': { icon: '❓', color: '#9E9E9E', label: 'Tournage probable', probable: true }
     },
+
+    // Ce jour est-il un simple « probable » ? Une seule facon de le demander.
+    estProbable: (jour) => !!(jour && (jour.dayType === 'probable'
+        || (Planning.dayTypes[jour.dayType] && Planning.dayTypes[jour.dayType].probable))),
 
     // Clés triées alphabétiquement par label (Autre en dernier) : source unique des selects
     dayTypesSorted: () => {
@@ -272,6 +285,65 @@
     renderWeekView: (...a) => PlanningCalendarViews.renderWeekView(...a),
     renderDayView: (...a) => PlanningCalendarViews.renderDayView(...a),
     
+    // ==================================================================
+    //  MARQUER UN JOUR « TOURNAGE PROBABLE » (v601)
+    // ==================================================================
+    //  Clic droit sur une case vide du calendrier. On ne demande rien
+    //  d'autre : un jour probable n'a ni scenes ni feuille de service, et
+    //  c'est le but — on previent l'equipe avant d'avoir tout cale.
+    menuJourVide: (ev, dateStr) => {
+        if(ev) { ev.preventDefault(); ev.stopPropagation(); }
+        Planning.fermerMenuJour();
+        if(state.currentRole === 'viewer') return;
+        const menu = document.createElement('div');
+        menu.id = 'menu-jour-vide';
+        menu.className = 'menu-jour-vide';
+        const t = Planning.dayTypes['probable'];
+        menu.innerHTML = '<div class="menu-jour-tete">' + Utils.escape(Planning.jolieDate(dateStr)) + '</div>'
+            + '<button class="menu-jour-item" data-act="probable">' + t.icon + ' Marquer « ' + t.label + ' »</button>'
+            + '<button class="menu-jour-item" data-act="ouvrir">✏️ Créer une journée complète…</button>';
+        let x = ev ? ev.clientX : 40, y = ev ? ev.clientY : 40;
+        if(x + 250 > window.innerWidth) x = window.innerWidth - 260;
+        if(y + 120 > window.innerHeight) y = window.innerHeight - 130;
+        menu.style.left = Math.max(8, x) + 'px';
+        menu.style.top = Math.max(8, y) + 'px';
+        menu.addEventListener('click', (e) => {
+            const act = e.target && e.target.dataset ? e.target.dataset.act : null;
+            if(!act) return;
+            Planning.fermerMenuJour();
+            if(act === 'probable') Planning.poserProbable(dateStr);
+            else Planning.openDay(dateStr);
+        });
+        document.body.appendChild(menu);
+        setTimeout(() => { document.addEventListener('click', Planning.fermerMenuJour, { once: true }); }, 10);
+    },
+    fermerMenuJour: () => { const m = document.getElementById('menu-jour-vide'); if(m) m.remove(); },
+    jolieDate: (dateStr) => {
+        try {
+            const d = new Date(String(dateStr) + 'T12:00:00');
+            if(isNaN(d.getTime())) return String(dateStr || '');
+            return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        } catch(e) { return String(dateStr || ''); }
+    },
+    poserProbable: (dateStr) => {
+        if(state.currentRole === 'viewer') return;
+        if(!state.data.shootingDays) state.data.shootingDays = [];
+        if(Planning.getShootDay(dateStr)) { Utils.toast('Il y a déjà une journée ce jour-là.', 'info'); return; }
+        const t = Planning.dayTypes['probable'];
+        const jour = {
+            id: 'day_' + Utils.generateUniqueId(),
+            date: dateStr, startDate: dateStr, endDate: dateStr,
+            dayType: 'probable', name: t.label,
+            scenes: [], callSheet: [], validated: false
+        };
+        state.data.shootingDays.push(jour);
+        try { History.log('ADD', 'Tournage probable le ' + dateStr, { link: { kind: 'day', id: jour.id } }); } catch(e) {}
+        Store.save();
+        Planning.render();
+        Utils.toast(t.icon + ' Tournage probable posé le ' + Planning.jolieDate(dateStr)
+            + ' — il apparaît dans l’agenda des membres du projet.', 'success', 7000);
+    },
+
     openDay: (dateStr) => {
         const shootDay = Planning.getShootDay(dateStr);
         if(shootDay) {

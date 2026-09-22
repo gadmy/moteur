@@ -22,7 +22,7 @@
             const day = prevMonth.getDate() - i;
             const dateStr = Planning.formatDate(new Date(year, month - 1, day));
             const shootDay = Planning.getShootDay(dateStr);
-            html += `<div class="planning-day other-month" data-date="${dateStr}" onclick="app.Planning.openDay('${dateStr}')" ondragover="app.Planning.onDragOver(event)" ondrop="app.Planning.onDrop(event, '${dateStr}')">
+            html += `<div class="planning-day other-month" data-date="${dateStr}" onclick="app.Planning.openDay('${dateStr}')" oncontextmenu="app.Planning.menuJourVide(event, '${dateStr}')" ondragover="app.Planning.onDragOver(event)" ondrop="app.Planning.onDrop(event, '${dateStr}')">
                 <div class="planning-day-number">${day}</div>
                 ${shootDay ? (() => { const typeInfo = Planning.getDayTypeInfo(shootDay.dayType); return `<div class="planning-day-shoot" style="background: ${typeInfo.color};" draggable="true" ondragstart="app.Planning.onDragStart(event, '${shootDay.id}')" onclick="event.stopPropagation(); app.Planning.editShootDay('${shootDay.id}')" oncontextmenu="event.preventDefault(); event.stopPropagation(); app.Planning.showDayContextMenu(event, '${shootDay.id}')" title="${typeInfo.icon} ${Utils.escape(shootDay.name || typeInfo.label)}"><span class="month-resize-handle left" onmousedown="event.stopPropagation(); app.Planning.startResizeHorizontal(event, '${shootDay.id}', 'left')"></span>${typeInfo.icon} ${Utils.escape(shootDay.name || typeInfo.label).substring(0, 10)}<span class="month-resize-handle right" onmousedown="event.stopPropagation(); app.Planning.startResizeHorizontal(event, '${shootDay.id}', 'right')"></span></div>`; })() : ''}
             </div>`;
@@ -56,7 +56,7 @@
             if(isToday) classes += ' today';
             if(hasShoot) classes += ' has-shoot';
             
-            html += `<div class="${classes}" data-date="${dateStr}" onclick="app.Planning.openDay('${dateStr}')" ondragover="app.Planning.onDragOver(event)" ondrop="app.Planning.onDrop(event, '${dateStr}')">
+            html += `<div class="${classes}" data-date="${dateStr}" onclick="app.Planning.openDay('${dateStr}')" oncontextmenu="app.Planning.menuJourVide(event, '${dateStr}')" ondragover="app.Planning.onDragOver(event)" ondrop="app.Planning.onDrop(event, '${dateStr}')">
                 <div class="planning-day-number">${day}</div>
                 ${availHTML}
                 ${shootDay ? (() => { const typeInfo = Planning.getDayTypeInfo(shootDay.dayType); return `<div class="planning-day-shoot" style="background: ${typeInfo.color};" draggable="true" ondragstart="app.Planning.onDragStart(event, '${shootDay.id}')" onclick="event.stopPropagation(); app.Planning.editShootDay('${shootDay.id}')" oncontextmenu="event.preventDefault(); event.stopPropagation(); app.Planning.showDayContextMenu(event, '${shootDay.id}')" title="${typeInfo.icon} ${Utils.escape(shootDay.name || typeInfo.label)}"><span class="month-resize-handle left" onmousedown="event.stopPropagation(); app.Planning.startResizeHorizontal(event, '${shootDay.id}', 'left')"></span>${typeInfo.icon} ${Utils.escape(shootDay.name || typeInfo.label).substring(0, 10)}<span class="month-resize-handle right" onmousedown="event.stopPropagation(); app.Planning.startResizeHorizontal(event, '${shootDay.id}', 'right')"></span></div>`; })() : ''}
@@ -69,7 +69,7 @@
         for(let day = 1; day <= remaining; day++) {
             const dateStr = Planning.formatDate(new Date(year, month + 1, day));
             const shootDay = Planning.getShootDay(dateStr);
-            html += `<div class="planning-day other-month" data-date="${dateStr}" onclick="app.Planning.openDay('${dateStr}')" ondragover="app.Planning.onDragOver(event)" ondrop="app.Planning.onDrop(event, '${dateStr}')">
+            html += `<div class="planning-day other-month" data-date="${dateStr}" onclick="app.Planning.openDay('${dateStr}')" oncontextmenu="app.Planning.menuJourVide(event, '${dateStr}')" ondragover="app.Planning.onDragOver(event)" ondrop="app.Planning.onDrop(event, '${dateStr}')">
                 <div class="planning-day-number">${day}</div>
                 ${shootDay ? (() => { const typeInfo = Planning.getDayTypeInfo(shootDay.dayType); return `<div class="planning-day-shoot" style="background: ${typeInfo.color};" draggable="true" ondragstart="app.Planning.onDragStart(event, '${shootDay.id}')" onclick="event.stopPropagation(); app.Planning.editShootDay('${shootDay.id}')" oncontextmenu="event.preventDefault(); event.stopPropagation(); app.Planning.showDayContextMenu(event, '${shootDay.id}')" title="${typeInfo.icon} ${Utils.escape(shootDay.name || typeInfo.label)}"><span class="month-resize-handle left" onmousedown="event.stopPropagation(); app.Planning.startResizeHorizontal(event, '${shootDay.id}', 'left')"></span>${typeInfo.icon} ${Utils.escape(shootDay.name || typeInfo.label).substring(0, 10)}<span class="month-resize-handle right" onmousedown="event.stopPropagation(); app.Planning.startResizeHorizontal(event, '${shootDay.id}', 'right')"></span></div>`; })() : ''}
             </div>`;

@@ -9,8 +9,102 @@
     
     // ===== PROJETS ASSOCIÉS / VISIBILITÉ =====
     // Charge les projets associés à chaque profil
+    // ==================================================================
+    //  MES JOURS DE TOURNAGE, VUS DEPUIS MON PROFIL (v601)
+    // ==================================================================
+    //  « Mettre sur les agendas de tous les comediens et techniciens une
+    //  pastille pour leur signaler qu'ils ont un tournage. »
+    //  ON N'ECRIT PAS DANS L'AGENDA DES AUTRES — on ne le peut pas, et il ne
+    //  faudrait pas : le serveur refuse qu'un compte touche au profil d'un
+    //  autre. C'est l'agenda qui VA LIRE les projets dont on est membre. Le
+    //  resultat est le meme a l'ecran, et il est juste par construction : le
+    //  jour bouge dans le projet, l'agenda suit, sans rien a resynchroniser.
+    //  DEUX REGLES, ET ELLES DECOULENT DE CE QU'EST CHAQUE JOUR :
+    //    - un tournage PROBABLE n'a ni scenes ni feuille de service, donc
+    //      personne n'y est convoque nommement : il concerne TOUS les membres
+    //      du projet, c'est exactement ce qu'on veut annoncer ;
+    //    - un jour ARRETE a une feuille de service, donc il ne concerne que
+    //      les personnes qui y sont convoquees.
+    //  Cela ne marche QUE pour les membres du projet : quelqu'un dont la
+    //  fiche a ete creee sans invitation ne voit pas le projet du tout, donc
+    //  n'en verra pas les jours. C'est la regle des acces, pas une limite
+    //  qu'on ajoute ici.
+    profileDays: {},
+    //  QUI PREVENIR QUAND QUELQU'UN SE DESISTE : le CREATEUR du projet, et
+    //  l'assistant·e realisateur — ou le realisateur s'il n'y a pas
+    //  d'assistant. Deux personnes, pas l'equipe entiere : un desistement se
+    //  regle entre ceux qui refont le plan de travail, pas en prevenant
+    //  quinze personnes qui n'y peuvent rien.
+    //  L'ASSISTANT PASSE AVANT LE REALISATEUR, et seulement a defaut : quand
+    //  il y a un assistant, c'est lui qui tient le plan de travail, et
+    //  doubler le message ferait deux personnes a s'en occuper.
+    //  ON CALCULE AU CHARGEMENT, avec les donnees du projet deja sous la
+    //  main : les chercher au moment du desistement demanderait de relire le
+    //  projet pour une reponse qu'on avait deja.
+    _poste: (m) => String((m && m.role) || '').toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+    estAssistantReal: (m) => {
+        const p = PublicProfile._poste(m);
+        return /real/.test(p) && /(assistant|assistante)/.test(p);
+    },
+    estRealisateur: (m) => {
+        const p = PublicProfile._poste(m);
+        // « realisateur », « realisatrice », « realisateur·rice » — mais pas
+        // l'assistant, ni un « directeur de realisation » qui n'existe pas
+        // dans le referentiel.
+        return /^realisat/.test(p.trim()) || (/real/.test(p) && !/(assistant|assistante)/.test(p) && /realisat/.test(p));
+    },
+    _destinatairesProjet: (data, projectInfo) => {
+        const out = [];
+        const ajoute = (e) => {
+            const v = String(e || '').trim().toLowerCase();
+            if(v && v.indexOf('@') > 0 && out.indexOf(v) < 0) out.push(v);
+        };
+        ajoute(projectInfo.ownerEmail);
+        const equipe = (data && data.crew) || [];
+        const assistants = equipe.filter(m => m && PublicProfile.estAssistantReal(m));
+        const aPrevenir = assistants.length ? assistants
+                        : equipe.filter(m => m && PublicProfile.estRealisateur(m));
+        aPrevenir.forEach(m => ajoute(m.email));
+        return out;
+    },
+    _joursDeProjet: (data, projectInfo) => {
+        const out = [];
+        const destinataires = PublicProfile._destinatairesProjet(data, projectInfo);
+        const jours = (data && data.shootingDays) || [];
+        const titres = {};
+        (data && data.scenes || []).forEach(sc => { if(sc && sc.id) titres[sc.id] = sc.title || ''; });
+        jours.forEach(j => {
+            if(!j) return;
+            const probable = (typeof Planning !== 'undefined' && Planning.estProbable)
+                ? Planning.estProbable(j) : (j.dayType === 'probable');
+            out.push({
+                id: j.id, date: j.date || j.startDate || '', fin: j.endDate || j.date || j.startDate || '',
+                probable: probable,
+                nom: j.name || '',
+                projet: projectInfo.projectId, titre: projectInfo.projectTitle,
+                destinataires: destinataires,
+                convoques: (j.callSheet || []).filter(c => c && c.personId).map(c => c.type + ':' + c.personId),
+                scenes: (j.scenes || []).map(sc => titres[sc && sc.sceneId] || '').filter(Boolean)
+            });
+        });
+        return out;
+    },
+    //  Les jours qui concernent CETTE fiche dans CE projet.
+    _joursPourFiche: (joursProjet, espece, ficheId) => {
+        const cle = espece + ':' + ficheId;
+        return joursProjet.filter(j => j.probable || j.convoques.indexOf(cle) >= 0);
+    },
+    //  Tous mes jours, tous projets confondus, tries par date.
+    joursDe: (profilId) => (PublicProfile.profileDays[profilId] || [])
+        .slice().sort((a, b) => String(a.date).localeCompare(String(b.date))),
+    //  Ce qui tombe un jour donne (format AAAA-MM-JJ).
+    joursAuJour: (profilId, dateStr) => PublicProfile.joursDe(profilId)
+        .filter(j => j.date && dateStr >= j.date && dateStr <= (j.fin || j.date)),
+
     loadProfileProjects: async () => {
         PublicProfile.profileProjects = {};
+        PublicProfile.profileDays = {};
         if(!state.currentUser || PublicProfile.profiles.length === 0) return;
         
         try {
@@ -27,11 +121,24 @@
                 const data = projectData || null;
                 if(!data) continue;
                 
-                const projectInfo = { projectId: project.id, projectTitle: project.title || 'Sans titre', ownership: project.role };
+                const projectInfo = { projectId: project.id, projectTitle: project.title || 'Sans titre', ownership: project.role, ownerEmail: project.owner || '' };
+                // Les jours du projet, lus UNE fois ici : on a deja ses donnees
+                // sous la main, aller les rechercher ailleurs ferait une
+                // requete de plus pour la meme reponse.
+                const joursProjet = PublicProfile._joursDeProjet(data, projectInfo);
+                const poser = (espece, personne) => {
+                    if(!personne || !personne.publicProfileId) return;
+                    const miens = PublicProfile._joursPourFiche(joursProjet, espece, personne.id);
+                    if(!miens.length) return;
+                    const bac = PublicProfile.profileDays[personne.publicProfileId]
+                        || (PublicProfile.profileDays[personne.publicProfileId] = []);
+                    miens.forEach(j => { if(!bac.some(x => x.id === j.id)) bac.push(j); });
+                };
                 
                 // Vérifier les acteurs
                 if(data.actors && Array.isArray(data.actors)) {
                     data.actors.forEach(actor => {
+                        poser('actor', actor);
                         if(actor.publicProfileId) {
                             if(!PublicProfile.profileProjects[actor.publicProfileId]) {
                                 PublicProfile.profileProjects[actor.publicProfileId] = [];
@@ -47,6 +154,7 @@
                 // Vérifier les techniciens
                 if(data.crew && Array.isArray(data.crew)) {
                     data.crew.forEach(member => {
+                        poser('crew', member);
                         if(member.publicProfileId) {
                             if(!PublicProfile.profileProjects[member.publicProfileId]) {
                                 PublicProfile.profileProjects[member.publicProfileId] = [];
