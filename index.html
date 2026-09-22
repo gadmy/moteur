@@ -1610,6 +1610,32 @@ vv601 (20 septembre 2026) — EN COURS.
   est tantot un input tantot une liste deroulante. Le compte par type rangeait
   les trois listes ensemble et laissait un trou. On compte par RANG.
 
+  UN RESULTAT, TROIS FACONS DE LE REGARDER. Deux remarques a l'essai :
+  « des que je quitte l'onglet tri, il faut refaire la recherche », et « il
+  faut que sur la carte et la liste il n'y ait que les profils interesses par
+  le projet ».
+  LES DEUX VENAIENT DE LA MEME CHOSE : le resultat etait AFFICHE dans la vue
+  de tri au lieu d'etre simplement MONTRE par elle. La vue Liste remplace le
+  contenu de la scene, donc elle detruisait le conteneur du tri — et avec lui
+  tout ce qu'on croyait perdu. Or le resultat n'avait jamais bouge : il vit
+  dans le module, pas dans le HTML. Revenir le redessine, c'est tout.
+  LA REPARTITION EST DESORMAIS CLAIRE : la CARTE dit OU ils sont, la LISTE dit
+  COMBIEN et pour quel poste, le TRI sert a TRANCHER. SEUL LE TRI garde et
+  ecarte — les deux autres montrent, sans aucune option de tri, et le bandeau
+  de la liste le dit en toutes lettres.
+  LE POSTE SE DIT PAR SON NOM, PAS PAR UN SYMBOLE. J'avais prevu une icone
+  unique par poste dans un angle du marqueur ; le developpeur l'a retiree de
+  sa demande en la reformulant, et il avait raison — « cadreur » et
+  « perchman » ne se devinent pas dans un pictogramme, et quinze postes font
+  quinze symboles a apprendre. Le nom apparait AU SURVOL du marqueur, la ou
+  l'oeil est deja.
+  ET UN DEFAUT ANCIEN TROUVE EN EPROUVANT CE SURVOL : la carte de survol est
+  declaree DANS la scene de l'Univers, que la vue Liste remplace. Apres un
+  passage par la liste, l'element n'existait plus et le survol des marqueurs
+  ne montrait plus rien — sans la moindre erreur. Ce defaut n'avait pas besoin
+  de la recherche par projet pour se produire : il suffisait d'etre alle voir
+  la liste. Elle se recree maintenant si elle a disparu.
+
   J'AVAIS DETOURNE UN REGLAGE POSE POUR AUTRE CHOSE, ET J'EN AVAIS FAIT UN
   COUPERET INVISIBLE. « Toujours personne en tri. » Mesure : le projet se
   tourne a POINTE-A-PITRE, les profils sont en France metropolitaine — 6 700
@@ -5078,6 +5104,28 @@ header { transition: box-shadow 0.3s ease, background 0.3s ease; }
 .tri-vide { text-align: center; max-width: 380px; margin-top: 40px; color: var(--text-sec); }
 .tri-vide-icone { font-size: 3rem; margin-bottom: 10px; }
 .tri-vide h3 { color: var(--text-main); margin: 0 0 8px; }
+/* ===== LE MEME RESULTAT DANS LA LISTE ET SUR LA CARTE =====
+   La liste groupe par poste, la carte marque chacun de l'icone de son poste.
+   Ni l'une ni l'autre ne trie : seule la vue Tri garde et ecarte. */
+.match-liste { padding: 18px 20px 60px; }
+/* Le bandeau s'arrete AVANT les boutons Carte / Liste / Tri, qui flottent en
+   haut a droite : sans cela le titre passait dessous et se lisait a moitie. */
+.match-liste-tete { font-size: .95rem; color: var(--text-main); margin-bottom: 18px;
+  padding: 10px 14px; background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; }
+@media (min-width: 900px) { .match-liste-tete { margin-right: 250px; } }
+.match-liste-note { font-size: .76rem; color: var(--text-sec); margin-top: 4px; }
+.match-groupe { margin-bottom: 22px; }
+.match-groupe h3 { font-size: .95rem; margin: 0 0 10px; color: var(--primary);
+  display: flex; align-items: center; gap: 8px; }
+.match-groupe-n { font-size: .72rem; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 1px 9px; color: var(--text-sec); font-weight: 600; }
+.match-groupe-vide { font-size: .8rem; color: var(--text-sec); font-style: italic; }
+.match-groupe-cartes { display: flex; flex-wrap: wrap; gap: 12px; }
+.match-carte { position: relative; width: 150px; cursor: pointer; }
+/* Sur la carte, le survol dit POUR QUEL POSTE la personne ressort. */
+.hover-postes { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border);
+  font-size: .74rem; color: var(--primary); font-weight: 600; line-height: 1.35; }
+
 /* Le recapitulatif : une ligne par PERSONNE, pas par carte. */
 .tri-recap { width: 100%; max-width: 620px; }
 .tri-recap h3 { margin: 0 0 4px; }
@@ -68756,6 +68804,10 @@ const UniverseSearch = {
     
     // Reset la recherche
     reset: () => {
+        // v601 : « Reinitialiser » efface AUSSI la recherche par projet —
+        // sinon la carte et la liste continueraient de ne montrer que ses
+        // trouves, et l'on se demanderait ou sont passes les autres.
+        try { if(typeof CastingMatch !== 'undefined') CastingMatch.effacer(); } catch(e) {}
         document.getElementById('universe-type').value = '';
         document.getElementById('universe-department').value = '';
         document.getElementById('universe-city').value = '';
@@ -70021,12 +70073,41 @@ const UniverseMap = {
 
     // Afficher la carte de survol
     showHoverCard: (profile, event) => {
-        const hoverDiv = document.getElementById('map-hover-card');
-        if(!hoverDiv) return;
+        // v601 — LA CARTE DE SURVOL SE RECREE SI ELLE A DISPARU. Elle est
+        // declaree dans le HTML, DANS la scene de l'Univers — or la vue Liste
+        // remplace le contenu de cette scene. Apres un passage par la liste,
+        // l'element n'existait plus et le survol des marqueurs ne montrait
+        // plus rien, sans la moindre erreur. Trouve en eprouvant le survol,
+        // et c'est un defaut ANCIEN : il ne demandait pas la recherche par
+        // projet pour se produire, juste d'etre alle voir la liste.
+        let hoverDiv = document.getElementById('map-hover-card');
+        if(!hoverDiv) {
+            const scene = document.getElementById('universe-scene') || document.body;
+            hoverDiv = document.createElement('div');
+            hoverDiv.id = 'map-hover-card';
+            hoverDiv.className = 'map-hover-card';
+            scene.appendChild(hoverDiv);
+        }
         
         const card = Universe.createFanCard(profile, false);
         hoverDiv.innerHTML = '';
         hoverDiv.appendChild(card);
+        // v601 — QUAND UNE RECHERCHE PAR PROJET EST EN COURS, LE SURVOL DIT
+        // POUR QUEL POSTE cette personne ressort. C'est la seule chose qui
+        // manque a un marqueur : on voit OU elle est, pas POURQUOI elle est
+        // la. Le nom plutot qu'un symbole — « cadreur » et « perchman » ne se
+        // devinent pas dans un pictogramme.
+        try {
+            if(typeof CastingMatch !== 'undefined' && CastingMatch.actif()) {
+                const postes = CastingMatch.postesDe(profile);
+                if(postes.length) {
+                    const ligne = document.createElement('div');
+                    ligne.className = 'hover-postes';
+                    ligne.textContent = '🎯 ' + postes.join(' · ');
+                    card.appendChild(ligne);
+                }
+            }
+        } catch(e) {}
         
         // Positionner près de la souris
         const x = event.clientX + 15;
@@ -70202,6 +70283,13 @@ const UniverseMap = {
                 scene.appendChild(tri);
             }
             tri.style.display = 'flex';
+            // v601 — ON NE REFAIT PAS LA RECHERCHE EN REVENANT. La vue Liste
+            // remplace le contenu de la scene, donc le conteneur du tri est
+            // DETRUIT quand on la quitte — et avec lui tout ce qui etait
+            // affiche. Le resultat, lui, n'a jamais bouge : il vit dans
+            // CastingMatch. On le redessine, c'est tout. Signale a l'essai :
+            // « des que je quitte l'onglet tri, il faut refaire la recherche ».
+            try { if(typeof CastingMatch !== 'undefined' && CastingMatch.actif()) CastingMatch.rendre(); } catch(e) {}
             return;
         }
         if(tri) tri.style.display = 'none';
@@ -70238,7 +70326,10 @@ const UniverseMap = {
             if(!Universe.map) await UniverseMap.initMap();
             if(Universe.map) {
                 Universe.map.invalidateSize();
-                await UniverseMap.loadMapMarkers();
+                // v601 : meme regle que la liste — la carte montre les trouves
+                // de la recherche par projet, chacun avec l'icone de son poste.
+                if(typeof CastingMatch !== 'undefined' && CastingMatch.actif()) await CastingMatch.rendreCarte();
+                else await UniverseMap.loadMapMarkers();
             }
         } else {
             fanBtn.style.background = 'var(--primary)';
@@ -70254,7 +70345,10 @@ const UniverseMap = {
             // (« mapContainer is null »), signale a l'essai. On ne cache que ce
             // qui est la — la vue Carte le recree quand on y revient.
             if(mapContainer) mapContainer.style.display = 'none';
-            if(Universe.searchActive) UniverseSearch.renderSearchResultsFan(scene);
+            // v601 : une recherche par projet est en cours ? La liste montre
+            // SON resultat, groupe par poste — pas l'Univers entier.
+            if(typeof CastingMatch !== 'undefined' && CastingMatch.actif()) CastingMatch.rendreListe(scene);
+            else if(Universe.searchActive) UniverseSearch.renderSearchResultsFan(scene);
             else Universe.renderFanView(scene);
         }
     },
@@ -71839,6 +71933,7 @@ ${window.location.origin}${window.location.pathname}
       },
 
       pourProfil: (valeur) => {
+          CastingMatch.effacer();                // on quitte la recherche par projet
           const bouts = valeur.split(':');       // profil:<idx>:<facetKey...>
           const idx = parseInt(bouts[1], 10);
           const casquettes = CastingMatch.mesCasquettes();
@@ -72249,6 +72344,133 @@ ${window.location.origin}${window.location.pathname}
           if(!b) return [];
           if(!CastingMatch.rayonActif()) return b.candidats;
           return b.candidats.filter(c => c.km == null || c.km <= CastingMatch.rayonKm);
+      },
+
+      // ==================================================================
+      //  LE MEME RESULTAT DANS LES TROIS VUES (v601)
+      // ==================================================================
+      //  « Il faut que sur la carte et la liste il n'y ait que les profils
+      //  interesses par le projet. » Evidemment : lancer une recherche puis
+      //  changer de vue pour retomber sur l'Univers entier, c'est perdre son
+      //  travail a chaque clic.
+      //  UN RESULTAT, TROIS FACONS DE LE REGARDER : la CARTE dit OU ils sont,
+      //  la LISTE dit COMBIEN et pour quel poste, le TRI sert a TRANCHER. Seul
+      //  le tri garde et ecarte — les deux autres montrent, c'est tout.
+      actif: () => !!(CastingMatch.projet && CastingMatch.besoins && CastingMatch.besoins.length),
+      // Revenir a l'Univers entier. Appele par « Reinitialiser » et quand on
+      // relance une recherche pour un PROFIL (qui cherche des projets, pas des
+      // gens) : les deux vues doivent alors reprendre leur role habituel.
+      effacer: () => {
+          CastingMatch.projet = null;
+          CastingMatch.besoins = [];
+          CastingMatch.gardes = [];
+          CastingMatch.rangs = {};
+          CastingMatch.besoinCourant = null;
+          CastingMatch.centre = null;
+          CastingMatch.rayonKm = 0;
+      },
+
+      //  LE POSTE SE DIT PAR SON NOM, PAS PAR UN SYMBOLE. Premiere idee :
+      //  une icone unique par poste, posee dans un angle du marqueur. Le
+      //  developpeur l'a retiree de sa demande, et il a raison — « cadreur »
+      //  et « perchman » ne se devinent pas dans un pictogramme, et quinze
+      //  postes font quinze symboles a apprendre. Sur la carte, le nom
+      //  apparait donc AU SURVOL, la ou l'on regarde deja.
+      postesDe: (profil) => {
+          const id = (profil && (profil.id || profil.email)) || '';
+          const out = [];
+          CastingMatch.besoins.forEach(b => {
+              if(out.indexOf(b.poste) >= 0) return;
+              if(CastingMatch.liste(b).some(c => c.profilId === id)) out.push(b.poste);
+          });
+          return out;
+      },
+
+      //  Tous les candidats, une entree par PERSONNE, avec les postes pour
+      //  lesquels elle ressort. C'est ce que lisent la carte et la liste.
+      //  Le rayon choisi s'applique aussi la : les trois vues montrent la meme
+      //  chose, sinon on ne sait plus ce qu'on regarde.
+      trouves: () => {
+          const par = {};
+          CastingMatch.besoins.forEach(b => {
+              CastingMatch.liste(b).forEach(c => {
+                  const k = c.profilId || c.nom;
+                  if(!par[k]) par[k] = { profil: c.profil, cartes: [], postes: [] };
+                  par[k].cartes.push(c);
+                  if(par[k].postes.indexOf(b.poste) < 0) par[k].postes.push(b.poste);
+              });
+          });
+          return Object.keys(par).map(k => par[k]);
+      },
+
+      // ------------------------------------------------------------------
+      //  LA LISTE : UN GROUPE PAR POSTE
+      // ------------------------------------------------------------------
+      rendreListe: (scene) => {
+          const esc = Utils.escape;
+          scene.innerHTML = '';
+          scene.style.overflow = 'auto';
+          const hote = document.createElement('div');
+          hote.className = 'universe-fan-container match-liste';
+          let html = '<div class="match-liste-tete">🎯 <strong>' + esc(CastingMatch.projet.titre) + '</strong>'
+              + ' — ce que la recherche a trouvé'
+              + (CastingMatch.rayonActif() ? ' à moins de ' + CastingMatch.rayonKm + ' km' : '')
+              + '<div class="match-liste-note">Pour garder ou écarter, passez à la vue Tri.</div></div>';
+          CastingMatch.besoins.forEach(b => {
+              const gens = CastingMatch.liste(b);
+              html += '<div class="match-groupe"><h3>' + esc(b.label)
+                   + ' <span class="match-groupe-n">' + gens.length + '</span></h3>';
+              if(!gens.length) {
+                  html += '<div class="match-groupe-vide">Personne pour l’instant.</div></div>';
+                  return;
+              }
+              html += '<div class="match-groupe-cartes">' + gens.map(c =>
+                  '<div class="compact-card match-carte" onclick="app.CastingMatch.ouvrirProfil(\'' + esc(c.cle) + '\')">'
+                  + '<div class="compact-card-photo">' + (c.photo
+                      ? '<img src="' + Utils.safeMediaUrl(c.photo) + '" alt="">'
+                      : (b.kind === 'crew' ? '🎥' : '🎭')) + '</div>'
+                  + '<div class="compact-card-name">' + esc(c.nom) + '</div>'
+                  + '<div class="compact-card-role">' + esc(c.ville || '')
+                  + (c.km != null ? ' · ' + Math.round(c.km) + ' km' : '') + '</div>'
+                  + '</div>').join('') + '</div></div>';
+          });
+          hote.innerHTML = html;
+          scene.appendChild(hote);
+      },
+      ouvrirProfil: (cle) => {
+          for(const b of CastingMatch.besoins) {
+              const c = b.candidats.find(x => x.cle === cle);
+              if(c) { try { Universe.openProfileModal(c.profil, c.facetKey); } catch(e) {} return; }
+          }
+      },
+
+      // ------------------------------------------------------------------
+      //  LA CARTE : LES TROUVES SEULEMENT, AVEC L'ICONE DE LEUR POSTE
+      // ------------------------------------------------------------------
+      rendreCarte: async () => {
+          if(!Universe.map || !Universe.markersLayer) return;
+          Universe.markersLayer.clearLayers();
+          const gens = CastingMatch.trouves();
+          for(const g of gens) {
+              const p0 = g.profil || {};
+              let coords = (p0.latitude != null && p0.longitude != null)
+                  ? { lat: Number(p0.latitude), lng: Number(p0.longitude) } : null;
+              if(!coords && (p0.city || '')) { try { coords = await Universe.geocodeCity(p0.city); } catch(e) {} }
+              if(!coords) continue;
+              try {
+                  const m = UniverseMap.createMapMarker(p0, coords);
+                  // Le nom du poste s'affiche AU SURVOL (voir showHoverCard) :
+                  // rien a poser sur le marqueur lui-meme.
+                  if(m) Universe.markersLayer.addLayer(m);
+              } catch(e) { console.warn('[Match] marqueur :', e && e.message); }
+          }
+          // Cadrer sur ce qu'on a trouve, plus le lieu du projet.
+          try {
+              const pts = [];
+              Universe.markersLayer.eachLayer(l => { const ll = l.getLatLng && l.getLatLng(); if(ll) pts.push([ll.lat, ll.lng]); });
+              if(CastingMatch.centre) pts.push([CastingMatch.centre.lat, CastingMatch.centre.lng]);
+              if(pts.length > 1) Universe.map.fitBounds(pts, { padding: [40, 40], maxZoom: 11 });
+          } catch(e) {}
       },
 
       // ==================================================================

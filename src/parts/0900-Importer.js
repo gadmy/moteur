@@ -10909,6 +10909,10 @@ const UniverseSearch = {
     
     // Reset la recherche
     reset: () => {
+        // v601 : « Reinitialiser » efface AUSSI la recherche par projet —
+        // sinon la carte et la liste continueraient de ne montrer que ses
+        // trouves, et l'on se demanderait ou sont passes les autres.
+        try { if(typeof CastingMatch !== 'undefined') CastingMatch.effacer(); } catch(e) {}
         document.getElementById('universe-type').value = '';
         document.getElementById('universe-department').value = '';
         document.getElementById('universe-city').value = '';
@@ -12174,12 +12178,41 @@ const UniverseMap = {
 
     // Afficher la carte de survol
     showHoverCard: (profile, event) => {
-        const hoverDiv = document.getElementById('map-hover-card');
-        if(!hoverDiv) return;
+        // v601 — LA CARTE DE SURVOL SE RECREE SI ELLE A DISPARU. Elle est
+        // declaree dans le HTML, DANS la scene de l'Univers — or la vue Liste
+        // remplace le contenu de cette scene. Apres un passage par la liste,
+        // l'element n'existait plus et le survol des marqueurs ne montrait
+        // plus rien, sans la moindre erreur. Trouve en eprouvant le survol,
+        // et c'est un defaut ANCIEN : il ne demandait pas la recherche par
+        // projet pour se produire, juste d'etre alle voir la liste.
+        let hoverDiv = document.getElementById('map-hover-card');
+        if(!hoverDiv) {
+            const scene = document.getElementById('universe-scene') || document.body;
+            hoverDiv = document.createElement('div');
+            hoverDiv.id = 'map-hover-card';
+            hoverDiv.className = 'map-hover-card';
+            scene.appendChild(hoverDiv);
+        }
         
         const card = Universe.createFanCard(profile, false);
         hoverDiv.innerHTML = '';
         hoverDiv.appendChild(card);
+        // v601 — QUAND UNE RECHERCHE PAR PROJET EST EN COURS, LE SURVOL DIT
+        // POUR QUEL POSTE cette personne ressort. C'est la seule chose qui
+        // manque a un marqueur : on voit OU elle est, pas POURQUOI elle est
+        // la. Le nom plutot qu'un symbole — « cadreur » et « perchman » ne se
+        // devinent pas dans un pictogramme.
+        try {
+            if(typeof CastingMatch !== 'undefined' && CastingMatch.actif()) {
+                const postes = CastingMatch.postesDe(profile);
+                if(postes.length) {
+                    const ligne = document.createElement('div');
+                    ligne.className = 'hover-postes';
+                    ligne.textContent = '🎯 ' + postes.join(' · ');
+                    card.appendChild(ligne);
+                }
+            }
+        } catch(e) {}
         
         // Positionner près de la souris
         const x = event.clientX + 15;
@@ -12355,6 +12388,13 @@ const UniverseMap = {
                 scene.appendChild(tri);
             }
             tri.style.display = 'flex';
+            // v601 — ON NE REFAIT PAS LA RECHERCHE EN REVENANT. La vue Liste
+            // remplace le contenu de la scene, donc le conteneur du tri est
+            // DETRUIT quand on la quitte — et avec lui tout ce qui etait
+            // affiche. Le resultat, lui, n'a jamais bouge : il vit dans
+            // CastingMatch. On le redessine, c'est tout. Signale a l'essai :
+            // « des que je quitte l'onglet tri, il faut refaire la recherche ».
+            try { if(typeof CastingMatch !== 'undefined' && CastingMatch.actif()) CastingMatch.rendre(); } catch(e) {}
             return;
         }
         if(tri) tri.style.display = 'none';
@@ -12391,7 +12431,10 @@ const UniverseMap = {
             if(!Universe.map) await UniverseMap.initMap();
             if(Universe.map) {
                 Universe.map.invalidateSize();
-                await UniverseMap.loadMapMarkers();
+                // v601 : meme regle que la liste — la carte montre les trouves
+                // de la recherche par projet, chacun avec l'icone de son poste.
+                if(typeof CastingMatch !== 'undefined' && CastingMatch.actif()) await CastingMatch.rendreCarte();
+                else await UniverseMap.loadMapMarkers();
             }
         } else {
             fanBtn.style.background = 'var(--primary)';
@@ -12407,7 +12450,10 @@ const UniverseMap = {
             // (« mapContainer is null »), signale a l'essai. On ne cache que ce
             // qui est la — la vue Carte le recree quand on y revient.
             if(mapContainer) mapContainer.style.display = 'none';
-            if(Universe.searchActive) UniverseSearch.renderSearchResultsFan(scene);
+            // v601 : une recherche par projet est en cours ? La liste montre
+            // SON resultat, groupe par poste — pas l'Univers entier.
+            if(typeof CastingMatch !== 'undefined' && CastingMatch.actif()) CastingMatch.rendreListe(scene);
+            else if(Universe.searchActive) UniverseSearch.renderSearchResultsFan(scene);
             else Universe.renderFanView(scene);
         }
     },

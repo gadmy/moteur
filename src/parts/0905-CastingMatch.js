@@ -161,6 +161,7 @@
       },
 
       pourProfil: (valeur) => {
+          CastingMatch.effacer();                // on quitte la recherche par projet
           const bouts = valeur.split(':');       // profil:<idx>:<facetKey...>
           const idx = parseInt(bouts[1], 10);
           const casquettes = CastingMatch.mesCasquettes();
@@ -571,6 +572,133 @@
           if(!b) return [];
           if(!CastingMatch.rayonActif()) return b.candidats;
           return b.candidats.filter(c => c.km == null || c.km <= CastingMatch.rayonKm);
+      },
+
+      // ==================================================================
+      //  LE MEME RESULTAT DANS LES TROIS VUES (v601)
+      // ==================================================================
+      //  « Il faut que sur la carte et la liste il n'y ait que les profils
+      //  interesses par le projet. » Evidemment : lancer une recherche puis
+      //  changer de vue pour retomber sur l'Univers entier, c'est perdre son
+      //  travail a chaque clic.
+      //  UN RESULTAT, TROIS FACONS DE LE REGARDER : la CARTE dit OU ils sont,
+      //  la LISTE dit COMBIEN et pour quel poste, le TRI sert a TRANCHER. Seul
+      //  le tri garde et ecarte — les deux autres montrent, c'est tout.
+      actif: () => !!(CastingMatch.projet && CastingMatch.besoins && CastingMatch.besoins.length),
+      // Revenir a l'Univers entier. Appele par « Reinitialiser » et quand on
+      // relance une recherche pour un PROFIL (qui cherche des projets, pas des
+      // gens) : les deux vues doivent alors reprendre leur role habituel.
+      effacer: () => {
+          CastingMatch.projet = null;
+          CastingMatch.besoins = [];
+          CastingMatch.gardes = [];
+          CastingMatch.rangs = {};
+          CastingMatch.besoinCourant = null;
+          CastingMatch.centre = null;
+          CastingMatch.rayonKm = 0;
+      },
+
+      //  LE POSTE SE DIT PAR SON NOM, PAS PAR UN SYMBOLE. Premiere idee :
+      //  une icone unique par poste, posee dans un angle du marqueur. Le
+      //  developpeur l'a retiree de sa demande, et il a raison — « cadreur »
+      //  et « perchman » ne se devinent pas dans un pictogramme, et quinze
+      //  postes font quinze symboles a apprendre. Sur la carte, le nom
+      //  apparait donc AU SURVOL, la ou l'on regarde deja.
+      postesDe: (profil) => {
+          const id = (profil && (profil.id || profil.email)) || '';
+          const out = [];
+          CastingMatch.besoins.forEach(b => {
+              if(out.indexOf(b.poste) >= 0) return;
+              if(CastingMatch.liste(b).some(c => c.profilId === id)) out.push(b.poste);
+          });
+          return out;
+      },
+
+      //  Tous les candidats, une entree par PERSONNE, avec les postes pour
+      //  lesquels elle ressort. C'est ce que lisent la carte et la liste.
+      //  Le rayon choisi s'applique aussi la : les trois vues montrent la meme
+      //  chose, sinon on ne sait plus ce qu'on regarde.
+      trouves: () => {
+          const par = {};
+          CastingMatch.besoins.forEach(b => {
+              CastingMatch.liste(b).forEach(c => {
+                  const k = c.profilId || c.nom;
+                  if(!par[k]) par[k] = { profil: c.profil, cartes: [], postes: [] };
+                  par[k].cartes.push(c);
+                  if(par[k].postes.indexOf(b.poste) < 0) par[k].postes.push(b.poste);
+              });
+          });
+          return Object.keys(par).map(k => par[k]);
+      },
+
+      // ------------------------------------------------------------------
+      //  LA LISTE : UN GROUPE PAR POSTE
+      // ------------------------------------------------------------------
+      rendreListe: (scene) => {
+          const esc = Utils.escape;
+          scene.innerHTML = '';
+          scene.style.overflow = 'auto';
+          const hote = document.createElement('div');
+          hote.className = 'universe-fan-container match-liste';
+          let html = '<div class="match-liste-tete">🎯 <strong>' + esc(CastingMatch.projet.titre) + '</strong>'
+              + ' — ce que la recherche a trouvé'
+              + (CastingMatch.rayonActif() ? ' à moins de ' + CastingMatch.rayonKm + ' km' : '')
+              + '<div class="match-liste-note">Pour garder ou écarter, passez à la vue Tri.</div></div>';
+          CastingMatch.besoins.forEach(b => {
+              const gens = CastingMatch.liste(b);
+              html += '<div class="match-groupe"><h3>' + esc(b.label)
+                   + ' <span class="match-groupe-n">' + gens.length + '</span></h3>';
+              if(!gens.length) {
+                  html += '<div class="match-groupe-vide">Personne pour l’instant.</div></div>';
+                  return;
+              }
+              html += '<div class="match-groupe-cartes">' + gens.map(c =>
+                  '<div class="compact-card match-carte" onclick="app.CastingMatch.ouvrirProfil(\'' + esc(c.cle) + '\')">'
+                  + '<div class="compact-card-photo">' + (c.photo
+                      ? '<img src="' + Utils.safeMediaUrl(c.photo) + '" alt="">'
+                      : (b.kind === 'crew' ? '🎥' : '🎭')) + '</div>'
+                  + '<div class="compact-card-name">' + esc(c.nom) + '</div>'
+                  + '<div class="compact-card-role">' + esc(c.ville || '')
+                  + (c.km != null ? ' · ' + Math.round(c.km) + ' km' : '') + '</div>'
+                  + '</div>').join('') + '</div></div>';
+          });
+          hote.innerHTML = html;
+          scene.appendChild(hote);
+      },
+      ouvrirProfil: (cle) => {
+          for(const b of CastingMatch.besoins) {
+              const c = b.candidats.find(x => x.cle === cle);
+              if(c) { try { Universe.openProfileModal(c.profil, c.facetKey); } catch(e) {} return; }
+          }
+      },
+
+      // ------------------------------------------------------------------
+      //  LA CARTE : LES TROUVES SEULEMENT, AVEC L'ICONE DE LEUR POSTE
+      // ------------------------------------------------------------------
+      rendreCarte: async () => {
+          if(!Universe.map || !Universe.markersLayer) return;
+          Universe.markersLayer.clearLayers();
+          const gens = CastingMatch.trouves();
+          for(const g of gens) {
+              const p0 = g.profil || {};
+              let coords = (p0.latitude != null && p0.longitude != null)
+                  ? { lat: Number(p0.latitude), lng: Number(p0.longitude) } : null;
+              if(!coords && (p0.city || '')) { try { coords = await Universe.geocodeCity(p0.city); } catch(e) {} }
+              if(!coords) continue;
+              try {
+                  const m = UniverseMap.createMapMarker(p0, coords);
+                  // Le nom du poste s'affiche AU SURVOL (voir showHoverCard) :
+                  // rien a poser sur le marqueur lui-meme.
+                  if(m) Universe.markersLayer.addLayer(m);
+              } catch(e) { console.warn('[Match] marqueur :', e && e.message); }
+          }
+          // Cadrer sur ce qu'on a trouve, plus le lieu du projet.
+          try {
+              const pts = [];
+              Universe.markersLayer.eachLayer(l => { const ll = l.getLatLng && l.getLatLng(); if(ll) pts.push([ll.lat, ll.lng]); });
+              if(CastingMatch.centre) pts.push([CastingMatch.centre.lat, CastingMatch.centre.lng]);
+              if(pts.length > 1) Universe.map.fitBounds(pts, { padding: [40, 40], maxZoom: 11 });
+          } catch(e) {}
       },
 
       // ==================================================================
