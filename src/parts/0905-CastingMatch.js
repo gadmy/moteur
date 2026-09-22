@@ -226,11 +226,29 @@
       besoinsDe: (donnees) => {
           const out = [];
           const p = (donnees && donnees.presentation) || {};
+          // LES PERSONNAGES SANS COMEDIEN SONT DES BESOINS, sans qu'on ait eu a
+          // les recopier (v601). Un personnage DEJA CASTE n'en est plus un :
+          // le chercher encore ferait perdre du temps sur un role pourvu.
+          const nomsVus = {};
+          (donnees && donnees.characters || []).forEach((c, i) => {
+              if(!c || c.actor_id) return;               // deja distribue
+              const nom = c.name || ('Personnage ' + (i + 1));
+              nomsVus[CastingMatch._cle(nom)] = 1;
+              out.push({
+                  id: 'perso:' + (c.id || i), kind: 'actor',
+                  poste: nom, label: 'Rôle de ' + nom,
+                  need: { roleName: nom, gender: c.gender || '', ageMin: c.ageMin || '', ageMax: c.ageMax || '',
+                          ethnicity: c.ethnicity || '', hairColor: c.hairColor || '' }
+              });
+          });
           (p.actorNeeds || []).forEach((need, i) => {
+              const nom = need.roleName || ('Rôle ' + (i + 1));
+              // Un besoin ecrit a la main qui porte le nom d'un personnage
+              // ferait doublon : la source, c'est la fiche du personnage.
+              if(nomsVus[CastingMatch._cle(nom)]) return;
               out.push({
                   id: 'actor:' + i, kind: 'actor',
-                  poste: need.roleName || ('Rôle ' + (i + 1)),
-                  label: 'Rôle de ' + (need.roleName || ('#' + (i + 1))),
+                  poste: nom, label: 'Rôle de ' + nom,
                   need: need
               });
           });
@@ -483,6 +501,10 @@
                     'premier', 'premiere', 'rice', 'trice', 'euse', 'iere'],
       // « court » garde les mots de trois lettres : les departements en ont
       // (« Son »), et les ecarter revenait a ignorer tout le departement Son.
+      // Un nom reduit a l'essentiel, pour reconnaitre deux ecritures du meme
+      // role (« ALIX BERGER » et « Alix Berger »).
+      _cle: (v) => String(v || '').toLowerCase().trim()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(),
       _mots: (s, court) => String(s || '').toLowerCase()
           .normalize('NFD').replace(/[̀-ͯ]/g, '')
           .replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)

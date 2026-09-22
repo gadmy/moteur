@@ -3716,6 +3716,29 @@ const Presentation = {
         { id: 'mixeur', name: 'Mixeur Son', dept: 'Post-production' }
     ],
     
+    // Les membres de l'equipe qui tiennent ce poste. On compare avec la meme
+    // regle que la recherche de l'Univers — une seule facon de reconnaitre un
+    // metier dans l'application, sinon les deux ecrans se contredisent.
+    posteTenuPar: (pos) => {
+        try {
+            if(typeof Links !== 'undefined' && Links.masquee && Links.masquee('crew')) return [];
+            const cherche = CastingMatch._mots(pos.name || '');
+            const dept = CastingMatch._mots(pos.dept || '', true);
+            return (state.data.crew || []).filter(m => {
+                if(!m) return false;
+                const declare = CastingMatch._mots(m.role || '');
+                if(declare.length) {
+                    if(cherche.some(x => declare.some(d => CastingMatch._memeMot(x, d)))) return true;
+                    return declare.some(d => CastingMatch._memeFamille(d, cherche));
+                }
+                const dd = CastingMatch._mots(m.department || '', true);
+                return dd.length > 0 && dd.some(d => cherche.some(x => CastingMatch._memeMot(x, d))
+                                                 || dept.some(x => CastingMatch._memeMot(x, d))
+                                                 || CastingMatch._memeFamille(d, cherche));
+            }).map(m => m.name || 'Sans nom');
+        } catch(e) { return []; }
+    },
+
     renderCrewNeeds: () => {
         const container = document.getElementById('needs-crew-list');
         if(!container) return;
@@ -3728,9 +3751,21 @@ const Presentation = {
         let html = '';
         Presentation.crewPositions.forEach(pos => {
             const need = needs[pos.id] || { needed: false, count: 1 };
-            html += `<div style="display: flex; align-items: center; gap: 10px; padding: 8px; background: var(--bg); border-radius: 6px;">
+            // QUI TIENT DEJA CE POSTE ? L'equivalent du « casté » d'un
+            // comedien, pour un technicien, c'est « POURVU ». On le lit dans
+            // l'equipe du projet, jamais recopie a la main.
+            const tenu = Presentation.posteTenuPar(pos);
+            const assez = tenu.length >= (need.count || 1);
+            const etat = !need.needed ? ''
+                : (tenu.length
+                    ? '<span class="besoin-etat ' + (assez ? 'est-ok' : 'est-partiel') + '" title="'
+                      + Utils.escape(tenu.join(', ')) + '">' + (assez ? '✅ pourvu' : '◑ ' + tenu.length + '/' + (need.count || 1))
+                      + ' — ' + Utils.escape(tenu[0]) + (tenu.length > 1 ? ' +' + (tenu.length - 1) : '') + '</span>'
+                    : '<span class="besoin-etat est-cherche">🔎 à pourvoir</span>');
+            html += `<div class="besoin-poste${need.needed && assez ? ' est-comble' : ''}" style="display: flex; align-items: center; gap: 10px; padding: 8px; background: var(--bg); border-radius: 6px;">
                 <input type="checkbox" id="need-crew-${pos.id}" ${need.needed ? 'checked' : ''} onchange="app.Presentation.toggleCrewNeed('${pos.id}')" style="width: 18px; height: 18px;">
                 <label for="need-crew-${pos.id}" style="flex: 1; cursor: pointer;">${pos.name}</label>
+                ${etat}
                 <input type="number" id="need-crew-count-${pos.id}" value="${need.count}" min="1" max="20" class="n8-input-4" onchange="app.Presentation.updateCrewNeedCount('${pos.id}', this.value)" ${need.needed ? '' : 'disabled'}>
             </div>`;
         });
@@ -3799,6 +3834,27 @@ const Presentation = {
         Presentation.renderCrewNeeds();
     },
     
+    // ==================================================================
+    //  LES PERSONNAGES SONT DES BESOINS, SANS QU'ON AIT A LES RECOPIER (v601)
+    // ==================================================================
+    //  « Si un personnage n'a pas de comedien lie, il va directement dans
+    //  besoins comedien ; des qu'il est lie, il se marque casté. »
+    //  C'est la bonne facon : la distribution EST deja saisie dans l'onglet
+    //  Personnages. La recopier a la main, c'est deux listes a tenir a jour —
+    //  et une qui ment des qu'on oublie. On lit donc la source.
+    //  LES BESOINS ECRITS A LA MAIN RESTENT : tout n'est pas un personnage
+    //  (« Touristes / villageois / hommes de main » n'en est pas un).
+    rolesDuProjet: () => {
+        try {
+            if(typeof Links !== 'undefined' && Links.masquee && Links.masquee('character')) return null;
+        } catch(e) {}
+        const acteurs = state.data.actors || [];
+        return (state.data.characters || []).map(c => {
+            const a = c && c.actor_id ? acteurs.find(x => x && x.id === c.actor_id) : null;
+            return { id: c.id, nom: c.name || 'Sans nom', caste: !!a, comedien: a ? (a.name || '') : '' };
+        });
+    },
+
     renderActorNeeds: () => {
         const container = document.getElementById('needs-actors-list');
         if(!container) return;
@@ -3807,13 +3863,36 @@ const Presentation = {
         if(!state.data.presentation.actorNeeds) state.data.presentation.actorNeeds = [];
         
         const needs = state.data.presentation.actorNeeds;
-        
+        const esc = Utils.escape;
+
+        // --- Les personnages du projet, avec leur etat de distribution.
+        let auto = '';
+        const roles = Presentation.rolesDuProjet();
+        if(roles === null) {
+            auto = '<div class="besoin-auto-note">Vous n’avez pas accès aux personnages de ce projet.</div>';
+        } else if(roles.length) {
+            const aDistribuer = roles.filter(r => !r.caste).length;
+            auto = '<div class="besoins-auto">'
+                + '<div class="besoins-auto-tete">🎭 Les personnages du projet'
+                + ' <span class="besoin-compte">' + aDistribuer + ' à distribuer sur ' + roles.length + '</span></div>'
+                + '<div class="besoins-auto-liste">'
+                + roles.map(r => '<div class="besoin-ligne' + (r.caste ? ' est-comble' : '') + '">'
+                    + '<span class="besoin-nom">' + esc(r.nom) + '</span>'
+                    + (r.caste
+                        ? '<span class="besoin-etat est-ok" title="Rôle distribué">✅ casté — ' + esc(r.comedien) + '</span>'
+                        : '<span class="besoin-etat est-cherche">🔎 à distribuer</span>')
+                    + '</div>').join('')
+                + '</div>'
+                + '<div class="besoin-auto-note">Cette liste suit l’onglet Personnages : lier un comédien le marque « casté ».</div>'
+                + '</div>';
+        }
+
         if(needs.length === 0) {
-            container.innerHTML = '<div style="color: var(--text-sec); text-align: center; padding: 20px; background: var(--bg); border-radius: 8px;">Aucun rôle défini. Cliquez sur "Ajouter un rôle" pour commencer.</div>';
+            container.innerHTML = auto + '<div style="color: var(--text-sec); text-align: center; padding: 20px; background: var(--bg); border-radius: 8px;">Aucun rôle ajouté à la main. Les personnages ci-dessus suffisent le plus souvent ; le bouton « Ajouter un rôle » sert pour ce qui n’est pas un personnage (figuration, silhouettes…).</div>';
             return;
         }
         
-        let html = '';
+        let html = auto;
         needs.forEach((need, idx) => {
             html += `<div style="background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 15px; margin-bottom: 10px;">
                 <div class="section-header-10">
