@@ -453,6 +453,7 @@
                     
                     // Déplacer l'onglet vers la nouvelle catégorie
                     UICategories.moveTabToCategory(tabName, fromCategory, toCategory);
+                    UICategories.signalerArrivee(tabName);
                 }
             });
         });
@@ -474,8 +475,25 @@
         }
         
         Utils.toast('Ordre des onglets sauvegardé', 'success');
+        if(UICategories.subnavDraggedTab && UICategories.subnavDraggedTab.dataset)
+            UICategories.signalerArrivee(UICategories.subnavDraggedTab.dataset.tab);
     },
     
+    //  v601 - UN ONGLET QUI ARRIVE SE VOIT ARRIVER. Apres un deplacement, la
+    //  barre est redessinee : sans signe, on ne sait pas lequel a bouge ni
+    //  ou il a atterri. On le fait apparaitre une fois a sa nouvelle place.
+    signalerArrivee: (tabName) => {
+        setTimeout(() => {
+            document.querySelectorAll('.tab-subbtn[data-tab="' + tabName + '"], .tab-btn[data-tab="' + tabName + '"]')
+                .forEach(b => {
+                    b.classList.remove('onglet-arrive');
+                    void b.offsetWidth;          // sans cette relecture, l'animation ne rejoue pas
+                    b.classList.add('onglet-arrive');
+                    setTimeout(() => b.classList.remove('onglet-arrive'), 500);
+                });
+        }, 30);
+    },
+
     moveTabToCategory: (tabName, fromCategory, toCategory) => {
         // Retirer de l'ancienne catégorie
         UICategories.categoryTabs[fromCategory] = UICategories.categoryTabs[fromCategory].filter(t => t !== tabName);

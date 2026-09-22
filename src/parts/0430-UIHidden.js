@@ -45,7 +45,28 @@
         }
     },
     
+    // ==================================================================
+    //  UN ONGLET QUI PART SE VOIT PARTIR (v601)
+    // ==================================================================
+    //  Il disparaissait d'un coup : le suivant sautait a sa place et on se
+    //  demandait lequel on venait de fermer. Il se retracte maintenant sur
+    //  place, en deux dixiemes de seconde — juste assez pour suivre l'oeil,
+    //  pas assez pour attendre. Rien ne change pour qui a demande moins
+    //  d'animations : le travail se fait dans tous les cas.
+    DUREE_ONGLET: 190,
     hideTab: (tabName) => {
+        if(UIHidden.hiddenTabs.includes(tabName)) return;
+        const boutons = [...document.querySelectorAll('.tab-subbtn[data-tab="' + tabName + '"], .tab-btn[data-tab="' + tabName + '"]')];
+        if(boutons.length && !UIHidden._enPartance) {
+            UIHidden._enPartance = true;
+            boutons.forEach(b => { b.style.width = b.offsetWidth + 'px'; b.classList.add('onglet-part'); });
+            setTimeout(() => { UIHidden._enPartance = false; UIHidden._masquerVraiment(tabName); }, UIHidden.DUREE_ONGLET);
+            return;
+        }
+        UIHidden._masquerVraiment(tabName);
+    },
+    _enPartance: false,
+    _masquerVraiment: (tabName) => {
         if(UIHidden.hiddenTabs.includes(tabName)) return;
         
         // Empêcher de masquer le dernier onglet visible

@@ -4099,6 +4099,11 @@ const FicheBlocks = {
             const d = FicheBlocks._defilement;
             if(d) d.x = ev.clientX;
         });
+        // Le compte suit AUSSI un defilement a la molette ou au pave tactile.
+        document.addEventListener('scroll', (ev) => {
+            const barre = ev.target;
+            if(barre && barre.classList && barre.classList.contains('fid-tabbar')) FicheBlocks._relire(barre);
+        }, true);
     },
     _suivreBord: (barre) => {
         if(FicheBlocks._defilement && FicheBlocks._defilement.barre === barre) return;
@@ -4123,14 +4128,43 @@ const FicheBlocks = {
             } else if(aDroite >= 0 && aDroite < FicheBlocks.ZONE_BORD) {
                 v = FicheBlocks.VITESSE_BORD * (1 - aDroite / FicheBlocks.ZONE_BORD);
             }
-            if(v) barre.scrollLeft += v;
+            if(v) { barre.scrollLeft += v; FicheBlocks._relire(barre); }
         };
         requestAnimationFrame(pas);
     },
 
     _observateur: null,
+    //  v601 - « IL Y A ENCORE DEUX ONGLETS PAR LA-BAS ». Le defilement au bord
+    //  marchait, mais rien ne disait qu'il y avait quelque chose a aller
+    //  chercher : une barre pleine et une barre qui deborde se ressemblent.
+    //  On COMPTE les onglets sortis du cadre de chaque cote et on l'ecrit.
+    //  Le compte est pose sur le parent, pas sur la barre : la barre DEFILE,
+    //  une pastille posee dessus partirait avec elle.
     _relire: (barre) => {
-        try { barre.classList.toggle('a-defilement', barre.scrollWidth > barre.clientWidth + 4); } catch(e) {}
+        try {
+            const deborde = barre.scrollWidth > barre.clientWidth + 4;
+            barre.classList.toggle('a-defilement', deborde);
+            const hote = barre.parentElement;
+            if(!hote) return;
+            if(!deborde) {
+                hote.removeAttribute('data-caches-g');
+                hote.removeAttribute('data-caches-d');
+                return;
+            }
+            const g0 = barre.scrollLeft, d0 = barre.scrollLeft + barre.clientWidth;
+            let g = 0, d = 0;
+            barre.querySelectorAll(':scope > .fid-tab').forEach(t => {
+                if(t.offsetLeft + t.offsetWidth <= g0 + 1) g++;
+                else if(t.offsetLeft >= d0 - 1) d++;
+            });
+            // UN ONGLET COUPE EN DEUX N'EST PAS « CACHE » : annoncer « 1 »
+            // pour un onglet qu'on a sous les yeux serait faux. Mais il reste
+            // quelque chose par la : on met alors le chevron SANS compte.
+            const resteG = barre.scrollLeft > 2;
+            const resteD = barre.scrollLeft + barre.clientWidth < barre.scrollWidth - 2;
+            if(resteG) hote.setAttribute('data-caches-g', g ? String(g) : ''); else hote.removeAttribute('data-caches-g');
+            if(resteD) hote.setAttribute('data-caches-d', d ? String(d) : ''); else hote.removeAttribute('data-caches-d');
+        } catch(e) {}
     },
     _marquerDebordement: () => {
         document.querySelectorAll('.fid-tabbar').forEach(barre => {
