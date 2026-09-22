@@ -1763,6 +1763,30 @@ vv601 (20 septembre 2026) — EN COURS.
   reconnaissaient l'un l'autre. Deux metiers sans aucun rapport rapproches par
   une marque de genre. Les terminaisons isolees sont ecartees comme les grades.
 
+  LES DOSSIERS SE RANGENT AUSSI ENTRE EUX. Un seul geste, trois intentions,
+  et chacune se voit AVANT qu'on lache : les BORDS d'une tuile rangent a cote
+  (avant ou apres, barre franche d'un cote), le MILIEU range dedans (contour
+  complet). Un PROJET, lui, n'a pas de rang parmi les dossiers : quel que soit
+  l'endroit ou on le lache sur une tuile, il va dedans.
+  L'ORDRE EST ENREGISTRE, donc il survit a la fermeture. Les dossiers crees
+  avant qu'il existe n'en ont pas : ils gardent leur rang d'origine et passent
+  apres ceux qu'on a ranges — personne ne voit son classement se melanger.
+  ON RENUMEROTE LA FRATRIE ENTIERE a chaque deplacement, plutot que de glisser
+  une valeur entre deux : c'est la seule facon d'avoir des rangs qui restent
+  justes apres dix deplacements. Et un dossier qui ARRIVE dans une autre
+  fratrie se met au bout, pas au rang qu'il occupait dans l'ancienne.
+
+  LE BANDEAU « VOTRE PROFIL EST COMPLET » A ETE RETIRE. Il s'affichait en vert
+  juste a cote du triangle qui disait l'inverse. Ce n'etait pas un defaut
+  d'affichage : il avait SA PROPRE liste d'exigences (nom, telephone, ville,
+  sexe), plus ancienne, sans rapport avec ce qu'il faut vraiment pour etre
+  trouve dans une recherche. Deux reponses a la meme question, dont une
+  fausse. La fonction qui l'ecrivait part avec lui.
+  UNE SEULE REGLE DESORMAIS (PublicProfile.MANQUES) ET UN SEUL SIGNE, le
+  triangle, qui dit au survol ce qui manque. C'est la meme lecon que les
+  besoins comediens lus a la source : quand deux ecrans repondent
+  separement a la meme question, l'un des deux ment tot ou tard.
+
   DANS LE HUB, LES DOSSIERS SE GLISSENT AUSSI. Un projet se rangeait deja dans
   un dossier ; un DOSSIER, lui, ne bougeait pas — le seul moyen d'en ranger un
   dans un autre aurait ete de le supprimer et de le refaire. Le rangement
@@ -3708,9 +3732,6 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
 
   .profile-input { padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; background: var(--input-bg); color: var(--text-main); width: 100%; }
   .profile-input:focus { outline: none; border-color: var(--primary); }
-  .profile-status { padding: 10px 15px; border-radius: 8px; margin-bottom: 20px; }
-  .profile-status.incomplete { background: rgba(255,150,0,0.1); border: 1px solid orange; color: orange; }
-  .profile-status.complete { background: rgba(40,167,69,0.1); border: 1px solid var(--success); color: var(--success); }
 
 /* Cartes profils (cercles) */
 .profile-circle-card { display: flex; flex-direction: column; align-items: center; min-width: 170px; width: auto; cursor: pointer; }
@@ -3864,6 +3885,15 @@ body:not(.dark-mode) .leaflet-container { background: #f4f6f8; }
      s'efface, et le fil d'Ariane s'allume : c'est par lui qu'on le fait
      RESSORTIR d'un dossier. */
   .folder-tile.dossier-en-vol { opacity: 0.35; }
+  /* Les BORDS rangent a cote (avant / apres), le MILIEU range dedans :
+     une barre franche d'un cote, le contour complet pour l'interieur. */
+  .folder-tile.rang-avant, .folder-tile.rang-apres { border-color: var(--primary); }
+  .folder-tile.rang-avant::before, .folder-tile.rang-apres::before {
+    content: ''; position: absolute; top: 6px; bottom: 6px; width: 5px;
+    border-radius: 3px; background: var(--primary);
+  }
+  .folder-tile.rang-avant::before { left: -3px; }
+  .folder-tile.rang-apres::before { right: -3px; }
   .folder-crumb.crumb-drop { background: var(--primary); color: #fff; }
   .folder-tile-icon { font-size: 2rem; }
   .folder-tile-name { font-weight: bold; }
@@ -9433,10 +9463,6 @@ body.presentation-mode .presentation-bar {
             
             <!-- Toutes les sections du profil (masquées si aucun profil) -->
             <div id="profile-all-sections" class="d-none">
-                <div id="profile-status" class="profile-status incomplete">
-                    ⚠️ Ce profil est incomplet. Remplissez les champs obligatoires pour apparaître dans les recherches.
-                </div>
-                
                 <!-- Mes casquettes (facettes) -->
                 <div class="profile-section">
                     <div id="profile-hub-header"></div>
@@ -15247,7 +15273,21 @@ crewRoles: {
       // ----- Lecture -----
       // ProjectFolders.all retirée v569, jamais appelée.
       get: (id) => ProjectFolders._load().folders.find(f => f.id === id) || null,
-      children: (parentId) => ProjectFolders._load().folders.filter(f => (f.parentId || null) === (parentId || null)),
+      // Les dossiers d'un meme parent, DANS L'ORDRE CHOISI. Les dossiers
+      // crees avant que l'ordre existe n'en ont pas : ils gardent leur rang
+      // d'origine (l'ordre d'ajout) et passent apres ceux qu'on a ranges.
+      children: (parentId) => {
+          const tous = ProjectFolders._load().folders;
+          return tous
+              .map((f, i) => ({ f, i }))
+              .filter(x => (x.f.parentId || null) === (parentId || null))
+              .sort((a, b) => {
+                  const oa = (typeof a.f.order === 'number') ? a.f.order : 9999;
+                  const ob = (typeof b.f.order === 'number') ? b.f.order : 9999;
+                  return oa !== ob ? oa - ob : a.i - b.i;
+              })
+              .map(x => x.f);
+      },
       folderOf: (projectId) => ProjectFolders._load().assignments[projectId] || null,
       projectsIn: (folderId) => {
           const a = ProjectFolders._load().assignments;
@@ -15269,7 +15309,8 @@ crewRoles: {
               name: (name || 'Nouveau dossier').toString().slice(0, 120),
               color: color || '#9E9E9E',
               priority: priority || '',
-              parentId: parentId || null
+              parentId: parentId || null,
+              order: ProjectFolders.children(parentId || null).length
           };
           st.folders.push(folder);
           ProjectFolders._persist();
@@ -15282,7 +15323,15 @@ crewRoles: {
           if(patch.name !== undefined) f.name = patch.name.toString().slice(0, 120);
           if(patch.color !== undefined) f.color = patch.color;
           if(patch.priority !== undefined) f.priority = patch.priority;
-          if(patch.parentId !== undefined && !ProjectFolders._wouldCycle(id, patch.parentId)) f.parentId = patch.parentId || null;
+          if(patch.parentId !== undefined && !ProjectFolders._wouldCycle(id, patch.parentId)) {
+              const nouveau = patch.parentId || null;
+              if(nouveau !== (f.parentId || null)) {
+                  // Il arrive dans une autre fratrie : il se met au bout,
+                  // pas au rang qu'il occupait dans l'ancienne.
+                  f.order = ProjectFolders.children(nouveau).filter(x => x.id !== id).length;
+              }
+              f.parentId = nouveau;
+          }
           ProjectFolders._persist();
           return f;
       },
@@ -15295,6 +15344,28 @@ crewRoles: {
           const guard = new Set();
           while(cur && !guard.has(cur.id)) { if(cur.id === id) return true; guard.add(cur.id); cur = cur.parentId ? ProjectFolders.get(cur.parentId) : null; }
           return false;
+      },
+
+      // Change le RANG d'un dossier : le poser juste avant (ou juste apres)
+      // un autre. Il prend au passage le parent de celui-la — poser un
+      // dossier a cote d'un autre, c'est le mettre au meme endroit.
+      // Renvoie false, sans rien changer, quand le deplacement est impossible.
+      ranger: (id, voisinId, apres) => {
+          const f = ProjectFolders.get(id), v = ProjectFolders.get(voisinId);
+          if(!f || !v || f.id === v.id) return false;
+          const parent = v.parentId || null;
+          if(!ProjectFolders.accepte(id, parent)) return false;
+          f.parentId = parent;
+          // On renumerote la fratrie ENTIERE : c'est la seule facon d'avoir
+          // des rangs qui restent justes apres plusieurs deplacements.
+          const fratrie = ProjectFolders.children(parent).filter(x => x.id !== id);
+          let i = fratrie.findIndex(x => x.id === v.id);
+          if(i < 0) return false;
+          if(apres) i++;
+          fratrie.splice(i, 0, f);
+          fratrie.forEach((x, n) => { x.order = n; });
+          ProjectFolders._persist();
+          return true;
       },
 
       // Un dossier peut-il etre range dans celui-la ? Question posee par
@@ -23938,6 +24009,41 @@ initCategoriesDragDrop: () => {
         try { return Array.prototype.indexOf.call(e.dataTransfer.types, UIDashboard.ETIQ_DOSSIER) >= 0; }
         catch(err) { return false; }
     },
+    //  OU VA-T-IL, SUR CETTE TUILE ? Les bords rangent A COTE (avant ou
+    //  apres), le milieu range DEDANS. Un seul geste, trois intentions, et
+    //  chacune se voit avant qu'on lache — c'est la seule facon de ne pas
+    //  avoir a deviner. Un PROJET, lui, n'a pas de rang parmi les dossiers :
+    //  il ne connait que « dedans ».
+    BANDE_BORD: 0.28,
+    _zoneTuile: (e, tile) => {
+        if(!UIDashboard._dossierEnVol(e)) return 'dedans';
+        const r = tile.getBoundingClientRect();
+        if(!r.width) return 'dedans';
+        const x = (e.clientX - r.left) / r.width;
+        if(x < UIDashboard.BANDE_BORD) return 'avant';
+        if(x > 1 - UIDashboard.BANDE_BORD) return 'apres';
+        return 'dedans';
+    },
+    _marquerZone: (tile, zone) => {
+        tile.classList.toggle('folder-drop', zone === 'dedans');
+        tile.classList.toggle('rang-avant', zone === 'avant');
+        tile.classList.toggle('rang-apres', zone === 'apres');
+    },
+    _nettoyerZones: () => {
+        document.querySelectorAll('.folder-tile, .folder-crumb').forEach(el => {
+            el.classList.remove('folder-drop', 'rang-avant', 'rang-apres', 'crumb-drop');
+        });
+    },
+    //  Poser un dossier a cote d'un autre : meme place, rang choisi.
+    _rangerACote: (id, voisinId, apres) => {
+        const f = ProjectFolders.get(id);
+        if(!f) return;
+        if(!ProjectFolders.ranger(id, voisinId, apres)) {
+            Utils.toast('Un dossier ne peut pas être rangé dans lui-même ni dans l’un des siens.', 'warning', 6000);
+            return;
+        }
+        UIDashboard.renderProjectList();
+    },
     //  Ranger un dossier ailleurs. cible = null : a la racine.
     _rangerDossier: (id, cibleId) => {
         const f = ProjectFolders.get(id);
@@ -24009,25 +24115,30 @@ initCategoriesDragDrop: () => {
             });
             tile.addEventListener('dragend', () => {
                 tile.classList.remove('dossier-en-vol');
-                document.querySelectorAll('.folder-drop, .crumb-drop')
-                    .forEach(el => el.classList.remove('folder-drop', 'crumb-drop'));
+                UIDashboard._nettoyerZones();
             });
             tile.addEventListener('dragover', (e) => {
                 // Un dossier pose sur lui-meme : on ne fait pas semblant
                 // d'accepter. Le refus se voit AVANT de lacher.
                 if(UIDashboard._dossierEnVol(e) && tile.classList.contains('dossier-en-vol')) {
                     e.dataTransfer.dropEffect = 'none';
+                    UIDashboard._marquerZone(tile, '');
                     return;
                 }
                 e.preventDefault();
-                tile.classList.add('folder-drop');
+                UIDashboard._marquerZone(tile, UIDashboard._zoneTuile(e, tile));
             });
-            tile.addEventListener('dragleave', (e) => { if(!tile.contains(e.relatedTarget)) tile.classList.remove('folder-drop'); });
+            tile.addEventListener('dragleave', (e) => { if(!tile.contains(e.relatedTarget)) UIDashboard._marquerZone(tile, ''); });
             tile.addEventListener('drop', (e) => {
                 e.preventDefault();
-                tile.classList.remove('folder-drop');
+                const zone = UIDashboard._zoneTuile(e, tile);
+                UIDashboard._marquerZone(tile, '');
                 const fid = e.dataTransfer.getData(UIDashboard.ETIQ_DOSSIER);
-                if(fid) { UIDashboard._rangerDossier(fid, f.id); return; }
+                if(fid) {
+                    if(zone === 'dedans') UIDashboard._rangerDossier(fid, f.id);
+                    else UIDashboard._rangerACote(fid, f.id, zone === 'apres');
+                    return;
+                }
                 const pid = e.dataTransfer.getData('text/plain');
                 if(pid) { ProjectFolders.assign(pid, f.id); Utils.toast('Déplacé dans « ' + f.name + ' »', 'success'); UIDashboard.renderProjectList(); }
             });
@@ -44464,7 +44575,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             PublicProfile.currentFacetTab = enabled.find(k => k !== 'crew') || null;
         }
         PublicProfile.renderFacetTabs(enabled);
-        PublicProfile.updateStatus();
     },
     
     // Change le type de profil (comédien/technicien)
@@ -45944,7 +46054,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             }
             
             PublicProfile.renderProfileTabs();
-            PublicProfile.updateStatus();
             if(btn) { btn.innerHTML = originalText; btn.classList.remove('btn-loading'); }
             Utils.toast('Profil sauvegardé !', 'success');
             return true;
@@ -46069,31 +46178,13 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         });
     },
     
-    // v600 : lit le PROFIL et non plus les champs du formulaire supprime.
-    updateStatus: () => {
-        const p = PublicProfile.profiles[PublicProfile.currentProfileIndex] || {};
-        const name = (p.name || '').trim();
-        const phone = (p.phone || '').trim();
-        const city = (p.city || '').trim();
-        const gender = p.gender || '';
-        
-        const isComplete = name && phone && city && gender;
-        const statusDiv = document.getElementById('profile-status');
-        if(!statusDiv) return;
-        
-        if(isComplete) {
-            statusDiv.className = 'profile-status complete';
-            statusDiv.innerHTML = '✅ Votre profil est complet et visible dans les recherches !';
-        } else {
-            statusDiv.className = 'profile-status incomplete';
-            const missing = [];
-            if(!name) missing.push('nom');
-            if(!gender) missing.push('sexe');
-            if(!phone) missing.push('téléphone');
-            if(!city) missing.push('ville');
-            statusDiv.innerHTML = `⚠️ Profil incomplet. Champs manquants : ${missing.join(', ')}`;
-        }
-    },
+    //  v601 - LE BANDEAU « VOTRE PROFIL EST COMPLET » A ETE RETIRE, et avec
+    //  lui la fonction updateStatus qui l'ecrivait. Il annoncait un profil
+    //  complet juste a cote du triangle qui disait l'inverse : il avait SA
+    //  PROPRE liste d'exigences (nom, telephone, ville, sexe), plus ancienne
+    //  et sans rapport avec ce qu'il faut vraiment pour etre trouve. Deux
+    //  reponses a la meme question, dont une fausse. Une seule regle
+    //  desormais : PublicProfile.MANQUES, et un seul signe, le triangle.
     
 };
 

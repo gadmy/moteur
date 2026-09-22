@@ -28,7 +28,21 @@
       // ----- Lecture -----
       // ProjectFolders.all retirée v569, jamais appelée.
       get: (id) => ProjectFolders._load().folders.find(f => f.id === id) || null,
-      children: (parentId) => ProjectFolders._load().folders.filter(f => (f.parentId || null) === (parentId || null)),
+      // Les dossiers d'un meme parent, DANS L'ORDRE CHOISI. Les dossiers
+      // crees avant que l'ordre existe n'en ont pas : ils gardent leur rang
+      // d'origine (l'ordre d'ajout) et passent apres ceux qu'on a ranges.
+      children: (parentId) => {
+          const tous = ProjectFolders._load().folders;
+          return tous
+              .map((f, i) => ({ f, i }))
+              .filter(x => (x.f.parentId || null) === (parentId || null))
+              .sort((a, b) => {
+                  const oa = (typeof a.f.order === 'number') ? a.f.order : 9999;
+                  const ob = (typeof b.f.order === 'number') ? b.f.order : 9999;
+                  return oa !== ob ? oa - ob : a.i - b.i;
+              })
+              .map(x => x.f);
+      },
       folderOf: (projectId) => ProjectFolders._load().assignments[projectId] || null,
       projectsIn: (folderId) => {
           const a = ProjectFolders._load().assignments;
@@ -50,7 +64,8 @@
               name: (name || 'Nouveau dossier').toString().slice(0, 120),
               color: color || '#9E9E9E',
               priority: priority || '',
-              parentId: parentId || null
+              parentId: parentId || null,
+              order: ProjectFolders.children(parentId || null).length
           };
           st.folders.push(folder);
           ProjectFolders._persist();
@@ -63,7 +78,15 @@
           if(patch.name !== undefined) f.name = patch.name.toString().slice(0, 120);
           if(patch.color !== undefined) f.color = patch.color;
           if(patch.priority !== undefined) f.priority = patch.priority;
-          if(patch.parentId !== undefined && !ProjectFolders._wouldCycle(id, patch.parentId)) f.parentId = patch.parentId || null;
+          if(patch.parentId !== undefined && !ProjectFolders._wouldCycle(id, patch.parentId)) {
+              const nouveau = patch.parentId || null;
+              if(nouveau !== (f.parentId || null)) {
+                  // Il arrive dans une autre fratrie : il se met au bout,
+                  // pas au rang qu'il occupait dans l'ancienne.
+                  f.order = ProjectFolders.children(nouveau).filter(x => x.id !== id).length;
+              }
+              f.parentId = nouveau;
+          }
           ProjectFolders._persist();
           return f;
       },
@@ -76,6 +99,28 @@
           const guard = new Set();
           while(cur && !guard.has(cur.id)) { if(cur.id === id) return true; guard.add(cur.id); cur = cur.parentId ? ProjectFolders.get(cur.parentId) : null; }
           return false;
+      },
+
+      // Change le RANG d'un dossier : le poser juste avant (ou juste apres)
+      // un autre. Il prend au passage le parent de celui-la — poser un
+      // dossier a cote d'un autre, c'est le mettre au meme endroit.
+      // Renvoie false, sans rien changer, quand le deplacement est impossible.
+      ranger: (id, voisinId, apres) => {
+          const f = ProjectFolders.get(id), v = ProjectFolders.get(voisinId);
+          if(!f || !v || f.id === v.id) return false;
+          const parent = v.parentId || null;
+          if(!ProjectFolders.accepte(id, parent)) return false;
+          f.parentId = parent;
+          // On renumerote la fratrie ENTIERE : c'est la seule facon d'avoir
+          // des rangs qui restent justes apres plusieurs deplacements.
+          const fratrie = ProjectFolders.children(parent).filter(x => x.id !== id);
+          let i = fratrie.findIndex(x => x.id === v.id);
+          if(i < 0) return false;
+          if(apres) i++;
+          fratrie.splice(i, 0, f);
+          fratrie.forEach((x, n) => { x.order = n; });
+          ProjectFolders._persist();
+          return true;
       },
 
       // Un dossier peut-il etre range dans celui-la ? Question posee par

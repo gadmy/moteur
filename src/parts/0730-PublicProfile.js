@@ -369,7 +369,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             PublicProfile.currentFacetTab = enabled.find(k => k !== 'crew') || null;
         }
         PublicProfile.renderFacetTabs(enabled);
-        PublicProfile.updateStatus();
     },
     
     // Change le type de profil (comédien/technicien)
@@ -1849,7 +1848,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             }
             
             PublicProfile.renderProfileTabs();
-            PublicProfile.updateStatus();
             if(btn) { btn.innerHTML = originalText; btn.classList.remove('btn-loading'); }
             Utils.toast('Profil sauvegardé !', 'success');
             return true;
@@ -1974,31 +1972,13 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         });
     },
     
-    // v600 : lit le PROFIL et non plus les champs du formulaire supprime.
-    updateStatus: () => {
-        const p = PublicProfile.profiles[PublicProfile.currentProfileIndex] || {};
-        const name = (p.name || '').trim();
-        const phone = (p.phone || '').trim();
-        const city = (p.city || '').trim();
-        const gender = p.gender || '';
-        
-        const isComplete = name && phone && city && gender;
-        const statusDiv = document.getElementById('profile-status');
-        if(!statusDiv) return;
-        
-        if(isComplete) {
-            statusDiv.className = 'profile-status complete';
-            statusDiv.innerHTML = '✅ Votre profil est complet et visible dans les recherches !';
-        } else {
-            statusDiv.className = 'profile-status incomplete';
-            const missing = [];
-            if(!name) missing.push('nom');
-            if(!gender) missing.push('sexe');
-            if(!phone) missing.push('téléphone');
-            if(!city) missing.push('ville');
-            statusDiv.innerHTML = `⚠️ Profil incomplet. Champs manquants : ${missing.join(', ')}`;
-        }
-    },
+    //  v601 - LE BANDEAU « VOTRE PROFIL EST COMPLET » A ETE RETIRE, et avec
+    //  lui la fonction updateStatus qui l'ecrivait. Il annoncait un profil
+    //  complet juste a cote du triangle qui disait l'inverse : il avait SA
+    //  PROPRE liste d'exigences (nom, telephone, ville, sexe), plus ancienne
+    //  et sans rapport avec ce qu'il faut vraiment pour etre trouve. Deux
+    //  reponses a la meme question, dont une fausse. Une seule regle
+    //  desormais : PublicProfile.MANQUES, et un seul signe, le triangle.
     
 };
 

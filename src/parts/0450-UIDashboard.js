@@ -300,6 +300,41 @@
         try { return Array.prototype.indexOf.call(e.dataTransfer.types, UIDashboard.ETIQ_DOSSIER) >= 0; }
         catch(err) { return false; }
     },
+    //  OU VA-T-IL, SUR CETTE TUILE ? Les bords rangent A COTE (avant ou
+    //  apres), le milieu range DEDANS. Un seul geste, trois intentions, et
+    //  chacune se voit avant qu'on lache — c'est la seule facon de ne pas
+    //  avoir a deviner. Un PROJET, lui, n'a pas de rang parmi les dossiers :
+    //  il ne connait que « dedans ».
+    BANDE_BORD: 0.28,
+    _zoneTuile: (e, tile) => {
+        if(!UIDashboard._dossierEnVol(e)) return 'dedans';
+        const r = tile.getBoundingClientRect();
+        if(!r.width) return 'dedans';
+        const x = (e.clientX - r.left) / r.width;
+        if(x < UIDashboard.BANDE_BORD) return 'avant';
+        if(x > 1 - UIDashboard.BANDE_BORD) return 'apres';
+        return 'dedans';
+    },
+    _marquerZone: (tile, zone) => {
+        tile.classList.toggle('folder-drop', zone === 'dedans');
+        tile.classList.toggle('rang-avant', zone === 'avant');
+        tile.classList.toggle('rang-apres', zone === 'apres');
+    },
+    _nettoyerZones: () => {
+        document.querySelectorAll('.folder-tile, .folder-crumb').forEach(el => {
+            el.classList.remove('folder-drop', 'rang-avant', 'rang-apres', 'crumb-drop');
+        });
+    },
+    //  Poser un dossier a cote d'un autre : meme place, rang choisi.
+    _rangerACote: (id, voisinId, apres) => {
+        const f = ProjectFolders.get(id);
+        if(!f) return;
+        if(!ProjectFolders.ranger(id, voisinId, apres)) {
+            Utils.toast('Un dossier ne peut pas être rangé dans lui-même ni dans l’un des siens.', 'warning', 6000);
+            return;
+        }
+        UIDashboard.renderProjectList();
+    },
     //  Ranger un dossier ailleurs. cible = null : a la racine.
     _rangerDossier: (id, cibleId) => {
         const f = ProjectFolders.get(id);
@@ -371,25 +406,30 @@
             });
             tile.addEventListener('dragend', () => {
                 tile.classList.remove('dossier-en-vol');
-                document.querySelectorAll('.folder-drop, .crumb-drop')
-                    .forEach(el => el.classList.remove('folder-drop', 'crumb-drop'));
+                UIDashboard._nettoyerZones();
             });
             tile.addEventListener('dragover', (e) => {
                 // Un dossier pose sur lui-meme : on ne fait pas semblant
                 // d'accepter. Le refus se voit AVANT de lacher.
                 if(UIDashboard._dossierEnVol(e) && tile.classList.contains('dossier-en-vol')) {
                     e.dataTransfer.dropEffect = 'none';
+                    UIDashboard._marquerZone(tile, '');
                     return;
                 }
                 e.preventDefault();
-                tile.classList.add('folder-drop');
+                UIDashboard._marquerZone(tile, UIDashboard._zoneTuile(e, tile));
             });
-            tile.addEventListener('dragleave', (e) => { if(!tile.contains(e.relatedTarget)) tile.classList.remove('folder-drop'); });
+            tile.addEventListener('dragleave', (e) => { if(!tile.contains(e.relatedTarget)) UIDashboard._marquerZone(tile, ''); });
             tile.addEventListener('drop', (e) => {
                 e.preventDefault();
-                tile.classList.remove('folder-drop');
+                const zone = UIDashboard._zoneTuile(e, tile);
+                UIDashboard._marquerZone(tile, '');
                 const fid = e.dataTransfer.getData(UIDashboard.ETIQ_DOSSIER);
-                if(fid) { UIDashboard._rangerDossier(fid, f.id); return; }
+                if(fid) {
+                    if(zone === 'dedans') UIDashboard._rangerDossier(fid, f.id);
+                    else UIDashboard._rangerACote(fid, f.id, zone === 'apres');
+                    return;
+                }
                 const pid = e.dataTransfer.getData('text/plain');
                 if(pid) { ProjectFolders.assign(pid, f.id); Utils.toast('Déplacé dans « ' + f.name + ' »', 'success'); UIDashboard.renderProjectList(); }
             });
