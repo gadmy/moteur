@@ -359,7 +359,37 @@ const app = (function(){
                       // Empêcher toute reconnexion websocket
                       supabase.realtime.connect = () => {};
                       supabase.realtime.reconnect = () => {};
-                      supabase.channel = () => ({ on: function(){return this;}, subscribe: function(){return this;}, track: function(){return this;}, send: function(){return this;} });
+                      // LE FAUX CANAL DOIT REPONDRE A TOUT CE QU'ON LUI DEMANDE.
+                      // Il ne portait que « on », « subscribe », « track » et
+                      // « send » — mais la bibliotheque, quand on lui rend un
+                      // canal (removeChannel), appelle UNSUBSCRIBE dessus.
+                      // Revenir au tableau de bord depuis un projet plantait
+                      // donc : « e.unsubscribe is not a function ». Le defaut
+                      // dormait depuis que le mode fichier existe ; il ne se
+                      // voyait pas tant que la bibliotheque ne se chargeait
+                      // meme pas en local.
+                      // ON REND TOUT CE QUE LA BIBLIOTHEQUE PEUT APPELER, sans
+                      // rien faire : en mode fichier il n'y a pas de temps
+                      // reel, donc rien a defaire.
+                      const fauxCanal = {
+                          topic: 'local', state: 'closed', params: {},
+                          on: function(){ return this; },
+                          off: function(){ return this; },
+                          subscribe: function(cb){ try { if(typeof cb === 'function') cb('CLOSED'); } catch(e) {} return this; },
+                          unsubscribe: function(){ return Promise.resolve('ok'); },
+                          track: function(){ return Promise.resolve('ok'); },
+                          untrack: function(){ return Promise.resolve('ok'); },
+                          send: function(){ return Promise.resolve('ok'); },
+                          presenceState: function(){ return {}; },
+                          teardown: function(){},
+                          _trigger: function(){}
+                      };
+                      supabase.channel = () => fauxCanal;
+                      // Et rendre un canal ne doit rien tenter non plus : il
+                      // n'y en a jamais eu de vrai.
+                      supabase.removeChannel = () => Promise.resolve('ok');
+                      supabase.removeAllChannels = () => Promise.resolve([]);
+                      supabase.getChannels = () => [];
                   }
                   // Supabase initialisé
                   resolve(true);

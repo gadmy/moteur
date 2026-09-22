@@ -1763,6 +1763,21 @@ vv601 (20 septembre 2026) — EN COURS.
   reconnaissaient l'un l'autre. Deux metiers sans aucun rapport rapproches par
   une marque de genre. Les terminaisons isolees sont ecartees comme les grades.
 
+  LE FAUX CANAL NE SAVAIT PAS SE DESABONNER. Signale en revenant au tableau
+  de bord depuis un projet, en local : « e.unsubscribe is not a function ».
+  EN MODE FICHIER, LE TEMPS REEL EST COUPE et remplace par un faux canal qui
+  ne fait rien. Il repondait a « on », « subscribe », « track » et « send » —
+  mais pas a UNSUBSCRIBE. Or rendre un canal a la bibliotheque
+  (removeChannel) l'appelle. Quitter un projet plantait donc.
+  LE DEFAUT DORMAIT DEPUIS QUE LE MODE FICHIER EXISTE : il ne pouvait pas se
+  voir tant que la bibliotheque ne se chargeait meme pas en local. La seconde
+  adresse ajoutee ce matin l'a reveille — une correction qui en decouvre une
+  autre, ce qui est plutot bon signe.
+  LE FAUX CANAL REPOND DESORMAIS A TOUT CE QUE LA BIBLIOTHEQUE PEUT LUI
+  DEMANDER, sans rien faire : en mode fichier il n'y a pas de temps reel, donc
+  rien a defaire. Et rendre un canal ne tente plus rien non plus — il n'y en a
+  jamais eu de vrai.
+
   UN SEUL CDN, C'ETAIT UN SEUL POINT DE PANNE. Le message ajoute ci-dessous a
   fait son travail des le premier essai : « La bibliotheque Supabase n'a pas pu
   etre chargee (CDN injoignable ?) », depuis un poste de travail. Sans lui on
@@ -12597,7 +12612,37 @@ const app = (function(){
                       // Empêcher toute reconnexion websocket
                       supabase.realtime.connect = () => {};
                       supabase.realtime.reconnect = () => {};
-                      supabase.channel = () => ({ on: function(){return this;}, subscribe: function(){return this;}, track: function(){return this;}, send: function(){return this;} });
+                      // LE FAUX CANAL DOIT REPONDRE A TOUT CE QU'ON LUI DEMANDE.
+                      // Il ne portait que « on », « subscribe », « track » et
+                      // « send » — mais la bibliotheque, quand on lui rend un
+                      // canal (removeChannel), appelle UNSUBSCRIBE dessus.
+                      // Revenir au tableau de bord depuis un projet plantait
+                      // donc : « e.unsubscribe is not a function ». Le defaut
+                      // dormait depuis que le mode fichier existe ; il ne se
+                      // voyait pas tant que la bibliotheque ne se chargeait
+                      // meme pas en local.
+                      // ON REND TOUT CE QUE LA BIBLIOTHEQUE PEUT APPELER, sans
+                      // rien faire : en mode fichier il n'y a pas de temps
+                      // reel, donc rien a defaire.
+                      const fauxCanal = {
+                          topic: 'local', state: 'closed', params: {},
+                          on: function(){ return this; },
+                          off: function(){ return this; },
+                          subscribe: function(cb){ try { if(typeof cb === 'function') cb('CLOSED'); } catch(e) {} return this; },
+                          unsubscribe: function(){ return Promise.resolve('ok'); },
+                          track: function(){ return Promise.resolve('ok'); },
+                          untrack: function(){ return Promise.resolve('ok'); },
+                          send: function(){ return Promise.resolve('ok'); },
+                          presenceState: function(){ return {}; },
+                          teardown: function(){},
+                          _trigger: function(){}
+                      };
+                      supabase.channel = () => fauxCanal;
+                      // Et rendre un canal ne doit rien tenter non plus : il
+                      // n'y en a jamais eu de vrai.
+                      supabase.removeChannel = () => Promise.resolve('ok');
+                      supabase.removeAllChannels = () => Promise.resolve([]);
+                      supabase.getChannels = () => [];
                   }
                   // Supabase initialisé
                   resolve(true);
