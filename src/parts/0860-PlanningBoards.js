@@ -1,7 +1,251 @@
 
   const PlanningBoards = {
+    // ==================================================================
+    //  LE PLAN DE TRAVAIL, L'AUTRE MOITIE (v601)
+    // ==================================================================
+    //  Ce qui s'appelait « plan de travail » n'etait que la GRILLE des
+    //  presences (SW / W / WF / T) : la moitie « qui travaille quand », celle
+    //  qui sert a la paie et aux contrats. Juste, mais muette sur ce qu'on
+    //  tourne.
+    //  L'AUTRE MOITIE, C'EST LE TOURNAGE ENTIER SUR UN DOCUMENT : chaque
+    //  journee, dans l'ordre, avec son decor, son effet, ses scenes, ses
+    //  personnages et ce qu'il faut preparer. C'est avec ca qu'on FABRIQUE un
+    //  tournage — on y lit qu'un decor revient trois fois a trois semaines
+    //  d'ecart, qu'un comedien a un trou de dix jours au milieu, qu'une nuit
+    //  suit un jour.
+    //  CE N'EST PAS LA FEUILLE DE SERVICE, qui existe deja et qui est tres
+    //  complete : celle-la, c'est UNE journee, distribuee la veille, avec les
+    //  convocations et les adresses. Le plan de travail, c'est la forme de
+    //  l'ensemble. On lit donc le depouillement PAR LA MEME PORTE que la
+    //  feuille de service (PlanningFDS.breakdownSlots) : deux lectures du
+    //  meme depouillement finiraient par ne plus dire la meme chose.
+    //  LES JOURS NUMEROTES SONT LES JOURS DE PLATEAU, et eux seuls — c'est
+    //  ainsi que font les productions : J1, J2... comptent le tournage, et
+    //  les reperages, essais et journees probables figurent au bon endroit
+    //  dans le calendrier, sans numero. Numeroter un essai costume ferait un
+    //  « 30 jours de tournage » qui n'en est pas un, et c'est ce chiffre qui
+    //  part dans le budget et les contrats.
+
+    //  Un jour de plateau, ou une journee d'autre chose ?
+    _estPlateau: (j) => {
+        if(!j) return false;
+        if(typeof Planning !== 'undefined' && Planning.estProbable && Planning.estProbable(j)) return false;
+        const t = j.dayType || 'tournage';
+        return t === 'tournage';
+    },
+    //  Les journees du projet, dans l'ordre, avec leur numero de plateau.
+    journees: () => {
+        const jours = (state.data.shootingDays || []).slice().sort((a, b) =>
+            String(a.startDate || a.date || '').localeCompare(String(b.startDate || b.date || '')));
+        let n = 0;
+        return jours.map(j => {
+            const plateau = PlanningBoards._estPlateau(j);
+            if(plateau) n++;
+            return { jour: j, numero: plateau ? n : null, plateau: plateau };
+        });
+    },
+    //  Les scenes d'une journee, retrouvees par leur identifiant.
+    _scenesDe: (j) => (j && j.scenes || [])
+        .map(ref => (state.data.scenes || []).find(s => s && s.id === (ref && ref.sceneId)))
+        .filter(Boolean),
+    //  Le decor d'une scene : la fiche liee si elle existe, sinon ce que dit
+    //  l'en-tete de scene (meme lecture que la feuille de service).
+    _decorDe: (sc) => {
+        const fiche = sc && sc.locationId
+            ? (state.data.locations || []).find(l => l && l.id === sc.locationId) : null;
+        if(fiche && fiche.name) return fiche.name;
+        try { return PlanningFDS.decor(sc); } catch(e) { return (sc && sc.title) || ''; }
+    },
+    //  L'effet : INT/EXT et JOUR/NUIT, tels qu'ils sont ecrits sur la scene.
+    _effetDe: (sc) => [sc && sc.intExt, sc && sc.dayNight].filter(Boolean).join(' · '),
+    //  Les personnages d'une journee, par leurs fiches.
+    _personnagesDe: (j) => {
+        const vus = {}, out = [];
+        PlanningBoards._scenesDe(j).forEach(sc => {
+            (sc.breakdown && sc.breakdown['PERSONNAGES'] || []).forEach(it => {
+                const t = Utils.bdText(it);
+                if(!t || vus[t]) return;
+                vus[t] = 1; out.push(t);
+            });
+        });
+        return out;
+    },
+    //  CE QUI DECIDE DE L'ORDRE DES JOURS. Un vehicule, un animal, un effet
+    //  special ou de la figuration coutent cher et se preparent : on les voit
+    //  d'un coup d'oeil, sans deplier le depouillement entier.
+    CATS_LOURDES: [
+        { cat: 'VEHICULES', icone: '🚗', mot: 'véhicule' },
+        { cat: 'ANIMAUX', icone: '🐕', mot: 'animal' },
+        { cat: 'EFFETS SPECIAUX (SFX)', icone: '💥', mot: 'SFX' },
+        { cat: 'EFFETS VISUELS (VFX)', icone: '🖥️', mot: 'VFX' },
+        { cat: 'FIGURATION', icone: '👥', mot: 'figurant' }
+    ],
+    pointsLourds: (j) => {
+        const compte = {};
+        PlanningBoards._scenesDe(j).forEach(sc => {
+            PlanningBoards.CATS_LOURDES.forEach(d => {
+                const items = (sc.breakdown && sc.breakdown[d.cat]) || [];
+                if(!items.length) return;
+                if(!compte[d.cat]) compte[d.cat] = {};
+                items.forEach(it => { const t = Utils.bdText(it); if(t) compte[d.cat][t] = 1; });
+            });
+        });
+        return PlanningBoards.CATS_LOURDES
+            .filter(d => compte[d.cat])
+            .map(d => {
+                const n = Object.keys(compte[d.cat]).length;
+                return { icone: d.icone, n: n, mot: d.mot + (n > 1 ? 's' : ''),
+                         quoi: Object.keys(compte[d.cat]) };
+            });
+    },
+
     // Afficher le Plan de Travail
     // Afficher le Plan de Travail (DOOD)
+    //  LE RECAPITULATIF PAR DECOR : la premiere chose qu'un assistant
+    //  realisateur optimise. Y retourner trois fois pour une scene a chaque
+    //  fois, c'est trois installations et trois retours.
+    recapDecors: () => {
+        const par = {};
+        PlanningBoards.journees().forEach(l => {
+            PlanningBoards._scenesDe(l.jour).forEach(sc => {
+                const d = PlanningBoards._decorDe(sc);
+                if(!d) return;
+                if(!par[d]) par[d] = { jours: [], scenes: 0 };
+                par[d].scenes++;
+                const eti = l.numero ? ('J' + l.numero) : PlanningBoards._dateCourte(l.jour.startDate || l.jour.date);
+                if(par[d].jours.indexOf(eti) < 0) par[d].jours.push(eti);
+            });
+        });
+        const noms = Object.keys(par).sort((a, b) => par[b].jours.length - par[a].jours.length);
+        if(!noms.length) return '';
+        const esc = Utils.escape;
+        return '<div class="pdt-bloc"><h3 class="pdt-titre">🏠 Par décor</h3>'
+            + '<table class="pdt-table"><thead><tr><th>Décor</th><th>Jours</th><th>Scènes</th><th>Quand</th></tr></thead><tbody>'
+            + noms.map(n => {
+                // Un decor eclate sur des jours eloignes se voit : c'est
+                // souvent la qu'on peut regrouper.
+                const eclate = par[n].jours.length > 1;
+                return '<tr><td>' + esc(n) + '</td>'
+                     + '<td class="pdt-num">' + par[n].jours.length + '</td>'
+                     + '<td class="pdt-num">' + par[n].scenes + '</td>'
+                     + '<td>' + esc(par[n].jours.join(', '))
+                     + (eclate ? ' <span class="pdt-alerte" title="Ce décor revient sur plusieurs journées : regroupables ?">⚠</span>' : '')
+                     + '</td></tr>';
+              }).join('')
+            + '</tbody></table></div>';
+    },
+
+    //  LES SCENES QUI NE SONT NULLE PART. C'est la question qu'on se pose en
+    //  refermant un plan de travail : est-il COMPLET ? Un document qui ne dit
+    //  pas ce qu'il oublie laisse croire que tout est place.
+    scenesNonPlanifiees: () => {
+        const placees = {};
+        (state.data.shootingDays || []).forEach(j => {
+            (j && j.scenes || []).forEach(ref => { if(ref && ref.sceneId) placees[ref.sceneId] = 1; });
+        });
+        const reste = (state.data.scenes || []).filter(s => s && !placees[s.id]);
+        const total = (state.data.scenes || []).length;
+        if(!total) return '';
+        const esc = Utils.escape;
+        if(!reste.length) {
+            return '<div class="pdt-bloc pdt-complet">✅ Les ' + total + ' scènes du scénario sont placées.</div>';
+        }
+        const plur = reste.length > 1;
+        return '<div class="pdt-bloc pdt-manque"><h3 class="pdt-titre">⚠ ' + reste.length + ' scène'
+            + (plur ? 's' : '') + ' sur ' + total + (plur ? ' ne sont pas encore placées' : ' n’est pas encore placée') + '</h3>'
+            + '<div class="pdt-scenes-libres">'
+            + reste.map(sc => '<span class="pdt-scene" title="' + esc(sc.title || '') + '">'
+                + esc(sc.number || '?') + '</span>').join(' ')
+            + '</div></div>';
+    },
+
+    //  LE DEPOUILLEMENT COMPLET, JOUR PAR JOUR. Il est LONG — seize
+    //  categories par journee — donc il se deplie : le plan de travail se lit
+    //  d'abord d'un coup d'oeil, on ouvre le detail quand on prepare.
+    //  MEME LECTURE QUE LA FEUILLE DE SERVICE, volontairement : deux
+    //  lectures du meme depouillement finiraient par ne plus dire la meme
+    //  chose.
+    depouillementParJour: () => {
+        const lignes = PlanningBoards.journees().filter(l => PlanningBoards._scenesDe(l.jour).length);
+        if(!lignes.length) return '';
+        const esc = Utils.escape;
+        let html = '<div class="pdt-bloc"><h3 class="pdt-titre">📋 Le dépouillement, jour par jour</h3>';
+        lignes.forEach(l => {
+            const j = l.jour;
+            let cats = {};
+            PlanningBoards._scenesDe(j).forEach(sc => {
+                Object.entries(sc.breakdown || {}).forEach(([cat, items]) => {
+                    if(!Array.isArray(items) || !items.length) return;
+                    if(!cats[cat]) cats[cat] = {};
+                    items.forEach(it => { const t = Utils.bdText(it); if(t) cats[cat][t] = 1; });
+                });
+            });
+            const noms = Object.keys(cats).sort();
+            if(!noms.length) return;
+            const titre = (l.numero ? 'J' + l.numero : Planning.getDayTypeInfo(j.dayType).icon)
+                        + ' · ' + PlanningBoards._dateCourte(j.startDate || j.date);
+            html += '<details class="pdt-jour"><summary>' + esc(titre)
+                 + ' <span class="pdt-jour-compte">' + noms.length + ' catégorie' + (noms.length > 1 ? 's' : '') + '</span></summary>'
+                 + '<div class="pdt-cats">'
+                 + noms.map(cat => '<div class="pdt-cat"><strong>' + esc(Utils.catLabel(cat)) + '</strong><span>'
+                     + esc(Object.keys(cats[cat]).join(', ')) + '</span></div>').join('')
+                 + '</div></details>';
+        });
+        return html + '</div>';
+    },
+
+    //  Le tableau des journees. C'est le coeur du document.
+    _dateCourte: (d) => {
+        try {
+            const x = new Date(String(d) + 'T12:00:00');
+            if(isNaN(x.getTime())) return String(d || '');
+            return x.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+        } catch(e) { return String(d || ''); }
+    },
+    tableauJournees: () => {
+        const lignes = PlanningBoards.journees();
+        if(!lignes.length) return '';
+        const esc = Utils.escape;
+        let html = '<div class="pdt-bloc"><h3 class="pdt-titre">📆 Les journées</h3>'
+                 + '<table class="pdt-table"><thead><tr>'
+                 + '<th>Jour</th><th>Date</th><th>Décor</th><th>Effet</th>'
+                 + '<th>Scènes</th><th>Personnages</th><th>À préparer</th>'
+                 + '</tr></thead><tbody>';
+        lignes.forEach(l => {
+            const j = l.jour;
+            const scenes = PlanningBoards._scenesDe(j);
+            const decors = [];
+            scenes.forEach(sc => { const d = PlanningBoards._decorDe(sc); if(d && decors.indexOf(d) < 0) decors.push(d); });
+            const effets = [];
+            scenes.forEach(sc => { const e = PlanningBoards._effetDe(sc); if(e && effets.indexOf(e) < 0) effets.push(e); });
+            const persos = PlanningBoards._personnagesDe(j);
+            const lourds = PlanningBoards.pointsLourds(j);
+            const typeInfo = Planning.getDayTypeInfo(j.dayType);
+            // UN JOUR AVEC TROIS DECORS EST UN SIGNAL, pas un detail : c'est
+            // une journee a deplacements, celle qui deborde.
+            const alerteDecors = decors.length > 2;
+            html += '<tr class="' + (l.plateau ? 'pdt-plateau' : 'pdt-hors') + '">'
+                + '<td class="pdt-num">' + (l.numero ? ('J' + l.numero) : ('<span title="' + esc(typeInfo.label) + '">' + typeInfo.icon + '</span>')) + '</td>'
+                + '<td class="pdt-date">' + esc(PlanningBoards._dateCourte(j.startDate || j.date)) + '</td>'
+                + '<td>' + (decors.length ? esc(decors.join(' · ')) + (alerteDecors ? ' <span class="pdt-alerte" title="Trois décors ou plus dans la journée : prévoyez les déplacements">⚠</span>' : '')
+                                          : '<span class="pdt-vide">' + esc(j.name || typeInfo.label) + '</span>') + '</td>'
+                + '<td class="pdt-effet">' + esc(effets.join(' / ')) + '</td>'
+                + '<td>' + (scenes.length
+                      ? scenes.map(sc => '<span class="pdt-scene" title="' + esc(sc.title || '') + '">' + esc(sc.number || '?') + '</span>').join(' ')
+                      : '') + '</td>'
+                + '<td class="pdt-persos">' + esc(persos.join(', ')) + '</td>'
+                + '<td class="pdt-lourds">' + lourds.map(x => '<span class="pdt-lourd" title="' + esc(x.quoi.join(', ')) + '">' + x.icone + ' ' + x.n + ' ' + esc(x.mot) + '</span>').join(' ') + '</td>'
+            + '</tr>';
+        });
+        const nPlateau = lignes.filter(l => l.plateau).length;
+        const nAutres = lignes.length - nPlateau;
+        html += '</tbody></table>'
+             + '<div class="pdt-note">' + nPlateau + ' jour' + (nPlateau > 1 ? 's' : '') + ' de tournage'
+             + (nAutres ? ' · ' + nAutres + ' autre' + (nAutres > 1 ? 's journées' : ' journée') + ' (repérage, essais, probable…), sans numéro : seuls les jours de plateau se comptent.' : '')
+             + '</div></div>';
+        return html;
+    },
+
     renderWorkPlan: () => {
         const shootDays = (state.data.shootingDays || []).slice().sort((a, b) => {
             const dateA = new Date(a.startDate || a.date);
@@ -102,6 +346,15 @@
             return Object.keys(data.days).length;
         };
         
+        // v601 : LE CHIFFRE DE L'EN-TETE COMPTE LES JOURS DE PLATEAU, comme
+        // le tableau plus bas. Il comptait TOUTES les journees : l'en-tete
+        // annoncait « 4 jours de tournage » au-dessus d'un tableau qui en
+        // montrait deux. Deux chiffres qui se contredisent sur la meme page,
+        // c'est le document entier qu'on cesse de croire — et c'est ce chiffre
+        // qui part dans le budget et les contrats.
+        const nbPlateau = shootDays.filter(j => PlanningBoards._estPlateau(j)).length;
+        const nbAutres = shootDays.length - nbPlateau;
+
         // Dates du tournage
         const firstDate = new Date(shootDays[0].startDate || shootDays[0].date);
         const lastDate = new Date(shootDays[shootDays.length - 1].startDate || shootDays[shootDays.length - 1].date);
@@ -119,7 +372,7 @@
                 </div>
                 <div class="workplan-header-info">
                     <strong>Tournage :</strong> Du ${formatDate(firstDate)} au ${formatDate(lastDate)}<br>
-                    <strong>Jours :</strong> ${shootDays.length} jour${shootDays.length > 1 ? 's' : ''} de tournage<br>
+                    <strong>Jours :</strong> ${nbPlateau} jour${nbPlateau > 1 ? 's' : ''} de tournage${nbAutres ? ` <span class="pdt-vide">(+ ${nbAutres} autre${nbAutres > 1 ? 's' : ''})</span>` : ''}<br>
                     <strong>Comédiens :</strong> ${actors.length}
                 </div>
                 <div class="workplan-header-version">
@@ -128,7 +381,15 @@
                 </div>
             </div>`;
         
-        // Tableau principal
+        // v601 : LES QUATRE BLOCS QUI MANQUAIENT, avant la grille des
+        // presences. On lit d'abord ce qu'on tourne, ensuite qui est la.
+        html += PlanningBoards.scenesNonPlanifiees();
+        html += PlanningBoards.tableauJournees();
+        html += PlanningBoards.recapDecors();
+        html += PlanningBoards.depouillementParJour();
+
+        // La grille des presences (SW / W / WF / T) : qui travaille quand.
+        html += '<div class="pdt-bloc"><h3 class="pdt-titre">🎭 Qui travaille quand</h3></div>';
         html += '<table class="workplan-table"><thead><tr>';
         html += '<th class="workplan-col-num">N°</th>';
         html += '<th class="workplan-col-role">RÔLE</th>';
