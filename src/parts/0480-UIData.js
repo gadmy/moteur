@@ -197,7 +197,7 @@
                     const galleryPhotos = item.galleryPhotos || [];
                     const galleryHTML = galleryPhotos.map((url, i2) => `<div style="position:relative; width:80px; height:80px;"><img src="${Utils.safeMediaUrl(url)}" alt="Photo de la galerie" class="${(item.galleryFav||[]).includes(url) ? 'gallery-thumb-fav' : ''}" style="width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--border); cursor:pointer;" onclick="app.PhotoViewer.open('actors', ${idx}, ${i2})">${(item.galleryFav||[]).includes(url) ? '<span class="gallery-fav-badge">❤</span>' : ''}${!isReadOnly ? `<button onclick="app.Actions.removeActorGalleryPhoto(${idx}, ${i2})" class="n8-avatar-3">✕</button>` : ''}</div>`).join('');
                     let galHtml = `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px;">${galleryHTML || '<span style="color:var(--text-sec); font-size:0.85rem;">Aucune photo</span>'}</div>
-                        ${!isReadOnly ? `<div class="flex-gap10" style="align-items:center;"><input type="file" id="actor-gallery-input-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.addActorGalleryPhoto(${idx})"><button onclick="document.getElementById('actor-gallery-input-${idx}').click()" class="btn btn--primary btn--sm" ${galleryPhotos.length >= 3 ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>📤 Ajouter une photo${galleryPhotos.length > 0 ? ` (${galleryPhotos.length}/3)` : ''}</button></div>` : ''}`;
+                        ${!isReadOnly ? `<div class="flex-gap10" style="align-items:center;"><input type="file" id="actor-gallery-input-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.addActorGalleryPhoto(${idx})"><button onclick="document.getElementById('actor-gallery-input-${idx}').click()" class="btn btn--primary btn--sm" ${galleryPhotos.length >= CONFIG.maxGaleriePhotos ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>📤 Ajouter une photo${galleryPhotos.length > 0 ? ` (${galleryPhotos.length}/${CONFIG.maxGaleriePhotos})` : ''}</button></div>` : ''}`;
                     blocks.push(FicheUI.block('actor', 'galerie', '📸 Galerie photos', galHtml));
                 }
 
@@ -358,8 +358,9 @@
                 }
                 projHtml += FicheUI.field('Interprété par', actorControl);
                 // v601 : ce bouton ouvre desormais le TRI de l'Univers, sur ce
-                // role. Il ne sert que tant que le role est a distribuer.
-                if(!isView && !item.actor_id) projHtml += `<div style="margin-top:6px;"><button class="btn btn--primary btn--sm" onclick="app.GlobalSearch.openForCharacter(${idx})">🎭 Trouver un·e comédien·ne pour ce rôle</button></div>`;
+                // role. IL RESTE LA MEME QUAND LE ROLE EST DISTRIBUE : on
+                // cherche aussi un remplacant, une doublure, un second choix.
+                if(!isView) projHtml += `<div style="margin-top:6px;"><button class="btn btn--primary btn--sm" onclick="app.GlobalSearch.openForCharacter(${idx})">🎭 Trouver un·e comédien·ne pour ce rôle</button></div>`;
                 projHtml += UI.renderCost('character', item.id);
                 blocks.push(FicheUI.block('character', 'projet', '🎬 Dans le projet', projHtml, { pin: 'right' }));
 
@@ -530,7 +531,7 @@
         projHtml += UI.renderCost('crew', member.id);
         // v601 : tant que ce poste n'est relie a personne de l'Univers, on
         // peut partir d'ici pour trier les technicien·nes qui le tiennent.
-        if(!isReadOnly && !member.publicProfileId) {
+        if(!isReadOnly) {
             projHtml += `<div style="margin-top:6px;"><button class="btn btn--primary btn--sm" onclick="app.GlobalSearch.openForCrewMember(${idx})">🎥 Trouver quelqu’un pour ce poste</button></div>`;
         }
         blocks.push(FicheUI.block('crew', 'projet', '🎬 Dans le projet', projHtml, { pin: 'right' }));

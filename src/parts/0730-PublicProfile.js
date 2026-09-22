@@ -882,10 +882,12 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         const d = PublicProfile._engineProfile;
         if(!d) return;
         if(!Array.isArray(d.galleryPhotos)) d.galleryPhotos = [];
-        if(d.galleryPhotos.length >= 3) { Utils.toast('3 photos maximum.', 'warning'); return; }
+        if(d.galleryPhotos.length >= CONFIG.maxGaleriePhotos) { Utils.toast(CONFIG.maxGaleriePhotos + ' photos maximum.', 'warning'); return; }
         Utils.toast('Envoi de la photo…', 'info', 1500);
         try {
-            const blob = await PublicProfile.compressImageToBlob(file, 800, 0.8);
+            // Une galerie de casting sert a JUGER un visage : a 800 px et 0,8
+            // un portrait perd ses traits des qu'on l'agrandit.
+            const blob = await PublicProfile.compressImageToBlob(file, CONFIG.galerieCotePx, CONFIG.galerieQualite);
             const userId = state.currentUser.id;
             const filePath = userId + '/gallery_' + Date.now() + '.jpg';
             const { error } = await supabase.storage.from('gallery').upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });

@@ -425,6 +425,17 @@ const app = (function(){
   
 const CONFIG = { 
     themeKey: 'fmp_theme_pref',
+    // ========== GALERIES PHOTO ==========
+    //  LE MEME NOMBRE ECRIT A QUATRE ENDROITS FINIT PAR NE PLUS ETRE LE MEME.
+    //  Il etait dans deux controles et dans deux libelles ; passe de 3 a 10 en
+    //  v601, il se change desormais ICI, une fois.
+    maxGaleriePhotos: 10,
+    //  Et la qualite va avec : une galerie de casting sert a JUGER un visage.
+    //  Le profil public compressait a 800 px / 0,8 — un portrait y perd ses
+    //  traits des qu'on l'agrandit. On s'aligne sur la galerie du projet, qui
+    //  etait deja correcte : 1600 px de cote, qualite 0,9.
+    galerieCotePx: 1600,
+    galerieQualite: 0.9,
     // ========== ADMIN ==========
     adminEmails: ['contact@moteur.studio'],  // Emails ayant accès au tableau de bord admin
     internalEmails: ['contact@moteur.studio', 'ga.dmy@ikmail.com', 'ga.demauroy@gmail.com'],  // B4 : connexions internes (exclues des stats)

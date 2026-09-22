@@ -198,7 +198,7 @@
           <h3>Gère tous tes comédiens</h3>
           <p>Deux vues : par Personnages du scénario, ou par Comédiens avec fiches complètes.</p>
           <p>Chaque personnage peut être lié à un comédien. Tu vois qui joue qui en un coup d'œil.</p>
-          <p><strong>Fiche comédien :</strong> Photo, contact, mensurations, compétences, disponibilités. Jusqu'à 3 photos pour la galerie (essais costumes !).</p>
+          <p><strong>Fiche comédien :</strong> Photo, contact, mensurations, compétences, disponibilités. Jusqu'à 10 photos pour la galerie (essais costumes !).</p>
           <div class="tuto-tip"><strong>💡 Contrats :</strong> Le bouton Contrat sur chaque fiche génère directement le document. Les jours de tournage sont calculés depuis le planning.</div>
         `
       },
@@ -318,7 +318,7 @@
           <h3>Ta carte de visite pro</h3>
           <p>Pour apparaître dans l'Univers, active au moins une casquette : <strong>Comédien·ne, Technicien·ne, Association ou Entreprise</strong>. Chaque casquette te rend visible auprès des autres membres de la communauté.</p>
           <div class="tuto-tip"><strong>💡 Quatre casquettes :</strong> Ton profil unique peut cumuler jusqu'à 4 casquettes (comédien·ne, technicien·ne, association, entreprise). Chaque casquette a ses propres champs et sa propre visibilité dans l'Univers.</div>
-          <p><strong>Profil Comédien·ne :</strong> Nom de scène, mensurations, compétences, langues, sports (avec niveaux). Jusqu'à 3 photos (profil, plein-pied, portrait).</p>
+          <p><strong>Profil Comédien·ne :</strong> Nom de scène, mensurations, compétences, langues, sports (avec niveaux). Jusqu'à 10 photos (profil, plein-pied, portrait, essais...).</p>
           <p><strong>Profil Technicien·ne :</strong> Département et poste (perche, lumière, machino...), identité, contact, photos, bande démo, parcours, disponibilités, véhicule et tarif. Tu peux ouvrir <strong>plusieurs fiches technicien</strong> si tu tiens plusieurs spécialités : le bouton « + » sur la grille des casquettes en crée une nouvelle, qui reprend ton identité et ton véhicule.</p>
           <p><strong>Profil Association / Entreprise :</strong> Nom de structure, description, membres référents, zone d'action.</p>
           <div class="tuto-tip"><strong>🔒 Visibilité :</strong> elle se règle <strong>par casquette</strong>, avec la case « 👁 Univers » sur sa carte. Tu peux être cherchable comme technicien·ne sans l'être comme comédien·ne. Le bouton « 🧹 Effacer » vide une casquette sans toucher aux autres ni à ton compte.</div>

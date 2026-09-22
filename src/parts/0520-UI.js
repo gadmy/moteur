@@ -2354,9 +2354,11 @@
           const input = document.getElementById(`actor-gallery-input-${idx}`);
           if(!input || !input.files || !input.files[0]) { Utils.toast('Veuillez sélectionner une photo.', 'warning'); return; }
           if(!state.data.actors[idx].galleryPhotos) state.data.actors[idx].galleryPhotos = [];
-          // Limite à 3 photos dans la galerie comédien
-          if(state.data.actors[idx].galleryPhotos.length >= 3) {
-              Utils.toast('Maximum 3 photos dans la galerie comédien. Supprimez-en une avant d\'en ajouter une nouvelle.', 'warning');
+          // Le nombre vient de CONFIG.maxGaleriePhotos : il etait ecrit ici,
+          // dans le libelle du bouton et dans le profil public — trois copies
+          // du meme chiffre, donc trois occasions qu'il diverge.
+          if(state.data.actors[idx].galleryPhotos.length >= CONFIG.maxGaleriePhotos) {
+              Utils.toast('Maximum ' + CONFIG.maxGaleriePhotos + ' photos dans la galerie comédien. Supprimez-en une avant d\'en ajouter une nouvelle.', 'warning');
               input.value = '';
               return;
           }
