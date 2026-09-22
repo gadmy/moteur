@@ -53,7 +53,57 @@
     //  place, en deux dixiemes de seconde — juste assez pour suivre l'oeil,
     //  pas assez pour attendre. Rien ne change pour qui a demande moins
     //  d'animations : le travail se fait dans tous les cas.
-    DUREE_ONGLET: 190,
+    //  DEFAUT VU A L'USAGE, ET CORRIGE : « l'animation n'est pas tres
+    //  visible ». Elle ne l'etait pas parce que la largeur ne tombait a zero
+    //  qu'a la DERNIERE image : l'onglet palissait sur place, puis toute la
+    //  barre sautait d'un coup pour combler le trou. On ne voyait donc que le
+    //  saut. La largeur se retracte maintenant sur toute la duree — les
+    //  voisins se rabattent AVEC lui — et la duree passe a un tiers de
+    //  seconde, le temps qu'il faut pour suivre un deplacement des yeux.
+    DUREE_ONGLET: 320,
+    DUREE_ECART: 300,
+    SEL_ONGLETS: '.tab-subbtn[data-tab], .tab-btn[data-tab]',
+    _sansAnimation: () => {
+        try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+        catch(e) { return false; }
+    },
+    //  UN ONGLET QUI REVIENT ECARTE SES VOISINS. Sa largeur de destination
+    //  depend du mot qu'il porte : elle ne peut pas s'ecrire dans une feuille
+    //  de style, on la MESURE une fois pose, on le remet a zero, et on le
+    //  laisse s'ouvrir. Les voisins suivent, puisque c'est la meme barre.
+    ecarterOnglet: (tabName) => {
+        const btns = [...document.querySelectorAll(
+            '.tab-subbtn[data-tab="' + tabName + '"], .tab-btn[data-tab="' + tabName + '"]')];
+        if(!btns.length || UIHidden._sansAnimation()) return;
+        btns.forEach(b => {
+            const large = b.offsetWidth;
+            // Mesure a zero = rien de mesure : on preferera ne rien animer
+            // plutot que d'ouvrir un onglet de zero pixel qui n'en sortirait
+            // jamais.
+            if(!large) return;
+            const D = UIHidden.DUREE_ECART;
+            b.classList.add('onglet-ecarte');
+            b.style.transition = 'none';
+            b.style.width = '0px';
+            b.style.paddingLeft = '0px'; b.style.paddingRight = '0px';
+            b.style.marginLeft = '0px'; b.style.marginRight = '0px';
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                b.style.transition = 'width ' + D + 'ms cubic-bezier(.22,.7,.3,1), '
+                                   + 'padding ' + D + 'ms cubic-bezier(.22,.7,.3,1), '
+                                   + 'margin ' + D + 'ms cubic-bezier(.22,.7,.3,1)';
+                b.style.width = large + 'px';
+                b.style.paddingLeft = ''; b.style.paddingRight = '';
+                b.style.marginLeft = ''; b.style.marginRight = '';
+                setTimeout(() => {
+                    // On rend l'onglet a sa feuille de style : une largeur
+                    // figee en pixels ne survivrait pas a un changement de
+                    // langue ni a un redimensionnement.
+                    b.style.transition = ''; b.style.width = '';
+                    b.classList.remove('onglet-ecarte');
+                }, D + 40);
+            }));
+        });
+    },
     hideTab: (tabName) => {
         if(UIHidden.hiddenTabs.includes(tabName)) return;
         const boutons = [...document.querySelectorAll('.tab-subbtn[data-tab="' + tabName + '"], .tab-btn[data-tab="' + tabName + '"]')];
@@ -297,6 +347,8 @@
         UIHidden.applyHiddenTabs();
         UIHidden.applyHiddenCategories();
         UI.switchTab(tabName);
+        // Apres le re-rendu, pas avant : le bouton n'existe qu'a ce moment-la.
+        setTimeout(() => UIHidden.ecarterOnglet(tabName), 20);
         Utils.toast('Onglet restauré', 'success');
     },
     

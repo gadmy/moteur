@@ -321,7 +321,10 @@
       _checkState: {
           synopsis: { short: true, long: true, main: true, intent: true, director: true, producer: true },
           script: { numbers: true, notes: false },
-          planning: { callsheet: true }
+          planning: { callsheet: true },
+          // Le plan de travail entre au hub avec le choix de ses tableaux :
+          // on ne distribue pas les memes a la production et a la regie.
+          workplan: { journees: true, decors: true, presences: true }
       },
       _checkDefs: {
           synopsis: [
@@ -333,9 +336,31 @@
           ],
           planning: [
               { k: 'callsheet', l: 'Feuille de service (convocations détaillées)' }
+          ],
+          workplan: [
+              { k: 'journees',  l: 'Les journées (modèle horizontal)' },
+              { k: 'decors',    l: 'Par décor' },
+              { k: 'presences', l: 'Les présences (modèle vertical)' }
           ]
       },
-      _checkTitles: { synopsis: 'Synopsis', script: 'Scénario', planning: 'Planning' },
+      _checkTitles: { synopsis: 'Synopsis', script: 'Scénario', planning: 'Planning',
+                      workplan: 'Plan de travail' },
+      // ON ANNONCE LE PAPIER AVANT DE GENERER. Un tableau de quarante
+      // colonnes sorti sur A4 donne des caracteres de deux millimetres :
+      // illisible, donc jete. Le libelle dit sa taille et sa feuille, et le
+      // PDF sort en A3 paysage tout seul quand il le faut.
+      expOpenWorkplanOptions: (e) => {
+          const base = { journees: 'Les journées (modèle horizontal)', decors: 'Par décor',
+                         presences: 'Les présences (modèle vertical)' };
+          ActionsExport._checkDefs.workplan = Object.keys(base).map(k => {
+              const f = (typeof PlanningBoards !== 'undefined') ? PlanningBoards.formatTableau(k) : null;
+              const info = !f ? ' — vide'
+                  : ' — ' + f.colonnes + ' colonnes, ' + f.lignes + ' ligne' + (f.lignes > 1 ? 's' : '')
+                    + (f.papier === 'A3' ? ' → A3 paysage' : '');
+              return { k: k, l: base[k] + info };
+          });
+          ActionsExport.expOpenCheckOptions('workplan', e);
+      },
       expOpenCheckOptions: (key, e) => {
           if(e) e.stopPropagation();
           const defs = ActionsExport._checkDefs[key];
@@ -373,7 +398,7 @@
           moodboard: 'moodboard', storyboard: 'storyboard',
           presentation: 'presentation', chars: 'personnages', actors: 'comediens',
           locs: 'lieux', breakdown: 'depouillement', crew: 'equipe', orgs: 'equipe',
-          resources: 'ressources', planning: 'planning',
+          resources: 'ressources', planning: 'planning', workplan: 'planning',
           scriptreports: 'scriptreport', budget: 'depenses', stats: 'stats'
       },
 
@@ -806,6 +831,7 @@
               orgs:         { label: 'Asso / Entreprises',    build: (extra) => Orgs.exportPDF({ includeCover: getCover('orgs'), mode: ActionsExport._modeState.orgs, ...extra }) },
               resources:    { label: 'Ressources',            build: (extra) => Resources.exportPDF({ includeCover: getCover('resources'), mode: ActionsExport._modeState.resources, ...extra }) },
               planning:     { label: 'Planning',              build: (extra) => Planning.exportPlanningPDF({ ...planningOpts(), ...extra }) },
+              workplan:     { label: 'Plan de travail',       build: (extra) => PlanningBoards.exportPDF({ includeCover: getCover('workplan'), tableaux: Object.keys(ActionsExport._checkState.workplan).filter(k => ActionsExport._checkState.workplan[k]), ...extra }) },
               scriptreports: { label: 'Rapports script',     build: (extra) => ScriptReport.exportPDF({ includeCover: getCover('scriptreports'), sceneIds: srSceneIds(), ...extra }) },
               report:       { label: 'Rapport de production', build: (extra) => Exporter.productionReport({ includeCover: getCover('report'), ...extra }) },
               budget:       { label: 'Budget',                build: (extra) => Expenses.exportPDF({ ...budgetOpts(), ...extra }) },

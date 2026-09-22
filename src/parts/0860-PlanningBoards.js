@@ -186,7 +186,8 @@
         const noms = Object.keys(par).sort((a, b) => par[b].jours.length - par[a].jours.length);
         if(!noms.length) return '';
         const esc = Utils.escape;
-        return '<div class="pdt-bloc"><h3 class="pdt-titre">🏠 Par décor</h3>'
+        return '<div class="pdt-bloc" data-bloc="decors"><h3 class="pdt-titre">🏠 Par décor'
+            + PlanningBoards._btnImp('decors') + '</h3>'
             + '<table class="pdt-table"><thead><tr><th>Décor</th><th>Jours</th><th>Scènes</th><th>Durée</th><th>Quand</th></tr></thead><tbody>'
             + noms.map(n => {
                 // Un decor eclate sur des jours eloignes se voit : c'est
@@ -252,7 +253,8 @@
         const lignes = PlanningBoards.journees().filter(l => PlanningBoards._scenesDe(l.jour).length);
         if(!lignes.length) return '';
         const esc = Utils.escape;
-        let html = '<div class="pdt-bloc"><h3 class="pdt-titre">📋 Le dépouillement, jour par jour</h3>';
+        let html = '<div class="pdt-bloc" data-bloc="depouillement"><h3 class="pdt-titre">📋 Le dépouillement, jour par jour'
+                 + PlanningBoards._btnImp('depouillement') + '</h3>';
         lignes.forEach(l => {
             const j = l.jour;
             let cats = {};
@@ -526,7 +528,8 @@
             if(d && d.groupe === r.groupe) d.n++;
             else familles.push({ groupe: r.groupe, classe: r.classe, n: 1 });
         });
-        let html = '<div class="pdt-bloc"><h3 class="pdt-titre">📆 Plan de travail — journées (modèle horizontal)</h3>'
+        let html = '<div class="pdt-bloc" data-bloc="journees"><h3 class="pdt-titre">📆 Plan de travail — journées (modèle horizontal)'
+                 + PlanningBoards._btnImp('journees') + '</h3>'
                  + PlanningBoards.barreRessources()
                  + '<div class="pdt-large"><table class="pdt-table pdt-feuille"><thead>'
                  // Premiere bande : le cartouche du document a gauche, les
@@ -650,6 +653,459 @@
         return html;
     },
 
+    //  ==================================================================
+    //  IMPRIMER CHAQUE TABLEAU A PART (v601)
+    //  ==================================================================
+    //  Un plan de travail ne se distribue pas d'un bloc : le regisseur veut le
+    //  recap des decors, la production le tableau des journees, la
+    //  comptabilite les presences. Chaque tableau porte donc son imprimante.
+    //  ET LE PAPIER SUIT LE TABLEAU, pas l'inverse. Une A4 paysage fait
+    //  environ 1040 points utiles, une A3 paysage environ 1500. Un tableau de
+    //  quarante colonnes sorti sur A4 donne des caracteres de deux
+    //  millimetres : illisible, donc inutile, donc jete. On choisit le format
+    //  avant d'imprimer, et on le DIT.
+    TABLEAUX: [
+        { cle: 'journees',      titre: 'Plan de travail — journées' },
+        { cle: 'decors',        titre: 'Par décor' },
+        { cle: 'depouillement', titre: 'Le dépouillement, jour par jour' },
+        { cle: 'presences',     titre: 'Plan de travail — présences' }
+    ],
+    A4_PAYSAGE: 1040,
+    A3_PAYSAGE: 1500,
+    _btnImp: (cle) => ' <button type="button" class="pdt-imp-btn" title="Imprimer ce tableau seul"'
+        + ' onclick="app.PlanningBoards.imprimerBloc(\'' + cle + '\')">\U0001F5A8️</button>',
+    //  LA LARGEUR NATURELLE DU TABLEAU, celle qu'il prendrait si rien ne le
+    //  contraignait. C'est la seule qui dise quelque chose sur le papier.
+    //  PIEGE PAYE : mesurer le tableau TEL QU'IL EST AFFICHE repond la largeur
+    //  de l'ECRAN pour tout tableau en width:100%. « Par décor » — cinq
+    //  colonnes courtes — etait annonce trop large pour une A4 parce que la
+    //  fenetre faisait 1200 points. Il tient sur un demi-A5.
+    //  On mesure donc une COPIE posee de cote, en largeur libre.
+    largeurBloc: (el) => {
+        if(!el) return 0;
+        const t = el.querySelector('table');
+        if(!t) return Math.round(el.scrollWidth || 0);
+        let banc = null;
+        try {
+            banc = document.createElement('div');
+            banc.style.cssText = 'position:absolute;left:-99999px;top:0;visibility:hidden;width:max-content;';
+            const copie = t.cloneNode(true);
+            copie.style.width = 'max-content';
+            banc.appendChild(copie);
+            document.body.appendChild(banc);
+            const l = Math.round(Math.max(copie.scrollWidth || 0, copie.offsetWidth || 0));
+            // Une mesure a zero veut dire qu'on n'a rien mesure : on retombe
+            // sur la largeur affichee plutot que de conclure « ca tient ».
+            return l > 0 ? l : Math.round(Math.max(t.scrollWidth || 0, t.offsetWidth || 0));
+        } catch(e) {
+            return Math.round(Math.max(t.scrollWidth || 0, t.offsetWidth || 0));
+        } finally {
+            if(banc && banc.parentNode) banc.parentNode.removeChild(banc);
+        }
+    },
+    formatPour: (largeur) => {
+        if(!largeur || largeur <= PlanningBoards.A4_PAYSAGE) return { papier: 'A4', zoom: 1 };
+        if(largeur <= PlanningBoards.A3_PAYSAGE) return { papier: 'A3', zoom: 1 };
+        // Au-dela de l'A3, on reduit plutot que de couper : un tableau coupe
+        // en deux feuilles sans repetition des noms ne se lit plus du tout.
+        return { papier: 'A3', zoom: Math.max(0.45, PlanningBoards.A3_PAYSAGE / largeur) };
+    },
+    _blocDOM: (cle) => document.querySelector('#workplanContent [data-bloc="' + cle + '"]'),
+    //  Les tableaux qui ne tiennent pas sur une A4 paysage, avec le papier
+    //  qu'il leur faudrait. C'est ce qu'on montre avant « tout imprimer ».
+    tableauxLarges: () => {
+        const out = [];
+        PlanningBoards.TABLEAUX.forEach(t => {
+            const el = PlanningBoards._blocDOM(t.cle);
+            if(!el) return;
+            const l = PlanningBoards.largeurBloc(el);
+            if(l > PlanningBoards.A4_PAYSAGE) {
+                out.push({ cle: t.cle, titre: t.titre, largeur: l, papier: PlanningBoards.formatPour(l).papier });
+            }
+        });
+        return out;
+    },
+    //  LA FEUILLE BLANCHE. L'application est sombre ; le papier ne l'est pas.
+    //  Cette feuille de style est la SEULE de l'impression : l'ancienne ne
+    //  connaissait que la grille des presences, donc les tableaux ajoutes
+    //  depuis sortaient sans bordure et sans fond.
+    _cssImpression: (papier, zoom) => `
+        @page { size: ${papier} landscape; margin: 8mm; }
+        body { font-family: Arial, Helvetica, sans-serif; margin: 0; background: #fff; color: #111;
+               zoom: ${zoom}; }
+        h3, .pdt-titre { font-size: 12px; margin: 0 0 6px; }
+        .pdt-imp-btn, .pdt-ressources-barre, .workplan-actions, .pdt-large { display: block; }
+        .pdt-imp-btn, .pdt-ressources-barre, .workplan-actions { display: none !important; }
+        .pdt-large { overflow: visible !important; border: none !important; }
+        .workplan-header-box { border: 2px solid #333; padding: 10px; margin-bottom: 12px;
+            display: flex; justify-content: space-between; }
+        .workplan-header-title { font-size: 15px; font-weight: bold; }
+        .workplan-header-subtitle, .workplan-header-info, .workplan-header-version { font-size: 9px; color: #444; }
+        .pdt-recap { display: flex; gap: 8px; margin-bottom: 10px; }
+        .pdt-recap-case { flex: 1; border: 1px solid #999; padding: 5px 8px; }
+        .pdt-recap-case span { display: block; font-size: 7px; text-transform: uppercase; color: #555; }
+        .pdt-recap-case strong { font-size: 12px; }
+        table { width: 100%; border-collapse: collapse; font-size: 8px; page-break-inside: auto; }
+        th, td { border: 1px solid #999; padding: 2px 3px; vertical-align: top; }
+        thead th { background: #eee; font-weight: 700; text-align: left; }
+        tr { page-break-inside: avoid; }
+        .pdt-num, .pdt-fin, .pdt-rnum, .pdt-rtot, .pdt-case, .workplan-col-day { text-align: center; }
+        .pdt-duree { text-align: right; }
+        .pdt-ent { text-align: left; }
+        .pdt-ent-titre { display: block; font-size: 11px; font-weight: 700; letter-spacing: 1px; }
+        .pdt-ent-ligne { display: block; font-size: 8px; color: #555; }
+        .pdt-grp { text-align: center; font-weight: 700; background: #ddd; }
+        .pdt-nom > span, .wp-vert { writing-mode: vertical-rl; transform: rotate(180deg);
+            display: inline-block; max-height: 110px; overflow: hidden; white-space: nowrap; font-size: 7px; }
+        .pdt-ligne-recap td { background: #eee; font-weight: 700; text-align: right; }
+        .pdt-croix.est-pris { background: #d8ecd8; font-weight: 700; }
+        .pdt-scene { border: 1px solid #999; padding: 0 3px; font-weight: 700; }
+        .pdt-lourd { border: 1px solid #b26a00; color: #b26a00; padding: 0 3px; margin: 1px; display: inline-block; }
+        .pdt-hors td, .wp-hors { color: #666; font-style: italic; }
+        .pdt-alerte { color: #b26a00; }
+        .pdt-note, .pdt-legende, .workplan-legend { font-size: 8px; color: #444; margin-top: 5px;
+            display: flex; gap: 10px; flex-wrap: wrap; }
+        .pdt-note { display: block; }
+        .pdt-leg i, .workplan-legend-box { display: inline-block; font-style: normal; font-weight: 700;
+            padding: 0 4px; color: #fff; }
+        .wp-bande-lbl { text-align: right; font-size: 7px; text-transform: uppercase; background: #eee; }
+        .wp-bande-case { font-size: 7px; text-align: center; }
+        .workplan-section-row td { background: #d5d5d5; font-weight: 700; text-align: left; }
+        .workplan-cell-role, .workplan-cell-actor, .workplan-col-role, .workplan-col-actor { text-align: left; }
+        .workplan-bar-T, .workplan-bar-SW, .workplan-bar-W, .workplan-bar-WF,
+        .pdt-leg i.workplan-bar-T, .pdt-leg i.workplan-bar-SW,
+        .pdt-leg i.workplan-bar-W, .pdt-leg i.workplan-bar-WF { background: #c0392b; color: #fff; font-weight: 700; }
+        .workplan-bar-H, .pdt-leg i.workplan-bar-H { background: #f39c12; color: #fff; }
+        .workplan-bar-R, .pdt-leg i.workplan-bar-R { background: #3498db; color: #fff; }
+        .workplan-bar-V, .pdt-leg i.workplan-bar-V { background: #9b59b6; color: #fff; }
+        .pdt-bloc { margin-bottom: 14px; page-break-inside: auto; }
+        .pdt-complet, .pdt-manque { border: 1px solid #999; padding: 7px 9px; font-size: 9px; }
+        details { border: 1px solid #999; margin-bottom: 3px; padding: 3px 6px; font-size: 8px; }
+        .pdt-cat { display: flex; gap: 8px; }
+        .pdt-cat strong { flex: 0 0 30%; }
+    `,
+    //  Une fenetre, une feuille de style, un appel a l'imprimante. Le detail
+    //  du depouillement est DEPLIE a l'impression : un « ▶ » ferme sur du
+    //  papier ne s'ouvre jamais.
+    _fenetreImpression: (titre, contenu, papier, zoom) => {
+        const f = window.open('', '_blank');
+        if(!f) { Utils.toast('Le navigateur a bloqué la fenêtre d’impression', 'warning'); return; }
+        f.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>'
+            + Utils.escape(titre) + ' — ' + Utils.escape(state.data.title || 'Film') + '</title>'
+            + '<style>' + PlanningBoards._cssImpression(papier, zoom) + '</style></head><body>'
+            + contenu + '</body></html>');
+        f.document.close();
+        try { f.document.querySelectorAll('details').forEach(d => { d.open = true; }); } catch(e) {}
+        f.focus();
+        f.print();
+    },
+    imprimerBloc: (cle) => {
+        const src = PlanningBoards._blocDOM(cle);
+        if(!src) { Utils.toast('Ce tableau n’est pas affiché', 'warning'); return; }
+        const f = PlanningBoards.formatPour(PlanningBoards.largeurBloc(src));
+        const t = (PlanningBoards.TABLEAUX.find(x => x.cle === cle) || {}).titre || 'Plan de travail';
+        PlanningBoards._fenetreImpression(t, src.outerHTML, f.papier, f.zoom);
+    },
+
+    //  ON PREVIENT AVANT D'IMPRIMER, PAS APRES. « Tout imprimer » sur un plan
+    //  de travail de quarante colonnes donne des caracteres de deux
+    //  millimetres : le document part a la poubelle et on recommence. La
+    //  fenetre dit lesquels debordent, de combien, et propose de les sortir a
+    //  part sur du papier plus grand.
+    _avert: null,
+    _fermerAvert: () => {
+        if(PlanningBoards._avert) { PlanningBoards._avert.remove(); PlanningBoards._avert = null; }
+    },
+    imprimerTout: () => {
+        const larges = PlanningBoards.tableauxLarges();
+        if(!larges.length) { PlanningBoards._imprimerTout([]); return; }
+        const esc = Utils.escape;
+        const plur = larges.length > 1;
+        PlanningBoards._fermerAvert();
+        const o = document.createElement('div');
+        o.className = 'modal-overlay';
+        o.style.display = 'flex';
+        o.innerHTML = '<div class="modal-box pdt-avert-box">'
+            + '<h3 class="pdt-avert-titre">\U0001F5A8️ ' + larges.length + ' tableau' + (plur ? 'x' : '')
+            + ' trop large' + (plur ? 's' : '') + ' pour une feuille A4</h3>'
+            + '<p class="pdt-avert-txt">Sur une A4 paysage, ' + (plur ? 'ils seront réduits' : 'il sera réduit')
+            + ' au point de ne plus se lire. Le mieux : ' + (plur ? 'les sortir' : 'le sortir')
+            + ' à part, sur du papier plus grand.</p>'
+            + '<div class="pdt-avert-liste">'
+            + larges.map(t => '<button type="button" class="pdt-avert-item" onclick="app.PlanningBoards.imprimerBloc(\''
+                  + t.cle + '\')">\U0001F5A8️ ' + esc(t.titre)
+                  + '<span>' + t.largeur + ' px → ' + t.papier + ' paysage</span></button>').join('')
+            + '</div>'
+            + '<div class="pdt-avert-actions">'
+            + '<button type="button" class="pdt-avert-btn" onclick="app.PlanningBoards._sansLarges()">Imprimer les autres seulement</button>'
+            + '<button type="button" class="pdt-avert-btn est-principal" onclick="app.PlanningBoards._toutQuandMeme()">Tout imprimer quand même</button>'
+            + '<button type="button" class="pdt-avert-btn" onclick="app.PlanningBoards._fermerAvert()">Fermer</button>'
+            + '</div></div>';
+        document.body.appendChild(o);
+        PlanningBoards._avert = o;
+        o.onclick = (e) => { if(e.target === o) PlanningBoards._fermerAvert(); };
+    },
+    _toutQuandMeme: () => { PlanningBoards._fermerAvert(); PlanningBoards._imprimerTout([]); },
+    _sansLarges: () => {
+        const exclure = PlanningBoards.tableauxLarges().map(t => t.cle);
+        PlanningBoards._fermerAvert();
+        PlanningBoards._imprimerTout(exclure);
+    },
+    //  LE PAPIER SUIT LE PLUS LARGE DES TABLEAUX RETENUS : une seule feuille
+    //  de style pour un document, donc un seul format.
+    _imprimerTout: (exclure) => {
+        const zone = document.getElementById('workplanContent');
+        if(!zone) { Utils.toast('Le plan de travail n’est pas affiché', 'warning'); return; }
+        const horsJeu = exclure || [];
+        const copie = zone.cloneNode(true);
+        horsJeu.forEach(cle => {
+            const el = copie.querySelector('[data-bloc="' + cle + '"]');
+            if(el) el.remove();
+        });
+        let max = 0;
+        PlanningBoards.TABLEAUX.forEach(t => {
+            if(horsJeu.indexOf(t.cle) >= 0) return;
+            const el = PlanningBoards._blocDOM(t.cle);
+            if(el) max = Math.max(max, PlanningBoards.largeurBloc(el));
+        });
+        const f = PlanningBoards.formatPour(max);
+        PlanningBoards._fenetreImpression('Plan de travail', copie.innerHTML, f.papier, f.zoom);
+    },
+
+    //  ==================================================================
+    //  LE PLAN DE TRAVAIL DANS LE HUB D'EXPORT (v601)
+    //  ==================================================================
+    //  Le hub sort des PDF, pas des fenetres d'impression : c'est la que les
+    //  gens fabriquent le dossier de production. Le plan de travail y entre
+    //  donc comme les autres sections, avec le choix des tableaux.
+    //  LES FAITS VIENNENT DES MEMES PORTES QUE L'ECRAN (journees,
+    //  _scenesDe, _decorDe, colonnesTableau, codeCase...) : seule la MISE EN
+    //  PAGE est ecrite deux fois. Recalculer les chiffres ici, c'est la
+    //  garantie qu'un jour le papier et l'ecran ne diront plus la meme chose.
+    //  LE PAPIER EST CHOISI PAR LE TABLEAU, comme a l'impression : A4 paysage
+    //  tant que ca tient, A3 paysage ensuite. Et quand meme l'A3 ne suffit
+    //  pas, ON COUPE EN PAQUETS DE COLONNES en REPETANT les colonnes
+    //  d'identite : un tableau coupe sans ses noms ne se lit plus.
+    _modeleJournees: () => {
+        const lignes = PlanningBoards.journees();
+        const colonnes = PlanningBoards.colonnesTableau();
+        const pres = PlanningBoards.presences(lignes.map(l => l.jour));
+        const resJour = PlanningBoards.ressourcesParJour();
+        const premiere = (lignes.find(l => l.plateau) || {}).jour;
+        const depart = premiere ? (premiere.startDate || premiere.date) : '';
+        const cols = [
+            { t: 'JT', w: 7 }, { t: 'S', w: 6 }, { t: 'M', w: 11 }, { t: 'Dates', w: 20 },
+            { t: 'Décors', w: 34, g: 1 }, { t: 'Séq.', w: 20, g: 1 }, { t: 'I/E', w: 8 },
+            { t: 'Effet', w: 9 }, { t: 'Horaires', w: 14 }, { t: 'Min', w: 16 },
+            { t: 'Personnages', w: 34, g: 1 }
+        // UNE COLONNE DE 7 MM NE PORTE PAS UN NOM : « ROLE1 » a « ROLE12 »
+        // sortaient tous « ROL », douze colonnes identiques. Le modele AFAR
+        // fait exactement l'inverse — la colonne porte SON NUMERO, et une
+        // legende dit qui est qui. C'est le numero qu'on se dit au telephone.
+        ].concat(colonnes.map((c, i) => ({ t: String(i + 1), w: 7 })));
+        const legende = colonnes.map((c, i) => (i + 1) + ' · ' + c.titre
+            + (c.kind === 'res' ? '' : (c.nom && c.nom !== c.titre ? ' (' + c.nom + ')' : '')));
+        const rangs = lignes.map((l, i) => {
+            const j = l.jour;
+            const scenes = PlanningBoards._scenesDe(j);
+            const decors = [];
+            scenes.forEach(sc => { const d = PlanningBoards._decorDe(sc); if(d && decors.indexOf(d) < 0) decors.push(d); });
+            const dJour = j.startDate || j.date;
+            const d = PlanningBoards.dureeJour(j);
+            const type = Planning.getDayTypeInfo(j.dayType);
+            return [
+                l.numero ? String(l.numero) : '·',
+                String(PlanningBoards._semaineDe(dJour, depart) || ''),
+                PlanningBoards._moisDe(dJour),
+                PlanningBoards._dateCourte(dJour),
+                decors.length ? decors.join(' · ') : (j.name || type.label),
+                scenes.map(sc => sc.number || '?').join(' '),
+                [...new Set(scenes.map(sc => sc && sc.intExt).filter(Boolean))].join('/'),
+                [...new Set(scenes.map(sc => sc && sc.dayNight).filter(Boolean))].join('/'),
+                j.crewCall || '',
+                d ? PlanningBoards._hms(d) : '',
+                PlanningBoards._personnagesDe(j).join(', ')
+            ].concat(colonnes.map(c => c.kind === 'res'
+                ? (((resJour[i] || {})[c.cat] || {})[c.res] ? 'X' : '')
+                : PlanningBoards.codeCase(pres, c.cle, i)));
+        });
+        // Le libelle va dans la colonne « Décors » (34 mm) : dans « JT »
+        // (7 mm) il ne tient pas, et une colonne fusionnee sur du jsPDF
+        // fabrique a la main coute plus cher que ce qu'elle rapporte.
+        const recap = ['', '', '', '', 'RÉCAPITULATIF (jours)', '', '', '', '', '', '']
+            .concat(colonnes.map(c => String(c.kind === 'res'
+                ? ((PlanningBoards.inventaireRessources()[c.cat] || {})[c.res] || 0)
+                : PlanningBoards.joursTravailles(pres, c.cle))));
+        return { titre: 'Plan de travail — journées', cols: cols, rangs: rangs, recap: recap,
+                 fixes: 5, legende: legende };
+    },
+    _modeleDecors: () => {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = PlanningBoards.recapDecors();
+        const lignes = [...tmp.querySelectorAll('tbody tr')].map(tr =>
+            [...tr.children].map(td => (td.textContent || '').replace(/\s+/g, ' ').trim()));
+        if(!lignes.length) return null;
+        return { titre: 'Par décor', fixes: 1,
+            cols: [{ t: 'Décor', w: 60, g: 1 }, { t: 'Jours', w: 14 }, { t: 'Scènes', w: 14 },
+                   { t: 'Durée', w: 18 }, { t: 'Quand', w: 60, g: 1 }],
+            rangs: lignes };
+    },
+    _modelePresences: () => {
+        const lignes = PlanningBoards.journees();
+        const pres = PlanningBoards.presences(lignes.map(l => l.jour));
+        const gens = PlanningBoards.colonnesRoles();
+        if(!gens.length) return null;
+        const cols = [{ t: 'N°', w: 8 }, { t: 'Rôle / Poste', w: 38, g: 1 }, { t: 'Nom', w: 38, g: 1 }]
+            .concat(lignes.map(l => ({ t: l.numero ? String(l.numero) : '·', w: 7 })))
+            .concat([{ t: 'Tot.', w: 10 }]);
+        const rangs = gens.map(g => [String(g.num), g.titre, g.nom]
+            .concat(lignes.map((l, i) => PlanningBoards.codeCase(pres, g.cle, i)))
+            .concat([String(PlanningBoards.joursTravailles(pres, g.cle))]));
+        return { titre: 'Plan de travail — présences', cols: cols, rangs: rangs, fixes: 3 };
+    },
+    //  UNE GRILLE SUR LE PAPIER : pagination en hauteur, et en largeur des
+    //  paquets de colonnes qui REPETENT les colonnes d'identite.
+    _pdfGrille: (doc, etat, bloc) => {
+        if(!bloc || !bloc.rangs || !bloc.rangs.length) return;
+        const large = doc.internal.pageSize.getWidth() - etat.marge * 2;
+        const haut = doc.internal.pageSize.getHeight() - etat.marge;
+        const fixes = bloc.fixes || 0;
+        const clean = (x) => Utils.stripPdfUnsafe
+            ? Utils.stripPdfUnsafe(String(x == null ? '' : x).replace(/[—–]/g, '-').replace(/…/g, '...'))
+            : String(x == null ? '' : x);
+        // Les paquets de colonnes : les fixes d'abord, puis autant que possible.
+        const paquets = [];
+        let courant = [], larg = bloc.cols.slice(0, fixes).reduce((a, c) => a + c.w, 0);
+        for(let i = fixes; i < bloc.cols.length; i++) {
+            if(courant.length && larg + bloc.cols[i].w > large) {
+                paquets.push(courant);
+                courant = []; larg = bloc.cols.slice(0, fixes).reduce((a, c) => a + c.w, 0);
+            }
+            courant.push(i); larg += bloc.cols[i].w;
+        }
+        paquets.push(courant);
+        paquets.forEach((paquet, np) => {
+            const idx = [];
+            for(let i = 0; i < fixes; i++) idx.push(i);
+            paquet.forEach(i => idx.push(i));
+            const titre = bloc.titre + (paquets.length > 1 ? '  (' + (np + 1) + '/' + paquets.length + ')' : '');
+            // DEUX PIEGES DE jsPDF, PAYES SUR LA PREMIERE EPREUVE :
+            //  1. text() ECRASE LA COULEUR DE REMPLISSAGE — dans un PDF, un
+            //     texte est une forme remplie. Une case dessinee APRES un
+            //     texte sort donc en noir plein. Sur l'epreuve, seule la
+            //     premiere colonne etait grise, toutes les suivantes noires.
+            //     On dessine donc TOUTES les cases, PUIS tous les textes.
+            //  2. maxWidth ne coupe pas, il RENVOIE A LA LIGNE. « RÉCAPITULATIF »
+            //     dans une colonne de 7 mm s'empilait sur quatre lignes et
+            //     debordait sur l'en-tete. On coupe a la largeur, nous-memes.
+            const couper = (txt, w) => {
+                let t = clean(txt);
+                if(!t) return '';
+                const max = w - 1.6;
+                if(doc.getTextWidth(t) <= max) return t;
+                while(t.length > 1 && doc.getTextWidth(t) > max) t = t.slice(0, -1);
+                return t;
+            };
+            const bande = (cells, h, fond, gras) => {
+                let x = etat.marge;
+                doc.setDrawColor(150);
+                idx.forEach(i => {
+                    if(fond != null) doc.setFillColor(fond);
+                    doc.rect(x, etat.y, bloc.cols[i].w, h, fond != null ? 'FD' : 'D');
+                    x += bloc.cols[i].w;
+                });
+                x = etat.marge;
+                doc.setFont('helvetica', gras ? 'bold' : 'normal');
+                doc.setFontSize(6); doc.setTextColor(20);
+                idx.forEach(i => {
+                    const t = couper(cells[i], bloc.cols[i].w);
+                    if(t) doc.text(t, x + 0.8, etat.y + h - 1.5);
+                    x += bloc.cols[i].w;
+                });
+                etat.y += h;
+            };
+            const tete = () => {
+                if(etat.y + 18 > haut) { doc.addPage(); etat.y = etat.marge; }
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(20);
+                doc.text(clean(titre), etat.marge, etat.y + 4);
+                etat.y += 7;
+                bande(bloc.cols.map(c => c.t), 6, 232, true);
+            };
+            tete();
+            const ligne = (cells, gras) => {
+                if(etat.y + 5 > haut) { doc.addPage(); etat.y = etat.marge; tete(); }
+                bande(cells, 5, gras ? 242 : null, gras);
+            };
+            if(bloc.recap) ligne(bloc.recap, true);
+            bloc.rangs.forEach(r => ligne(r, false));
+            etat.y += 4;
+        });
+        // LA LEGENDE DES NUMEROS DE COLONNE. Sans elle, le tableau dit « 7 »
+        // et personne ne sait qui c'est.
+        if(bloc.legende && bloc.legende.length) {
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(70);
+            const parLigne = Math.max(1, Math.floor(large / 48));
+            for(let i = 0; i < bloc.legende.length; i += parLigne) {
+                if(etat.y + 4 > haut) { doc.addPage(); etat.y = etat.marge; }
+                bloc.legende.slice(i, i + parLigne).forEach((txt, k) => {
+                    doc.text(clean(txt).substring(0, 34), etat.marge + k * 48, etat.y + 2.6);
+                });
+                etat.y += 3.6;
+            }
+            doc.setTextColor(20);
+            etat.y += 5;
+        }
+    },
+    //  Ce que chaque tableau coutera en papier, SANS avoir a l'afficher :
+    //  c'est ce qu'on annonce dans le hub, la ou le plan de travail n'est
+    //  peut-etre meme pas a l'ecran.
+    formatTableau: (cle) => {
+        let m = null;
+        try {
+            m = cle === 'journees' ? PlanningBoards._modeleJournees()
+              : cle === 'decors'   ? PlanningBoards._modeleDecors()
+              : cle === 'presences' ? PlanningBoards._modelePresences() : null;
+        } catch(e) { return null; }
+        if(!m || !m.rangs || !m.rangs.length) return null;
+        const mm = m.cols.reduce((a, c) => a + c.w, 0);
+        return { colonnes: m.cols.length, lignes: m.rangs.length, mm: mm, papier: mm > 277 ? 'A3' : 'A4' };
+    },
+
+    //  Les tableaux demandes, dans l'ordre du document.
+    exportPDF: async (opts = {}) => {
+        await LazyLib.load('pdfexport');
+        const { jsPDF } = window.jspdf;
+        const veut = (cle) => !opts.tableaux || opts.tableaux.indexOf(cle) >= 0;
+        const blocs = [];
+        if(veut('journees'))  blocs.push(PlanningBoards._modeleJournees());
+        if(veut('decors'))    blocs.push(PlanningBoards._modeleDecors());
+        if(veut('presences')) blocs.push(PlanningBoards._modelePresences());
+        const utiles = blocs.filter(b => b && b.rangs && b.rangs.length);
+        if(!utiles.length) { Utils.toast('Aucun tableau à exporter : le planning est vide', 'warning'); return; }
+        // Le format suit le plus large des tableaux retenus.
+        const besoin = Math.max.apply(null, utiles.map(b => b.cols.reduce((a, c) => a + c.w, 0)));
+        const papier = besoin > 277 ? 'a3' : 'a4';
+        const doc = new jsPDF('l', 'mm', papier);
+        if(opts.includeCover !== false && typeof FichesPDF !== 'undefined' && FichesPDF._drawCoverPage) {
+            FichesPDF._drawCoverPage(doc, 'Plan de travail');
+            doc.addPage();
+        }
+        const etat = { marge: 10, y: 10 };
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(13);
+        doc.text(Utils.stripPdfUnsafe(String(state.data.title || 'Sans titre')), etat.marge, etat.y + 5);
+        etat.y += 12;
+        utiles.forEach(b => PlanningBoards._pdfGrille(doc, etat, b));
+        if(typeof FichesPDF !== 'undefined' && FichesPDF._drawFooters) {
+            FichesPDF._drawFooters(doc, opts.includeCover !== false, !!opts.returnBlob);
+        }
+        if(opts.returnBlob) return doc.output('blob');
+        const nom = (typeof PdfTheme !== 'undefined' && PdfTheme.filename)
+            ? PdfTheme.filename('Plan de travail')
+            : (state.data.title || 'Projet') + ' - Plan de travail - moteur.studio.pdf';
+        doc.save(nom);
+        Utils.toast('Plan de travail PDF exporté (' + papier.toUpperCase() + ' paysage) !', 'success');
+    },
+
     renderWorkPlan: () => {
         // UNE SEULE LECTURE DU PLANNING POUR LES DEUX TABLEAUX : meme ordre,
         // memes numeros de journee, memes cases. Deux tris differents du meme
@@ -761,7 +1217,10 @@
             });
             return r + '<th class="wp-bande-vide"></th></tr>';
         };
-        html += '<div class="pdt-bloc"><h3 class="pdt-titre">🎭 Plan de travail — présences (modèle vertical)</h3></div>';
+        // Le titre, le tableau et la legende dans UN SEUL cadre : c'est ce
+        // cadre qu'on imprime quand on demande ce tableau-la tout seul.
+        html += '<div class="pdt-bloc" data-bloc="presences"><h3 class="pdt-titre">🎭 Plan de travail — présences (modèle vertical)'
+             + PlanningBoards._btnImp('presences') + '</h3>';
         html += '<div class="pdt-large"><table class="workplan-table pdt-feuille"><thead>';
         html += bande('SEMAINE', (i) => ({ txt: String(PlanningBoards._semaineDe(i.date, dateDepart) || '') }), 'wp-bande-forte');
         html += bande('JOUR DE TOURNAGE', (i) => i.ligne.numero
@@ -875,12 +1334,15 @@
                     <div class="workplan-legend-item"><div class="workplan-legend-box workplan-bar-R">R</div> Repos</div>
                     <div class="workplan-legend-item"><div class="workplan-legend-box workplan-bar-V">V</div> Voyage</div>
                 </div>
-                <div class="workplan-actions">
-                    <button onclick="app.Planning.printWorkPlan()">🖨️ Imprimer</button>
-                    <button onclick="app.Planning.renderWorkPlan()">🔄 Actualiser</button>
-                </div>
-            </div>`;
-        
+            </div></div>`;
+
+        // « Imprimer tout » PREVIENT quand un tableau ne tient pas sur une A4 :
+        // sorti reduit avec le reste, il est illisible, donc jete.
+        html += '<div class="workplan-actions">'
+             + '<button onclick="app.PlanningBoards.imprimerTout()">🖨️ Imprimer tout</button>'
+             + '<button onclick="app.Planning.renderWorkPlan()">🔄 Actualiser</button>'
+             + '</div>';
+
         html += '</div>';
         
         document.getElementById('workplanContent').innerHTML = html;
@@ -949,49 +1411,12 @@
     // Planning.getBreakdownItemsForPerson (31 l.) retirée v569, jamais appelée.
     
     // Imprimer le Plan de Travail
-    printWorkPlan: () => {
-        const content = document.getElementById('workplanContent').innerHTML;
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Plan de Travail - ${Utils.escape(state.data.title || 'Film')}</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    .workplan-wrapper { background: white; }
-                    .workplan-header-box { border: 2px solid #333; padding: 15px; margin-bottom: 20px; display: flex; justify-content: space-between; }
-                    .workplan-header-title { font-size: 1.4rem; font-weight: bold; }
-                    .workplan-header-subtitle { font-size: 0.9rem; color: #666; }
-                    .workplan-header-info { font-size: 0.85rem; }
-                    .workplan-header-version { text-align: right; font-size: 0.85rem; }
-                    .workplan-table { width: 100%; border-collapse: collapse; font-size: 9px; }
-                    .workplan-table th, .workplan-table td { border: 1px solid #999; padding: 3px 4px; text-align: center; }
-                    .workplan-table thead th { background: #f0f0f0; font-weight: 600; }
-                    .workplan-cell-num, .workplan-col-num { background: #f5f5f5; }
-                    .workplan-cell-role, .workplan-col-role { text-align: left; width: 100px; }
-                    .workplan-cell-actor, .workplan-col-actor { text-align: left; width: 110px; font-size: 8px; }
-                    .workplan-cell-total, .workplan-col-total { background: #f5f5f5; font-weight: 600; }
-                    .workplan-bar-T, .workplan-bar-SW, .workplan-bar-W, .workplan-bar-WF { background: #c0392b !important; color: white; font-weight: bold; }
-                    .workplan-bar-H { background: #f39c12 !important; color: white; }
-                    .workplan-bar-R { background: #3498db !important; color: white; }
-                    .workplan-bar-V { background: #9b59b6 !important; color: white; }
-                    .workplan-section-row td { background: #d5d5d5 !important; font-weight: 600; text-align: left; }
-                    .workplan-footer { margin-top: 15px; }
-                    .workplan-legend { display: flex; gap: 15px; flex-wrap: wrap; font-size: 10px; }
-                    .workplan-legend-item { display: flex; align-items: center; gap: 4px; }
-                    .workplan-legend-box { width: 20px; height: 14px; border: 1px solid #999; font-size: 8px; display: flex; align-items: center; justify-content: center; color: white; }
-                    .workplan-actions { display: none; }
-                    @page { size: landscape; margin: 10mm; }
-                </style>
-            </head>
-            <body>${content}</body>
-            </html>
-        `);
-        printWindow.document.close();
-        printWindow.print();
-    },
-    
+    //  L'ancienne impression avait SA PROPRE feuille de style, qui ne
+    //  connaissait que la grille des presences : tout ce qui a ete ajoute
+    //  depuis sortait sans bordure et sans fond. Elle passe par la porte
+    //  commune, qui previent aussi sur les tableaux trop larges.
+    printWorkPlan: () => PlanningBoards.imprimerTout(),
+
     // Afficher le Kanban
     renderKanban: () => {
         const scenes = state.data.scenes || [];

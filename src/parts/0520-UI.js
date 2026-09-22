@@ -2850,6 +2850,7 @@
       expOpenMoodboardBoards: (...a) => ActionsExport.expOpenMoodboardBoards(...a),
       expOpenModeOptions: (...a) => ActionsExport.expOpenModeOptions(...a),
       expOpenCheckOptions: (...a) => ActionsExport.expOpenCheckOptions(...a),
+      expOpenWorkplanOptions: (...a) => ActionsExport.expOpenWorkplanOptions(...a),
       expOpenBoardSeasons: (...a) => ActionsExport.expOpenBoardSeasons(...a),
       expApplyPermissions: (...a) => ActionsExport.expApplyPermissions(...a),
       expToggleAll: (...a) => ActionsExport.expToggleAll(...a),
