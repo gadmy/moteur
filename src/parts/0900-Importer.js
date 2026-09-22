@@ -12401,7 +12401,12 @@ const UniverseMap = {
             mapBtn.style.color = 'var(--text-main)';
             mapBtn.style.border = '1px solid var(--border)';
             
-            mapContainer.style.display = 'none';
+            // LE CONTENEUR DE CARTE PEUT NE PLUS EXISTER : la vue Liste remplace
+            // le contenu de la scene, et la vue Tri la met de cote. Y toucher
+            // sans regarder plantait des qu'on naviguait entre les trois
+            // (« mapContainer is null »), signale a l'essai. On ne cache que ce
+            // qui est la — la vue Carte le recree quand on y revient.
+            if(mapContainer) mapContainer.style.display = 'none';
             if(Universe.searchActive) UniverseSearch.renderSearchResultsFan(scene);
             else Universe.renderFanView(scene);
         }

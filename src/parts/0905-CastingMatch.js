@@ -36,6 +36,7 @@
       _mesProjets: null,   // cache de la liste, le temps de la session
       rangs: {},           // { besoinId: ou l'on en est dans SES candidats }
       besoinCourant: null, // le poste affiche
+      menuOuvert: false,   // la liste deroulante des postes
       centre: null,        // { lat, lng } du projet — pour les distances
       rayonKm: 0,          // 0 = pas de limite
 
@@ -306,12 +307,32 @@
       //  UN CRITERE NON RENSEIGNE NE PENALISE PAS — ni du cote du projet (un
       //  role sans age cherche tous les ages), ni du cote de la personne (un
       //  profil sans age ne doit pas etre ecarte du casting).
+      // DEUX VOCABULAIRES POUR LE MEME GENRE, ET AUCUN NE SE RECONNAISSAIT.
+      // Mesure en base le 22 septembre, apres un essai sur un vrai projet ou
+      // QUATRE ROLES SUR CINQ ne proposaient personne : la fiche projet ecrit
+      // « H » et « F », les profils ecrivent « homme » et « femme ». « homme »
+      // n'est pas « H », donc chaque role genre renvoyait zero — et seul le
+      // role sans genre (« Touristes / villageois ») remplissait sa pile.
+      // C'est la lecon de septembre, encore : je comparais deux ecrans sans
+      // regarder ce qu'ils contiennent vraiment.
+      // On ramene donc tout a une seule lettre, et ce qui ne se range nulle
+      // part (« non-precise ») ne vaut PAS exclusion : inconnu n'est pas
+      // incompatible.
+      _genre: (v) => {
+          const t = String(v || '').toLowerCase().trim()
+              .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          if(!t) return '';
+          if(['h', 'm', 'homme', 'masculin', 'male', 'man'].indexOf(t) >= 0) return 'h';
+          if(['f', 'w', 'femme', 'feminin', 'female', 'woman'].indexOf(t) >= 0) return 'f';
+          return '';
+      },
       noterComedien: (profil, facet, need) => {
           const raisons = [];
           let score = 30;                     // socle : c'est un comedien visible
-          const g = (facet.gender || profil.gender || '').toLowerCase();
-          const gn = (need.gender || '').toLowerCase();
-          if(gn && gn !== 'tous') {
+          const g = CastingMatch._genre(facet.gender || profil.gender);
+          const brutN = String(need.gender || '').toLowerCase().trim();
+          const gn = (brutN === 'tous' || brutN === 'tout') ? '' : CastingMatch._genre(brutN);
+          if(gn) {
               if(!g) { score += 5; }
               else if(g === gn) { score += 30; raisons.push('genre'); }
               else return { score: 0, raisons: [] };   // genre incompatible : on sort
@@ -345,18 +366,60 @@
       //  Dans ce metier les intitules sont feminises partout — la liste des
       //  postes du projet dit elle-meme « Realisateur·rice ». La comparaison
       //  se fait donc sur le DEBUT des mots (voir _memeMot).
+      // LE MEME METIER SOUS TROIS NOMS. « Chef Operateur », « DOP » et
+      // « Directeur·rice de la photographie » designent la meme personne, et
+      // aucun ne partage de mot avec les autres. Mesure en base : le seul
+      // technicien qui declare ce poste l'ecrit « Directeur·rice de la
+      // photographie » — il ne serait jamais sorti sur le besoin « Chef
+      // Operateur / DOP ». La table reste COURTE et ne couvre que les cas ou
+      // les deux noms sont vraiment le meme poste.
+      SYNONYMES: [
+          ['operateur', 'photographie', 'photo'],          // chef op / DOP / directeur photo
+          ['ingenieur', 'preneur', 'mixeur'],              // son : ingenieur / preneur / mixeur
+          ['perchman', 'perchiste'],
+          ['realisateur', 'realisation'],
+          ['monteur', 'montage'],
+          ['etalonneur', 'etalonnage'],
+          ['decorateur', 'deco', 'decors'],
+          ['maquilleur', 'maquillage'],
+          ['costumier', 'costumes'],
+          ['electricien', 'electro', 'lumiere'],
+          ['regisseur', 'regie']
+      ],
+      _famille: (mot) => {
+          for(const fam of CastingMatch.SYNONYMES) {
+              if(fam.some(m => CastingMatch._memeMot(m, mot))) return fam[0];
+          }
+          return null;
+      },
       noterTechnicien: (profil, facet, need) => {
           const raisons = [];
           const cherche = CastingMatch._mots(need.role || '');
-          const declare = CastingMatch._mots(facet.role || '');
-          if(!cherche.length || !declare.length) return { score: 0, raisons: [] };
+          // LE METIER PEUT VIVRE AILLEURS QUE DANS LA CASQUETTE. Le reste de
+          // l'application lit le champ du profil quand la casquette est vide ;
+          // je ne lisais que la casquette, donc je ne voyais rien la ou les
+          // autres ecrans affichent un poste.
+          const declare = CastingMatch._mots(facet.role || profil.role || '');
+          if(!cherche.length) return { score: 0, raisons: [] };
+          // AUCUN POSTE DECLARE : on ne l'ecarte pas, on le montre en dernier.
+          // Mesure du 22 septembre : sur 288 profils publics, TROIS declarent
+          // un metier. Ne rien proposer serait exact et inutile ; proposer en
+          // disant « poste non precise » laisse la personne juger.
+          if(!declare.length) return { score: 22, raisons: ['poste non précisé'] };
           const communs = cherche.filter(m => declare.some(d => CastingMatch._memeMot(m, d)));
           let score = 0;
           if(declare.length === cherche.length && communs.length === cherche.length) {
               score = 80; raisons.push('poste exact');
           }
           else if(communs.length) { score = 40 + Math.min(30, communs.length * 15); raisons.push('poste proche'); }
-          else return { score: 0, raisons: [] };
+          else {
+              // Pas de mot commun : les deux intitules designent-ils le meme
+              // metier sous un autre nom ?
+              const famA = cherche.map(CastingMatch._famille).filter(Boolean);
+              const famB = declare.map(CastingMatch._famille).filter(Boolean);
+              if(famA.some(f => famB.indexOf(f) >= 0)) { score = 55; raisons.push('même métier'); }
+              else return { score: 0, raisons: [] };
+          }
           score += CastingMatch._bonusLieu(facet, profil, raisons);
           return { score: Math.max(0, Math.min(100, score)), raisons: raisons };
       },
@@ -489,7 +552,9 @@
           return b.candidats[CastingMatch.rangs[b.id] || 0] || null;
       },
       restants: (b) => Math.max(0, b.candidats.length - (CastingMatch.rangs[b.id] || 0)),
+      basculerMenu: () => { CastingMatch.menuOuvert = !CastingMatch.menuOuvert; CastingMatch.rendre(); },
       allerAu: (besoinId) => {
+          CastingMatch.menuOuvert = false;
           if(!CastingMatch.besoins.some(b => b.id === besoinId)) return;
           CastingMatch.besoinCourant = besoinId;
           CastingMatch.dernier = null;      // on n'annule pas par-dessus un autre poste
@@ -522,6 +587,14 @@
       poserClavier: () => {
           if(CastingMatch._clavierPose) return;
           CastingMatch._clavierPose = true;
+          // Un clic ailleurs referme la liste : c'est ce qu'on attend d'un menu.
+          document.addEventListener('click', (ev) => {
+              if(!CastingMatch.menuOuvert) return;
+              const el = ev.target;
+              if(el && el.closest && el.closest('.tri-choix')) return;
+              CastingMatch.menuOuvert = false;
+              CastingMatch.rendre();
+          });
           document.addEventListener('keydown', (ev) => {
               const vue = document.getElementById('universe-tri');
               if(!vue || vue.style.display === 'none' || !vue.getClientRects().length) return;
@@ -530,6 +603,8 @@
               if(el && el.closest && el.closest('input, textarea, select, [contenteditable="true"]')) return;
               if(ev.ctrlKey || ev.metaKey || ev.altKey) return;
               const k = ev.key;
+              if(k === 'Escape' && CastingMatch.menuOuvert) { ev.preventDefault(); CastingMatch.basculerMenu(); return; }
+              if(CastingMatch.menuOuvert) return;   // le menu ouvert prend la main
               if(k === ' ' || k === 'Enter')      { ev.preventDefault(); CastingMatch.garder(); }
               else if(k === 'ArrowRight')         { ev.preventDefault(); CastingMatch.passer(1); }
               else if(k === 'ArrowLeft')          { ev.preventDefault(); CastingMatch.passer(-1); }
@@ -551,17 +626,31 @@
                   + '<button class="tri-fin" onclick="app.CastingMatch.rendreRecap()">🏁 Voir le récapitulatif</button></div>';
               return;
           }
-          // LES POSTES EN PASTILLES, TOUJOURS VISIBLES : c'est par la qu'on
-          // change de poste, et c'est aussi ce qui dit ou l'on en est partout
-          // ailleurs sans avoir a y aller.
-          const onglets = '<div class="tri-postes">' + CastingMatch.besoins.map(b => {
-              const reste = CastingMatch.restants(b);
-              const actif = b.id === CastingMatch.besoinCourant;
-              return '<button class="tri-poste' + (actif ? ' is-actif' : '') + (reste ? '' : ' is-fini') + '"'
-                  + ' onclick="app.CastingMatch.allerAu(\'' + esc(b.id) + '\')"'
-                  + ' title="' + esc(b.label) + ' — ' + reste + ' à voir sur ' + b.candidats.length + '">'
-                  + esc(b.poste) + '<span class="tri-poste-n">' + reste + '</span></button>';
-          }).join('') + '</div>';
+          // LE CHOIX DU POSTE : UN BOUTON QUI OUVRE LA LISTE.
+          //  Premiere version : une rangee de pastilles, une par poste. Sur un
+          //  vrai projet il y en avait QUINZE — la rangee debordait, les noms
+          //  etaient coupes, et il fallait la faire defiler pour trouver le
+          //  poste voulu. Remarque du developpeur : « plutot, quand on clique
+          //  sur le nom du groupe, ca fait une liste ou on peut choisir ». Il a
+          //  raison : un menu tient quel que soit le nombre de postes, et il
+          //  montre les noms EN ENTIER, avec ce qu'il reste a voir.
+          const courant = CastingMatch.besoinActif();
+          const menu = CastingMatch.menuOuvert
+              ? '<div class="tri-choix-menu">' + CastingMatch.besoins.map(b2 => {
+                    const r2 = CastingMatch.restants(b2);
+                    return '<button class="tri-choix-ligne' + (b2.id === CastingMatch.besoinCourant ? ' is-actif' : '')
+                        + (r2 ? '' : ' is-fini') + '" onclick="app.CastingMatch.allerAu(\'' + esc(b2.id) + '\')">'
+                        + '<span class="tri-choix-nom">' + esc(b2.label) + '</span>'
+                        + '<span class="tri-poste-n">' + r2 + '</span></button>';
+                }).join('') + '</div>'
+              : '';
+          const onglets = '<div class="tri-choix">'
+              + '<button class="tri-choix-btn" onclick="event.stopPropagation(); app.CastingMatch.basculerMenu();"'
+              + ' title="Changer de poste — ' + CastingMatch.besoins.length + ' au total">'
+              + '<span class="tri-choix-nom">' + esc((courant && courant.label) || 'Choisir un poste') + '</span>'
+              + '<span class="tri-poste-n">' + (courant ? CastingMatch.restants(courant) : 0) + '</span>'
+              + '<span class="tri-choix-fleche">' + (CastingMatch.menuOuvert ? '▴' : '▾') + '</span>'
+              + '</button>' + menu + '</div>';
 
           const c = CastingMatch.carteActive();
           const b = CastingMatch.besoinActif();
