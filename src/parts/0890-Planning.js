@@ -687,6 +687,7 @@
     renderAvailabilitySelectors: (...a) => PlanningAvailPicker.renderAvailabilitySelectors(...a),
     renderAvailabilityTags: (...a) => PlanningAvailPicker.renderAvailabilityTags(...a),
     toutSelectionner: (...a) => PlanningAvailPicker.toutSelectionner(...a),
+    journeeLibrePourTous: (...a) => PlanningAvailPicker.journeeLibrePourTous(...a),
     toutEnlever: (...a) => PlanningAvailPicker.toutEnlever(...a),
     showDropdown: (...a) => PlanningAvailPicker.showDropdown(...a),
     hideDropdown: (...a) => PlanningAvailPicker.hideDropdown(...a),
@@ -709,14 +710,11 @@
     generateFDS: (...a) => PlanningFDS.generateFDS(...a),
     
 // ========== CALENDRIER VISUEL DISPONIBILITÉS — délégué à PlanningAvailability ==========
-    get availMonth() { return PlanningAvailability.availMonth; },
-    set availMonth(v) { PlanningAvailability.availMonth = v; },
-    get availYear() { return PlanningAvailability.availYear; },
-    set availYear(v) { PlanningAvailability.availYear = v; },
     exportICS: (...a) => PlanningAvailability.exportICS(...a),
-    showAvailabilityView: (...a) => PlanningAvailability.showAvailabilityView(...a),
-    prevAvailMonth: (...a) => PlanningAvailability.prevAvailMonth(...a),
-    nextAvailMonth: (...a) => PlanningAvailability.nextAvailMonth(...a),
+    // v601 : showAvailabilityView / prevAvailMonth / nextAvailMonth et le mois
+    // courant du tableau sont partis avec le tableau lui-meme. Ce qu'il
+    // apportait — « quel jour est libre pour tout le monde ? » — est
+    // desormais dans le calendrier, en vert.
  // ===== EXPORT PDF PLANNING — délégué à PlanningExport =====
     openExportModal: (...a) => PlanningExport.openExportModal(...a),
     exportPlanningPDF: (...a) => PlanningExport.exportPlanningPDF(...a)

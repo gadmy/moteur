@@ -55,6 +55,9 @@
             let classes = 'planning-day';
             if(isToday) classes += ' today';
             if(hasShoot) classes += ' has-shoot';
+            // v601 : tous les gens AFFICHES sont disponibles ce jour-la — la
+            // journee s'entoure de vert. Sans selection, aucune promesse.
+            if(Planning.journeeLibrePourTous(dateStr)) classes += ' tous-libres';
             
             html += `<div class="${classes}" data-date="${dateStr}" onclick="app.Planning.openDay('${dateStr}')" oncontextmenu="app.Planning.menuJourVide(event, '${dateStr}')" ondragover="app.Planning.onDragOver(event)" ondrop="app.Planning.onDrop(event, '${dateStr}')">
                 <div class="planning-day-number">${day}</div>

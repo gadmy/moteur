@@ -20,9 +20,46 @@
         return noms.filter((r, i, a) => a.indexOf(r) === i);
     },
     
+    // ==================================================================
+    //  LE PANNEAU DIT CE QU'IL MONTRE, MEME REPLIE (v601)
+    // ==================================================================
+    //  « Ca devenait tellement grand qu'on etait oblige de remonter pour
+    //  changer de mois. » Quinze etiquettes poussaient le calendrier hors de
+    //  l'ecran. Deux reponses, et il fallait les deux :
+    //    - les etiquettes ne depassent plus quelques lignes et defilent ;
+    //    - le titre porte le COMPTE, pour qu'on puisse replier le panneau
+    //      sans perdre de vue qui est affiche. Un panneau qu'on ne peut
+    //      refermer qu'en oubliant ce qu'il contient, on ne le referme pas.
+    //  ET « TOUT AFFICHER » LE REPLIE : la selection est faite d'un geste, il
+    //  n'y a plus rien a y regarder, et c'est precisement le moment ou la
+    //  liste est la plus longue.
+    _majResume: () => {
+        const sum = document.querySelector('.planning-avail > summary');
+        if(!sum) return;
+        const na = (Planning.selectedAvailability.actors || []).length;
+        const nc = (Planning.selectedAvailability.crew || []).length;
+        let bulle = sum.querySelector('.avail-resume');
+        if(!na && !nc) { if(bulle) bulle.remove(); return; }
+        if(!bulle) {
+            bulle = document.createElement('span');
+            bulle.className = 'avail-resume';
+            sum.appendChild(bulle);
+        }
+        const bouts = [];
+        if(na) bouts.push('🎭 ' + na);
+        if(nc) bouts.push('🎥 ' + nc);
+        bulle.textContent = bouts.join(' · ');
+        bulle.title = 'Affiché sur le calendrier — cliquez pour modifier';
+    },
+    replier: () => {
+        const d = document.querySelector('.planning-avail');
+        if(d) d.removeAttribute('open');
+    },
+
     renderAvailabilitySelectors: () => {
         Planning.renderAvailabilityTags('actors');
         Planning.renderAvailabilityTags('crew');
+        PlanningAvailPicker._majResume();
         
         // Ajouter les event listeners pour focus/blur
         const actorsSearch = document.getElementById('planning-actors-search');
@@ -177,6 +214,34 @@
     //  avoir deux lignes d'equipe. On ne prend donc qu'UNE ligne par CORPS,
     //  sinon elle poserait deux barres identiques sur chaque journee — c'est
     //  la regle deja posee en v598 pour les etiquettes, on la respecte ici.
+    //  UNE JOURNEE OU TOUT LE MONDE PEUT VENIR (v601)
+    //  C'est la seule chose qu'apportait le tableau « Disponibilites de
+    //  l'equipe », supprime pour cause de doublon. Elle descend ici, la ou
+    //  l'on regarde deja : la journee s'entoure de vert.
+    //  ON NE REPOND QUE SUR LES GENS AFFICHES : sans selection, il n'y a
+    //  aucune promesse a faire — entourer toutes les journees de vert quand
+    //  personne n'est choisi ne voudrait rien dire.
+    //  Une case non remplie compte comme DISPONIBLE (regle posee avec
+    //  PlanningAvailability._estLibre) : seul un « indisponible » ecrit
+    //  retire la journee.
+    _personnesAffichees: () => {
+        const out = [];
+        (Planning.selectedAvailability.actors || []).forEach(id => {
+            const p = (state.data.actors || []).find(x => x && x.id === id);
+            if(p) out.push(p);
+        });
+        (Planning.selectedAvailability.crew || []).forEach(id => {
+            const p = (state.data.crew || []).find(x => x && x.id === id);
+            if(p) out.push(p);
+        });
+        return out;
+    },
+    journeeLibrePourTous: (dateStr) => {
+        const gens = PlanningAvailPicker._personnesAffichees();
+        if(!gens.length) return false;
+        return gens.every(p => PlanningAvailability._estLibre(p, dateStr));
+    },
+
     toutSelectionner: (type) => {
         const personType = (type === 'actors') ? 'actor' : 'crew';
         const source = (type === 'actors') ? (state.data.actors || []) : (state.data.crew || []);
@@ -190,6 +255,7 @@
         });
         Planning.selectedAvailability[type === 'actors' ? 'actors' : 'crew'] = ids;
         Planning.renderAvailabilitySelectors();
+        PlanningAvailPicker.replier();
         Planning.render();
         Utils.toast(ids.length
             ? (ids.length + (type === 'actors' ? ' comédien·ne' : ' technicien·ne') + (ids.length > 1 ? 's affiché·es' : ' affiché·e'))
