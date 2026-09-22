@@ -274,6 +274,25 @@ const app = (function(){
           (document.body || document.documentElement).appendChild(d);
       } catch(e) { /* si meme ceci echoue, la console reste le dernier recours */ }
   }
+  const MOTEUR_SB_SECOURS = 'https://unpkg.com/@supabase/supabase-js@2.116.0/dist/umd/supabase.js';
+  const MOTEUR_SB_EMPREINTE = 'sha384-iLddHTLokph6Omwoyid4XKxHaWa6w41BnoEj0q5oOrzmYPpHIKt1wyjReA7s//pP';
+  let moteurSecoursPose = false;
+  // La deuxieme adresse n'est tentee qu'une fois, et seulement apres avoir
+  // laisse sa chance a la premiere : le cas normal ne doit rien telecharger
+  // en double.
+  function moteurSecoursSupabase() {
+      if(moteurSecoursPose) return;
+      moteurSecoursPose = true;
+      try {
+          const sc = document.createElement('script');
+          sc.src = MOTEUR_SB_SECOURS;
+          sc.integrity = MOTEUR_SB_EMPREINTE;   // meme fichier, meme empreinte
+          sc.crossOrigin = 'anonymous';
+          sc.onerror = () => console.warn('[Moteur] Seconde adresse injoignable elle aussi.');
+          document.head.appendChild(sc);
+          console.warn('[Moteur] Premiere adresse muette — on tente la seconde (unpkg).');
+      } catch(e) { /* rien de plus a tenter */ }
+  }
   function initSupabase() {
       return new Promise((resolve) => {
           const depart = Date.now();
@@ -345,16 +364,27 @@ const app = (function(){
                   // Supabase initialisé
                   resolve(true);
               } else if(Date.now() - depart < MOTEUR_ATTENTE_MAX) {
-                  // Attente de Supabase
+                  // Attente de Supabase. Au bout de quatre secondes — ou tout de
+                  // suite si le navigateur a deja signale l'echec — on essaie la
+                  // seconde adresse, sans cesser de guetter.
+                  if(window.__sbEchec || Date.now() - depart > 4000) moteurSecoursSupabase();
                   setTimeout(tryInit, 100);
               } else {
                   // ON RENONCE, ET ON LE DIT. Mieux vaut un message franc qu'une
                   // page noire : la personne peut agir sur sa connexion, pas sur
                   // une attente invisible.
                   console.error('[Moteur] La bibliotheque Supabase n\'a pas pu etre chargee (CDN injoignable ?).');
-                  moteurEcranPanne('La bibliothèque de connexion n\'a pas pu être téléchargée.<br>'
-                      + 'Vérifiez votre connexion internet : même ouvert depuis votre disque, '
-                      + 'Moteur a besoin du réseau pour vous connecter.');
+                  // LE MESSAGE SERT AUSSI DE DIAGNOSTIC : il donne l'adresse qui
+                  // n'a pas repondu. Si elle ne s'ouvre pas non plus dans un
+                  // onglet, c'est le reseau qui la bloque — pas Moteur.
+                  moteurEcranPanne('La bibliothèque de connexion n\'a pas pu être téléchargée, '
+                      + 'ni depuis son adresse principale ni depuis celle de secours.<br><br>'
+                      + 'Même ouvert depuis votre disque, Moteur a besoin du réseau.<br>'
+                      + 'Pour savoir d\'où vient le blocage, ouvrez cette adresse dans un onglet :<br>'
+                      + '<a href="' + MOTEUR_SB_SECOURS + '" target="_blank" rel="noopener" '
+                      + 'style="color:#7aa7ff;word-break:break-all">' + MOTEUR_SB_SECOURS + '</a><br>'
+                      + 'Si elle ne s\'ouvre pas non plus, c\'est votre réseau (ou un antivirus) '
+                      + 'qui la bloque.');
                   resolve(false);
               }
           }
