@@ -34,6 +34,10 @@
       gardes: [],          // les cartes retenues (coeur)
       dernier: null,       // la derniere carte tranchee — pour pouvoir annuler
       _mesProjets: null,   // cache de la liste, le temps de la session
+      rangs: {},           // { besoinId: ou l'on en est dans SES candidats }
+      besoinCourant: null, // le poste affiche
+      centre: null,        // { lat, lng } du projet — pour les distances
+      rayonKm: 0,          // 0 = pas de limite
 
       // Les ecartes sont MEMORISEES PAR PROJET, dans le navigateur. Sans cela
       // la pile reproposerait trente fois les memes personnes ecartees. Ce
@@ -205,6 +209,7 @@
           CastingMatch.besoins = besoins.map(b => Object.assign({}, b, {
               candidats: CastingMatch.candidatsPour(b)
           }));
+          await CastingMatch.mesurerDistances();
           CastingMatch.preparerPile();
           CastingMatch.ouvrirTri();
       },
@@ -334,14 +339,22 @@
       //  Un poste : c'est le METIER qui decide. On compare le poste cherche au
       //  role declare, dans les deux sens — « Chef Électricien » et
       //  « électricien » doivent se reconnaitre.
+      //  ET « CHEF OPERATRICE » DOIT RECONNAITRE « CHEF OPERATEUR ». Trouve en
+      //  eprouvant la vue de tri : les deux ne partageaient aucun mot entier,
+      //  donc le score tombait a zero et la personne n'apparaissait jamais.
+      //  Dans ce metier les intitules sont feminises partout — la liste des
+      //  postes du projet dit elle-meme « Realisateur·rice ». La comparaison
+      //  se fait donc sur le DEBUT des mots (voir _memeMot).
       noterTechnicien: (profil, facet, need) => {
           const raisons = [];
           const cherche = CastingMatch._mots(need.role || '');
           const declare = CastingMatch._mots(facet.role || '');
           if(!cherche.length || !declare.length) return { score: 0, raisons: [] };
-          const communs = cherche.filter(m => declare.indexOf(m) >= 0);
+          const communs = cherche.filter(m => declare.some(d => CastingMatch._memeMot(m, d)));
           let score = 0;
-          if(declare.join(' ') === cherche.join(' ')) { score = 80; raisons.push('poste exact'); }
+          if(declare.length === cherche.length && communs.length === cherche.length) {
+              score = 80; raisons.push('poste exact');
+          }
           else if(communs.length) { score = 40 + Math.min(30, communs.length * 15); raisons.push('poste proche'); }
           else return { score: 0, raisons: [] };
           score += CastingMatch._bonusLieu(facet, profil, raisons);
@@ -361,10 +374,89 @@
           } catch(e) {}
           return 0;
       },
+      // LES MOTS QUI NE DISENT PAS LE METIER sont ecartes : les grades (chef,
+      // assistant...) et surtout les TERMINAISONS FEMININES ISOLEES. Sans cela
+      // « Realisateur·rice » et « Directeur·rice de casting » partageaient le
+      // mot « rice » et se reconnaissaient l'un l'autre — deux metiers sans
+      // rapport rapproches par une marque de genre.
+      HORS_METIER: ['chef', 'assistant', 'assistante', 'directeur', 'directrice',
+                    'premier', 'premiere', 'rice', 'trice', 'euse', 'iere'],
       _mots: (s) => String(s || '').toLowerCase()
           .normalize('NFD').replace(/[̀-ͯ]/g, '')
           .replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)
-          .filter(m => m.length > 3 && ['chef', 'assistant', 'directeur', 'premier'].indexOf(m) < 0),
+          .filter(m => m.length > 3 && CastingMatch.HORS_METIER.indexOf(m) < 0),
+      // Deux mots designent le meme metier s'ils sont identiques, ou s'ils
+      // commencent pareil sur au moins cinq lettres : « operateur » et
+      // « operatrice » se rejoignent sur « operat », « monteur » n'y va pas.
+      _memeMot: (a, b) => {
+          if(a === b) return true;
+          const n = Math.min(a.length, b.length);
+          if(n < 5) return false;
+          const p2 = Math.max(5, n - 3);
+          return a.slice(0, p2) === b.slice(0, p2);
+      },
+
+      // ==================================================================
+      //  LA DISTANCE, EN KILOMETRES REELS
+      // ==================================================================
+      //  Le nom de ville ne suffisait pas : « Lyon » et « Villeurbanne » sont
+      //  a quatre kilometres et ne se ressemblent pas, « Saint-Denis » est
+      //  aussi bien en banlieue parisienne qu'a La Reunion. On mesure donc a
+      //  vol d'oiseau, avec la meme fonction que la recherche de l'Univers —
+      //  une seule facon de calculer une distance dans l'application.
+      //  LE CENTRE EST LA VILLE DU PROJET, pas celle tapee dans la recherche :
+      //  on cherche des gens POUR CE TOURNAGE.
+      //  LE RAYON EST CELUI DU CURSEUR de la barre laterale, deja present et
+      //  deja compris. A l'infini (500) on ne filtre rien, mais on affiche
+      //  quand meme les distances : savoir que quelqu'un est a 600 km change
+      //  la decision, meme si on ne l'exclut pas.
+      rayonActif: () => CastingMatch.rayonKm > 0 && CastingMatch.rayonKm < 500,
+      _lireRayon: () => {
+          const el = document.getElementById('universe-distance');
+          const v = el ? parseInt(el.value, 10) : NaN;
+          CastingMatch.rayonKm = isNaN(v) ? 0 : v;
+      },
+      _coordsDe: async (item, ville) => {
+          if(item && item.latitude != null && item.longitude != null) {
+              return { lat: Number(item.latitude), lng: Number(item.longitude) };
+          }
+          if(!ville) return null;
+          try { return await Universe.geocodeCity(ville); } catch(e) { return null; }
+      },
+      mesurerDistances: async () => {
+          CastingMatch._lireRayon();
+          CastingMatch.centre = null;
+          const pres = (CastingMatch.projet && CastingMatch.projet.donnees
+                        && CastingMatch.projet.donnees.presentation) || {};
+          CastingMatch.centre = await CastingMatch._coordsDe(pres, pres.city || '');
+          if(!CastingMatch.centre) {
+              // On le DIT plutot que d'ignorer le rayon en silence : sinon on
+              // croit chercher a vingt kilometres alors qu'on cherche partout.
+              if(CastingMatch.rayonActif()) {
+                  Utils.toast('Ce projet n’a pas de ville dans sa Présentation : impossible de filtrer par distance.', 'warning', 7000);
+              }
+              return;
+          }
+          // Les profils portent presque toujours leurs coordonnees (la carte en
+          // a besoin) : le geocodage ne sert que pour les rares qui n'ont
+          // qu'un nom de ville, et il est deja mis en cache par l'Univers.
+          for(const b of CastingMatch.besoins) {
+              const gardes = [];
+              for(const c of b.candidats) {
+                  const co = await CastingMatch._coordsDe(c.facet.latitude != null ? c.facet : c.profil,
+                                                          c.ville || '');
+                  c.km = co ? UniverseSearch._distanceKm(CastingMatch.centre, co) : null;
+                  if(CastingMatch.rayonActif() && c.km != null && c.km > CastingMatch.rayonKm) continue;
+                  if(c.km != null && c.km <= 30) c.raisons.push('à moins de 30 km');
+                  gardes.push(c);
+              }
+              // LE PLUS PROCHE D'ABORD A SCORE EGAL. La distance ne remplace
+              // pas la pertinence : elle departage.
+              gardes.sort((x, y) => (y.score - x.score)
+                  || ((x.km == null ? 1e9 : x.km) - (y.km == null ? 1e9 : y.km)));
+              b.candidats = gardes;
+          }
+      },
 
       // ==================================================================
       //  3. LA VUE DE TRI (« tinder »)
@@ -374,62 +466,155 @@
       //  LES CARTES SONT RANGEES PAR BESOIN, pas melangees : on distribue un
       //  role, puis le suivant. Melanger obligerait a se redemander a chaque
       //  carte « pour quoi je regarde cette personne ? ».
+      //  ON NE FINIT PAS UN POSTE AVANT DE PASSER AU SUIVANT. Premiere
+      //  version : une seule pile, les besoins a la queue leu leu. Remarque du
+      //  developpeur : « s'il y a 200 candidats pour Paul et que je veux
+      //  passer a Sarah, je dois pouvoir le faire ». Evidemment — deux cents
+      //  cartes avant d'atteindre le role suivant, ce n'est pas un tri, c'est
+      //  une punition. CHAQUE POSTE GARDE DESORMAIS SA PROPRE PLACE : on le
+      //  quitte, on y revient, on retrouve ou l'on en etait.
       preparerPile: () => {
-          CastingMatch.pile = [];
           CastingMatch.gardes = [];
-          CastingMatch.rang = 0;
+          CastingMatch.rangs = {};
           CastingMatch.dernier = null;
-          CastingMatch.besoins.forEach(b => {
-              b.candidats.forEach(c => CastingMatch.pile.push(c));
-          });
+          CastingMatch.besoins.forEach(b => { CastingMatch.rangs[b.id] = 0; });
+          const premier = CastingMatch.besoins.find(b => b.candidats.length) || CastingMatch.besoins[0];
+          CastingMatch.besoinCourant = premier ? premier.id : null;
+      },
+
+      besoinActif: () => CastingMatch.besoins.find(b => b.id === CastingMatch.besoinCourant) || null,
+      carteActive: () => {
+          const b = CastingMatch.besoinActif();
+          if(!b) return null;
+          return b.candidats[CastingMatch.rangs[b.id] || 0] || null;
+      },
+      restants: (b) => Math.max(0, b.candidats.length - (CastingMatch.rangs[b.id] || 0)),
+      allerAu: (besoinId) => {
+          if(!CastingMatch.besoins.some(b => b.id === besoinId)) return;
+          CastingMatch.besoinCourant = besoinId;
+          CastingMatch.dernier = null;      // on n'annule pas par-dessus un autre poste
+          CastingMatch.rendre();
+      },
+      // Le poste suivant qui a encore quelque chose a montrer.
+      besoinSuivant: () => {
+          const i = CastingMatch.besoins.findIndex(b => b.id === CastingMatch.besoinCourant);
+          for(let k = 1; k <= CastingMatch.besoins.length; k++) {
+              const b = CastingMatch.besoins[(i + k) % CastingMatch.besoins.length];
+              if(CastingMatch.restants(b) > 0) return b;
+          }
+          return null;
       },
 
       ouvrirTri: async () => {
           if(typeof Universe.setViewMode === 'function') await Universe.setViewMode('tri');
+          CastingMatch.poserClavier();
           CastingMatch.rendre();
+      },
+
+      // ------------------------------------------------------------------
+      //  LE CLAVIER
+      // ------------------------------------------------------------------
+      //  Un ecouteur pose UNE FOIS, qui ne fait rien tant qu'on n'est pas dans
+      //  la vue de tri — et jamais quand on est en train d'ecrire quelque part.
+      //  Voler la barre d'espace a un champ de texte est le genre de detail
+      //  qui rend une application insupportable.
+      _clavierPose: false,
+      poserClavier: () => {
+          if(CastingMatch._clavierPose) return;
+          CastingMatch._clavierPose = true;
+          document.addEventListener('keydown', (ev) => {
+              const vue = document.getElementById('universe-tri');
+              if(!vue || vue.style.display === 'none' || !vue.getClientRects().length) return;
+              if(!CastingMatch.carteActive()) return;
+              const el = ev.target;
+              if(el && el.closest && el.closest('input, textarea, select, [contenteditable="true"]')) return;
+              if(ev.ctrlKey || ev.metaKey || ev.altKey) return;
+              const k = ev.key;
+              if(k === ' ' || k === 'Enter')      { ev.preventDefault(); CastingMatch.garder(); }
+              else if(k === 'ArrowRight')         { ev.preventDefault(); CastingMatch.passer(1); }
+              else if(k === 'ArrowLeft')          { ev.preventDefault(); CastingMatch.passer(-1); }
+              else if(k === 'Delete' || k === 'Backspace') { ev.preventDefault(); CastingMatch.ecarter(); }
+          });
       },
 
       rendre: () => {
           const hote = document.getElementById('universe-tri');
           if(!hote) return;
-          const total = CastingMatch.pile.length;
-          if(!total) {
+          const esc = Utils.escape;
+          const totalCandidats = CastingMatch.besoins.reduce((n, b) => n + b.candidats.length, 0);
+          if(!totalCandidats) {
               hote.innerHTML = '<div class="tri-vide"><div class="tri-vide-icone">🔍</div>'
                   + '<h3>Personne à proposer pour l’instant</h3>'
-                  + '<p>Aucun profil public ne correspond aux besoins de ce projet. '
-                  + 'La communauté grandit — réessaie dans quelque temps.</p></div>';
+                  + '<p>Aucun profil public ne correspond aux besoins de ce projet'
+                  + (CastingMatch.rayonActif() ? ' dans le rayon choisi' : '') + '. '
+                  + 'La communauté grandit — réessaie dans quelque temps.</p>'
+                  + '<button class="tri-fin" onclick="app.CastingMatch.rendreRecap()">🏁 Voir le récapitulatif</button></div>';
               return;
           }
-          if(CastingMatch.rang >= total) return CastingMatch.rendreRecap();
-          const c = CastingMatch.pile[CastingMatch.rang];
-          const besoin = CastingMatch.besoins.find(b => b.id === c.besoinId);
-          const restants = total - CastingMatch.rang;
+          // LES POSTES EN PASTILLES, TOUJOURS VISIBLES : c'est par la qu'on
+          // change de poste, et c'est aussi ce qui dit ou l'on en est partout
+          // ailleurs sans avoir a y aller.
+          const onglets = '<div class="tri-postes">' + CastingMatch.besoins.map(b => {
+              const reste = CastingMatch.restants(b);
+              const actif = b.id === CastingMatch.besoinCourant;
+              return '<button class="tri-poste' + (actif ? ' is-actif' : '') + (reste ? '' : ' is-fini') + '"'
+                  + ' onclick="app.CastingMatch.allerAu(\'' + esc(b.id) + '\')"'
+                  + ' title="' + esc(b.label) + ' — ' + reste + ' à voir sur ' + b.candidats.length + '">'
+                  + esc(b.poste) + '<span class="tri-poste-n">' + reste + '</span></button>';
+          }).join('') + '</div>';
+
+          const c = CastingMatch.carteActive();
+          const b = CastingMatch.besoinActif();
+          if(!c) {
+              const suivant = CastingMatch.besoinSuivant();
+              hote.innerHTML = onglets
+                  + '<div class="tri-vide"><div class="tri-vide-icone">✅</div>'
+                  + '<h3>' + esc((b && b.label) || 'Ce poste') + ' : c’est vu</h3>'
+                  + '<p>Vous avez parcouru tous les profils proposés pour ce poste.</p>'
+                  + (suivant
+                      ? '<button class="tri-fin" onclick="app.CastingMatch.allerAu(\'' + esc(suivant.id) + '\')">→ Passer à ' + esc(suivant.poste) + '</button>'
+                      : '<button class="tri-fin" onclick="app.CastingMatch.rendreRecap()">🏁 Voir le récapitulatif</button>')
+                  + '</div>';
+              return;
+          }
+          const reste = CastingMatch.restants(b);
           const couleur = c.score >= 70 ? '#22c55e' : (c.score >= 40 ? '#f59e0b' : '#94a3b8');
-          const esc = Utils.escape;
-          hote.innerHTML = `
+          const loin = (c.km != null) ? Math.round(c.km) + ' km' : '';
+          hote.innerHTML = onglets + `
             <div class="tri-entete">
-              <div class="tri-besoin">${esc((besoin && besoin.label) || c.poste)}</div>
-              <div class="tri-compte">${restants} profil${restants > 1 ? 's' : ''} à voir
-                — ${CastingMatch.gardes.length} gardé${CastingMatch.gardes.length > 1 ? 's' : ''}</div>
+              <div class="tri-besoin">${esc((b && b.label) || c.poste)}</div>
+              <div class="tri-compte">${reste} profil${reste > 1 ? 's' : ''} à voir
+                — ${CastingMatch.gardes.length} gardé${CastingMatch.gardes.length > 1 ? 's' : ''} en tout</div>
             </div>
             <div class="tri-carte" id="tri-carte">
-              <div class="tri-photo">${c.photo
+              <div class="tri-photo" title="Clic : ouvrir la fiche — clic droit : passer sans rien décider"
+                   onclick="app.CastingMatch.ouvrirFiche()"
+                   oncontextmenu="event.preventDefault(); app.CastingMatch.passer(1); return false;">${c.photo
                     ? `<img src="${Utils.safeMediaUrl(c.photo)}" alt="Photo de ${esc(c.nom)}">`
-                    : (besoin && besoin.kind === 'crew' ? '🎥' : '🎭')}</div>
+                    : (b && b.kind === 'crew' ? '🎥' : '🎭')}</div>
               <div class="tri-score" style="background:${couleur}">${c.score}%</div>
               <div class="tri-corps">
                 <div class="tri-nom">${esc(c.nom)}</div>
-                <div class="tri-sous">${esc(c.role || (besoin && besoin.poste) || '')}${c.ville ? ' · ' + esc(c.ville) : ''}</div>
+                <div class="tri-sous">${esc(c.role || (b && b.poste) || '')}${c.ville ? ' · ' + esc(c.ville) : ''}${loin ? ' · ' + loin : ''}</div>
                 ${c.raisons.length ? '<div class="tri-raisons">' + c.raisons.map(r => '<span>' + esc(r) + '</span>').join('') + '</div>' : ''}
               </div>
             </div>
             <div class="tri-boutons">
-              <button class="tri-btn tri-non" onclick="app.CastingMatch.ecarter()" title="Écarter ce profil">✕</button>
+              <button class="tri-btn tri-non" onclick="app.CastingMatch.ecarter()" title="Écarter (Suppr)">✕</button>
               <button class="tri-btn tri-retour" onclick="app.CastingMatch.annuler()" title="Annuler le dernier choix"${CastingMatch.dernier ? '' : ' disabled'}>↺</button>
-              <button class="tri-btn tri-oui" onclick="app.CastingMatch.garder()" title="Garder ce profil">♥</button>
+              <button class="tri-btn tri-passer" onclick="app.CastingMatch.passer(1)" title="Passer sans rien décider (→)">→</button>
+              <button class="tri-btn tri-oui" onclick="app.CastingMatch.garder()" title="Garder (Espace ou Entrée)">♥</button>
             </div>
             <button class="tri-fin" onclick="app.CastingMatch.terminer()">🏁 La recherche est finie</button>
-            <div class="tri-note">Le cœur ne prévient personne : rien n’est envoyé avant le récapitulatif.</div>`;
+            <div class="tri-note">Espace ou Entrée : garder · ← → : passer sans rien décider · Suppr : écarter.<br>
+              Le cœur ne prévient personne : rien n’est envoyé avant le récapitulatif.</div>`;
+      },
+
+      ouvrirFiche: () => {
+          const c = CastingMatch.carteActive();
+          if(!c) return;
+          try { Universe.openProfileModal(c.profil, c.facetKey); }
+          catch(e) { console.warn('[Match] ouverture de la fiche :', e && e.message); }
       },
 
       _glisser: (sens) => {
@@ -439,31 +624,48 @@
       },
 
       ecarter: () => {
-          const c = CastingMatch.pile[CastingMatch.rang];
+          const c = CastingMatch.carteActive();
           if(!c) return;
           CastingMatch.ecarter_memoire(CastingMatch.projet ? CastingMatch.projet.id : '', c.cle);
-          CastingMatch.dernier = { carte: c, garde: false };
-          CastingMatch.rang++;
+          CastingMatch.dernier = { carte: c, besoin: CastingMatch.besoinCourant, action: 'ecarte' };
+          CastingMatch.rangs[CastingMatch.besoinCourant]++;
           CastingMatch._glisser(-1);
       },
 
       garder: () => {
-          const c = CastingMatch.pile[CastingMatch.rang];
+          const c = CastingMatch.carteActive();
           if(!c) return;
           if(!CastingMatch.gardes.some(g => g.cle === c.cle)) CastingMatch.gardes.push(c);
-          CastingMatch.dernier = { carte: c, garde: true };
-          CastingMatch.rang++;
+          CastingMatch.dernier = { carte: c, besoin: CastingMatch.besoinCourant, action: 'garde' };
+          CastingMatch.rangs[CastingMatch.besoinCourant]++;
           CastingMatch._glisser(1);
       },
 
+      // PASSER SANS RIEN DECIDER. Ni garde, ni ecarte : on avance (ou on
+      // recule) dans la pile du poste. Rien n'est retenu, donc la personne
+      // reviendra au prochain passage — c'est le « je verrai plus tard ».
+      passer: (sens) => {
+          const b = CastingMatch.besoinActif();
+          if(!b) return;
+          const n = b.candidats.length;
+          const avant = CastingMatch.rangs[b.id] || 0;
+          const apres = Math.min(n, Math.max(0, avant + (sens < 0 ? -1 : 1)));
+          if(apres === avant) return;
+          CastingMatch.rangs[b.id] = apres;
+          CastingMatch.dernier = null;   // il n'y a rien a annuler : rien n'a ete decide
+          CastingMatch._glisser(sens < 0 ? -1 : 1);
+      },
+
       // Le geste part vite : on doit pouvoir revenir d'un cran. UN SEUL cran —
-      // au-dela, on ne se souvient plus de ce qu'on annule.
+      // au-dela, on ne se souvient plus de ce qu'on annule. Et seulement sur
+      // le poste ou le geste a ete fait.
       annuler: () => {
           const d = CastingMatch.dernier;
           if(!d) return;
           CastingMatch.dernier = null;
-          CastingMatch.rang = Math.max(0, CastingMatch.rang - 1);
-          if(d.garde) CastingMatch.gardes = CastingMatch.gardes.filter(g => g.cle !== d.carte.cle);
+          CastingMatch.besoinCourant = d.besoin;
+          CastingMatch.rangs[d.besoin] = Math.max(0, (CastingMatch.rangs[d.besoin] || 0) - 1);
+          if(d.action === 'garde') CastingMatch.gardes = CastingMatch.gardes.filter(g => g.cle !== d.carte.cle);
           else CastingMatch._retirerEcarte(d.carte.cle);
           CastingMatch.rendre();
       },
@@ -476,7 +678,7 @@
           } catch(e) {}
       },
 
-      terminer: () => { CastingMatch.rang = CastingMatch.pile.length; CastingMatch.rendreRecap(); },
+      terminer: () => CastingMatch.rendreRecap(),
 
       remettreAZero: async () => {
           const ok = await ConfirmModal.show({
