@@ -3851,7 +3851,7 @@ const FicheUI = {
         if(!b.classList.contains('is-collapsed') && state.currentRole !== 'viewer') {
             const cal = b.querySelector('[id^="actor-calendar-"], [id^="crew-calendar-"]');
             if(cal && !cal.firstChild) {
-                const m = cal.id.match(/^(actor|crew)-calendar-(\d+)$/);
+                const m = cal.id.match(/^(actor|crew)-calendar-(-?\d+)$/)  /* v601 : -1 en mode profil */;
                 if(m) { try { UI.renderAvailabilityCalendar(cal.id, m[1], parseInt(m[2], 10)); } catch(e) {} }
             }
         }
@@ -4174,7 +4174,7 @@ const FicheBlocks = {
         // a l'ouverture de son onglet (meme garde viewer qu'a l'ouverture).
         if(shown && state.currentRole !== 'viewer') {
             shown.querySelectorAll('[id^="actor-calendar-"],[id^="crew-calendar-"]').forEach(cal => {
-                const m = cal.id.match(/^(actor|crew)-calendar-(\d+)$/);
+                const m = cal.id.match(/^(actor|crew)-calendar-(-?\d+)$/)  /* v601 : -1 en mode profil */;
                 if(m) { try { UI.renderAvailabilityCalendar(cal.id, m[1], parseInt(m[2], 10)); } catch(e) {} }
             });
         }

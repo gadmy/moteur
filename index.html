@@ -1763,6 +1763,24 @@ vv601 (20 septembre 2026) — EN COURS.
   reconnaissaient l'un l'autre. Deux metiers sans aucun rapport rapproches par
   une marque de genre. Les terminaisons isolees sont ecartees comme les grades.
 
+  LE PLANNING AVAIT DISPARU DES FICHES DE « MES PROFILS ». Signale a l'image :
+  la brique Disponibilites ne montrait plus que la zone de texte, le
+  calendrier n'etait plus la.
+  LA QUESTION « DE QUI PARLE CE CALENDRIER ? » ETAIT POSEE A TROIS ENDROITS,
+  toujours de la meme facon : « state.data.actors[index] ». Dans un PROJET
+  c'est juste. Dans « Mon profil », l'index vaut -1 — il n'y a pas de tableau,
+  il y a MA fiche : la reponse etait undefined, et le calendrier se contentait
+  de ne rien dessiner. Aucune erreur, aucun message : juste un bloc vide.
+  Une seule reponse desormais (UI._personneCalendrier).
+  UN SECOND VERROU, PLUS DISCRET : deux filtres cherchaient un identifiant de
+  la forme « actor-calendar-<chiffres> », sans prevoir le signe moins. Meme
+  une fois la personne retrouvee, deplier la brique ou changer d'onglet ne
+  redessinait donc rien en mode profil.
+  ET UN TROISIEME DEFAUT TROUVE EN CHEMIN : les plages choisies au calendrier
+  etaient CALCULEES pour etre affichees en toutes lettres sous le
+  calendrier... et la variable n'etait jamais utilisee. Du code mort qui
+  ressemblait a une fonctionnalite. Elles s'affichent maintenant.
+
   PUBLIER UN PROJET NE SORT PLUS TOUT D'UN COUP. Cocher « visible dans
   l'Univers » publiait l'equipe, le casting, les dates et le reste en une
   fois, sans que personne ait rien choisi. On demande maintenant, section par
@@ -5411,6 +5429,8 @@ header { transition: box-shadow 0.3s ease, background 0.3s ease; }
    l'etat reste cale en haut a droite. */
 /* v601 - une valeur CALCULEE (l'age, depuis la date de naissance) : elle se
    lit comme un champ mais ne s'edite pas, donc pas de bordure de saisie. */
+/* v601 - les plages choisies au calendrier, ecrites en toutes lettres. */
+.dispo-plages { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 8px; }
 /* v601 - publier un projet : on choisit ce qui sort, section par section. */
 .vis-toujours { background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
   padding: 10px 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 3px; }
@@ -25136,8 +25156,12 @@ initCategoriesDragDrop: () => {
                     const actorAvailDatesHTML = actorAvailDates.map((d, i2) => `<span style="display:inline-flex; align-items:center; background:#E8F5E9; border:1px solid #4CAF50; color:#2E7D32; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✓ ${d.from} → ${d.to} ${!isReadOnly ? `<span onclick="app.Actions.removeActorAvailability(${idx}, ${i2})" class="delete-link">✖</span>` : ''}</span>`).join('');
                     const actorUnavailDates = item.unavailabilityDates || [];
                     const actorUnavailDatesHTML = actorUnavailDates.map((d, i2) => `<span style="display:inline-flex; align-items:center; background:#FFEBEE; border:1px solid #f44336; color:#C62828; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✗ ${d.from} → ${d.to} ${d.reason ? '(' + Utils.escape(d.reason) + ')' : ''} ${!isReadOnly ? `<span onclick="app.Actions.removeActorUnavailability(${idx}, ${i2})" class="delete-link">✖</span>` : ''}</span>`).join('');
+                    // v601 : ces deux listes etaient CALCULEES et jamais
+                    // affichees — les plages choisies au calendrier
+                    // n'apparaissaient nulle part en toutes lettres.
                     let availHtml = `<textarea class="actor-input" style="min-height:50px; width:100%;" placeholder="Situation / Notes de disponibilité..." data-tooltip="Situation / Notes de disponibilité..." onchange="app.Actions.updateActorMeta(${idx}, 'availabilityText', this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(item.availabilityText || '')}</textarea>
-                        <div id="actor-calendar-${idx}"></div>`;
+                        <div id="actor-calendar-${idx}"></div>
+                        ${(actorAvailDatesHTML || actorUnavailDatesHTML) ? `<div class="dispo-plages">${actorAvailDatesHTML}${actorUnavailDatesHTML}</div>` : ''}`;
                     blocks.push(FicheUI.block('actor', 'dispos', '📅 Disponibilités', availHtml));
                 }
 
@@ -26753,11 +26777,29 @@ initCategoriesDragDrop: () => {
   };
   const UI = {
 	// ===================== ÉTAT & CALENDRIER DE DISPONIBILITÉS =====================
+  // ====================================================================
+  //  DE QUI PARLE CE CALENDRIER ? UNE SEULE REPONSE (v601)
+  // ====================================================================
+  //  La question etait posee a TROIS endroits, toujours de la meme facon :
+  //  « state.data.actors[idx] ». Dans un PROJET c'est juste. Dans « Mon
+  //  profil », l'index vaut -1 (il n'y a pas de tableau, il y a MA fiche) :
+  //  la reponse etait undefined, et le calendrier se contentait de ne rien
+  //  dessiner. D'ou le planning disparu des fiches de mes profils, sans la
+  //  moindre erreur a l'ecran.
+  _personneCalendrier: (personType, personIdx) => {
+      try {
+          if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) {
+              return PublicProfile._engineProfile || null;
+          }
+      } catch(e) {}
+      return (personType === 'actor') ? state.data.actors[personIdx] : state.data.crew[personIdx];
+  },
+
 	renderAvailabilityCalendar: (containerId, personType, personIdx) => {
       const container = document.getElementById(containerId);
       if(!container) return;
       
-      const person = personType === 'actor' ? state.data.actors[personIdx] : state.data.crew[personIdx];
+      const person = UI._personneCalendrier(personType, personIdx);
       if(!person) return;
       
       // Vérifier si le profil est verrouillé (revendiqué)
@@ -26848,7 +26890,7 @@ initCategoriesDragDrop: () => {
   },
   
   changeCalendarMonth: (containerId, personType, personIdx, delta) => {
-      const person = personType === 'actor' ? state.data.actors[personIdx] : state.data.crew[personIdx];
+      const person = UI._personneCalendrier(personType, personIdx);
       if(!person) return;
       
       const today = new Date();
@@ -26912,7 +26954,7 @@ initCategoriesDragDrop: () => {
           const from = dates[0];
           const to = dates[dates.length - 1];
           
-          const person = personType === 'actor' ? state.data.actors[personIdx] : state.data.crew[personIdx];
+          const person = UI._personneCalendrier(personType, personIdx);
           if(person) {
               // Initialiser les tableaux si nécessaire
               if(!person.availabilityDates) person.availabilityDates = [];
@@ -26947,11 +26989,15 @@ initCategoriesDragDrop: () => {
                   targetArray.push({ from, to });
               }
               
-              Store.save();
+              // En mode profil il n'y a pas de projet a enregistrer ni
+              // d'onglet a redessiner : la fiche se sauve avec le profil.
+              const enProfil = (typeof PublicProfile !== 'undefined' && PublicProfile._engineMode);
+              if(!enProfil) Store.save();
               UI.renderAvailabilityCalendar(UI._calendarDrag.containerId, personType, personIdx);
-              
-              // Rafraîchir aussi la liste des dates
-              if(personType === 'actor') {
+              if(enProfil) {
+                  // rien d'autre : la carte reste a l'ecran, le calendrier vient
+                  // d'etre redessine avec les nouvelles dates.
+              } else if(personType === 'actor') {
                   UIData.renderDataTab('actors', els.actorContainer);
               } else {
                   UI.renderCrewTab();
@@ -80366,7 +80412,7 @@ const FicheUI = {
         if(!b.classList.contains('is-collapsed') && state.currentRole !== 'viewer') {
             const cal = b.querySelector('[id^="actor-calendar-"], [id^="crew-calendar-"]');
             if(cal && !cal.firstChild) {
-                const m = cal.id.match(/^(actor|crew)-calendar-(\d+)$/);
+                const m = cal.id.match(/^(actor|crew)-calendar-(-?\d+)$/)  /* v601 : -1 en mode profil */;
                 if(m) { try { UI.renderAvailabilityCalendar(cal.id, m[1], parseInt(m[2], 10)); } catch(e) {} }
             }
         }
@@ -80689,7 +80735,7 @@ const FicheBlocks = {
         // a l'ouverture de son onglet (meme garde viewer qu'a l'ouverture).
         if(shown && state.currentRole !== 'viewer') {
             shown.querySelectorAll('[id^="actor-calendar-"],[id^="crew-calendar-"]').forEach(cal => {
-                const m = cal.id.match(/^(actor|crew)-calendar-(\d+)$/);
+                const m = cal.id.match(/^(actor|crew)-calendar-(-?\d+)$/)  /* v601 : -1 en mode profil */;
                 if(m) { try { UI.renderAvailabilityCalendar(cal.id, m[1], parseInt(m[2], 10)); } catch(e) {} }
             });
         }

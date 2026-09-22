@@ -1,11 +1,29 @@
 
   const UI = {
 	// ===================== ÉTAT & CALENDRIER DE DISPONIBILITÉS =====================
+  // ====================================================================
+  //  DE QUI PARLE CE CALENDRIER ? UNE SEULE REPONSE (v601)
+  // ====================================================================
+  //  La question etait posee a TROIS endroits, toujours de la meme facon :
+  //  « state.data.actors[idx] ». Dans un PROJET c'est juste. Dans « Mon
+  //  profil », l'index vaut -1 (il n'y a pas de tableau, il y a MA fiche) :
+  //  la reponse etait undefined, et le calendrier se contentait de ne rien
+  //  dessiner. D'ou le planning disparu des fiches de mes profils, sans la
+  //  moindre erreur a l'ecran.
+  _personneCalendrier: (personType, personIdx) => {
+      try {
+          if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) {
+              return PublicProfile._engineProfile || null;
+          }
+      } catch(e) {}
+      return (personType === 'actor') ? state.data.actors[personIdx] : state.data.crew[personIdx];
+  },
+
 	renderAvailabilityCalendar: (containerId, personType, personIdx) => {
       const container = document.getElementById(containerId);
       if(!container) return;
       
-      const person = personType === 'actor' ? state.data.actors[personIdx] : state.data.crew[personIdx];
+      const person = UI._personneCalendrier(personType, personIdx);
       if(!person) return;
       
       // Vérifier si le profil est verrouillé (revendiqué)
@@ -96,7 +114,7 @@
   },
   
   changeCalendarMonth: (containerId, personType, personIdx, delta) => {
-      const person = personType === 'actor' ? state.data.actors[personIdx] : state.data.crew[personIdx];
+      const person = UI._personneCalendrier(personType, personIdx);
       if(!person) return;
       
       const today = new Date();
@@ -160,7 +178,7 @@
           const from = dates[0];
           const to = dates[dates.length - 1];
           
-          const person = personType === 'actor' ? state.data.actors[personIdx] : state.data.crew[personIdx];
+          const person = UI._personneCalendrier(personType, personIdx);
           if(person) {
               // Initialiser les tableaux si nécessaire
               if(!person.availabilityDates) person.availabilityDates = [];
@@ -195,11 +213,15 @@
                   targetArray.push({ from, to });
               }
               
-              Store.save();
+              // En mode profil il n'y a pas de projet a enregistrer ni
+              // d'onglet a redessiner : la fiche se sauve avec le profil.
+              const enProfil = (typeof PublicProfile !== 'undefined' && PublicProfile._engineMode);
+              if(!enProfil) Store.save();
               UI.renderAvailabilityCalendar(UI._calendarDrag.containerId, personType, personIdx);
-              
-              // Rafraîchir aussi la liste des dates
-              if(personType === 'actor') {
+              if(enProfil) {
+                  // rien d'autre : la carte reste a l'ecran, le calendrier vient
+                  // d'etre redessine avec les nouvelles dates.
+              } else if(personType === 'actor') {
                   UIData.renderDataTab('actors', els.actorContainer);
               } else {
                   UI.renderCrewTab();
