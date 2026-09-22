@@ -3800,11 +3800,24 @@ const FicheUI = {
 
     // Champ « etiquette au-dessus, valeur dessous ». controlHtml est un
     // morceau deja construit (input, select...), passe tel quel.
-    field: (label, controlHtml) => {
+    //  v601 - « commun » marque un champ PARTAGE par toutes les casquettes du
+    //  compte (telephone, vehicule, date de naissance...). Sans ce signe, on
+    //  croit modifier sa fiche technicien et on modifie les quatre.
+    field: (label, controlHtml, opts) => {
         if(!controlHtml) return '';
-        return `<div class="fid-field"><span class="fid-label">${Utils.escape(label)}</span>${controlHtml}</div>`;
+        const marque = (opts && opts.commun)
+            ? ' <span class="fid-commun" title="Champ commun à toutes vos casquettes : le modifier ici le modifie partout.">⇄ commun</span>'
+            : '';
+        return `<div class="fid-field"><span class="fid-label">${Utils.escape(label)}${marque}</span>${controlHtml}</div>`;
     },
 
+    //  v601 - UN CHAMP DANS UNE RANGEE GARDE SON NOM AU-DESSUS. Le texte
+    //  grise a l'interieur disparait des qu'on ecrit : six mois plus tard,
+    //  on relit « 178 » sans savoir si c'est la taille ou le poids.
+    mini: (label, controlHtml) => {
+        if(!controlHtml) return '';
+        return `<label class="fid-mini"><span>${Utils.escape(label)}</span>${controlHtml}</label>`;
+    },
     // v593 : secTitle retiré (helper jamais appelé).
 
     badge: (txt, ok) => `<span class="fid-badge${ok ? ' fid-badge--ok' : ''}">${Utils.escape(txt)}</span>`,

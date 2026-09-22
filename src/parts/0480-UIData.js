@@ -152,7 +152,7 @@
                 let idHtml = FicheUI.field('Sexe', `<select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'gender', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(item.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>`);
                 // v601 : la date de naissance, et l'age qui en decoule. On ne
                 // tape plus un age : il serait faux l'annee suivante.
-                idHtml += FicheUI.field('Date de naissance', `<input type="date" class="actor-input" value="${Utils.escape(item.birthdate || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'birthdate', this.value); app.CardModal.refresh();" ${isReadOnly ? 'disabled' : ''}>`);
+                idHtml += FicheUI.field('Date de naissance', `<input type="date" class="actor-input" value="${Utils.escape(item.birthdate || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'birthdate', this.value); app.CardModal.refresh();" ${isReadOnly ? 'disabled' : ''}>`, { commun: PublicProfile._engineMode });
                 const ageTxt = PublicProfile.ageTexte(item);
                 idHtml += FicheUI.field('Âge', `<div class="fid-calcule">${ageTxt ? Utils.escape(ageTxt) : '<span style="opacity:.6">renseignez la date de naissance</span>'}</div>`);
                 if(!isReadOnly) {
@@ -168,7 +168,7 @@
 
                 // Brique « Contact ».
                 let contactHtml = FicheUI.field('Email', `<input class="actor-input" value="${Utils.escape(item.email||'')}" onchange="app.Actions.updateActorMeta(${idx}, 'email', this.value)" ${isReadOnly?'disabled':''}>`);
-                contactHtml += FicheUI.field('Téléphone', `<input class="actor-input" value="${Utils.escape(item.phone||'')}" onchange="app.Actions.updateActorMeta(${idx}, 'phone', this.value)" ${isReadOnly?'disabled':''}>`);
+                contactHtml += FicheUI.field('Téléphone', `<input class="actor-input" value="${Utils.escape(item.phone||'')}" onchange="app.Actions.updateActorMeta(${idx}, 'phone', this.value)" ${isReadOnly?'disabled':''}>`, { commun: PublicProfile._engineMode });
                 contactHtml += FicheUI.field('Ville / Région', `<input class="actor-input" list="city-suggestions" value="${Utils.escape(item.city||'')}" oninput="app.Geo.suggestCities(this)" onchange="app.Actions.updateActorMeta(${idx}, 'city', this.value)" ${isReadOnly?'disabled':''}>`);
                 contactHtml += FicheUI.field('Site web', `<input class="actor-input" value="${Utils.escape(item.website||'')}" onchange="app.Actions.updateActorMeta(${idx}, 'website', this.value)" ${isReadOnly?'disabled':''}>`);
                 contactHtml += FicheUI.field('Adresse / notes', `<textarea class="data-desc" style="width:100%; min-height:50px;" oninput="app.Actions.updateActorMeta(${idx}, 'address', this.value)" ${isReadOnly?'disabled':''}>${Utils.escape(item.address || '')}</textarea>`);
@@ -176,23 +176,30 @@
 
                 // Brique « Description physique ».
                 if(UI.isSectionVisibleForProject(item, 'physical')) {
+                    // v601 : chaque champ garde son nom AU-DESSUS. Le texte grise
+                    // a l'interieur disparait des qu'on ecrit, et six mois plus
+                    // tard on relit « 178 » sans savoir si c'est la taille ou le
+                    // poids. L'age, lui, n'est plus un champ : il se calcule
+                    // depuis la date de naissance, dans la brique Identite.
+                    const sel = (cle, liste) => `<select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, '${cle}', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions[liste].map(o => '<option value="'+o.value+'" '+(item[cle] === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>`;
+                    const ageCalc = PublicProfile.ageTexte(item);
                     let phHtml = `<div class="actor-input-row mb-8">
-                        <input class="actor-input" type="number" placeholder="Taille (cm)" data-tooltip="Taille (cm)" value="${Utils.escape(item.height || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'height', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                        <input class="actor-input" type="number" placeholder="Poids (kg)" data-tooltip="Poids (kg)" value="${Utils.escape(item.weight || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'weight', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                        <input class="actor-input" type="number" placeholder="Âge" data-tooltip="Âge" value="${Utils.escape(item.age || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'age', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        ${FicheUI.mini('Taille (cm)', `<input class="actor-input" type="number" value="${Utils.escape(item.height || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'height', this.value)" ${isReadOnly ? 'disabled' : ''}>`)}
+                        ${FicheUI.mini('Poids (kg)', `<input class="actor-input" type="number" value="${Utils.escape(item.weight || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'weight', this.value)" ${isReadOnly ? 'disabled' : ''}>`)}
+                        ${FicheUI.mini('Âge', `<div class="fid-calcule">${ageCalc ? Utils.escape(ageCalc) : '<span style="opacity:.6">date de naissance ?</span>'}</div>`)}
                     </div>
                     <div class="actor-input-row mb-8">
-                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'eyeColor', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.eyeColor.map(o => '<option value="'+o.value+'" '+(item.eyeColor === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
-                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'hairColor', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.hairColor.map(o => '<option value="'+o.value+'" '+(item.hairColor === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
-                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'hairLength', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.hairLength.map(o => '<option value="'+o.value+'" '+(item.hairLength === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
+                        ${FicheUI.mini('Yeux', sel('eyeColor', 'eyeColor'))}
+                        ${FicheUI.mini('Cheveux', sel('hairColor', 'hairColor'))}
+                        ${FicheUI.mini('Longueur', sel('hairLength', 'hairLength'))}
                     </div>
                     <div class="actor-input-row mb-8">
-                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'corpulence', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.corpulence.map(o => '<option value="'+o.value+'" '+(item.corpulence === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
-                        <select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'ethnicity', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.ethnicity.map(o => '<option value="'+o.value+'" '+(item.ethnicity === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>
+                        ${FicheUI.mini('Corpulence', sel('corpulence', 'corpulence'))}
+                        ${FicheUI.mini('Origine', sel('ethnicity', 'ethnicity'))}
                     </div>
                     <div class="actor-input-row">
-                        <input class="actor-input" placeholder="Sports pratiqués (équitation, natation...)" data-tooltip="Sports pratiqués (équitation, natation...)" value="${Utils.escape(item.sports || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'sports', this.value)" ${isReadOnly ? 'disabled' : ''}>
-                        <input class="actor-input" placeholder="Langues parlées (français, anglais...)" data-tooltip="Langues parlées (français, anglais...)" value="${Utils.escape(item.languages || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'languages', this.value)" ${isReadOnly ? 'disabled' : ''}>
+                        ${FicheUI.mini('Sports pratiqués', `<input class="actor-input" placeholder="équitation, natation..." data-tooltip="équitation, natation..." value="${Utils.escape(item.sports || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'sports', this.value)" ${isReadOnly ? 'disabled' : ''}>`)}
+                        ${FicheUI.mini('Langues parlées', `<input class="actor-input" placeholder="français, anglais..." data-tooltip="français, anglais..." value="${Utils.escape(item.languages || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'languages', this.value)" ${isReadOnly ? 'disabled' : ''}>`)}
                     </div>`;
                     blocks.push(FicheUI.block('actor', 'physique', '📏 Description physique', phHtml));
                 }
@@ -551,7 +558,7 @@
             idHtml += FicheUI.field('Département', `<select class="crew-input" onchange="app.Crew.updateMember(${idx}, 'group_id', this.value)" ${isLocked ? 'disabled' : ''}>${groupOptions}</select>`);
             idHtml += FicheUI.field('Poste', `<select class="crew-input" id="role-select-${idx}" onchange="app.UIData.handleRoleChange(${idx}, this.value)" ${isLocked ? 'disabled' : ''}>${rolesOptions}</select>`);
             idHtml += FicheUI.field('Sexe', `<select class="crew-input" onchange="app.Crew.updateMember(${idx}, 'gender', this.value)" ${isLocked ? 'disabled' : ''}>${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(member.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>`);
-            idHtml += FicheUI.field('Date de naissance', `<input type="date" class="crew-input" value="${Utils.escape(member.birthdate || '')}" onchange="app.Crew.updateMember(${idx}, 'birthdate', this.value); app.CardModal.refresh();" ${isLocked ? 'disabled' : ''}>`);
+            idHtml += FicheUI.field('Date de naissance', `<input type="date" class="crew-input" value="${Utils.escape(member.birthdate || '')}" onchange="app.Crew.updateMember(${idx}, 'birthdate', this.value); app.CardModal.refresh();" ${isLocked ? 'disabled' : ''}>`, { commun: PublicProfile._engineMode });
         }
         {
             const ageTxtC = PublicProfile.ageTexte(member);
@@ -568,7 +575,7 @@
 
         // Brique « Contact ».
         let contactHtml = FicheUI.field('Email', `<input class="crew-input" value="${Utils.escape(member.email || '')}" onchange="app.Crew.updateMember(${idx}, 'email', this.value)" ${isReadOnly ? 'disabled' : ''}>`);
-        contactHtml += FicheUI.field('Téléphone', `<input class="crew-input" value="${Utils.escape(member.phone || '')}" onchange="app.Crew.updateMember(${idx}, 'phone', this.value)" ${isReadOnly ? 'disabled' : ''}>`);
+        contactHtml += FicheUI.field('Téléphone', `<input class="crew-input" value="${Utils.escape(member.phone || '')}" onchange="app.Crew.updateMember(${idx}, 'phone', this.value)" ${isReadOnly ? 'disabled' : ''}>`, { commun: PublicProfile._engineMode });
         contactHtml += FicheUI.field('Ville / Région', `<input class="crew-input" list="city-suggestions" value="${Utils.escape(member.city || '')}" oninput="app.Geo.suggestCities(this)" onchange="app.Crew.updateMember(${idx}, 'city', this.value)" ${isReadOnly ? 'disabled' : ''}>`);
         contactHtml += FicheUI.field('Adresse', `<textarea class="crew-input" style="width:100%; min-height:50px;" onchange="app.Crew.updateMember(${idx}, 'address', this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(member.address || '')}</textarea>`);
         blocks.push(FicheUI.block('crew', 'contact', '📇 Contact', contactHtml));

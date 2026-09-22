@@ -3450,10 +3450,42 @@ const Presentation = {
         }
     },
     
+    // ==================================================================
+    //  CE QUI SORT DU PROJET SE DECIDE, SECTION PAR SECTION (v601)
+    // ==================================================================
+    //  LA REGLE ETAIT ECRITE A TROIS ENDROITS (le defaut des boutons, le
+    //  defaut de lecture, la liste des sections) et elle disait « tout est
+    //  visible sauf le legal ». Publier un projet sortait donc d'un coup
+    //  l'equipe, le casting et les dates, sans que personne ait rien demande.
+    //  Elle vit maintenant ICI, une fois.
+    //  LE CASTING ET L'EQUIPE PARTENT FERMES : ce sont les seules sections qui
+    //  declenchent des CANDIDATURES. On ne se fait pas demarcher par accident.
+    SECTIONS_VIS: [
+        { id: 'description',    label: 'Note d’intention',       defaut: true,  obligatoire: true },
+        { id: 'casting',        label: 'Rôles à distribuer',     defaut: false, note: 'Les comédien·nes pourront trouver vos rôles et se proposer.' },
+        { id: 'crew',           label: 'Postes techniques',      defaut: false, note: 'Les technicien·nes pourront trouver vos postes et se proposer.' },
+        { id: 'dates',          label: 'Dates de production',    defaut: true },
+        { id: 'location',       label: 'Lieu de tournage',       defaut: true },
+        { id: 'team',           label: 'Équipe déjà constituée', defaut: true },
+        { id: 'productionType', label: 'Type de production',     defaut: true },
+        { id: 'partners',       label: 'Partenaires',            defaut: true },
+        { id: 'legal',          label: 'Informations légales',   defaut: false }
+    ],
+    //  Toujours publie, quoi qu'il arrive : c'est ce qui fait la vignette sur
+    //  la carte. Sans cela il n'y a pas de projet a montrer.
+    TOUJOURS_VISIBLE: ['Le titre', 'L’affiche', 'Le type de projet (film, série…)', 'Le genre'],
+
+    _sectionVis: (id) => Presentation.SECTIONS_VIS.find(x => x.id === id) || null,
+    _visDefaut: (id) => { const s = Presentation._sectionVis(id); return s ? s.defaut : true; },
+
     toggleSectionVisibility: (section) => {
         const btn = document.getElementById(`project-vis-btn-${section}`);
         if(!btn) return;
-        
+        const def = Presentation._sectionVis(section);
+        if(def && def.obligatoire) {
+            Utils.toast('La note d’intention est ce qu’on lit en premier sur la carte : elle reste visible tant que le projet est publié.', 'info', 6000);
+            return;
+        }
         const isHidden = btn.classList.toggle('hidden-section');
         Presentation.save();
         
@@ -3463,16 +3495,14 @@ const Presentation = {
     updateVisibilityButtons: () => {
         const p = state.data.presentation || {};
         const vis = p.visibility || {};
-        
-        const sections = ['dates', 'location', 'team', 'legal', 'productionType', 'partners', 'crew', 'casting', 'description'];
-        sections.forEach(section => {
-            const btn = document.getElementById(`project-vis-btn-${section}`);
-            if(btn) {
-                // Par défaut visible sauf legal
-                const defaultVisible = section !== 'legal';
-                const isVisible = vis[section] !== undefined ? vis[section] : defaultVisible;
-                btn.classList.toggle('hidden-section', !isVisible);
-            }
+        Presentation.SECTIONS_VIS.forEach(sec => {
+            const btn = document.getElementById(`project-vis-btn-${sec.id}`);
+            if(!btn) return;
+            const isVisible = sec.obligatoire ? true
+                            : (vis[sec.id] !== undefined ? vis[sec.id] : sec.defaut);
+            btn.classList.toggle('hidden-section', !isVisible);
+            btn.classList.toggle('vis-obligatoire', !!sec.obligatoire);
+            if(sec.obligatoire) btn.title = 'Toujours visible tant que le projet est publié';
         });
     },
     
@@ -3553,31 +3583,96 @@ const Presentation = {
         p.isPublic = document.getElementById('project-public')?.checked || false;
         
         // Options de visibilité par section (lire depuis les boutons)
-        const getVis = (section, defaultVal = true) => {
+        // Le defaut vient de SECTIONS_VIS, plus d'un « true » recopie ici.
+        const getVis = (section) => {
+            const sec = Presentation._sectionVis(section);
+            if(sec && sec.obligatoire) return true;
             const btn = document.getElementById(`project-vis-btn-${section}`);
-            return btn ? !btn.classList.contains('hidden-section') : defaultVal;
+            return btn ? !btn.classList.contains('hidden-section') : Presentation._visDefaut(section);
         };
-        p.visibility = {
-            dates: getVis('dates'),
-            location: getVis('location'),
-            team: getVis('team'),
-            legal: getVis('legal', false),
-            productionType: getVis('productionType'),
-            partners: getVis('partners'),
-            crew: getVis('crew'),
-            casting: getVis('casting'),
-            description: getVis('description')
-        };
+        p.visibility = {};
+        Presentation.SECTIONS_VIS.forEach(sec => { p.visibility[sec.id] = getVis(sec.id); });
         
         p.updatedAt = new Date().toISOString();
         
         Store.save();
         
-        if(p.isPublic) {
+        if(p.isPublic && !wasPublic) {
+            // ON PASSE DE PRIVE A PUBLIC : c'est le seul moment ou la question
+            // se pose vraiment, et le seul ou elle ne derange personne.
+            Presentation.demanderVisibilites();
+        } else if(p.isPublic) {
             Presentation.publishToUniverse();
         } else if(wasPublic && !p.isPublic) {
             Presentation.unpublishFromUniverse();
         }
+    },
+
+    // ==================================================================
+    //  « QU'EST-CE QUI SORT ? » — LA QUESTION SE POSE UNE FOIS (v601)
+    // ==================================================================
+    //  Cocher « visible dans l'Univers » publiait tout d'un coup. On demande
+    //  desormais, section par section, au moment ou l'on publie — et on
+    //  rappelle ce qui sort de toute facon, pour qu'il n'y ait pas de
+    //  surprise dans l'autre sens.
+    //  ANNULER REMET LA CASE A SA PLACE : un ecran qu'on ferme ne doit pas
+    //  laisser le projet publie a moitie.
+    demanderVisibilites: () => {
+        const p = state.data.presentation || {};
+        const vis = p.visibility || {};
+        const ov = document.createElement('div');
+        ov.className = 'confirm-modal-overlay';
+        ov.id = 'vis-modal';
+        const ligne = (sec) => {
+            if(sec.obligatoire) return '';
+            const on = vis[sec.id] !== undefined ? vis[sec.id] : sec.defaut;
+            return '<label class="vis-ligne">'
+                + '<input type="checkbox" data-sec="' + sec.id + '" ' + (on ? 'checked' : '') + '>'
+                + '<span class="vis-ligne-txt"><strong>' + Utils.escape(sec.label) + '</strong>'
+                + (sec.note ? '<span>' + Utils.escape(sec.note) + '</span>' : '') + '</span>'
+            + '</label>';
+        };
+        ov.innerHTML = '<div class="confirm-modal-box" style="max-width:540px;">'
+            + '<h3 style="margin:0 0 4px;">🌍 Publier dans l’Univers</h3>'
+            + '<p style="margin:0 0 14px; font-size:.82rem; color:var(--text-sec);">'
+              + 'Choisissez ce que les autres verront. Vous pourrez le changer à tout moment, section par section, depuis cette page.</p>'
+            + '<div class="vis-toujours"><strong>Toujours visible</strong><span>'
+              + Presentation.TOUJOURS_VISIBLE.concat(['La note d’intention']).join(' · ')
+              + '</span></div>'
+            + '<div class="vis-liste">' + Presentation.SECTIONS_VIS.map(ligne).join('') + '</div>'
+            + '<div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">'
+              + '<button class="btn btn--secondary btn--sm" data-act="annuler">Ne pas publier</button>'
+              + '<button class="btn btn--primary btn--sm" data-act="ok">Publier</button>'
+            + '</div>'
+        + '</div>';
+        document.body.appendChild(ov);
+        const fermer = () => { const m = document.getElementById('vis-modal'); if(m) m.remove(); };
+        ov.addEventListener('click', (e) => {
+            const act = e.target && e.target.dataset ? e.target.dataset.act : null;
+            if(e.target === ov || act === 'annuler') {
+                fermer();
+                // On remet la case comme on l'a trouvee : rien n'est publie.
+                const c = document.getElementById('project-public');
+                if(c) c.checked = false;
+                const pp = state.data.presentation || {};
+                pp.isPublic = false;
+                Store.save();
+                Utils.toast('Projet non publié.', 'info');
+                return;
+            }
+            if(act !== 'ok') return;
+            const choix = {};
+            ov.querySelectorAll('input[data-sec]').forEach(el => { choix[el.dataset.sec] = el.checked; });
+            Presentation.SECTIONS_VIS.forEach(sec => {
+                const val = sec.obligatoire ? true : !!choix[sec.id];
+                const btn = document.getElementById('project-vis-btn-' + sec.id);
+                if(btn) btn.classList.toggle('hidden-section', !val);
+                (state.data.presentation.visibility = state.data.presentation.visibility || {})[sec.id] = val;
+            });
+            fermer();
+            Store.save();
+            Presentation.publishToUniverse();
+        });
     },
     
     publishToUniverse: async () => {
