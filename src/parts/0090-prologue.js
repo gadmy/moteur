@@ -243,8 +243,40 @@ const app = (function(){
   const SUPABASE_ANON_KEY = MOTEUR_SUPABASE.anon;
   
   var supabase;
+  // ==========================================================================
+  //  UNE ATTENTE QUI NE FINIT JAMAIS EST UN ECRAN NOIR (v601)
+  // ==========================================================================
+  //  La bibliotheque Supabase arrive d'un CDN. Si elle n'arrive PAS — pas de
+  //  reseau, CDN bloque, fichier ouvert dans un avion — cette fonction se
+  //  rappelait toutes les cent millisecondes POUR TOUJOURS. Le demarrage
+  //  restait bloque sur son « await », plus rien n'etait affiche, et la page
+  //  restait NOIRE : pas de message, pas d'erreur en console, rien a quoi se
+  //  raccrocher. Signale en ouvrant le fichier en local.
+  //  C'est le meme defaut que les trois de septembre — un mecanisme qui
+  //  attend sans jamais conclure — et il se corrige pareil : on lui donne une
+  //  echeance, et on DIT ce qui s'est passe.
+  const MOTEUR_ATTENTE_MAX = 20000;   // 20 s : large, meme sur une connexion lente
+  function moteurEcranPanne(message) {
+      try {
+          if(document.getElementById('moteur-panne')) return;
+          const d = document.createElement('div');
+          d.id = 'moteur-panne';
+          d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:flex;'
+              + 'align-items:center;justify-content:center;padding:24px;'
+              + 'background:#121212;color:#e8e8e8;font-family:system-ui,sans-serif;text-align:center;';
+          d.innerHTML = '<div style="max-width:520px;line-height:1.55">'
+              + '<div style="font-size:2.6rem;margin-bottom:12px">&#128268;</div>'
+              + '<div style="font-size:1.15rem;font-weight:700;margin-bottom:10px">Moteur n\'a pas pu démarrer</div>'
+              + '<div style="opacity:.85;font-size:.95rem">' + message + '</div>'
+              + '<button style="margin-top:18px;padding:10px 18px;border-radius:8px;border:1px solid #444;'
+              + 'background:#1e1e1e;color:#e8e8e8;cursor:pointer" onclick="location.reload()">Réessayer</button>'
+              + '</div>';
+          (document.body || document.documentElement).appendChild(d);
+      } catch(e) { /* si meme ceci echoue, la console reste le dernier recours */ }
+  }
   function initSupabase() {
       return new Promise((resolve) => {
+          const depart = Date.now();
           function tryInit() {
               if (typeof window.supabase !== 'undefined' && typeof window.supabase.createClient === 'function') {
                   const isFileProtocol = window.location.protocol === 'file:';
@@ -312,9 +344,18 @@ const app = (function(){
                   }
                   // Supabase initialisé
                   resolve(true);
-              } else {
+              } else if(Date.now() - depart < MOTEUR_ATTENTE_MAX) {
                   // Attente de Supabase
                   setTimeout(tryInit, 100);
+              } else {
+                  // ON RENONCE, ET ON LE DIT. Mieux vaut un message franc qu'une
+                  // page noire : la personne peut agir sur sa connexion, pas sur
+                  // une attente invisible.
+                  console.error('[Moteur] La bibliotheque Supabase n\'a pas pu etre chargee (CDN injoignable ?).');
+                  moteurEcranPanne('La bibliothèque de connexion n\'a pas pu être téléchargée.<br>'
+                      + 'Vérifiez votre connexion internet : même ouvert depuis votre disque, '
+                      + 'Moteur a besoin du réseau pour vous connecter.');
+                  resolve(false);
               }
           }
           tryInit();
