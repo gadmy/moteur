@@ -38,6 +38,7 @@
       besoinCourant: null, // le poste affiche
       menuOuvert: false,   // la liste deroulante des postes
       centre: null,        // { lat, lng } du projet — pour les distances
+      villeProjet: '',     // son nom, pour le dire a l'ecran
       rayonKm: 0,          // 0 = pas de limite
 
       // Les ecartes sont MEMORISEES PAR PROJET, dans le navigateur. Sans cela
@@ -510,11 +511,25 @@
       //  deja compris. A l'infini (500) on ne filtre rien, mais on affiche
       //  quand meme les distances : savoir que quelqu'un est a 600 km change
       //  la decision, meme si on ne l'exclut pas.
-      rayonActif: () => CastingMatch.rayonKm > 0 && CastingMatch.rayonKm < 500,
-      _lireRayon: () => {
-          const el = document.getElementById('universe-distance');
-          const v = el ? parseInt(el.value, 10) : NaN;
-          CastingMatch.rayonKm = isNaN(v) ? 0 : v;
+      //  LE RAYON NE SE PREND PLUS AU CURSEUR DE LA RECHERCHE, ET C'ETAIT UNE
+      //  MAUVAISE IDEE. Essai reel : le projet se tourne a POINTE-A-PITRE, les
+      //  profils sont en France metropolitaine — 6 700 km — et le curseur de
+      //  la barre laterale etait sur 50 km. Tout le monde etait donc ecarte en
+      //  silence, et les seuls qui restaient etaient ceux qu'on n'avait pas su
+      //  situer. « Toujours personne en tri. »
+      //  DEUX FAUTES EN UNE : j'ai detourne un reglage pose pour AUTRE CHOSE
+      //  (la recherche de l'Univers), et j'en ai fait un couperet invisible.
+      //  Desormais : AUCUNE LIMITE PAR DEFAUT, la distance s'affiche et
+      //  departage a score egal, et si l'on veut couper on le demande ICI, sur
+      //  un bouton qu'on voit.
+      RAYONS: [0, 50, 100, 300, 1000],
+      rayonActif: () => CastingMatch.rayonKm > 0,
+      choisirRayon: (km) => {
+          CastingMatch.rayonKm = parseInt(km, 10) || 0;
+          // Les places changent de sens quand la liste change : on repart du
+          // debut du poste courant plutot que de pointer n'importe ou.
+          CastingMatch.besoins.forEach(b => { CastingMatch.rangs[b.id] = 0; });
+          CastingMatch.rendre();
       },
       _coordsDe: async (item, ville) => {
           if(item && item.latitude != null && item.longitude != null) {
@@ -524,38 +539,38 @@
           try { return await Universe.geocodeCity(ville); } catch(e) { return null; }
       },
       mesurerDistances: async () => {
-          CastingMatch._lireRayon();
+          CastingMatch.rayonKm = 0;          // on ne coupe rien tant qu'on ne le demande pas
           CastingMatch.centre = null;
           const pres = (CastingMatch.projet && CastingMatch.projet.donnees
                         && CastingMatch.projet.donnees.presentation) || {};
           CastingMatch.centre = await CastingMatch._coordsDe(pres, pres.city || '');
-          if(!CastingMatch.centre) {
-              // On le DIT plutot que d'ignorer le rayon en silence : sinon on
-              // croit chercher a vingt kilometres alors qu'on cherche partout.
-              if(CastingMatch.rayonActif()) {
-                  Utils.toast('Ce projet n’a pas de ville dans sa Présentation : impossible de filtrer par distance.', 'warning', 7000);
-              }
-              return;
-          }
+          CastingMatch.villeProjet = pres.city || '';
+          if(!CastingMatch.centre) return;   // pas de ville : pas de distances, et c'est tout
           // Les profils portent presque toujours leurs coordonnees (la carte en
           // a besoin) : le geocodage ne sert que pour les rares qui n'ont
           // qu'un nom de ville, et il est deja mis en cache par l'Univers.
           for(const b of CastingMatch.besoins) {
-              const gardes = [];
               for(const c of b.candidats) {
                   const co = await CastingMatch._coordsDe(c.facet.latitude != null ? c.facet : c.profil,
                                                           c.ville || '');
                   c.km = co ? UniverseSearch._distanceKm(CastingMatch.centre, co) : null;
-                  if(CastingMatch.rayonActif() && c.km != null && c.km > CastingMatch.rayonKm) continue;
                   if(c.km != null && c.km <= 30) c.raisons.push('à moins de 30 km');
-                  gardes.push(c);
               }
               // LE PLUS PROCHE D'ABORD A SCORE EGAL. La distance ne remplace
-              // pas la pertinence : elle departage.
-              gardes.sort((x, y) => (y.score - x.score)
+              // pas la pertinence : elle departage. PERSONNE N'EST RETIRE ICI.
+              b.candidats.sort((x, y) => (y.score - x.score)
                   || ((x.km == null ? 1e9 : x.km) - (y.km == null ? 1e9 : y.km)));
-              b.candidats = gardes;
           }
+      },
+
+      // La liste REELLEMENT montree pour un poste : tous ses candidats, moins
+      // ceux que le rayon choisi ecarte. Filtrer ICI plutot qu'a la mesure
+      // permet de changer de rayon sans tout recalculer — et surtout de
+      // REVENIR en arriere, ce qu'une liste amputee ne permettait pas.
+      liste: (b) => {
+          if(!b) return [];
+          if(!CastingMatch.rayonActif()) return b.candidats;
+          return b.candidats.filter(c => c.km == null || c.km <= CastingMatch.rayonKm);
       },
 
       // ==================================================================
@@ -578,7 +593,7 @@
           CastingMatch.rangs = {};
           CastingMatch.dernier = null;
           CastingMatch.besoins.forEach(b => { CastingMatch.rangs[b.id] = 0; });
-          const premier = CastingMatch.besoins.find(b => b.candidats.length) || CastingMatch.besoins[0];
+          const premier = CastingMatch.besoins.find(b => CastingMatch.liste(b).length) || CastingMatch.besoins[0];
           CastingMatch.besoinCourant = premier ? premier.id : null;
       },
 
@@ -586,9 +601,9 @@
       carteActive: () => {
           const b = CastingMatch.besoinActif();
           if(!b) return null;
-          return b.candidats[CastingMatch.rangs[b.id] || 0] || null;
+          return CastingMatch.liste(b)[CastingMatch.rangs[b.id] || 0] || null;
       },
-      restants: (b) => Math.max(0, b.candidats.length - (CastingMatch.rangs[b.id] || 0)),
+      restants: (b) => Math.max(0, CastingMatch.liste(b).length - (CastingMatch.rangs[b.id] || 0)),
       basculerMenu: () => { CastingMatch.menuOuvert = !CastingMatch.menuOuvert; CastingMatch.rendre(); },
       allerAu: (besoinId) => {
           CastingMatch.menuOuvert = false;
@@ -653,14 +668,26 @@
           const hote = document.getElementById('universe-tri');
           if(!hote) return;
           const esc = Utils.escape;
-          const totalCandidats = CastingMatch.besoins.reduce((n, b) => n + b.candidats.length, 0);
+          const totalCandidats = CastingMatch.besoins.reduce((n, b) => n + CastingMatch.liste(b).length, 0);
           if(!totalCandidats) {
-              hote.innerHTML = '<div class="tri-vide"><div class="tri-vide-icone">🔍</div>'
-                  + '<h3>Personne à proposer pour l’instant</h3>'
-                  + '<p>Aucun profil public ne correspond aux besoins de ce projet'
-                  + (CastingMatch.rayonActif() ? ' dans le rayon choisi' : '') + '. '
-                  + 'La communauté grandit — réessaie dans quelque temps.</p>'
-                  + '<button class="tri-fin" onclick="app.CastingMatch.rendreRecap()">🏁 Voir le récapitulatif</button></div>';
+              // S'IL N'Y A PERSONNE A CAUSE DU RAYON, ON LE DIT ET ON PROPOSE DE
+              // L'ENLEVER. Une liste vide qui ne s'explique pas donne
+              // l'impression que le logiciel ne marche pas — c'est exactement
+              // ce qui s'est passe avec un projet tourne a Pointe-a-Pitre.
+              const horsRayon = CastingMatch.besoins.reduce((n, b0) => n + b0.candidats.length, 0);
+              const aCauseDuRayon = CastingMatch.rayonActif() && horsRayon > 0;
+              hote.innerHTML = '<div class="tri-vide"><div class="tri-vide-icone">'
+                  + (aCauseDuRayon ? '📍' : '🔍') + '</div>'
+                  + (aCauseDuRayon
+                      ? '<h3>Personne à moins de ' + CastingMatch.rayonKm + ' km</h3>'
+                        + '<p>' + horsRayon + ' profil' + (horsRayon > 1 ? 's' : '')
+                        + ' correspondent, mais plus loin que le rayon choisi.</p>'
+                        + '<button class="tri-fin" onclick="app.CastingMatch.choisirRayon(0)">📍 Voir aussi les plus loin</button>'
+                      : '<h3>Personne à proposer pour l’instant</h3>'
+                        + '<p>Aucun profil public ne correspond aux besoins de ce projet. '
+                        + 'La communauté grandit — réessaie dans quelque temps.</p>'
+                        + '<button class="tri-fin" onclick="app.CastingMatch.rendreRecap()">🏁 Voir le récapitulatif</button>')
+                  + '</div>';
               return;
           }
           // LE CHOIX DU POSTE : UN BOUTON QUI OUVRE LA LISTE.
@@ -696,7 +723,12 @@
               hote.innerHTML = onglets
                   + '<div class="tri-vide"><div class="tri-vide-icone">✅</div>'
                   + '<h3>' + esc((b && b.label) || 'Ce poste') + ' : c’est vu</h3>'
-                  + '<p>Vous avez parcouru tous les profils proposés pour ce poste.</p>'
+                  + '<p>Vous avez parcouru tous les profils proposés pour ce poste'
+                  + (CastingMatch.rayonActif() ? ' à moins de ' + CastingMatch.rayonKm + ' km' : '') + '.</p>'
+                  + (CastingMatch.rayonActif() && b && b.candidats.length > CastingMatch.liste(b).length
+                      ? '<button class="tri-fin" onclick="app.CastingMatch.choisirRayon(0)">📍 Voir aussi les '
+                        + (b.candidats.length - CastingMatch.liste(b).length) + ' plus loin</button> '
+                      : '')
                   + (suivant
                       ? '<button class="tri-fin" onclick="app.CastingMatch.allerAu(\'' + esc(suivant.id) + '\')">→ Passer à ' + esc(suivant.poste) + '</button>'
                       : '<button class="tri-fin" onclick="app.CastingMatch.rendreRecap()">🏁 Voir le récapitulatif</button>')
@@ -706,11 +738,23 @@
           const reste = CastingMatch.restants(b);
           const couleur = c.score >= 70 ? '#22c55e' : (c.score >= 40 ? '#f59e0b' : '#94a3b8');
           const loin = (c.km != null) ? Math.round(c.km) + ' km' : '';
+          // LA DISTANCE SE REGLE ICI, A LA VUE DE TOUS. Elle ne coupe rien par
+          // defaut : on la voit, on l'utilise si on veut. N'apparait que si le
+          // projet a une ville — sans centre, la question n'a pas de sens.
+          const reglageKm = CastingMatch.centre
+              ? '<div class="tri-km">📍 depuis ' + esc(CastingMatch.villeProjet || 'le projet') + ' — '
+                + CastingMatch.RAYONS.map(r =>
+                    '<button class="tri-km-btn' + (CastingMatch.rayonKm === r ? ' is-actif' : '') + '"'
+                    + ' onclick="app.CastingMatch.choisirRayon(' + r + ')">'
+                    + (r ? r + ' km' : 'sans limite') + '</button>').join('')
+                + '</div>'
+              : '';
           hote.innerHTML = onglets + `
             <div class="tri-entete">
               <div class="tri-besoin">${esc((b && b.label) || c.poste)}</div>
               <div class="tri-compte">${reste} profil${reste > 1 ? 's' : ''} à voir
                 — ${CastingMatch.gardes.length} gardé${CastingMatch.gardes.length > 1 ? 's' : ''} en tout</div>
+              ${reglageKm}
             </div>
             <div class="tri-carte" id="tri-carte">
               <div class="tri-photo" title="Clic : ouvrir la fiche — clic droit : passer sans rien décider"
@@ -773,7 +817,7 @@
       passer: (sens) => {
           const b = CastingMatch.besoinActif();
           if(!b) return;
-          const n = b.candidats.length;
+          const n = CastingMatch.liste(b).length;
           const avant = CastingMatch.rangs[b.id] || 0;
           const apres = Math.min(n, Math.max(0, avant + (sens < 0 ? -1 : 1)));
           if(apres === avant) return;
