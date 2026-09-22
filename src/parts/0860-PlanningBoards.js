@@ -88,6 +88,39 @@
     },
     dureeJour: (j) => PlanningBoards._scenesDe(j)
         .reduce((somme, sc) => somme + PlanningBoards._dureeDe(sc), 0),
+    //  LE PREMINUTAGE S'ECRIT EN HEURES:MINUTES:SECONDES (00:03:15), et pas
+    //  en « 3,25 min » : c'est la forme des modeles professionnels, celle que
+    //  lisent les gens a qui ce document est destine. Une minute et demie,
+    //  c'est 00:01:30 — la fraction decimale se lit mal et se compare mal.
+    _hms: (minutes) => {
+        const tot = Math.max(0, Math.round((Number(minutes) || 0) * 60));
+        const h = Math.floor(tot / 3600), m = Math.floor((tot % 3600) / 60), sec = tot % 60;
+        const d2 = (n) => String(n).padStart(2, '0');
+        return d2(h) + ':' + d2(m) + ':' + d2(sec);
+    },
+    //  LA SEMAINE DE TOURNAGE, pas la semaine du calendrier : le modele
+    //  compte a partir de la premiere journee de plateau, parce que c'est
+    //  « la semaine 3 du tournage » qu'on dit sur un plateau, jamais « la
+    //  semaine 38 de l'annee ».
+    _semaineDe: (dateStr, premiere) => {
+        if(!premiere) return '';
+        const a = new Date(String(premiere) + 'T12:00:00');
+        const b = new Date(String(dateStr) + 'T12:00:00');
+        if(isNaN(a.getTime()) || isNaN(b.getTime())) return '';
+        // On part du LUNDI de la premiere semaine : sinon un tournage qui
+        // commence un jeudi ferait changer de semaine le dimanche soir.
+        const lundi = new Date(a);
+        const j = (a.getDay() + 6) % 7;
+        lundi.setDate(a.getDate() - j);
+        const jours = Math.floor((b - lundi) / 86400000);
+        return jours < 0 ? '' : (Math.floor(jours / 7) + 1);
+    },
+    MOIS_COURTS: ['JANV', 'FÉVR', 'MARS', 'AVR', 'MAI', 'JUIN', 'JUIL', 'AOÛT', 'SEPT', 'OCT', 'NOV', 'DÉC'],
+    _moisDe: (dateStr) => {
+        const d = new Date(String(dateStr) + 'T12:00:00');
+        return isNaN(d.getTime()) ? '' : PlanningBoards.MOIS_COURTS[d.getMonth()];
+    },
+
     //  « 4,5 min » plutot que « 4.5 min » : on ecrit comme on parle.
     _minutes: (n) => (Math.round(n * 10) / 10).toString().replace('.', ',') + ' min',
     //  LA MOYENNE VIENT DU PROJET LUI-MEME, pas d'un chiffre que j'aurais
@@ -244,6 +277,35 @@
         return html + '</div>';
     },
 
+    //  LE RECAPITULATIF DE TETE, comme dans le modele AFAR : jours de
+    //  tournage, preminutage, roles, figuration. Ce sont les chiffres qu'on
+    //  recopie dans un devis — ils doivent etre justes et se lire d'un coup.
+    recapitulatif: () => {
+        const lignes = PlanningBoards.journees();
+        const plateau = lignes.filter(l => l.plateau);
+        const total = plateau.reduce((s, l) => s + PlanningBoards.dureeJour(l.jour), 0);
+        // Les roles, ce sont les PERSONNAGES du scenario ; la figuration se
+        // compte sur le depouillement, la ou elle est ecrite.
+        const roles = (state.data.characters || []).length;
+        const figu = {};
+        (state.data.scenes || []).forEach(sc => {
+            ((sc.breakdown || {})['FIGURATION'] || []).forEach(it => {
+                const t = Utils.bdText(it); if(t) figu[t] = 1;
+            });
+        });
+        const nFigu = Object.keys(figu).length;
+        const cases = [
+            { lbl: 'Jours de tournage', val: plateau.length },
+            { lbl: 'Préminutage', val: PlanningBoards._hms(total) },
+            { lbl: 'Rôles', val: roles },
+            { lbl: 'Figuration', val: nFigu ? nFigu + ' mention' + (nFigu > 1 ? 's' : '') : '—' }
+        ];
+        return '<div class="pdt-recap">'
+            + cases.map(c => '<div class="pdt-recap-case"><span>' + Utils.escape(c.lbl) + '</span><strong>'
+                + Utils.escape(String(c.val)) + '</strong></div>').join('')
+            + '</div>';
+    },
+
     //  Le tableau des journees. C'est le coeur du document.
     _dateCourte: (d) => {
         try {
@@ -257,11 +319,22 @@
         if(!lignes.length) return '';
         const esc = Utils.escape;
         const moyenne = PlanningBoards.dureeMoyenne();
+        const premiere = (lignes.find(l => l.plateau) || {}).jour;
+        const dateDepart = premiere ? (premiere.startDate || premiere.date) : '';
         let total = 0;
         let html = '<div class="pdt-bloc"><h3 class="pdt-titre">📆 Les journées</h3>'
                  + '<table class="pdt-table"><thead><tr>'
-                 + '<th>Jour</th><th>Date</th><th>Décor</th><th>Effet</th>'
-                 + '<th>Scènes</th><th>Durée</th><th>Personnages</th><th>À préparer</th>'
+                 // Les colonnes du modele AFAR horizontal, dans son ordre :
+                 // JT · S · M · DATES · DÉCORS · SÉQUENCES · I/E · EFFET ·
+                 // HORAIRES · MIN. On y ajoute ce que l'application sait et
+                 // que le tableur ne savait pas : les personnages nommes et
+                 // ce qu'il faut preparer.
+                 + '<th title="Jour de tournage">JT</th><th title="Semaine de tournage">S</th>'
+                 + '<th title="Mois">M</th><th>Dates</th><th>Décors</th>'
+                 + '<th title="Séquences">Séq.</th><th title="Intérieur / Extérieur">I/E</th>'
+                 + '<th title="Jour / Nuit">Effet</th><th title="Convocation équipe">Horaires</th>'
+                 + '<th title="Préminutage de la journée">Min</th>'
+                 + '<th>Personnages</th><th>À préparer</th>'
                  + '</tr></thead><tbody>';
         lignes.forEach(l => {
             const j = l.jour;
@@ -276,15 +349,20 @@
             // UN JOUR AVEC TROIS DECORS EST UN SIGNAL, pas un detail : c'est
             // une journee a deplacements, celle qui deborde.
             const alerteDecors = decors.length > 2;
+            const dJour = j.startDate || j.date;
             html += '<tr class="' + (l.plateau ? 'pdt-plateau' : 'pdt-hors') + '">'
-                + '<td class="pdt-num">' + (l.numero ? ('J' + l.numero) : ('<span title="' + esc(typeInfo.label) + '">' + typeInfo.icon + '</span>')) + '</td>'
-                + '<td class="pdt-date">' + esc(PlanningBoards._dateCourte(j.startDate || j.date)) + '</td>'
+                + '<td class="pdt-num">' + (l.numero ? l.numero : ('<span title="' + esc(typeInfo.label) + '">' + typeInfo.icon + '</span>')) + '</td>'
+                + '<td class="pdt-num pdt-fin">' + esc(String(PlanningBoards._semaineDe(dJour, dateDepart))) + '</td>'
+                + '<td class="pdt-num pdt-fin">' + esc(PlanningBoards._moisDe(dJour)) + '</td>'
+                + '<td class="pdt-date">' + esc(PlanningBoards._dateCourte(dJour)) + '</td>'
                 + '<td>' + (decors.length ? esc(decors.join(' · ')) + (alerteDecors ? ' <span class="pdt-alerte" title="Trois décors ou plus dans la journée : prévoyez les déplacements">⚠</span>' : '')
                                           : '<span class="pdt-vide">' + esc(j.name || typeInfo.label) + '</span>') + '</td>'
-                + '<td class="pdt-effet">' + esc(effets.join(' / ')) + '</td>'
                 + '<td>' + (scenes.length
                       ? scenes.map(sc => '<span class="pdt-scene" title="' + esc(sc.title || '') + '">' + esc(sc.number || '?') + '</span>').join(' ')
                       : '') + '</td>'
+                + '<td class="pdt-fin">' + esc([...new Set(scenes.map(sc => sc && sc.intExt).filter(Boolean))].join('/')) + '</td>'
+                + '<td class="pdt-fin">' + esc([...new Set(scenes.map(sc => sc && sc.dayNight).filter(Boolean))].join('/')) + '</td>'
+                + '<td class="pdt-fin">' + esc(j.crewCall || '') + '</td>'
                 + (() => {
                     const d = PlanningBoards.dureeJour(j);
                     total += d;
@@ -297,7 +375,7 @@
                         ? ' title="' + esc(Math.round(d / moyenne * 10) / 10 + '× la moyenne de ce tournage (' + PlanningBoards._minutes(moyenne) + ' par jour)') + '"'
                         : '';
                     return '<td class="pdt-duree' + (lourde ? ' est-lourde' : '') + '"' + info + '>'
-                         + PlanningBoards._minutes(d) + (lourde ? ' ⚠' : '') + '</td>';
+                         + PlanningBoards._hms(d) + (lourde ? ' ⚠' : '') + '</td>';
                   })()
                 + '<td class="pdt-persos">' + esc(persos.join(', ')) + '</td>'
                 + '<td class="pdt-lourds">' + lourds.map(x => '<span class="pdt-lourd" title="' + esc(x.quoi.join(', ')) + '">' + x.icone + ' ' + x.n + ' ' + esc(x.mot) + '</span>').join(' ') + '</td>'
@@ -306,8 +384,8 @@
         const nPlateau = lignes.filter(l => l.plateau).length;
         const nAutres = lignes.length - nPlateau;
         html += '</tbody></table>'
-             + (total > 0 ? '<div class="pdt-note"><strong>' + PlanningBoards._minutes(total)
-                  + '</strong> placés, soit ' + PlanningBoards._minutes(moyenne)
+             + (total > 0 ? '<div class="pdt-note">Préminutage placé : <strong>' + PlanningBoards._hms(total)
+                  + '</strong> — soit ' + PlanningBoards._hms(moyenne)
                   + ' par jour de tournage en moyenne.</div>' : '')
              + '<div class="pdt-note">' + nPlateau + ' jour' + (nPlateau > 1 ? 's' : '') + ' de tournage'
              + (nAutres ? ' · ' + nAutres + ' autre' + (nAutres > 1 ? 's journées' : ' journée') + ' (repérage, essais, probable…), sans numéro : seuls les jours de plateau se comptent.' : '')
@@ -450,8 +528,13 @@
                 </div>
             </div>`;
         
-        // v601 : LES QUATRE BLOCS QUI MANQUAIENT, avant la grille des
-        // presences. On lit d'abord ce qu'on tourne, ensuite qui est la.
+        // v601 : LE RECAPITULATIF DE TETE DU MODELE AFAR. Un plan de travail
+        // s'ouvre par ses chiffres : combien de jours, combien de minutes,
+        // combien de roles. C'est ce qu'on recopie dans un devis.
+        html += PlanningBoards.recapitulatif();
+
+        // LES QUATRE BLOCS QUI MANQUAIENT, avant la grille des presences.
+        // On lit d'abord ce qu'on tourne, ensuite qui est la.
         html += PlanningBoards.scenesNonPlanifiees();
         html += PlanningBoards.tableauJournees();
         html += PlanningBoards.recapDecors();
