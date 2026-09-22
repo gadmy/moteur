@@ -686,6 +686,8 @@
     set selectedAvailability(v) { PlanningAvailPicker.selectedAvailability = v; },
     renderAvailabilitySelectors: (...a) => PlanningAvailPicker.renderAvailabilitySelectors(...a),
     renderAvailabilityTags: (...a) => PlanningAvailPicker.renderAvailabilityTags(...a),
+    toutSelectionner: (...a) => PlanningAvailPicker.toutSelectionner(...a),
+    toutEnlever: (...a) => PlanningAvailPicker.toutEnlever(...a),
     showDropdown: (...a) => PlanningAvailPicker.showDropdown(...a),
     hideDropdown: (...a) => PlanningAvailPicker.hideDropdown(...a),
     filterAvailabilityList: (...a) => PlanningAvailPicker.filterAvailabilityList(...a),

@@ -45,6 +45,7 @@
         if(!tagsContainer) return;
         
         const selectedIds = type === 'actors' ? Planning.selectedAvailability.actors : Planning.selectedAvailability.crew;
+        PlanningAvailPicker._boutonsLot(type, selectedIds);
         const dataArray = type === 'actors' ? state.data.actors : state.data.crew;
         
         if(selectedIds.length === 0) {
@@ -74,6 +75,21 @@
         tagsContainer.innerHTML = html;
     },
     
+    //  Les deux boutons vivent a cote de la recherche. On les redessine avec
+    //  les etiquettes : c'est le meme moment, et leur libelle depend de ce
+    //  qui est deja choisi.
+    _boutonsLot: (type, selectedIds) => {
+        const hote = document.getElementById('planning-' + type + '-lot');
+        if(!hote) return;
+        const total = PlanningAvailPicker.nbAffichables(type);
+        if(!total) { hote.innerHTML = ''; return; }
+        const n = (selectedIds || []).length;
+        hote.innerHTML = '<button class="avail-lot-btn' + (n >= total ? ' est-on' : '') + '" '
+              + 'onclick="app.Planning.toutSelectionner(\'' + type + '\')">Tout afficher (' + total + ')</button>'
+            + '<button class="avail-lot-btn"' + (n ? '' : ' disabled')
+              + ' onclick="app.Planning.toutEnlever(\'' + type + '\')">Tout enlever</button>';
+    },
+
     showDropdown: (type) => {
         const dropdown = document.getElementById(`planning-${type}-dropdown`);
         if(dropdown) {
@@ -150,6 +166,53 @@
         Planning.filterAvailabilityList(type);
     },
     
+    // ==================================================================
+    //  TOUT AFFICHER / TOUT ENLEVER (v601)
+    // ==================================================================
+    //  « On voit qu'on peut ajouter les personnes une par une. » Avec quinze
+    //  comediens et vingt techniciens, composer la vue au clic-a-clic est un
+    //  travail en soi — et la question qu'on se pose le plus souvent est
+    //  justement « tout le monde, ca donne quoi ? ».
+    //  UNE PERSONNE, UN AGENDA : une meme personne peut tenir deux postes et
+    //  avoir deux lignes d'equipe. On ne prend donc qu'UNE ligne par CORPS,
+    //  sinon elle poserait deux barres identiques sur chaque journee — c'est
+    //  la regle deja posee en v598 pour les etiquettes, on la respecte ici.
+    toutSelectionner: (type) => {
+        const personType = (type === 'actors') ? 'actor' : 'crew';
+        const source = (type === 'actors') ? (state.data.actors || []) : (state.data.crew || []);
+        const vus = {}, ids = [];
+        source.forEach(p => {
+            if(!p || !p.id || !p.name) return;
+            const corps = PlanningAvailPicker._corps(personType, p.id);
+            if(vus[corps]) return;
+            vus[corps] = 1;
+            ids.push(p.id);
+        });
+        Planning.selectedAvailability[type === 'actors' ? 'actors' : 'crew'] = ids;
+        Planning.renderAvailabilitySelectors();
+        Planning.render();
+        Utils.toast(ids.length
+            ? (ids.length + (type === 'actors' ? ' comédien·ne' : ' technicien·ne') + (ids.length > 1 ? 's affiché·es' : ' affiché·e'))
+            : 'Personne à afficher dans cette catégorie.', ids.length ? 'success' : 'info', 4000);
+    },
+    toutEnlever: (type) => {
+        Planning.selectedAvailability[type === 'actors' ? 'actors' : 'crew'] = [];
+        Planning.renderAvailabilitySelectors();
+        Planning.render();
+    },
+    //  Combien sont affichables, pour que le bouton dise le nombre plutot que
+    //  « tout » — on sait ce qu'on va obtenir avant de cliquer.
+    nbAffichables: (type) => {
+        const personType = (type === 'actors') ? 'actor' : 'crew';
+        const source = (type === 'actors') ? (state.data.actors || []) : (state.data.crew || []);
+        const vus = {};
+        source.forEach(p => {
+            if(!p || !p.id || !p.name) return;
+            vus[PlanningAvailPicker._corps(personType, p.id)] = 1;
+        });
+        return Object.keys(vus).length;
+    },
+
     toggleAvailabilityPerson: (type, id) => {
         const list = type === 'actor' ? Planning.selectedAvailability.actors : Planning.selectedAvailability.crew;
         const idx = list.indexOf(id);

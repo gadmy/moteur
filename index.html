@@ -1763,6 +1763,22 @@ vv601 (20 septembre 2026) — EN COURS.
   reconnaissaient l'un l'autre. Deux metiers sans aucun rapport rapproches par
   une marque de genre. Les terminaisons isolees sont ecartees comme les grades.
 
+  TOUT AFFICHER / TOUT ENLEVER, dans le selecteur de dispos du Planning.
+  « On voit qu'on peut ajouter les personnes une par une. » Avec quinze
+  comediens et vingt techniciens, composer la vue au clic-a-clic est un
+  travail en soi — et la question qu'on se pose le plus souvent est justement
+  « tout le monde, ca donne quoi ? ». Deux boutons par colonne, et « Tout
+  afficher » annonce COMBIEN : on sait ce qu'on obtient avant de cliquer.
+  UNE PERSONNE, UN AGENDA : quelqu'un qui tient deux postes a deux lignes
+  d'equipe mais un seul calendrier. « Tout afficher » n'en prend qu'UNE,
+  sinon il poserait deux barres identiques sur chaque journee. C'est la regle
+  de v598 pour les etiquettes ; elle valait aussi ici.
+  ATTENTION, DEUX ECRANS PORTENT LE MEME NOM : le selecteur de l'onglet
+  Planning (celui-ci) et la fenetre « Disponibilites de l'equipe » du menu
+  Documents. Le premier POSE des barres sur le calendrier, le second montre
+  un TABLEAU mois par mois. Ils ne servent pas a la meme chose et ne se
+  remplacent pas — je m'etais trompe d'ecran, c'est note.
+
   « JE NE VOIS PAS LES DISPOS DE TOUS LES COMEDIENS ». Deux comediens, des
   dispos posees pour les deux, et une seule ligne remplie a l'ecran.
   LA REPONSE ETAIT DANS LA DONNEE, PAS DANS LE CODE : les deux avaient bien
@@ -5582,6 +5598,14 @@ header { transition: box-shadow 0.3s ease, background 0.3s ease; }
 .dispo-cmd-btn.dispo-cmd-reset { border-color: var(--locked); color: var(--locked); background: none; }
 .dispo-cmd-note { font-size: .74rem; color: var(--text-sec); }
 .dispo-ligne-tous td { font-weight: 600; }
+/* v601 - tout afficher / tout enlever, a cote de la recherche : avec quinze
+   comediens, composer la vue au clic-a-clic est un travail en soi. */
+.avail-lot { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 6px; }
+.avail-lot-btn { border: 1px solid var(--border); background: var(--bg); color: var(--text-sec);
+  border-radius: 20px; padding: 4px 11px; font-size: .76rem; font-weight: 600; cursor: pointer; }
+.avail-lot-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.avail-lot-btn.est-on { background: var(--primary); border-color: var(--primary); color: #fff; }
+.avail-lot-btn:disabled { opacity: .4; cursor: default; }
 /* v601 - inviter d'un coup les fiches qui portent une adresse. */
 .share-lot { border-top: 1px solid var(--border); margin: 4px 0 14px; padding-top: 12px;
   display: flex; flex-direction: column; gap: 5px; }
@@ -11964,6 +11988,7 @@ body.presentation-mode .presentation-bar {
                            class="n8-badge-3">
                     <div id="planning-actors-dropdown" class="n8-dropdown-1"></div>
                 </div>
+                <div id="planning-actors-lot" class="avail-lot"></div>
                 <div id="planning-actors-tags" style="display: flex; flex-wrap: wrap; gap: 6px; min-height: 32px;"></div>
             </div>
             <!-- Techniciens -->
@@ -11975,6 +12000,7 @@ body.presentation-mode .presentation-bar {
                            class="n8-badge-3">
                     <div id="planning-crew-dropdown" class="n8-dropdown-1"></div>
                 </div>
+                <div id="planning-crew-lot" class="avail-lot"></div>
                 <div id="planning-crew-tags" style="display: flex; flex-wrap: wrap; gap: 6px; min-height: 32px;"></div>
             </div>
         </div>
@@ -54780,6 +54806,7 @@ closeModal: () => {
         if(!tagsContainer) return;
         
         const selectedIds = type === 'actors' ? Planning.selectedAvailability.actors : Planning.selectedAvailability.crew;
+        PlanningAvailPicker._boutonsLot(type, selectedIds);
         const dataArray = type === 'actors' ? state.data.actors : state.data.crew;
         
         if(selectedIds.length === 0) {
@@ -54809,6 +54836,21 @@ closeModal: () => {
         tagsContainer.innerHTML = html;
     },
     
+    //  Les deux boutons vivent a cote de la recherche. On les redessine avec
+    //  les etiquettes : c'est le meme moment, et leur libelle depend de ce
+    //  qui est deja choisi.
+    _boutonsLot: (type, selectedIds) => {
+        const hote = document.getElementById('planning-' + type + '-lot');
+        if(!hote) return;
+        const total = PlanningAvailPicker.nbAffichables(type);
+        if(!total) { hote.innerHTML = ''; return; }
+        const n = (selectedIds || []).length;
+        hote.innerHTML = '<button class="avail-lot-btn' + (n >= total ? ' est-on' : '') + '" '
+              + 'onclick="app.Planning.toutSelectionner(\'' + type + '\')">Tout afficher (' + total + ')</button>'
+            + '<button class="avail-lot-btn"' + (n ? '' : ' disabled')
+              + ' onclick="app.Planning.toutEnlever(\'' + type + '\')">Tout enlever</button>';
+    },
+
     showDropdown: (type) => {
         const dropdown = document.getElementById(`planning-${type}-dropdown`);
         if(dropdown) {
@@ -54885,6 +54927,53 @@ closeModal: () => {
         Planning.filterAvailabilityList(type);
     },
     
+    // ==================================================================
+    //  TOUT AFFICHER / TOUT ENLEVER (v601)
+    // ==================================================================
+    //  « On voit qu'on peut ajouter les personnes une par une. » Avec quinze
+    //  comediens et vingt techniciens, composer la vue au clic-a-clic est un
+    //  travail en soi — et la question qu'on se pose le plus souvent est
+    //  justement « tout le monde, ca donne quoi ? ».
+    //  UNE PERSONNE, UN AGENDA : une meme personne peut tenir deux postes et
+    //  avoir deux lignes d'equipe. On ne prend donc qu'UNE ligne par CORPS,
+    //  sinon elle poserait deux barres identiques sur chaque journee — c'est
+    //  la regle deja posee en v598 pour les etiquettes, on la respecte ici.
+    toutSelectionner: (type) => {
+        const personType = (type === 'actors') ? 'actor' : 'crew';
+        const source = (type === 'actors') ? (state.data.actors || []) : (state.data.crew || []);
+        const vus = {}, ids = [];
+        source.forEach(p => {
+            if(!p || !p.id || !p.name) return;
+            const corps = PlanningAvailPicker._corps(personType, p.id);
+            if(vus[corps]) return;
+            vus[corps] = 1;
+            ids.push(p.id);
+        });
+        Planning.selectedAvailability[type === 'actors' ? 'actors' : 'crew'] = ids;
+        Planning.renderAvailabilitySelectors();
+        Planning.render();
+        Utils.toast(ids.length
+            ? (ids.length + (type === 'actors' ? ' comédien·ne' : ' technicien·ne') + (ids.length > 1 ? 's affiché·es' : ' affiché·e'))
+            : 'Personne à afficher dans cette catégorie.', ids.length ? 'success' : 'info', 4000);
+    },
+    toutEnlever: (type) => {
+        Planning.selectedAvailability[type === 'actors' ? 'actors' : 'crew'] = [];
+        Planning.renderAvailabilitySelectors();
+        Planning.render();
+    },
+    //  Combien sont affichables, pour que le bouton dise le nombre plutot que
+    //  « tout » — on sait ce qu'on va obtenir avant de cliquer.
+    nbAffichables: (type) => {
+        const personType = (type === 'actors') ? 'actor' : 'crew';
+        const source = (type === 'actors') ? (state.data.actors || []) : (state.data.crew || []);
+        const vus = {};
+        source.forEach(p => {
+            if(!p || !p.id || !p.name) return;
+            vus[PlanningAvailPicker._corps(personType, p.id)] = 1;
+        });
+        return Object.keys(vus).length;
+    },
+
     toggleAvailabilityPerson: (type, id) => {
         const list = type === 'actor' ? Planning.selectedAvailability.actors : Planning.selectedAvailability.crew;
         const idx = list.indexOf(id);
@@ -55630,6 +55719,8 @@ closeModal: () => {
     set selectedAvailability(v) { PlanningAvailPicker.selectedAvailability = v; },
     renderAvailabilitySelectors: (...a) => PlanningAvailPicker.renderAvailabilitySelectors(...a),
     renderAvailabilityTags: (...a) => PlanningAvailPicker.renderAvailabilityTags(...a),
+    toutSelectionner: (...a) => PlanningAvailPicker.toutSelectionner(...a),
+    toutEnlever: (...a) => PlanningAvailPicker.toutEnlever(...a),
     showDropdown: (...a) => PlanningAvailPicker.showDropdown(...a),
     hideDropdown: (...a) => PlanningAvailPicker.hideDropdown(...a),
     filterAvailabilityList: (...a) => PlanningAvailPicker.filterAvailabilityList(...a),
