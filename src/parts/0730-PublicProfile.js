@@ -531,7 +531,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                         + xBtn
                         + '<div class="compact-card-photo">' + (photo ? '<img src="' + Utils.escape(photo) + '" alt="">' : '🎥') + '</div>'
                         + '<div class="compact-card-name">' + Utils.escape(name) + '</div>'
-                        + '<div class="compact-card-role">🎥 Technicien·ne' + nameSuffix + alerte + '</div>'
+                        + '<div class="compact-card-role"><span class="role-txt">🎥 Technicien·ne' + nameSuffix + '</span>' + alerte + '</div>'
                         + '<label class="facet-card-vis' + (mq.length ? ' est-bride' : '') + '" onclick="event.stopPropagation();"><input type="checkbox" ' + (visOn ? 'checked' : '') + ' onchange="app.PublicProfile.toggleCrewVisible(' + i + ', this.checked)"> 👁 Univers</label>'
                         + '<button type="button" class="facet-card-erase" onclick="event.stopPropagation(); app.PublicProfile.effaceCrewCard(' + i + ')">🧹 Effacer</button>'
                     + '</div>';
@@ -540,7 +540,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                     + '<div class="compact-card facet-card is-grey" onclick="app.PublicProfile.addCrewCard()" title="Créer une nouvelle fiche technicien">'
                         + '<div class="compact-card-photo" style="font-size:2rem; line-height:1; font-weight:300;">+</div>'
                         + '<div class="compact-card-name">Ajouter un profil technicien</div>'
-                        + '<div class="compact-card-role">' + (actifs ? 'Identité et véhicule repris' : 'Nouvelle spécialité') + '</div>'
+                        + '<div class="compact-card-role"><span class="role-txt">' + (actifs ? 'Identité et véhicule repris' : 'Nouvelle spécialité') + '</span></div>'
                     + '</div>';
             }
             const label = PublicProfile.FACET_LABELS[k];
@@ -548,7 +548,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                 return '<div class="compact-card facet-card is-grey" onclick="app.PublicProfile.activateFacetCard(\'' + k + '\')" title="Activer et remplir">'
                     + '<div class="compact-card-photo">' + (ICONS[k] || '👤') + '</div>'
                     + '<div class="compact-card-name">' + label + '</div>'
-                    + '<div class="compact-card-role">Cliquer pour activer</div>'
+                    + '<div class="compact-card-role"><span class="role-txt">Cliquer pour activer</span></div>'
                 + '</div>';
             }
             const visOn = (profile.facets && profile.facets[k]) ? (profile.facets[k].visible !== false) : true;
@@ -558,7 +558,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                 + '<button type="button" class="facet-card-x" title="Refermer (regriser)" onclick="event.stopPropagation(); app.PublicProfile.deactivateFacetCard(\'' + k + '\')">✕</button>'
                 + '<div class="compact-card-photo">' + (photo ? '<img src="' + Utils.escape(photo) + '" alt="">' : (ICONS[k] || '👤')) + '</div>'
                 + '<div class="compact-card-name">' + Utils.escape(name) + '</div>'
-                + '<div class="compact-card-role">' + label + alerteK + '</div>'
+                + '<div class="compact-card-role"><span class="role-txt">' + label + '</span>' + alerteK + '</div>'
                 + '<label class="facet-card-vis' + (mqK.length ? ' est-bride' : '') + '" onclick="event.stopPropagation();"><input type="checkbox" ' + (visOn ? 'checked' : '') + ' onchange="app.PublicProfile.toggleFacetVisible(\'' + k + '\', this.checked)"> 👁 Univers</label>'
                 + '<button type="button" class="facet-card-erase" onclick="event.stopPropagation(); app.PublicProfile.effaceFacetCard(\'' + k + '\')">🧹 Effacer</button>'
             + '</div>';
