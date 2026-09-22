@@ -9,11 +9,32 @@
     _openedMenu: null,
     DONE_KEY: 'moteur_tour_done',
 
+    // ==================================================================
+    //  « SUIS-JE DANS UN PROJET ? » — UNE SEULE QUESTION (v601)
+    // ==================================================================
+    //  state.currentProjectId N'EST JAMAIS REMIS A ZERO en revenant au hub :
+    //  revenir a l'accueil masque l'ecran du projet, il ne l'oublie pas. Le
+    //  prendre pour « je suis dans un projet » donnait deux defauts, opposes
+    //  et tous deux invisibles tant qu'on n'avait ouvert aucun projet :
+    //    - sur le hub, « visite de l'onglet en cours » lisait l'onglet encore
+    //      marque actif dans l'ecran CACHE du projet, et lancait la visite du
+    //      Synopsis depuis l'accueil ;
+    //    - et les visites du hub (orientation, profil, contacts, univers) se
+    //      declaraient indisponibles LA OU ELLES SERVENT, parce qu'elles
+    //      demandent l'inverse.
+    //  CE QUI COMPTE N'EST PAS CE QUI EST CHARGE, C'EST CE QU'ON REGARDE.
+    dansUnProjet: function () {
+      try {
+        return !!state.currentProjectId
+            && !!els.appView && els.appView.style.display !== 'none';
+      } catch (e) { return false; }
+    },
+
     chapters: {
       general: {
         titre: 'Orientation generale',
         desc: "Les grands reperes de Moteur : ton espace, la communaute, l'aide et tes projets.",
-        available: function () { return !state.currentProjectId; },
+        available: function () { return !Tour.dansUnProjet(); },
         unavailable: "Cette visite se lance depuis l'accueil (ferme le projet pour y revenir).",
         steps: [
           {
@@ -32,7 +53,7 @@
           },
           {
             title: 'Communaute',
-            body: "L'Univers : la carte des projets et profils publics. Tu peux y rechercher comediens, techniciens et associations, et laisser le matching te proposer des projets faits pour toi. Le Forum sert aux echanges.",
+            body: "L'Univers : la carte des projets et profils publics. Tu peux y rechercher comediens, techniciens et associations, et laisser le matching te proposer des projets faits pour toi — ou, depuis un de tes projets, chercher les profils des postes qui te manquent.",
             target: function () {
               var d = Tour._navDropdown(1);
               return d ? [d.querySelector('.hub-nav-btn'), d.querySelector('.dropdown-menu')] : [];
@@ -60,7 +81,7 @@
         tabs: ['seasons', 'episodes'],
         titre: 'Saisons et episodes',
         desc: "Reserve aux projets de type Serie : decouper en saisons et en episodes, et passer de l'un a l'autre.",
-        available: function () { return !!state.currentProjectId && state.currentProjectType === 'series'; },
+        available: function () { return Tour.dansUnProjet() && state.currentProjectType === 'series'; },
         unavailable: "Cette visite ne concerne que les projets de type Serie. Le type se choisit a la CREATION du projet et ne se change pas ensuite.",
         steps: [
           {
@@ -91,7 +112,7 @@
         tab: 'synopsis',
         titre: 'Synopsis et resumes',
         desc: "Les textes qui racontent ton film : synopsis, resume court, resume long, avec mise en forme et export PDF.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Synopsis.",
         steps: [
           {
@@ -121,7 +142,7 @@
         tab: 'board',
         titre: 'Sequencier',
         desc: "La vue d'ensemble de la structure : sequences en liste (Sequencier) ou cartes a deplacer (BeatBoard).",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Sequencier.",
         steps: [
           {
@@ -158,7 +179,7 @@
         tab: 'titlepage',
         titre: 'Page de titre',
         desc: "La page de garde de ton scenario : titre, auteurs, contact, mentions legales, export PDF.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Titre.",
         steps: [
           {
@@ -185,7 +206,7 @@
         tab: 'script',
         titre: 'Scenario',
         desc: "L'editeur de scenario au format standard : script continu, mise en forme, reglages et export pro.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Scenario.",
         steps: [
           {
@@ -226,7 +247,7 @@
         tab: 'moodboard',
         titre: 'Mood Board',
         desc: "Tes planches d'ambiance : images, couleurs et textes sur un canvas libre, exportables en PNG ou PDF.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Mood Board.",
         steps: [
           {
@@ -262,7 +283,7 @@
       profile: {
         titre: 'Mon Profil',
         desc: "Ta fiche publique : ce que les autres voient de toi dans l'Univers.",
-        available: function () { return !state.currentProjectId; },
+        available: function () { return !Tour.dansUnProjet(); },
         unavailable: "Cette visite se lance depuis l'accueil (ferme le projet pour y revenir).",
         steps: [
           {
@@ -291,7 +312,7 @@
       contacts: {
         titre: 'Contacts',
         desc: "Ton carnet d'adresses : les gens avec qui tu travailles, d'un projet a l'autre.",
-        available: function () { return !state.currentProjectId; },
+        available: function () { return !Tour.dansUnProjet(); },
         unavailable: "Cette visite se lance depuis l'accueil (ferme le projet pour y revenir).",
         steps: [
           {
@@ -315,7 +336,7 @@
       universe: {
         titre: 'Univers',
         desc: "L'annuaire vivant de Moteur : trouver des comediens, des techniciens, des structures.",
-        available: function () { return !state.currentProjectId; },
+        available: function () { return !Tour.dansUnProjet(); },
         unavailable: "Cette visite se lance depuis l'accueil (ferme le projet pour y revenir).",
         steps: [
           {
@@ -344,7 +365,7 @@
       forum: {
         titre: 'Forum',
         desc: "L'endroit pour poser une question, signaler un manque, ou parler du metier.",
-        available: function () { return !Forum.suspended && !state.currentProjectId; },
+        available: function () { return !Forum.suspended && !Tour.dansUnProjet(); },
         unavailable: "Le forum est temporairement suspendu.",
         steps: [
           {
@@ -373,7 +394,7 @@
         tab: 'presentation',
         titre: 'Presentation du projet',
         desc: "La fiche d'identite du film : titre, affiche, genre, dates, lieu, equipe.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Presentation.",
         steps: [
           {
@@ -403,7 +424,7 @@
         tab: 'stats',
         titre: 'Statistiques',
         desc: "Ce que ton scenario dit de lui-meme : repartition, parite, temps, avancement.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Statistiques.",
         steps: [
           {
@@ -433,7 +454,7 @@
         tab: 'scriptreport',
         titre: 'Rapport de script',
         desc: "Le document de la scripte : ce qui a reellement ete tourne, prise par prise.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Rapport de script.",
         steps: [
           {
@@ -458,7 +479,7 @@
         tab: 'expenses',
         titre: 'Budget et depenses',
         desc: "Le budget du film, les depenses reelles, et le lien avec les fiches.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Depenses.",
         steps: [
           {
@@ -493,7 +514,7 @@
         tab: 'contracts',
         titre: 'Contrats',
         desc: "Generer et suivre les documents : autorisations, engagements, cessions de droits.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Contrats.",
         steps: [
           {
@@ -524,7 +545,7 @@
         tab: 'chars',
         titre: 'Personnages',
         desc: "Les roles ecrits dans le scenario, et le lien vers les comediens qui les incarnent.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Personnages.",
         steps: [
           {
@@ -554,7 +575,7 @@
         tab: 'actors',
         titre: 'Comediens',
         desc: "Les personnes reelles : fiches, disponibilites, recherche par criteres physiques.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Comediens.",
         steps: [
           {
@@ -584,7 +605,7 @@
         tab: 'locs',
         titre: 'Decors',
         desc: "Les lieux de tournage : adresse, contacts, autorisations, photos, carte.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Decors.",
         steps: [
           {
@@ -609,7 +630,7 @@
         tab: 'resources',
         titre: 'Ressources',
         desc: "Accessoires, costumes, materiel, vehicules : tout ce qu'il faut apporter sur le plateau.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Ressources.",
         steps: [
           {
@@ -634,7 +655,7 @@
         tab: 'crew',
         titre: 'Equipe technique',
         desc: "Les techniciens, leurs postes, leurs disponibilites et les vehicules de production.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Equipe.",
         steps: [
           {
@@ -659,7 +680,7 @@
         tab: 'orgs',
         titre: 'Asso / Entreprises',
         desc: "Les structures partenaires : production, association, prestataires, lieux partenaires.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Asso / Entreprises.",
         steps: [
           {
@@ -686,7 +707,7 @@
         tab: 'breakdown',
         titre: 'Depouillement',
         desc: "Le coeur de Moteur : transformer le texte du scenario en fiches reelles, qui remplissent ensuite tout le reste.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Depouillement.",
         steps: [
           {
@@ -736,7 +757,7 @@
         tab: 'planning',
         titre: 'Planning et feuille de service',
         desc: "Poser les journees de tournage, et voir la feuille de service se remplir toute seule a partir des fiches.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Planning.",
         steps: [
           {
@@ -796,7 +817,7 @@
         tab: 'storyboard',
         titre: 'Storyboard',
         desc: "Le decoupage en plans dessines, scene par scene, avec calques techniques et export PDF.",
-        available: function () { return !!state.currentProjectId; },
+        available: function () { return Tour.dansUnProjet(); },
         unavailable: "Ouvre d'abord un projet : cette visite se passe dans l'onglet Storyboard.",
         steps: [
           {
@@ -829,6 +850,9 @@
     // la seule source fiable est le DOM, l'onglet visible portant la classe active.
     // On se limite a #app-view : le hub a lui aussi des .tab-content.
     currentTabName: function () {
+      // L'ecran du projet garde son onglet marque actif meme masque : hors
+      // projet, il n'y a donc PAS d'onglet en cours, quoi que dise le DOM.
+      if (!Tour.dansUnProjet()) return null;
       var el = document.querySelector('#app-view .tab-content.active');
       if (!el || !el.id) return null;
       return el.id.indexOf('tab-') === 0 ? el.id.slice(4) : null;
@@ -848,8 +872,8 @@
       return null;
     },
     startCurrentTab: function () {
-      if (!state.currentProjectId) {
-        if (typeof Utils !== 'undefined' && Utils.toast) Utils.toast("Ouvre d'abord un projet.", 'info');
+      if (!Tour.dansUnProjet()) {
+        if (typeof Utils !== 'undefined' && Utils.toast) Utils.toast("Ouvre d'abord un projet : cette visite suit l'onglet affiche.", 'info');
         return;
       }
       var cid = this.chapterForTab(this.currentTabName());
@@ -931,7 +955,9 @@
         '.tour-grp.open > .tour-grp-body{display:flex;}',
         '.tour-grp-soon{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 14px;border:1px dashed var(--border,#333);border-radius:8px;opacity:.7;}',
         '.tour-grp-soon strong{font-size:.95rem;}',
-        '.tour-soon{font-size:.8rem;font-style:italic;opacity:.7;white-space:nowrap;}',
+        '.tour-soon{font-size:.8rem;font-style:italic;opacity:.7;}',
+        '.tour-ch-off{opacity:.55;}',
+        '.tour-ch-off .tour-soon{max-width:44%;text-align:right;}',
         '@media(max-width:600px){.tour-tooltip{max-width:calc(100vw - 24px);}}'
       ].join('');
       document.head.appendChild(st);
@@ -992,9 +1018,17 @@
         if (it.ch) {
           var ch = self.chapters[it.ch];
           if (!ch) return;
-          html += '<div class="tour-ch">' +
+          // v601 : un bouton « Demarrer » qui refuse ensuite n'est pas un
+          // bouton. Quand la visite ne peut pas partir d'ici, on met a sa
+          // place LA RAISON — le chapitre reste visible, on sait juste ou
+          // aller le chercher.
+          var ouvert = true;
+          try { if (typeof ch.available === 'function') ouvert = !!ch.available(); } catch (e) {}
+          html += '<div class="tour-ch' + (ouvert ? '' : ' tour-ch-off') + '">' +
             '<div class="tour-ch-txt"><strong>' + (ch.titre || it.ch) + '</strong><span>' + (ch.desc || '') + '</span></div>' +
-            '<button class="tour-ch-go" data-ch="' + it.ch + '">Demarrer</button>' +
+            (ouvert
+              ? '<button class="tour-ch-go" data-ch="' + it.ch + '">Demarrer</button>'
+              : '<span class="tour-soon">' + (ch.unavailable || 'Pas disponible ici') + '</span>') +
           '</div>';
         } else if (it.grp) {
           if (!it.items || !it.items.length) {
@@ -1022,7 +1056,9 @@
           '<div class="tour-panel-head"><h3>Visites guidees</h3>' +
           '<button class="tour-panel-x" aria-label="Fermer">&times;</button></div>' +
           '<div class="tour-panel-body">' +
-            '<button class="tour-here" id="tour-here-btn">Visite de l\'onglet en cours</button>' +
+            (this.dansUnProjet()
+              ? '<button class="tour-here" id="tour-here-btn">Visite de l\'onglet en cours</button>'
+              : '') +
             this._menuHtml(this.menu) +
           '</div>' +
         '</div>';

@@ -281,14 +281,70 @@
     openFolder: (id) => { UIDashboard.currentFolderId = id || null; UIDashboard.renderProjectList(); },
 
     // Fil d'Ariane + tuiles des sous-dossiers du dossier courant + bouton Nouveau dossier.
+    // ======================================================================
+    //  GLISSER-DEPOSER DANS LE HUB : LES DOSSIERS AUSSI (v601)
+    // ======================================================================
+    //  Un projet se glissait deja dans un dossier. Un DOSSIER, lui, ne
+    //  bougeait pas : le seul moyen d'en ranger un dans un autre aurait ete
+    //  de le supprimer et de le refaire.
+    //  DEUX CHARGEMENTS DIFFERENTS SUR LE MEME GESTE, donc deux etiquettes
+    //  separees : un projet voyage en « text/plain » (c'etait deja le cas, on
+    //  n'y touche pas), un dossier en « application/x-moteur-dossier ». Le
+    //  navigateur laisse LIRE LES ETIQUETTES pendant le survol, mais pas leur
+    //  contenu — c'est pour cela qu'on ne melange pas les deux dans la meme :
+    //  sans etiquette distincte, une carte de projet ne saurait pas, au
+    //  survol, si ce qui arrive est un projet ou un dossier.
+    ETIQ_DOSSIER: 'application/x-moteur-dossier',
+    //  « Est-ce un dossier qui arrive ? » — repondable PENDANT le survol.
+    _dossierEnVol: (e) => {
+        try { return Array.prototype.indexOf.call(e.dataTransfer.types, UIDashboard.ETIQ_DOSSIER) >= 0; }
+        catch(err) { return false; }
+    },
+    //  Ranger un dossier ailleurs. cible = null : a la racine.
+    _rangerDossier: (id, cibleId) => {
+        const f = ProjectFolders.get(id);
+        if(!f) return;
+        if((f.parentId || null) === (cibleId || null)) return;        // deja la
+        if(!ProjectFolders.accepte(id, cibleId)) {
+            Utils.toast('Un dossier ne peut pas être rangé dans lui-même ni dans l’un des siens.', 'warning', 6000);
+            return;
+        }
+        ProjectFolders.update(id, { parentId: cibleId || null });
+        const cible = cibleId ? ProjectFolders.get(cibleId) : null;
+        Utils.toast('« ' + f.name + ' » rangé dans ' + (cible ? '« ' + cible.name + ' »' : 'Tous'), 'success');
+        UIDashboard.renderProjectList();
+    },
+    //  Le fil d'Ariane est LA SORTIE : sans lui, un dossier range dans un
+    //  autre ne pourrait plus jamais en ressortir. Il accepte les deux
+    //  chargements, projet comme dossier.
+    _crumbAccueille: (el, cibleId) => {
+        el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('crumb-drop'); });
+        el.addEventListener('dragleave', () => el.classList.remove('crumb-drop'));
+        el.addEventListener('drop', (e) => {
+            e.preventDefault();
+            el.classList.remove('crumb-drop');
+            const fid = e.dataTransfer.getData(UIDashboard.ETIQ_DOSSIER);
+            if(fid) { UIDashboard._rangerDossier(fid, cibleId); return; }
+            const pid = e.dataTransfer.getData('text/plain');
+            if(!pid) return;
+            ProjectFolders.assign(pid, cibleId || null);
+            const cible = cibleId ? ProjectFolders.get(cibleId) : null;
+            Utils.toast('Déplacé dans ' + (cible ? '« ' + cible.name + ' »' : 'Tous'), 'success');
+            UIDashboard.renderProjectList();
+        });
+    },
+
     _renderFolderArea: () => {
         const cur = UIDashboard.currentFolderId || null;
         const bar = document.createElement('div');
         bar.className = 'folder-bar';
-        let crumbs = `<span class="folder-crumb" onclick="app.UIDashboard.openFolder('')">🏠 Tous</span>`;
-        ProjectFolders.path(cur).forEach(f => { crumbs += `<span class="folder-sep">▸</span><span class="folder-crumb" onclick="app.UIDashboard.openFolder('${f.id}')">${Utils.escape(f.name)}</span>`; });
+        let crumbs = `<span class="folder-crumb" data-crumb-id="" onclick="app.UIDashboard.openFolder('')">🏠 Tous</span>`;
+        ProjectFolders.path(cur).forEach(f => { crumbs += `<span class="folder-sep">▸</span><span class="folder-crumb" data-crumb-id="${f.id}" onclick="app.UIDashboard.openFolder('${f.id}')">${Utils.escape(f.name)}</span>`; });
         bar.innerHTML = `<div class="folder-crumbs">${crumbs}</div><div class="folder-bar-actions"><button class="btn btn--primary btn--sm" onclick="app.Store.createNewProject()">+ Nouveau projet</button><button class="btn btn--secondary btn--sm" onclick="app.UIDashboard.newFolder()">+ Nouveau dossier</button><button class="btn btn--secondary btn--sm" onclick="document.getElementById('importInput').click()">📂 Importer</button><button class="btn btn--secondary btn--sm" onclick="app.UIDashboard.openTrash()">🗑 Corbeille</button></div>`;
         els.projectList.appendChild(bar);
+        bar.querySelectorAll('.folder-crumb').forEach(el => {
+            UIDashboard._crumbAccueille(el, el.dataset.crumbId || null);
+        });
 
         ProjectFolders.children(cur).forEach(f => {
             const count = ProjectFolders.projectsIn(f.id).length;
@@ -306,9 +362,37 @@
                 + `<button class="p-btn-del" onclick="app.UIDashboard.deleteFolder('${f.id}')" title="Supprimer">🗑️</button></div>`;
             tile.onclick = (e) => { if(!e.target.closest('.folder-tile-actions')) UIDashboard.openFolder(f.id); };
             tile.setAttribute('role', 'button'); tile.setAttribute('tabindex', '0');
-            tile.addEventListener('dragover', (e) => { e.preventDefault(); tile.classList.add('folder-drop'); });
+            // v601 : le dossier se prend et se pose, comme un projet.
+            tile.draggable = true;
+            tile.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData(UIDashboard.ETIQ_DOSSIER, f.id);
+                e.dataTransfer.effectAllowed = 'move';
+                tile.classList.add('dossier-en-vol');
+            });
+            tile.addEventListener('dragend', () => {
+                tile.classList.remove('dossier-en-vol');
+                document.querySelectorAll('.folder-drop, .crumb-drop')
+                    .forEach(el => el.classList.remove('folder-drop', 'crumb-drop'));
+            });
+            tile.addEventListener('dragover', (e) => {
+                // Un dossier pose sur lui-meme : on ne fait pas semblant
+                // d'accepter. Le refus se voit AVANT de lacher.
+                if(UIDashboard._dossierEnVol(e) && tile.classList.contains('dossier-en-vol')) {
+                    e.dataTransfer.dropEffect = 'none';
+                    return;
+                }
+                e.preventDefault();
+                tile.classList.add('folder-drop');
+            });
             tile.addEventListener('dragleave', (e) => { if(!tile.contains(e.relatedTarget)) tile.classList.remove('folder-drop'); });
-            tile.addEventListener('drop', (e) => { e.preventDefault(); tile.classList.remove('folder-drop'); const pid = e.dataTransfer.getData('text/plain'); if(pid) { ProjectFolders.assign(pid, f.id); Utils.toast('Déplacé dans « ' + f.name + ' »', 'success'); UIDashboard.renderProjectList(); } });
+            tile.addEventListener('drop', (e) => {
+                e.preventDefault();
+                tile.classList.remove('folder-drop');
+                const fid = e.dataTransfer.getData(UIDashboard.ETIQ_DOSSIER);
+                if(fid) { UIDashboard._rangerDossier(fid, f.id); return; }
+                const pid = e.dataTransfer.getData('text/plain');
+                if(pid) { ProjectFolders.assign(pid, f.id); Utils.toast('Déplacé dans « ' + f.name + ' »', 'success'); UIDashboard.renderProjectList(); }
+            });
             els.projectList.appendChild(tile);
         });
     },
@@ -492,6 +576,9 @@
                     document.querySelectorAll('.project-card').forEach(c => { c.classList.remove('drag-over'); c.classList.remove('drag-over-left'); }); 
                 });
                 card.addEventListener('dragover', (e) => { 
+                    // Un DOSSIER ne se range pas dans une carte de projet :
+                    // on n'allume rien et on ne l'accepte pas.
+                    if(UIDashboard._dossierEnVol(e)) { e.dataTransfer.dropEffect = 'none'; return; }
                     e.preventDefault(); 
                     if(!card.classList.contains('dragging')) {
                         document.querySelectorAll('.project-card').forEach(c => { if(c !== card) { c.classList.remove('drag-over'); c.classList.remove('drag-over-left'); }});
@@ -504,7 +591,7 @@
                         card.classList.remove('drag-over-left'); 
                     }
                 });
-                card.addEventListener('drop', (e) => { e.preventDefault(); card.classList.remove('drag-over'); card.classList.remove('drag-over-left'); const draggedId = e.dataTransfer.getData('text/plain'); if(draggedId !== p.id) UIDashboard.reorderProjects(draggedId, p.id); });
+                card.addEventListener('drop', (e) => { e.preventDefault(); card.classList.remove('drag-over'); card.classList.remove('drag-over-left'); if(e.dataTransfer.getData(UIDashboard.ETIQ_DOSSIER)) return; const draggedId = e.dataTransfer.getData('text/plain'); if(draggedId && draggedId !== p.id) UIDashboard.reorderProjects(draggedId, p.id); });
                 
                 els.projectList.appendChild(card); 
             });

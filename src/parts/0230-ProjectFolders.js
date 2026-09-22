@@ -78,6 +78,11 @@
           return false;
       },
 
+      // Un dossier peut-il etre range dans celui-la ? Question posee par
+      // l'ecran AVANT de deplacer, pour pouvoir dire pourquoi quand c'est non
+      // (un dossier ne rentre pas dans lui-meme ni dans l'un des siens).
+      accepte: (id, cibleId) => !ProjectFolders._wouldCycle(id, cibleId || null),
+
       // Supprime un dossier ; ses sous-dossiers et projets remontent au parent (null = racine).
       remove: (id) => {
           const st = ProjectFolders._load();
