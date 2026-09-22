@@ -32,13 +32,58 @@
         PlanningAvailability.renderAvailabilityCalendar();
     },
     //  L'etat d'une personne un jour donne : 'non' (indisponible), 'oui'
-    //  (disponible), '' (rien de dit). Une seule facon de lire les plages,
-    //  pour la ligne du haut comme pour les cases.
+    //  (disponible), '' (rien de dit). Une seule facon de lire les plages.
     _etatJour: (personne, dateStr) => {
         const dans = (plages) => (plages || []).some(r => r && r.from && r.to && dateStr >= r.from && dateStr <= r.to);
         if(dans(personne.unavailabilityDates)) return 'non';
         if(dans(personne.availabilityDates)) return 'oui';
         return '';
+    },
+    //  EST-ELLE LIBRE CE JOUR-LA ? Une case non remplie compte comme
+    //  DISPONIBLE : personne ne remplit son calendrier a l'annee, et exiger
+    //  une confirmation pour chaque jour ferait un tableau vide toute
+    //  l'annee. Seul un « indisponible » ECRIT bloque une journee.
+    _estLibre: (personne, dateStr) => PlanningAvailability._etatJour(personne, dateStr) !== 'non',
+    //  Les mois ou cette personne a ecrit quelque chose. Sert a ne pas laisser
+    //  croire « rien de renseigne » quand tout est dans un autre mois — c'est
+    //  exactement ce qui s'est passe : deux comediens, l'un en avril, l'autre
+    //  en septembre, et une ligne vide chacun leur tour.
+    _moisRemplis: (personne) => {
+        const vus = {};
+        [].concat(personne.availabilityDates || [], personne.unavailabilityDates || [])
+          .forEach(r => { if(r && r.from) vus[String(r.from).slice(0, 7)] = 1;
+                          if(r && r.to) vus[String(r.to).slice(0, 7)] = 1; });
+        return Object.keys(vus).sort();
+    },
+    NOMS_MOIS: ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet',
+                'août', 'septembre', 'octobre', 'novembre', 'décembre'],
+    _nomMois: (aaaaMm) => {
+        const m = /^(\d{4})-(\d{2})$/.exec(String(aaaaMm || ''));
+        if(!m) return String(aaaaMm || '');
+        return PlanningAvailability.NOMS_MOIS[Number(m[2]) - 1] + ' ' + m[1];
+    },
+    //  « Ses dates sont ailleurs ». Une ligne vide ne veut pas dire « rien de
+    //  renseigne » : elle peut vouloir dire « tout est dans un autre mois ».
+    //  Le cas s'est presente pour de vrai — un comedien en avril, un autre en
+    //  septembre, et chacun son tour une ligne vide qui semblait perdue.
+    _ailleurs: (personne, year, month) => {
+        const ici = year + '-' + String(month + 1).padStart(2, '0');
+        const mois = PlanningAvailability._moisRemplis(personne).filter(m => m !== ici);
+        if(!mois.length) return '';
+        const rienIci = !PlanningAvailability._moisRemplis(personne).some(m => m === ici);
+        if(!rienIci) return '';   // il y a deja quelque chose ce mois-ci : on n'encombre pas
+        const trois = mois.slice(0, 3);
+        const libelles = trois.map(m => '<button class="dispo-ailleurs-lien" onclick="event.stopPropagation(); app.PlanningAvailability.allerAuMois(\'' + m + '\')">'
+            + Utils.escape(PlanningAvailability._nomMois(m)) + '</button>').join(' ');
+        return '<span class="dispo-ailleurs" title="Rien ce mois-ci, mais des dates existent ailleurs">↪ ' + libelles
+             + (mois.length > 3 ? ' <span>+' + (mois.length - 3) + '</span>' : '') + '</span>';
+    },
+    allerAuMois: (aaaaMm) => {
+        const m = /^(\d{4})-(\d{2})$/.exec(String(aaaaMm || ''));
+        if(!m) return;
+        PlanningAvailability.availYear = Number(m[1]);
+        PlanningAvailability.availMonth = Number(m[2]) - 1;
+        PlanningAvailability.renderAvailabilityCalendar();
     },
     
     // Export ICS pour Google Calendar / Outlook
@@ -211,18 +256,15 @@ END:VEVENT
                 </td>`;
             for(let d = 1; d <= daysInMonth; d++) {
                 const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                let aucunNon = true, tousOui = true;
-                people.forEach(p => {
-                    const e = PlanningAvailability._etatJour(p, dateStr);
-                    if(e === 'non') aucunNon = false;
-                    if(e !== 'oui') tousOui = false;
-                });
-                const fond = !aucunNon ? 'transparent'
-                          : (tousOui ? 'rgba(76,175,80,0.55)' : 'rgba(76,175,80,0.20)');
-                const titre = !aucunNon ? 'Quelqu’un n’est pas disponible'
-                          : (tousOui ? 'Tout le monde s’est déclaré disponible'
-                                     : 'Personne n’est indisponible, mais tout le monde n’a pas répondu');
-                html += `<td title="${titre}" style="padding:5px; border:1px solid var(--border); text-align:center; background:${fond};">${aucunNon ? (tousOui ? '✓' : '·') : ''}</td>`;
+                // Une case non remplie compte comme DISPONIBLE : seul un
+                // « indisponible » ecrit bloque une journee.
+                const bloque = people.filter(p => !PlanningAvailability._estLibre(p, dateStr));
+                const libre = bloque.length === 0;
+                const fond = libre ? 'rgba(76,175,80,0.45)' : 'transparent';
+                const titre = libre
+                    ? 'Tout le monde peut venir'
+                    : ('Indisponible : ' + bloque.map(p => p.name).join(', '));
+                html += `<td title="${Utils.escape(titre)}" style="padding:5px; border:1px solid var(--border); text-align:center; background:${fond};">${libre ? '✓' : bloque.length}</td>`;
             }
             html += `</tr>`;
         }
@@ -233,6 +275,7 @@ END:VEVENT
                 <td style="padding: 8px; border: 1px solid var(--border); position: sticky; left: 0; background: var(--panel-bg); z-index: 1; white-space: nowrap;">
                     <button class="dispo-oeil" title="Retirer du tableau" onclick="app.PlanningAvailability.basculerPersonne('${Utils.escape(String(person.id))}')">✕</button>
                     ${person._type} ${Utils.escape(person.name)}
+                    ${PlanningAvailability._ailleurs(person, year, month)}
                 </td>`;
             
             const availDates = person.availabilityDates || [];

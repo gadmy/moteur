@@ -13726,6 +13726,142 @@ const Invitations = {
     },
     
     // ===================== ENVOI D'INVITATION =====================
+    // ==================================================================
+    //  INVITER TOUTES LES FICHES QUI ONT UN E-MAIL (v601)
+    // ==================================================================
+    //  « Si on ne les a pas invites tout de suite, il faut pouvoir les
+    //  inviter a un autre moment. »
+    //  UNE FICHE SANS INVITATION EST UNE FICHE SANS PERSONNE : elle ne voit
+    //  pas le projet, ne recoit pas les jours de tournage, et le desistement
+    //  ne la concerne pas. Les inviter une par une quand l'equipe est faite,
+    //  c'est trente fois la meme fenetre.
+    //  EN LECTURE SEULE, ET CE N'EST PAS UN DETAIL : on invite d'un coup des
+    //  gens qu'on n'a pas choisis un par un. Donner le droit de MODIFIER a
+    //  tout le monde par un seul clic est le genre de geste qu'on regrette.
+    //  Le role se releve ensuite, personne par personne.
+    //  QU'ILS SOIENT DEJA SUR MOTEUR OU PAS : ceux qui ont un compte
+    //  recoivent la cloche et un e-mail, les autres l'e-mail d'invitation a
+    //  s'inscrire — c'est exactement ce que fait deja l'invitation unitaire.
+    _emailValide: (e) => {
+        const v = String(e || '').trim().toLowerCase();
+        return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v) ? v : '';
+    },
+    //  Les gens du projet qui ont une adresse, sans doublon, moi exclu.
+    fichesInvitables: () => {
+        const moi = String((state.currentUser && state.currentUser.email) || '').toLowerCase();
+        const vus = {}, out = [];
+        const prendre = (espece, p) => {
+            if(!p) return;
+            const mail = Invitations._emailValide(p.email);
+            if(!mail || mail === moi || vus[mail]) return;
+            vus[mail] = 1;
+            out.push({ email: mail, nom: p.name || mail, espece: espece, profilId: p.publicProfileId || null });
+        };
+        (state.data.actors || []).forEach(a => prendre('actor', a));
+        (state.data.crew || []).forEach(c => prendre('crew', c));
+        return out;
+    },
+    //  Ceux qui sont deja membres (acceptes OU en attente) n'ont rien a
+    //  recevoir : reinviter quelqu'un qui n'a pas encore repondu, c'est le
+    //  relancer sans le vouloir.
+    ouvrirInvitationGroupee: async () => {
+        if(!state.currentProjectId) return;
+        if(state.currentRole !== 'owner') {
+            Utils.toast('Seul le propriétaire du projet peut inviter en une fois.', 'warning', 6000);
+            return;
+        }
+        const tous = Invitations.fichesInvitables();
+        if(!tous.length) {
+            Utils.toast('Aucune fiche du projet ne porte d’adresse e-mail. Renseignez-les dans les fiches comédiens et équipe.', 'info', 8000);
+            return;
+        }
+        let deja = [];
+        try {
+            const { data } = await supabase.from('project_members').select('email')
+                .eq('project_id', state.currentProjectId);
+            deja = (data || []).map(m => String(m.email || '').toLowerCase());
+        } catch(e) { console.warn('[Invitations] membres:', e && e.message); }
+        const reste = tous.filter(p => deja.indexOf(p.email) < 0);
+        if(!reste.length) {
+            Utils.toast('Tout le monde a déjà été invité.', 'info', 6000);
+            return;
+        }
+        const lignes = reste.map(p => '<label class="inv-ligne"><input type="checkbox" checked data-mail="'
+            + Utils.escape(p.email) + '"><span><strong>' + (p.espece === 'actor' ? '🎭 ' : '🎬 ')
+            + Utils.escape(p.nom) + '</strong><span>' + Utils.escape(p.email) + '</span></span></label>').join('');
+        const ov = document.createElement('div');
+        ov.className = 'confirm-modal-overlay';
+        ov.id = 'inv-groupe-modal';
+        ov.innerHTML = '<div class="confirm-modal-box" style="max-width:540px;">'
+            + '<h3 style="margin:0 0 4px;">📧 Inviter les fiches du projet</h3>'
+            + '<p style="margin:0 0 12px; font-size:.82rem; color:var(--text-sec);">'
+              + reste.length + ' fiche' + (reste.length > 1 ? 's ont' : ' a') + ' une adresse e-mail et n’'
+              + (reste.length > 1 ? 'ont' : 'a') + ' pas encore été invitée' + (reste.length > 1 ? 's' : '')
+              + '. Elles recevront une invitation <strong>en lecture seule</strong> — vous pourrez relever le rôle ensuite, personne par personne.'
+              + (deja.length ? '<br>' + deja.length + ' personne' + (deja.length > 1 ? 's sont' : ' est') + ' déjà invitée' + (deja.length > 1 ? 's' : '') + ' : elle' + (deja.length > 1 ? 's ne sont' : ' n’est') + ' pas relancée' + (deja.length > 1 ? 's' : '') + '.' : '')
+              + '</p>'
+            + '<div class="inv-liste">' + lignes + '</div>'
+            + '<div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">'
+              + '<button class="btn btn--secondary btn--sm" data-act="rien">Annuler</button>'
+              + '<button class="btn btn--primary btn--sm" data-act="ok">Envoyer les invitations</button>'
+            + '</div>'
+        + '</div>';
+        document.body.appendChild(ov);
+        const fermer = () => { const m = document.getElementById('inv-groupe-modal'); if(m) m.remove(); };
+        ov.addEventListener('click', async (e) => {
+            const act = e.target && e.target.dataset ? e.target.dataset.act : null;
+            if(e.target === ov || act === 'rien') { fermer(); return; }
+            if(act !== 'ok') return;
+            const choisis = [...ov.querySelectorAll('input[data-mail]:checked')].map(el => el.dataset.mail);
+            const liste = reste.filter(p => choisis.indexOf(p.email) >= 0);
+            fermer();
+            if(!liste.length) { Utils.toast('Personne de sélectionné.', 'info'); return; }
+            await Invitations.inviterEnLot(liste);
+        });
+    },
+    inviterEnLot: async (liste) => {
+        const pid = state.currentProjectId;
+        const projectTitle = state.data.title || 'Sans titre';
+        const inviterName = (state.currentUser.email || '').split('@')[0];
+        Utils.toast('Envoi de ' + liste.length + ' invitation' + (liste.length > 1 ? 's' : '') + '…', 'info', 3000);
+        let comptes = {};
+        try {
+            const { data } = await supabase.from('user_profiles').select('owner_email')
+                .in('owner_email', liste.map(p => p.email));
+            (data || []).forEach(u => { comptes[String(u.owner_email || '').toLowerCase()] = 1; });
+        } catch(e) { console.warn('[Invitations] comptes:', e && e.message); }
+        let ok = 0, rates = [];
+        for(const p of liste) {
+            try {
+                const { error } = await supabase.from('project_members').insert({
+                    project_id: pid, email: p.email, profile_id: p.profilId,
+                    role: 'viewer', status: 'pending',
+                    invited_by: state.currentUser.id, invited_at: new Date().toISOString()
+                });
+                if(error) throw error;
+                ok++;
+                if(comptes[p.email]) {
+                    try { await Notifications.send(p.email, 'invite', inviterName + ' vous a invité(e) au projet « ' + projectTitle + ' »', pid); } catch(e) {}
+                    try { await Messages.sendEmailPing(p.email, p.nom, 'invitation', { senderName: inviterName, projectTitle: projectTitle, role: 'Lecteur' }); } catch(e) {}
+                } else {
+                    try { await Invitations.sendEmail(p.email, projectTitle, 'viewer', inviterName, ''); } catch(e) {}
+                }
+            } catch(e) {
+                console.warn('[Invitations] ' + p.email + ' :', e && e.message);
+                rates.push(p.nom + ' (' + p.email + ')');
+            }
+        }
+        try { History.log('SHARE', ok + ' invitation(s) envoyée(s) depuis les fiches du projet'); } catch(e) {}
+        // ON DIT CE QUI N'EST PAS PARTI : un « c'est envoye » qui cache trois
+        // echecs se paie au moment ou les gens ne repondent pas.
+        if(rates.length) {
+            Utils.toast(ok + ' invitation(s) envoyée(s). Échec pour : ' + rates.join(', ')
+                + ' — réessayez depuis Partager.', 'warning', 12000);
+        } else {
+            Utils.toast(ok + ' invitation(s) envoyée(s) — en attente de leurs réponses.', 'success', 7000);
+        }
+    },
+
     sendInvitation: async () => {
         // Vérifier si l'email est dans la whitelist
         const email = document.getElementById('share-email')?.value?.trim()?.toLowerCase();
