@@ -256,16 +256,16 @@
 
                 // Brique « Disponibilités » (souvent repliee au quotidien).
                 if(UI.isSectionVisibleForProject(item, 'calendar')) {
-                    const actorAvailDates = item.availabilityDates || [];
-                    const actorAvailDatesHTML = actorAvailDates.map((d, i2) => `<span style="display:inline-flex; align-items:center; background:#E8F5E9; border:1px solid #4CAF50; color:#2E7D32; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✓ ${d.from} → ${d.to} ${!isReadOnly ? `<span onclick="app.Actions.removeActorAvailability(${idx}, ${i2})" class="delete-link">✖</span>` : ''}</span>`).join('');
-                    const actorUnavailDates = item.unavailabilityDates || [];
-                    const actorUnavailDatesHTML = actorUnavailDates.map((d, i2) => `<span style="display:inline-flex; align-items:center; background:#FFEBEE; border:1px solid #f44336; color:#C62828; padding:3px 8px; border-radius:4px; margin:2px; font-size:0.8rem;">✗ ${d.from} → ${d.to} ${d.reason ? '(' + Utils.escape(d.reason) + ')' : ''} ${!isReadOnly ? `<span onclick="app.Actions.removeActorUnavailability(${idx}, ${i2})" class="delete-link">✖</span>` : ''}</span>`).join('');
-                    // v601 : ces deux listes etaient CALCULEES et jamais
-                    // affichees — les plages choisies au calendrier
-                    // n'apparaissaient nulle part en toutes lettres.
+                    // v601 : la liste des plages EN TOUTES LETTRES a ete essayee
+                    // puis retiree le meme jour. Sur un calendrier rempli a
+                    // l'annee, elle faisait quarante etiquettes sous le mois
+                    // pour une information que le calendrier montre deja en
+                    // couleur. Les variables qui la construisaient partent
+                    // avec elle : du code qui ne s'affiche nulle part
+                    // ressemble a une fonctionnalite et n'en est pas une.
+                    // Retirer une plage se fait en recliquant le jour.
                     let availHtml = `<textarea class="actor-input" style="min-height:50px; width:100%;" placeholder="Situation / Notes de disponibilité..." data-tooltip="Situation / Notes de disponibilité..." onchange="app.Actions.updateActorMeta(${idx}, 'availabilityText', this.value)" ${isReadOnly ? 'disabled' : ''}>${Utils.escape(item.availabilityText || '')}</textarea>
-                        <div id="actor-calendar-${idx}"></div>
-                        ${(actorAvailDatesHTML || actorUnavailDatesHTML) ? `<div class="dispo-plages">${actorAvailDatesHTML}${actorUnavailDatesHTML}</div>` : ''}`;
+                        <div id="actor-calendar-${idx}"></div>`;
                     blocks.push(FicheUI.block('actor', 'dispos', '📅 Disponibilités', availHtml));
                 }
 
