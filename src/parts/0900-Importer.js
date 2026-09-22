@@ -7889,15 +7889,20 @@ const MatchingEngine = {
     },
     
     // Trouver des projets pour mon profil
-    findProjectsForMe: () => {
-        const select = document.getElementById('universe-my-profile');
-        if(!select || select.value === '') {
-            Utils.toast('Veuillez sélectionner un profil', 'warning');
-            return;
+    // v601 : le selecteur liste desormais une ligne PAR CASQUETTE et aussi mes
+    // PROJETS (voir CastingMatch). Quand la casquette a deja ete resolue, elle
+    // est passee ici directement — l'ancien chemin par l'index du menu ne
+    // suffisait plus, il ne savait designer qu'un profil entier.
+    findProjectsForMe: (profilDonne) => {
+        let profile = profilDonne || null;
+        if(!profile) {
+            const select = document.getElementById('universe-my-profile');
+            if(!select || select.value === '') {
+                Utils.toast('Veuillez sélectionner un profil', 'warning');
+                return;
+            }
+            profile = Universe.myProfiles[parseInt(select.value)];
         }
-        
-        const profileIdx = parseInt(select.value);
-        const profile = Universe.myProfiles[profileIdx];
         if(!profile) {
             Utils.toast('Profil introuvable', 'error');
             return;
@@ -12323,8 +12328,37 @@ const UniverseMap = {
         
         const mapBtn = document.getElementById('view-mode-map');
         const fanBtn = document.getElementById('view-mode-fan');
+        const triBtn = document.getElementById('view-mode-tri');
         let mapContainer = document.getElementById('universe-map');
         const scene = document.getElementById('universe-scene');
+
+        // v601 — TROISIEME VUE : LE TRI AU POUCE. Elle ne montre pas l'Univers
+        // entier mais le RESULTAT d'une recherche pour un projet : une pile de
+        // cartes qu'on garde ou qu'on ecarte. Elle est donc traitee a part, et
+        // elle range les deux autres plutot que de cohabiter avec elles.
+        const allumer = (btn, actif) => {
+            if(!btn) return;
+            btn.style.background = actif ? 'var(--primary)' : 'var(--bg)';
+            btn.style.color = actif ? 'white' : 'var(--text-main)';
+            btn.style.border = actif ? 'none' : '1px solid var(--border)';
+        };
+        let tri = document.getElementById('universe-tri');
+        if(mode === 'tri') {
+            allumer(mapBtn, false); allumer(fanBtn, false); allumer(triBtn, true);
+            if(mapContainer) mapContainer.style.display = 'none';
+            const fanContainer = scene.querySelector('.universe-fan-container');
+            if(fanContainer) fanContainer.remove();
+            if(!tri) {
+                tri = document.createElement('div');
+                tri.id = 'universe-tri';
+                tri.className = 'universe-tri';
+                scene.appendChild(tri);
+            }
+            tri.style.display = 'flex';
+            return;
+        }
+        if(tri) tri.style.display = 'none';
+        allumer(triBtn, false);
         
         if(mode === 'map') {
             mapBtn.style.background = 'var(--primary)';
@@ -12654,8 +12688,9 @@ Universe.setViewMode('map');
             );
             // Profils chargés
             
-            // Initialiser le sélecteur de profils pour le matching
-            MatchingEngine.initProfileSelector();
+            // Initialiser le sélecteur : mes casquettes ET mes projets (v601).
+            try { CastingMatch.remplirSelecteur(); }
+            catch(e) { MatchingEngine.initProfileSelector(); }
             
         } catch(e) {
             console.error('Erreur chargement profils:', e);
