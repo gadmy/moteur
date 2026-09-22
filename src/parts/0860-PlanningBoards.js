@@ -327,6 +327,123 @@
     //  LES COLONNES DE ROLES DU MODELE : les comediens d'abord, numerotes
     //  1..n comme sur la feuille, puis l'equipe. Le numero de la colonne est
     //  le numero du role : c'est lui qu'on dit au telephone.
+    //  ==================================================================
+    //  UNE LIGNE, UNE CROIX PAR BESOIN (v601)
+    //  ==================================================================
+    //  « Tu mets ressources a la suite, et tu coches quand il y a besoin de
+    //  tel truc ou de tel individu. Comme ca tu lis UNE ligne et tu as tout
+    //  sous les yeux. » C'est exactement le modele vertical de l'AFAR — qui
+    //  aligne des rangees vehicules, animaux, figuration, equipements
+    //  speciaux — remis dans le sens de l'horizontal.
+    //  CE QUE CA CHANGE : le depouillement n'est plus un bloc a part qu'il
+    //  faut deplier journee par journee. Il devient des COLONNES a cocher,
+    //  lues sur la meme ligne que le decor, l'effet et les comediens. On voit
+    //  d'un coup que la 2CV est prise J1 et J7, et qu'entre les deux elle
+    //  dort.
+    //  TOUTES LES CATEGORIES NE S'OUVRENT PAS D'OFFICE : deux cents
+    //  accessoires feraient deux cents colonnes et un document illisible. Les
+    //  lourdes — celles qui decident de l'ordre des jours — sont ouvertes ;
+    //  les autres s'ouvrent au clic, et leur nombre d'elements est annonce
+    //  AVANT d'ouvrir.
+    GROUPES_RESSOURCES: [
+        { cle: 'DECORS', label: 'Décors', icone: '\u{1F3E0}', ouvert: true },
+        { cle: 'VEHICULES', icone: '\u{1F697}', ouvert: true },
+        { cle: 'ANIMAUX', icone: '\u{1F415}', ouvert: true },
+        { cle: 'FIGURATION', icone: '\u{1F465}', ouvert: true },
+        { cle: 'EFFETS SPECIAUX (SFX)', icone: '\u{1F4A5}', ouvert: true },
+        { cle: 'EFFETS VISUELS (VFX)', icone: '\u{1F5A5}', ouvert: true },
+        { cle: 'ACCESSOIRES', icone: '\u{1F392}' },
+        { cle: 'COSTUMES', icone: '\u{1F457}' },
+        { cle: 'MAQUILLAGE-COIFFURE', icone: '\u{1F484}' },
+        { cle: 'LUMIERE', icone: '\u{1F4A1}' },
+        { cle: 'MACHINERIE', icone: '\u2699\uFE0F' },
+        { cle: 'SON-MUSIQUE', icone: '\u{1F3B5}' },
+        { cle: 'LOGISTIQUE', icone: '\u{1F4E6}' }
+    ],
+    _labelGroupe: (g) => g.label || Utils.catLabel(g.cle),
+    //  LE DECOR SE LIT PAR LA MEME PORTE QUE LA COLONNE « DÉCORS » : la fiche
+    //  de lieu si elle existe, sinon l'en-tete de scene. La categorie de
+    //  depouillement « DECORS-LIEUX » est volontairement ecartee, sinon le
+    //  meme decor apparaitrait deux fois sous deux orthographes.
+    ressourcesParJour: () => PlanningBoards.journees().map(l => {
+        const out = {};
+        const pose = (cle, txt) => { if(!txt) return; (out[cle] = out[cle] || {})[txt] = 1; };
+        PlanningBoards._scenesDe(l.jour).forEach(sc => {
+            pose('DECORS', PlanningBoards._decorDe(sc));
+            PlanningBoards.GROUPES_RESSOURCES.forEach(g => {
+                if(g.cle === 'DECORS') return;
+                ((sc.breakdown || {})[g.cle] || []).forEach(it => pose(g.cle, Utils.bdText(it)));
+            });
+        });
+        return out;
+    }),
+    //  L'inventaire : chaque ressource et le NOMBRE DE JOURS ou elle est
+    //  prise. C'est ce chiffre qui se loue, se paie et se rend.
+    inventaireRessources: () => {
+        const inv = {};
+        PlanningBoards.ressourcesParJour().forEach(jour => {
+            Object.keys(jour).forEach(cle => {
+                inv[cle] = inv[cle] || {};
+                Object.keys(jour[cle]).forEach(n => { inv[cle][n] = (inv[cle][n] || 0) + 1; });
+            });
+        });
+        return inv;
+    },
+    groupesOuverts: null,
+    _ouverts: () => {
+        if(!PlanningBoards.groupesOuverts) {
+            const o = {};
+            PlanningBoards.GROUPES_RESSOURCES.forEach(g => { o[g.cle] = !!g.ouvert; });
+            PlanningBoards.groupesOuverts = o;
+        }
+        return PlanningBoards.groupesOuverts;
+    },
+    basculerGroupe: (cle) => {
+        const o = PlanningBoards._ouverts();
+        o[cle] = !o[cle];
+        PlanningBoards.renderWorkPlan();
+    },
+    //  Les boutons : on annonce combien d'elements AVANT d'ouvrir, pour que
+    //  personne ne se retrouve avec quatre-vingts colonnes par surprise.
+    barreRessources: () => {
+        const inv = PlanningBoards.inventaireRessources();
+        const ouverts = PlanningBoards._ouverts();
+        const dispo = PlanningBoards.GROUPES_RESSOURCES.filter(g => Object.keys(inv[g.cle] || {}).length);
+        if(!dispo.length) return '';
+        return '<div class="pdt-ressources-barre"><span class="pdt-ressources-titre">Colonnes à cocher :</span>'
+            + dispo.map(g => {
+                const n = Object.keys(inv[g.cle]).length;
+                return '<button type="button" class="pdt-res-btn' + (ouverts[g.cle] ? ' est-on' : '') + '"'
+                     + ' onclick="app.PlanningBoards.basculerGroupe(\'' + g.cle.split("'").join("\\'") + '\')"'
+                     + ' title="' + Utils.escape(Object.keys(inv[g.cle]).slice(0, 12).join(', ')) + '">'
+                     + g.icone + ' ' + Utils.escape(PlanningBoards._labelGroupe(g))
+                     + ' <b>' + n + '</b></button>';
+              }).join('')
+            + '</div>';
+    },
+    //  TOUTES LES COLONNES DU TABLEAU, dans l'ordre du document : les roles,
+    //  l'equipe, puis les ressources cochables. Une seule liste, pour que
+    //  l'en-tete, le recapitulatif et les lignes ne puissent pas diverger.
+    colonnesTableau: () => {
+        const cols = PlanningBoards.colonnesRoles().map(r => Object.assign({}, r, {
+            kind: 'presence',
+            groupe: r.groupe === 'actor' ? '\u{1F3AD} RÔLES' : '\u{1F3A5} ÉQUIPE',
+            classe: r.groupe === 'actor' ? 'pdt-grp-com' : 'pdt-grp-tec'
+        }));
+        const inv = PlanningBoards.inventaireRessources();
+        const ouverts = PlanningBoards._ouverts();
+        PlanningBoards.GROUPES_RESSOURCES.forEach(g => {
+            if(!ouverts[g.cle]) return;
+            Object.keys(inv[g.cle] || {}).sort((a, b) => String(a).localeCompare(String(b), 'fr'))
+                .forEach((n, i) => cols.push({
+                    cle: 'res:' + g.cle + ':' + n, num: i + 1, kind: 'res', cat: g.cle, res: n,
+                    titre: n, nom: PlanningBoards._labelGroupe(g),
+                    groupe: g.icone + ' ' + PlanningBoards._labelGroupe(g), classe: 'pdt-grp-res'
+                }));
+        });
+        return cols;
+    },
+
     colonnesRoles: () => {
         const out = [];
         (state.data.actors || []).forEach((a, i) => out.push({
@@ -391,12 +508,26 @@
         // est en exterieur nuit au chateau AVEC les roles 1, 4 et 7. Deux
         // tableaux separes obligent a faire la jointure de tete, et c'est la
         // qu'on se trompe.
-        const roles = PlanningBoards.colonnesRoles();
+        const roles = PlanningBoards.colonnesTableau();
         const presences = PlanningBoards.presences(lignes.map(l => l.jour));
-        const nCom = roles.filter(r => r.groupe === 'actor').length;
-        const nTec = roles.length - nCom;
-        const GAUCHE = 12; // les colonnes du modele, avant les roles
+        const resJour = PlanningBoards.ressourcesParJour();
+        const inv = PlanningBoards.inventaireRessources();
+        // LES DOUZE COLONNES DE GAUCHE RESTENT, « À préparer » compris : ce
+        // n'est pas la meme chose que les croix. Les croix NOMMENT (la 2CV, le
+        // chien) et se ferment ; « À préparer » COMPTE (1 véhicule, 1 animal)
+        // et reste la quand on referme tout.
+        const GAUCHE = 12;
+        // Les familles, fusionnees en bandeaux : on parcourt les colonnes une
+        // fois et on regroupe les voisines de meme famille. Compter chaque
+        // famille a part ferait un deuxieme decompte a maintenir.
+        const familles = [];
+        roles.forEach(r => {
+            const d = familles[familles.length - 1];
+            if(d && d.groupe === r.groupe) d.n++;
+            else familles.push({ groupe: r.groupe, classe: r.classe, n: 1 });
+        });
         let html = '<div class="pdt-bloc"><h3 class="pdt-titre">📆 Plan de travail — journées (modèle horizontal)</h3>'
+                 + PlanningBoards.barreRessources()
                  + '<div class="pdt-large"><table class="pdt-table pdt-feuille"><thead>'
                  // Premiere bande : le cartouche du document a gauche, les
                  // familles de colonnes a droite.
@@ -405,8 +536,8 @@
                  + '<span class="pdt-ent-ligne">' + esc(state.data.title || 'Sans titre') + '</span>'
                  + '<span class="pdt-ent-ligne">Édité le ' + esc(new Date().toLocaleDateString('fr-FR')) + '</span>'
                  + '</th>'
-                 + (nCom ? '<th class="pdt-grp pdt-grp-com" colspan="' + nCom + '">🎭 RÔLES</th>' : '')
-                 + (nTec ? '<th class="pdt-grp pdt-grp-tec" colspan="' + nTec + '">🎥 ÉQUIPE</th>' : '')
+                 + familles.map(f => '<th class="pdt-grp ' + f.classe + '" colspan="' + f.n + '">'
+                       + esc(f.groupe) + '</th>').join('')
                  + '</tr>'
                  // Deuxieme bande : les noms, a la verticale comme sur la
                  // feuille — sinon quinze colonnes font trois metres de large.
@@ -426,14 +557,18 @@
                  + '<th title="Jour / Nuit">Effet</th><th title="Convocation équipe">Horaires</th>'
                  + '<th title="Préminutage de la journée">Min</th>'
                  + '<th>Personnages</th><th>À préparer</th>'
-                 + roles.map(r => '<th class="pdt-rnum" title="' + esc(r.nom) + '">' + r.num + '</th>').join('')
+                 + roles.map(r => '<th class="pdt-rnum" title="' + esc(r.titre + ' \u2014 ' + r.nom) + '">'
+                       + (r.kind === 'res' ? '\u00b7' : r.num) + '</th>').join('')
                  + '</tr></thead><tbody>'
                  // LE RECAPITULATIF DU MODELE : combien de jours chacun.
                  // C'est le chiffre qui part dans les contrats, et il se lit
                  // au-dessus de la colonne a laquelle il se rapporte.
                  + (roles.length
-                     ? '<tr class="pdt-ligne-recap"><td colspan="' + GAUCHE + '">RÉCAPITULATIF — jours travaillés par rôle</td>'
-                       + roles.map(r => '<td class="pdt-rtot">' + PlanningBoards.joursTravailles(presences, r.cle) + '</td>').join('')
+                     ? '<tr class="pdt-ligne-recap"><td colspan="' + GAUCHE + '">RÉCAPITULATIF — nombre de jours</td>'
+                       + roles.map(r => '<td class="pdt-rtot">'
+                           + (r.kind === 'res' ? ((inv[r.cat] || {})[r.res] || 0)
+                                               : PlanningBoards.joursTravailles(presences, r.cle))
+                           + '</td>').join('')
                        + '</tr>'
                      : '');
         lignes.forEach((l, iJour) => {
@@ -483,6 +618,14 @@
                 // Une case sans code reste cliquable : c'est la qu'on pose a
                 // la main un voyage ou un repos, comme dans l'ancienne grille.
                 + roles.map(r => {
+                    // UNE CROIX, ET RIEN D'AUTRE : la question posee est
+                    // « en a-t-on besoin ce jour-la ? ». Un nombre ferait
+                    // croire a une quantite que le depouillement ne dit pas.
+                    if(r.kind === 'res') {
+                        const pris = !!((resJour[iJour] || {})[r.cat] || {})[r.res];
+                        return '<td class="pdt-case pdt-croix' + (pris ? ' est-pris' : '') + '" title="'
+                             + esc(r.res + ' \u2014 ' + r.nom) + '">' + (pris ? '\u2715' : '') + '</td>';
+                    }
                     const code = PlanningBoards.codeCase(presences, r.cle, iJour);
                     const fixe = ['T', 'SW', 'W', 'WF'].indexOf(code) >= 0;
                     return '<td class="pdt-case ' + (code ? 'workplan-bar-' + code : 'workplan-bar-empty') + '"'
