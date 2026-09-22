@@ -218,6 +218,66 @@
       },
 
       // ------------------------------------------------------------------
+      //  PARTIR D'UNE FICHE DU PROJET (v601)
+      // ------------------------------------------------------------------
+      //  « Depuis une fiche personnage ou technicien non relie a quelqu'un,
+      //  le casting doit trier comme dans l'Univers. »
+      //  MEME MOTEUR, MEME VUE, MEME TRI — seule la porte change : on entre
+      //  par UNE fiche au lieu du projet entier. Les autres postes restent
+      //  accessibles par la liste deroulante : on ouvre sur le bon, on
+      //  n'enferme pas dedans.
+      //  ET LE BESOIN EST SYNTHETISE DEPUIS LA FICHE quand le projet ne le
+      //  declare pas : un technicien inscrit dans l'equipe sans que son poste
+      //  soit coche dans Presentation doit quand meme pouvoir etre cherche,
+      //  sinon le bouton de sa fiche ne repondrait rien.
+      _besoinDeFiche: (espece, id, donnees) => {
+          if(espece === 'character') {
+              const c = (donnees.characters || []).find(x => x && x.id === id);
+              if(!c) return null;
+              const nom = c.name || 'Personnage';
+              return { id: 'perso:' + c.id, kind: 'actor', poste: nom, label: 'Rôle de ' + nom,
+                       need: { roleName: nom, gender: c.gender || '', ageMin: c.ageMin || '',
+                               ageMax: c.ageMax || '', ethnicity: c.ethnicity || '',
+                               hairColor: c.hairColor || '' } };
+          }
+          const m = (donnees.crew || []).find(x => x && x.id === id);
+          if(!m) return null;
+          const nom = (m.role || m.department || '').trim();
+          if(!nom) { Utils.toast('Cette fiche n’a pas de poste : renseignez-le pour pouvoir chercher quelqu’un.', 'warning', 7000); return null; }
+          return { id: 'membre:' + m.id, kind: 'crew', poste: nom, label: 'Poste de ' + nom,
+                   need: { role: nom, dept: m.department || '', count: 1 } };
+      },
+      pourFiche: async (espece, id) => {
+          if(!state.currentProjectId || !state.data) { Utils.toast('Ouvre d’abord un projet.', 'info'); return; }
+          if(!(Universe.allProfiles && Universe.allProfiles.length) && Universe.loadAllProfiles) {
+              await Universe.loadAllProfiles();
+          }
+          const donnees = state.data;
+          const propre = CastingMatch._besoinDeFiche(espece, id, donnees);
+          if(!propre) return;
+          const besoins = CastingMatch.besoinsDe(donnees);
+          // Le besoin de la fiche passe EN TETE, qu'il vienne du projet ou
+          // qu'on vienne de le fabriquer : c'est celui qu'on est venu voir.
+          const autres = besoins.filter(b => b.id !== propre.id
+                                          && CastingMatch._cle(b.poste) !== CastingMatch._cle(propre.poste));
+          CastingMatch.projet = {
+              id: state.currentProjectId,
+              titre: donnees.title || 'Mon projet',
+              donnees: donnees
+          };
+          CastingMatch.besoins = [propre].concat(autres).map(b => Object.assign({}, b, {
+              candidats: CastingMatch.candidatsPour(b)
+          }));
+          await CastingMatch.mesurerDistances();
+          CastingMatch.preparerPile();
+          // preparerPile ouvre sur le premier poste QUI A DU MONDE ; ici on
+          // veut celui de la fiche, meme s'il n'a personne — c'est une
+          // reponse, et la cacher ferait croire a une erreur.
+          CastingMatch.besoinCourant = propre.id;
+          await CastingMatch.ouvrirTri();
+      },
+
+      // ------------------------------------------------------------------
       //  LES BESOINS D'UN PROJET
       // ------------------------------------------------------------------
       //  Ils vivent dans l'onglet Presentation, donc ils existent meme si le

@@ -5375,6 +5375,7 @@ const CardModal = {
                     <button class="edit-btn" onclick="event.stopPropagation(); app.CardModal.openCrew(${idx})" title="Modifier">✏️</button>
                     <button class="delete-btn" onclick="event.stopPropagation(); app.Crew.deleteMember(${idx})" title="Supprimer">🗑️</button>
                     ${CardModal._groupRoundHtml(member, idx, 'crew')}
+                    ${!member.publicProfileId ? `<button class="casting-btn" onclick="event.stopPropagation(); app.GlobalSearch.openForCrewMember(${idx})" title="Recrutement — trier les technicien·nes pour ce poste">🎥</button>` : ''}
                     <button class="web-btn" onclick="event.stopPropagation(); app.Web.open('crew', '${member.id}')" title="Voir dans la toile">🕸️</button>
                 </div>
                 ` : ''}
@@ -5487,7 +5488,7 @@ const CardModal = {
                     <button class="delete-btn" onclick="event.stopPropagation(); app.Actions.deleteDataItem('${type}', ${idx})" title="Supprimer">🗑️</button>
                     ${CardModal._groupRoundHtml(item, idx, type)}
                     ${(type === 'characters' || type === 'locations') ? `<button class="board-btn" onclick="event.stopPropagation(); app.Board.openSatellites('${type === 'characters' ? 'character' : 'location'}', '${item.id}')" title="Idées (planche)">💡</button>` : ''}
-                    ${type === 'characters' ? `<button class="casting-btn" onclick="event.stopPropagation(); app.GlobalSearch.openForCharacter(${idx})" title="Casting — comédiens qui matchent">🎭</button>` : ''}
+                    ${(type === 'characters' && !item.actor_id) ? `<button class="casting-btn" onclick="event.stopPropagation(); app.GlobalSearch.openForCharacter(${idx})" title="Casting — trier les comédiens pour ce rôle">🎭</button>` : ''}
                     <button class="web-btn" onclick="event.stopPropagation(); app.Web.open('${({characters:'character',actors:'actor',locations:'location'})[type]}', '${item.id}')" title="Voir dans la toile">🕸️</button>
                 </div>
                 ` : ''}

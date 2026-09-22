@@ -357,7 +357,9 @@
                     actorControl = `<div style="color:var(--primary);">🎭 ${Utils.escape(linkedActor.name)}</div>`;
                 }
                 projHtml += FicheUI.field('Interprété par', actorControl);
-                if(!isView) projHtml += `<div style="margin-top:6px;"><button class="btn btn--primary btn--sm" onclick="app.GlobalSearch.openForCharacter(${idx})">🔍 Chercher des comédiens qui lui ressemblent</button></div>`;
+                // v601 : ce bouton ouvre desormais le TRI de l'Univers, sur ce
+                // role. Il ne sert que tant que le role est a distribuer.
+                if(!isView && !item.actor_id) projHtml += `<div style="margin-top:6px;"><button class="btn btn--primary btn--sm" onclick="app.GlobalSearch.openForCharacter(${idx})">🎭 Trouver un·e comédien·ne pour ce rôle</button></div>`;
                 projHtml += UI.renderCost('character', item.id);
                 blocks.push(FicheUI.block('character', 'projet', '🎬 Dans le projet', projHtml, { pin: 'right' }));
 
@@ -526,6 +528,11 @@
         projHtml += UI.renderShootDays('crew', member.id, '📅 Convoqué·e le');
         projHtml += UI.renderLent('crew', member.id);
         projHtml += UI.renderCost('crew', member.id);
+        // v601 : tant que ce poste n'est relie a personne de l'Univers, on
+        // peut partir d'ici pour trier les technicien·nes qui le tiennent.
+        if(!isReadOnly && !member.publicProfileId) {
+            projHtml += `<div style="margin-top:6px;"><button class="btn btn--primary btn--sm" onclick="app.GlobalSearch.openForCrewMember(${idx})">🎥 Trouver quelqu’un pour ce poste</button></div>`;
+        }
         blocks.push(FicheUI.block('crew', 'projet', '🎬 Dans le projet', projHtml, { pin: 'right' }));
 
         // Brique « Identité » : fonction, departement, poste, sexe, photo.

@@ -2807,59 +2807,52 @@ const GlobalSearch = {
         GlobalSearch.open();
     },
     
-    // Ouvre la recherche comedien PRE-REMPLIE depuis la physique d'un personnage
-    // (memes valeurs d'options des deux cotes) pour trouver des comediens ressemblants.
+    // ==================================================================
+    //  LE CASTING D'UNE FICHE OUVRE LE TRI (v601)
+    // ==================================================================
+    //  « Depuis une fiche personnage ou technicien non relie a quelqu'un, je
+    //  veux que ca trie comme si j'etais dans l'Univers. »
+    //  AVANT : on ouvrait la CARTE avec les filtres physiques du personnage
+    //  pre-remplis. Un filtre est binaire — il EXCLUT. Le tri, lui, NOTE et
+    //  classe : un comedien qui ne coche pas tout descend dans la pile au
+    //  lieu de disparaitre. Pour un role a distribuer, c'est la bonne facon.
+    //  ON NE QUITTE PAS LE PROJET : l'Univers est deplace dans une FENETRE
+    //  flottante, puis remis a sa place a la fermeture. Le tri est efface en
+    //  partant, sinon les vues Carte et Liste de l'Univers resteraient
+    //  filtrees par une recherche qu'on a quittee.
     openForCharacter: async (charIdx) => {
         const c = state.data.characters && state.data.characters[charIdx];
         if(!c) return;
+        if(c.actor_id) Utils.toast('Ce personnage a déjà un comédien — la recherche s’ouvre quand même.', 'info', 5000);
+        await GlobalSearch._triDepuisFiche('character', c.id, '🎭 Casting — ' + (c.name || 'personnage'));
+    },
+    openForCrewMember: async (idx) => {
+        const m = state.data.crew && state.data.crew[idx];
+        if(!m) return;
+        await GlobalSearch._triDepuisFiche('crew', m.id, '🎥 Recrutement — ' + (m.role || m.department || 'poste'));
+    },
+    _triDepuisFiche: async (espece, id, titre) => {
         const uv = document.getElementById('universe-view');
         if(!uv || typeof WindowManager === 'undefined') return;
-        // Personnage d'ou part le casting : sert au « Ajouter a l'idee » sur les
-        // profils trouves (ajout a SA planche d'idees). Efface a la fermeture.
-        GlobalSearch._castingCharId = c.id;
-        // On n'ouvre PAS l'Univers en plein ecran : on charge ses profils puis on
-        // DEPLACE sa carte dans une FENETRE flottante (systeme WindowManager,
-        // comme un sous-onglet detache), sans quitter le projet — elle est remise
-        // a sa place a la fermeture. Vue CARTE, filtres pre-remplis avec la
-        // physique du personnage.
-        if(!(Universe.allProfiles && Universe.allProfiles.length) && Universe.loadAllProfiles) {
-            await Universe.loadAllProfiles();
-        }
+        // Personnage d'ou part le casting : sert au « Ajouter a l'idee » sur
+        // les profils trouves (ajout a SA planche d'idees). Efface en partant.
+        GlobalSearch._castingCharId = (espece === 'character') ? id : null;
         const origParent = uv.parentNode, origNext = uv.nextSibling;
-        WindowManager.open('universe-casting', '🎭 Casting — chercher un comédien', uv, {
-            w: 960, h: 640,
+        WindowManager.open('universe-casting', titre, uv, {
+            w: 980, h: 680,
             onClose: () => {
                 if(origParent) origParent.insertBefore(uv, origNext);
                 uv.style.display = 'none';
                 GlobalSearch._castingCharId = null;
+                try { if(typeof CastingMatch !== 'undefined') CastingMatch.effacer(); } catch(e) {}
                 if(Universe.setViewMode) Universe.setViewMode('map');
             }
         });
         uv.style.display = 'flex';
-        // Pre-remplir les filtres comedien AVANT tout rendu, pour etre sur que les
-        // valeurs prennent (les champs sont statiques dans la colonne de gauche).
         const typeSel = document.getElementById('universe-type');
-        if(typeSel) typeSel.value = 'actor';
-        const set = (id, v) => { const el = document.getElementById(id); if(el) el.value = (v == null ? '' : v); };
-        set('universe-actor-gender', c.gender);
-        set('universe-actor-eyes', c.eyeColor);
-        set('universe-actor-hair', c.hairColor);
-        set('universe-actor-hair-length', c.hairLength);
-        set('universe-actor-corpulence', c.corpulence);
-        set('universe-actor-ethnicity', c.ethnicity);
-        set('universe-actor-sports', c.sports);
-        set('universe-actor-languages', c.languages);
-        const h = parseInt(c.height, 10);
-        if(h > 0) { set('universe-actor-height-min', String(h - 5)); set('universe-actor-height-max', String(h + 5)); }
-        const am = String(c.storyAge || '').match(/\d{1,3}/);
-        if(am) { const a = parseInt(am[0], 10); set('universe-actor-age-min', String(Math.max(0, a - 3))); set('universe-actor-age-max', String(a + 3)); }
-        // Vue CARTE dans la fenetre : init Leaflet, on revele le bloc de filtres
-        // comedien (onTypeChange), puis recherche -> marqueurs filtres sur la carte.
-        if(Universe.setViewMode) await Universe.setViewMode('map');
+        if(typeSel) typeSel.value = (espece === 'character') ? 'actor' : 'crew';
         if(Universe.onTypeChange) Universe.onTypeChange();
-        if(typeof UniverseSearch !== 'undefined' && UniverseSearch.search) UniverseSearch.search();
-        // La fenetre vient d'apparaitre : Leaflet doit recalculer sa taille.
-        setTimeout(() => { try { if(Universe.map) Universe.map.invalidateSize(); } catch(_) {} }, 150);
+        await CastingMatch.pourFiche(espece, id);
     },
     
     open: (prefill) => {

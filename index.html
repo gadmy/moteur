@@ -1763,6 +1763,32 @@ vv601 (20 septembre 2026) — EN COURS.
   reconnaissaient l'un l'autre. Deux metiers sans aucun rapport rapproches par
   une marque de genre. Les terminaisons isolees sont ecartees comme les grades.
 
+  LE CASTING D'UNE FICHE OUVRE LE TRI. « Depuis une fiche personnage ou
+  technicien non relie a quelqu'un, je veux que ca trie comme si j'etais dans
+  l'Univers. »
+  AVANT, ce bouton ouvrait la CARTE avec les filtres physiques du personnage
+  pre-remplis. Un filtre est binaire : il EXCLUT. Le tri, lui, NOTE et classe —
+  un comedien qui ne coche pas tout descend dans la pile au lieu de
+  disparaitre. Pour un role a distribuer, c'est la bonne facon, et c'est celle
+  qu'on a deja construite.
+  MEME MOTEUR, MEME VUE, MEME TRI : seule la porte change, on entre par UNE
+  fiche au lieu du projet entier. Le poste de la fiche passe en tete et s'ouvre
+  en premier ; les autres postes du projet restent dans la liste deroulante —
+  on ouvre sur le bon, on n'enferme pas dedans.
+  LE BESOIN EST FABRIQUE DEPUIS LA FICHE quand le projet ne le declare pas :
+  un technicien inscrit dans l'equipe sans que son poste soit coche dans
+  Presentation doit quand meme pouvoir etre cherche, sinon le bouton de sa
+  fiche ne repondrait rien. Et il ne fait pas doublon avec le meme poste
+  declare ailleurs.
+  ON NE QUITTE PAS LE PROJET : l'Univers est deplace dans une fenetre
+  flottante puis remis a sa place. Le tri est EFFACE en partant — sinon les
+  vues Carte et Liste de l'Univers resteraient filtrees par une recherche
+  qu'on a quittee.
+  LE BOUTON NE S'AFFICHE QUE QUAND IL SERT : un role deja caste et un poste
+  deja tenu par quelqu'un de l'Univers ne le montrent plus. Un technicien
+  n'apporte le sien que s'il a un poste ecrit — sans poste, il n'y a rien a
+  chercher, et on le DIT au lieu d'ouvrir une pile vide.
+
   LES DOSSIERS SE RANGENT AUSSI ENTRE EUX. Un seul geste, trois intentions,
   et chacune se voit AVANT qu'on lache : les BORDS d'une tuile rangent a cote
   (avant ou apres, barre franche d'un cote), le MILIEU range dedans (contour
@@ -25054,7 +25080,9 @@ initCategoriesDragDrop: () => {
                     actorControl = `<div style="color:var(--primary);">🎭 ${Utils.escape(linkedActor.name)}</div>`;
                 }
                 projHtml += FicheUI.field('Interprété par', actorControl);
-                if(!isView) projHtml += `<div style="margin-top:6px;"><button class="btn btn--primary btn--sm" onclick="app.GlobalSearch.openForCharacter(${idx})">🔍 Chercher des comédiens qui lui ressemblent</button></div>`;
+                // v601 : ce bouton ouvre desormais le TRI de l'Univers, sur ce
+                // role. Il ne sert que tant que le role est a distribuer.
+                if(!isView && !item.actor_id) projHtml += `<div style="margin-top:6px;"><button class="btn btn--primary btn--sm" onclick="app.GlobalSearch.openForCharacter(${idx})">🎭 Trouver un·e comédien·ne pour ce rôle</button></div>`;
                 projHtml += UI.renderCost('character', item.id);
                 blocks.push(FicheUI.block('character', 'projet', '🎬 Dans le projet', projHtml, { pin: 'right' }));
 
@@ -25223,6 +25251,11 @@ initCategoriesDragDrop: () => {
         projHtml += UI.renderShootDays('crew', member.id, '📅 Convoqué·e le');
         projHtml += UI.renderLent('crew', member.id);
         projHtml += UI.renderCost('crew', member.id);
+        // v601 : tant que ce poste n'est relie a personne de l'Univers, on
+        // peut partir d'ici pour trier les technicien·nes qui le tiennent.
+        if(!isReadOnly && !member.publicProfileId) {
+            projHtml += `<div style="margin-top:6px;"><button class="btn btn--primary btn--sm" onclick="app.GlobalSearch.openForCrewMember(${idx})">🎥 Trouver quelqu’un pour ce poste</button></div>`;
+        }
         blocks.push(FicheUI.block('crew', 'projet', '🎬 Dans le projet', projHtml, { pin: 'right' }));
 
         // Brique « Identité » : fonction, departement, poste, sexe, photo.
@@ -47013,59 +47046,52 @@ const GlobalSearch = {
         GlobalSearch.open();
     },
     
-    // Ouvre la recherche comedien PRE-REMPLIE depuis la physique d'un personnage
-    // (memes valeurs d'options des deux cotes) pour trouver des comediens ressemblants.
+    // ==================================================================
+    //  LE CASTING D'UNE FICHE OUVRE LE TRI (v601)
+    // ==================================================================
+    //  « Depuis une fiche personnage ou technicien non relie a quelqu'un, je
+    //  veux que ca trie comme si j'etais dans l'Univers. »
+    //  AVANT : on ouvrait la CARTE avec les filtres physiques du personnage
+    //  pre-remplis. Un filtre est binaire — il EXCLUT. Le tri, lui, NOTE et
+    //  classe : un comedien qui ne coche pas tout descend dans la pile au
+    //  lieu de disparaitre. Pour un role a distribuer, c'est la bonne facon.
+    //  ON NE QUITTE PAS LE PROJET : l'Univers est deplace dans une FENETRE
+    //  flottante, puis remis a sa place a la fermeture. Le tri est efface en
+    //  partant, sinon les vues Carte et Liste de l'Univers resteraient
+    //  filtrees par une recherche qu'on a quittee.
     openForCharacter: async (charIdx) => {
         const c = state.data.characters && state.data.characters[charIdx];
         if(!c) return;
+        if(c.actor_id) Utils.toast('Ce personnage a déjà un comédien — la recherche s’ouvre quand même.', 'info', 5000);
+        await GlobalSearch._triDepuisFiche('character', c.id, '🎭 Casting — ' + (c.name || 'personnage'));
+    },
+    openForCrewMember: async (idx) => {
+        const m = state.data.crew && state.data.crew[idx];
+        if(!m) return;
+        await GlobalSearch._triDepuisFiche('crew', m.id, '🎥 Recrutement — ' + (m.role || m.department || 'poste'));
+    },
+    _triDepuisFiche: async (espece, id, titre) => {
         const uv = document.getElementById('universe-view');
         if(!uv || typeof WindowManager === 'undefined') return;
-        // Personnage d'ou part le casting : sert au « Ajouter a l'idee » sur les
-        // profils trouves (ajout a SA planche d'idees). Efface a la fermeture.
-        GlobalSearch._castingCharId = c.id;
-        // On n'ouvre PAS l'Univers en plein ecran : on charge ses profils puis on
-        // DEPLACE sa carte dans une FENETRE flottante (systeme WindowManager,
-        // comme un sous-onglet detache), sans quitter le projet — elle est remise
-        // a sa place a la fermeture. Vue CARTE, filtres pre-remplis avec la
-        // physique du personnage.
-        if(!(Universe.allProfiles && Universe.allProfiles.length) && Universe.loadAllProfiles) {
-            await Universe.loadAllProfiles();
-        }
+        // Personnage d'ou part le casting : sert au « Ajouter a l'idee » sur
+        // les profils trouves (ajout a SA planche d'idees). Efface en partant.
+        GlobalSearch._castingCharId = (espece === 'character') ? id : null;
         const origParent = uv.parentNode, origNext = uv.nextSibling;
-        WindowManager.open('universe-casting', '🎭 Casting — chercher un comédien', uv, {
-            w: 960, h: 640,
+        WindowManager.open('universe-casting', titre, uv, {
+            w: 980, h: 680,
             onClose: () => {
                 if(origParent) origParent.insertBefore(uv, origNext);
                 uv.style.display = 'none';
                 GlobalSearch._castingCharId = null;
+                try { if(typeof CastingMatch !== 'undefined') CastingMatch.effacer(); } catch(e) {}
                 if(Universe.setViewMode) Universe.setViewMode('map');
             }
         });
         uv.style.display = 'flex';
-        // Pre-remplir les filtres comedien AVANT tout rendu, pour etre sur que les
-        // valeurs prennent (les champs sont statiques dans la colonne de gauche).
         const typeSel = document.getElementById('universe-type');
-        if(typeSel) typeSel.value = 'actor';
-        const set = (id, v) => { const el = document.getElementById(id); if(el) el.value = (v == null ? '' : v); };
-        set('universe-actor-gender', c.gender);
-        set('universe-actor-eyes', c.eyeColor);
-        set('universe-actor-hair', c.hairColor);
-        set('universe-actor-hair-length', c.hairLength);
-        set('universe-actor-corpulence', c.corpulence);
-        set('universe-actor-ethnicity', c.ethnicity);
-        set('universe-actor-sports', c.sports);
-        set('universe-actor-languages', c.languages);
-        const h = parseInt(c.height, 10);
-        if(h > 0) { set('universe-actor-height-min', String(h - 5)); set('universe-actor-height-max', String(h + 5)); }
-        const am = String(c.storyAge || '').match(/\d{1,3}/);
-        if(am) { const a = parseInt(am[0], 10); set('universe-actor-age-min', String(Math.max(0, a - 3))); set('universe-actor-age-max', String(a + 3)); }
-        // Vue CARTE dans la fenetre : init Leaflet, on revele le bloc de filtres
-        // comedien (onTypeChange), puis recherche -> marqueurs filtres sur la carte.
-        if(Universe.setViewMode) await Universe.setViewMode('map');
+        if(typeSel) typeSel.value = (espece === 'character') ? 'actor' : 'crew';
         if(Universe.onTypeChange) Universe.onTypeChange();
-        if(typeof UniverseSearch !== 'undefined' && UniverseSearch.search) UniverseSearch.search();
-        // La fenetre vient d'apparaitre : Leaflet doit recalculer sa taille.
-        setTimeout(() => { try { if(Universe.map) Universe.map.invalidateSize(); } catch(_) {} }, 150);
+        await CastingMatch.pourFiche(espece, id);
     },
     
     open: (prefill) => {
@@ -72573,6 +72599,66 @@ ${window.location.origin}${window.location.pathname}
       },
 
       // ------------------------------------------------------------------
+      //  PARTIR D'UNE FICHE DU PROJET (v601)
+      // ------------------------------------------------------------------
+      //  « Depuis une fiche personnage ou technicien non relie a quelqu'un,
+      //  le casting doit trier comme dans l'Univers. »
+      //  MEME MOTEUR, MEME VUE, MEME TRI — seule la porte change : on entre
+      //  par UNE fiche au lieu du projet entier. Les autres postes restent
+      //  accessibles par la liste deroulante : on ouvre sur le bon, on
+      //  n'enferme pas dedans.
+      //  ET LE BESOIN EST SYNTHETISE DEPUIS LA FICHE quand le projet ne le
+      //  declare pas : un technicien inscrit dans l'equipe sans que son poste
+      //  soit coche dans Presentation doit quand meme pouvoir etre cherche,
+      //  sinon le bouton de sa fiche ne repondrait rien.
+      _besoinDeFiche: (espece, id, donnees) => {
+          if(espece === 'character') {
+              const c = (donnees.characters || []).find(x => x && x.id === id);
+              if(!c) return null;
+              const nom = c.name || 'Personnage';
+              return { id: 'perso:' + c.id, kind: 'actor', poste: nom, label: 'Rôle de ' + nom,
+                       need: { roleName: nom, gender: c.gender || '', ageMin: c.ageMin || '',
+                               ageMax: c.ageMax || '', ethnicity: c.ethnicity || '',
+                               hairColor: c.hairColor || '' } };
+          }
+          const m = (donnees.crew || []).find(x => x && x.id === id);
+          if(!m) return null;
+          const nom = (m.role || m.department || '').trim();
+          if(!nom) { Utils.toast('Cette fiche n’a pas de poste : renseignez-le pour pouvoir chercher quelqu’un.', 'warning', 7000); return null; }
+          return { id: 'membre:' + m.id, kind: 'crew', poste: nom, label: 'Poste de ' + nom,
+                   need: { role: nom, dept: m.department || '', count: 1 } };
+      },
+      pourFiche: async (espece, id) => {
+          if(!state.currentProjectId || !state.data) { Utils.toast('Ouvre d’abord un projet.', 'info'); return; }
+          if(!(Universe.allProfiles && Universe.allProfiles.length) && Universe.loadAllProfiles) {
+              await Universe.loadAllProfiles();
+          }
+          const donnees = state.data;
+          const propre = CastingMatch._besoinDeFiche(espece, id, donnees);
+          if(!propre) return;
+          const besoins = CastingMatch.besoinsDe(donnees);
+          // Le besoin de la fiche passe EN TETE, qu'il vienne du projet ou
+          // qu'on vienne de le fabriquer : c'est celui qu'on est venu voir.
+          const autres = besoins.filter(b => b.id !== propre.id
+                                          && CastingMatch._cle(b.poste) !== CastingMatch._cle(propre.poste));
+          CastingMatch.projet = {
+              id: state.currentProjectId,
+              titre: donnees.title || 'Mon projet',
+              donnees: donnees
+          };
+          CastingMatch.besoins = [propre].concat(autres).map(b => Object.assign({}, b, {
+              candidats: CastingMatch.candidatsPour(b)
+          }));
+          await CastingMatch.mesurerDistances();
+          CastingMatch.preparerPile();
+          // preparerPile ouvre sur le premier poste QUI A DU MONDE ; ici on
+          // veut celui de la fiche, meme s'il n'a personne — c'est une
+          // reponse, et la cacher ferait croire a une erreur.
+          CastingMatch.besoinCourant = propre.id;
+          await CastingMatch.ouvrirTri();
+      },
+
+      // ------------------------------------------------------------------
       //  LES BESOINS D'UN PROJET
       // ------------------------------------------------------------------
       //  Ils vivent dans l'onglet Presentation, donc ils existent meme si le
@@ -81463,6 +81549,7 @@ const CardModal = {
                     <button class="edit-btn" onclick="event.stopPropagation(); app.CardModal.openCrew(${idx})" title="Modifier">✏️</button>
                     <button class="delete-btn" onclick="event.stopPropagation(); app.Crew.deleteMember(${idx})" title="Supprimer">🗑️</button>
                     ${CardModal._groupRoundHtml(member, idx, 'crew')}
+                    ${!member.publicProfileId ? `<button class="casting-btn" onclick="event.stopPropagation(); app.GlobalSearch.openForCrewMember(${idx})" title="Recrutement — trier les technicien·nes pour ce poste">🎥</button>` : ''}
                     <button class="web-btn" onclick="event.stopPropagation(); app.Web.open('crew', '${member.id}')" title="Voir dans la toile">🕸️</button>
                 </div>
                 ` : ''}
@@ -81575,7 +81662,7 @@ const CardModal = {
                     <button class="delete-btn" onclick="event.stopPropagation(); app.Actions.deleteDataItem('${type}', ${idx})" title="Supprimer">🗑️</button>
                     ${CardModal._groupRoundHtml(item, idx, type)}
                     ${(type === 'characters' || type === 'locations') ? `<button class="board-btn" onclick="event.stopPropagation(); app.Board.openSatellites('${type === 'characters' ? 'character' : 'location'}', '${item.id}')" title="Idées (planche)">💡</button>` : ''}
-                    ${type === 'characters' ? `<button class="casting-btn" onclick="event.stopPropagation(); app.GlobalSearch.openForCharacter(${idx})" title="Casting — comédiens qui matchent">🎭</button>` : ''}
+                    ${(type === 'characters' && !item.actor_id) ? `<button class="casting-btn" onclick="event.stopPropagation(); app.GlobalSearch.openForCharacter(${idx})" title="Casting — trier les comédiens pour ce rôle">🎭</button>` : ''}
                     <button class="web-btn" onclick="event.stopPropagation(); app.Web.open('${({characters:'character',actors:'actor',locations:'location'})[type]}', '${item.id}')" title="Voir dans la toile">🕸️</button>
                 </div>
                 ` : ''}
