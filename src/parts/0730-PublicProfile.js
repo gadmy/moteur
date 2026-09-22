@@ -195,11 +195,17 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             
             // Identité de compte : photo + nom (communication interne), projets à droite
             const accountName = (state.userProfile && state.userProfile.displayName) || name;
+            // v601 : le meme avertissement que dans la barre du haut, sur la carte
+            const manquesCarte = [];
+            PublicProfile._casquettesActives(profile).forEach(c => {
+                PublicProfile.manquesDe(profile, c).forEach(m => { if(manquesCarte.indexOf(m) < 0) manquesCarte.push(m); });
+            });
+            const alerteCarte = PublicProfile.badgeIncomplet(manquesCarte);
             html += `<div class="profile-circle-card ${isActive ? 'active' : ''}" onclick="app.PublicProfile.switchToProfile(${idx})">
                 <div style="display:flex; align-items:center; gap:25px;">
                     <div style="display:flex; flex-direction:column; align-items:center;">
                         <div class="profile-circle-photo">${photoHtml}</div>
-                        <div class="profile-circle-name">${Utils.escape(accountName)}</div>
+                        <div class="profile-circle-name">${Utils.escape(accountName)}${alerteCarte}</div>
                     </div>
                     ${projectsHtml}
                 </div>
@@ -214,6 +220,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         }
         
         container.innerHTML = html;
+        PublicProfile.marquerNav();
     },
     
     // Crée un nouveau profil
@@ -514,6 +521,9 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                     // sans cela, un emplacement laisse vide donnait un « n°2 » sans « n°1 ».
                     const nameSuffix = actifs > 1 ? (' n°' + rang) : '';
                     const visOn = cf.visible !== false;
+                    // v601 : ce qui manque a cette fiche pour etre trouvee.
+                    const mq = PublicProfile.manquesDe(profile, PublicProfile._facetKey('crew', i));
+                    const alerte = PublicProfile.badgeIncomplet(mq);
                     const xBtn = (actifs > 1)
                         ? '<button type="button" class="facet-card-x" title="Supprimer cette fiche" onclick="event.stopPropagation(); app.PublicProfile.deleteCrewCard(' + i + ')">✕</button>'
                         : '<button type="button" class="facet-card-x" title="Refermer (regriser)" onclick="event.stopPropagation(); app.PublicProfile.deactivateCrewCard(' + i + ')">✕</button>';
@@ -521,8 +531,8 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                         + xBtn
                         + '<div class="compact-card-photo">' + (photo ? '<img src="' + Utils.escape(photo) + '" alt="">' : '🎥') + '</div>'
                         + '<div class="compact-card-name">' + Utils.escape(name) + '</div>'
-                        + '<div class="compact-card-role">🎥 Technicien·ne' + nameSuffix + '</div>'
-                        + '<label class="facet-card-vis" onclick="event.stopPropagation();"><input type="checkbox" ' + (visOn ? 'checked' : '') + ' onchange="app.PublicProfile.toggleCrewVisible(' + i + ', this.checked)"> 👁 Univers</label>'
+                        + '<div class="compact-card-role">🎥 Technicien·ne' + nameSuffix + alerte + '</div>'
+                        + '<label class="facet-card-vis' + (mq.length ? ' est-bride' : '') + '" onclick="event.stopPropagation();"><input type="checkbox" ' + (visOn ? 'checked' : '') + ' onchange="app.PublicProfile.toggleCrewVisible(' + i + ', this.checked)"> 👁 Univers</label>'
                         + '<button type="button" class="facet-card-erase" onclick="event.stopPropagation(); app.PublicProfile.effaceCrewCard(' + i + ')">🧹 Effacer</button>'
                     + '</div>';
                 }).join('');
@@ -542,12 +552,14 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                 + '</div>';
             }
             const visOn = (profile.facets && profile.facets[k]) ? (profile.facets[k].visible !== false) : true;
+            const mqK = PublicProfile.manquesDe(profile, k);
+            const alerteK = PublicProfile.badgeIncomplet(mqK);
             return '<div class="compact-card facet-card" onclick="app.PublicProfile.openFicheCard(\'' + k + '\')">'
                 + '<button type="button" class="facet-card-x" title="Refermer (regriser)" onclick="event.stopPropagation(); app.PublicProfile.deactivateFacetCard(\'' + k + '\')">✕</button>'
                 + '<div class="compact-card-photo">' + (photo ? '<img src="' + Utils.escape(photo) + '" alt="">' : (ICONS[k] || '👤')) + '</div>'
                 + '<div class="compact-card-name">' + Utils.escape(name) + '</div>'
-                + '<div class="compact-card-role">' + label + '</div>'
-                + '<label class="facet-card-vis" onclick="event.stopPropagation();"><input type="checkbox" ' + (visOn ? 'checked' : '') + ' onchange="app.PublicProfile.toggleFacetVisible(\'' + k + '\', this.checked)"> 👁 Univers</label>'
+                + '<div class="compact-card-role">' + label + alerteK + '</div>'
+                + '<label class="facet-card-vis' + (mqK.length ? ' est-bride' : '') + '" onclick="event.stopPropagation();"><input type="checkbox" ' + (visOn ? 'checked' : '') + ' onchange="app.PublicProfile.toggleFacetVisible(\'' + k + '\', this.checked)"> 👁 Univers</label>'
                 + '<button type="button" class="facet-card-erase" onclick="event.stopPropagation(); app.PublicProfile.effaceFacetCard(\'' + k + '\')">🧹 Effacer</button>'
             + '</div>';
         }).join('') + '</div>';
@@ -1086,10 +1098,125 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         profile.facets[k].enabled = false;
         PublicProfile.renderFacetTabs(PublicProfile._enabledFacets(profile));
     },
+    // ==================================================================
+    //  UNE FICHE INCOMPLETE NE SE MONTRE PAS DANS L'UNIVERS (v601)
+    // ==================================================================
+    //  « Si un profil technicien n'a pas de fiche de poste, il ne peut pas
+    //  cliquer sur visible dans l'Univers. Pareil pour un comedien qui n'a pas
+    //  complete assez son profil pour etre recherche et contacte. »
+    //  LA RAISON EST MESUREE, pas supposee : sur 288 profils publics, CENT
+    //  QUATRE casquettes techniciens n'ont aucun metier ecrit. Elles
+    //  apparaissent sur la carte, on peut cliquer dessus — et elles ne
+    //  ressortent sur AUCUNE recherche de poste, parce qu'il n'y a rien a
+    //  reconnaitre. Se montrer sans pouvoir etre trouve, c'est le pire des
+    //  deux mondes : la personne croit etre dans le reseau, et personne ne la
+    //  voit passer.
+    //  ON N'INTERDIT RIEN DE CE QUI EST DEJA LA : une fiche deja visible le
+    //  reste. C'est la BASCULE qui se refuse, en disant ce qui manque.
+    //  CE QUI EST EXIGE — et rien de plus : de quoi etre TROUVE (le nom, le
+    //  lieu, et le metier pour un technicien, le genre et l'age pour un
+    //  comedien) et de quoi etre CONTACTE.
+    MANQUES: {
+        nom:     { test: (f, p) => !!((f.name || p.name || '').trim()), quoi: 'un nom' },
+        lieu:    { test: (f, p) => !!((f.city || p.city || '').trim()), quoi: 'une ville' },
+        contact: { test: (f, p) => !!((f.contactEmail || p.email || f.phone || p.phone || p.agentPhone || '').trim()),
+                   quoi: 'un moyen d’être contacté (e-mail ou téléphone)' },
+        metier:  { test: (f) => !!((f.role || '').trim()), quoi: 'votre poste (la fiche de poste)', pour: ['crew'] },
+        genre:   { test: (f, p) => !!((f.gender || p.gender || '').trim()), quoi: 'votre genre', pour: ['actor'] },
+        age:     { test: (f, p) => !!(String(f.age || p.age || p.birthDate || '').trim()), quoi: 'votre âge', pour: ['actor'] },
+        photo:   { test: (f, p) => !!((f.photo || p.photo || '').trim()), quoi: 'une photo', pour: ['actor'] }
+    },
+    //  Ce qui manque a une casquette pour etre trouvee et contactee.
+    //  Renvoie un tableau de phrases ; vide = la fiche est prete.
+    manquesDe: (profil, cle) => {
+        try {
+            const kind = PublicProfile._facetKind(cle);
+            const f = PublicProfile.facetByKey(profil && profil.facets, cle) || {};
+            const out = [];
+            Object.keys(PublicProfile.MANQUES).forEach(n => {
+                const r = PublicProfile.MANQUES[n];
+                if(r.pour && r.pour.indexOf(kind) < 0) return;
+                if(!r.test(f, profil || {})) out.push(r.quoi);
+            });
+            return out;
+        } catch(e) { return []; }
+    },
+    //  Le profil entier est-il incomplet ? (au moins une casquette active a
+    //  qui il manque quelque chose)
+    profilIncomplet: (profil) => {
+        try {
+            const p = profil || PublicProfile.profiles[PublicProfile.currentProfileIndex];
+            if(!p) return false;
+            return PublicProfile._casquettesActives(p).some(c => PublicProfile.manquesDe(p, c).length > 0);
+        } catch(e) { return false; }
+    },
+    _casquettesActives: (p) => {
+        const out = [];
+        const f = (p && p.facets) || {};
+        PublicProfile.FACET_KEYS.forEach(k => {
+            if(k === 'crew') {
+                PublicProfile.crewArr(f).forEach((cf, i) => { if(cf && cf.enabled) out.push(PublicProfile._facetKey('crew', i)); });
+            } else if(f[k] && f[k].enabled) out.push(k);
+        });
+        return out;
+    },
+    //  Le petit avertissement, partout pareil. « quoi » sert a l'infobulle.
+    badgeIncomplet: (manques, petit) => {
+        if(!manques || !manques.length) return '';
+        const titre = 'Profil incomplet — il manque : ' + manques.join(', ')
+                    + '. Tant qu’il manque quelque chose, vous ne ressortez pas dans les recherches.';
+        return '<span class="badge-incomplet' + (petit ? ' est-petit' : '') + '" title="'
+             + Utils.escape(titre) + '">⚠️</span>';
+    },
+
+    //  La meme alerte dans la barre du haut : « Mon Espace » et « Mon Profil ».
+    //  On la pose au chargement des profils et apres chaque enregistrement,
+    //  pour qu'elle disparaisse d'elle-meme des que le profil est complet.
+    listeManques: () => {
+        const p = PublicProfile.profiles[PublicProfile.currentProfileIndex]
+               || PublicProfile.profiles[0];
+        if(!p) return [];
+        const vus = {}, out = [];
+        PublicProfile._casquettesActives(p).forEach(c => {
+            PublicProfile.manquesDe(p, c).forEach(m => {
+                if(vus[m]) return;
+                vus[m] = 1; out.push(m);
+            });
+        });
+        return out;
+    },
+    marquerNav: () => {
+        try {
+            const manques = PublicProfile.listeManques();
+            const titre = manques.length
+                ? 'Profil incomplet — il manque : ' + manques.join(', ')
+                  + '. Tant qu’il manque quelque chose, vous ne ressortez pas dans les recherches.'
+                : '';
+            ['alerte-espace', 'alerte-mon-profil'].forEach(id => {
+                const el = document.getElementById(id);
+                if(!el) return;
+                el.style.display = manques.length ? 'inline-flex' : 'none';
+                el.title = titre;
+            });
+        } catch(e) {}
+    },
+
     // Bascule « Visible dans l'Univers » d'une casquette.
     toggleFacetVisible: (k, checked) => {
         const p = PublicProfile.profiles[PublicProfile.currentProfileIndex];
-        if(p && p.facets && p.facets[k]) p.facets[k].visible = checked;
+        if(!p || !p.facets || !p.facets[k]) return;
+        if(checked && !PublicProfile._peutSeMontrer(p, k)) return;
+        p.facets[k].visible = checked;
+    },
+    //  Se montrer demande d'etre trouvable. On le REFUSE en disant pourquoi —
+    //  un interrupteur qui revient tout seul sans explication est pire que
+    //  pas d'interrupteur du tout.
+    _peutSeMontrer: (profil, cle) => {
+        const manques = PublicProfile.manquesDe(profil, cle);
+        if(!manques.length) return true;
+        Utils.toast('Il manque ' + manques.join(', ') + ' — sans cela vous ne ressortiriez dans aucune recherche.', 'warning', 8000);
+        PublicProfile.renderFacetTabs();     // la case revient a sa place
+        return false;
     },
     // Vider les champs d'une casquette (ancien « Remettre a zero cette carte »).
     effaceFacetCard: (k) => {
@@ -1168,7 +1295,9 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     toggleCrewVisible: (idx, checked) => {
         const profile = PublicProfile.profiles[PublicProfile.currentProfileIndex];
         const arr = profile && profile.facets && Array.isArray(profile.facets.crew) ? profile.facets.crew : null;
-        if(arr && arr[idx]) arr[idx].visible = checked;
+        if(!arr || !arr[idx]) return;
+        if(checked && !PublicProfile._peutSeMontrer(profile, PublicProfile._facetKey('crew', idx))) return;
+        arr[idx].visible = checked;
     },
     // Vider les champs d'une fiche technicien precise (garde enabled/visible, efface le reste).
     effaceCrewCard: async (idx) => {
@@ -1445,6 +1574,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             if(PublicProfile.currentProfileIndex >= PublicProfile.profiles.length) {
                 PublicProfile.currentProfileIndex = PublicProfile.profiles.length > 0 ? 0 : -1;
             }
+            PublicProfile.marquerNav();
         } catch(e) {
             console.error('Erreur chargement profils:', e);
             PublicProfile.profiles = [];
