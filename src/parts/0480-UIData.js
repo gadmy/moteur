@@ -150,6 +150,11 @@
 
                 // Brique « Identité » : sexe + photo.
                 let idHtml = FicheUI.field('Sexe', `<select class="actor-input" onchange="app.Actions.updateActorMeta(${idx}, 'gender', this.value)" ${isReadOnly ? 'disabled' : ''}>${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(item.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>`);
+                // v601 : la date de naissance, et l'age qui en decoule. On ne
+                // tape plus un age : il serait faux l'annee suivante.
+                idHtml += FicheUI.field('Date de naissance', `<input type="date" class="actor-input" value="${Utils.escape(item.birthdate || '')}" onchange="app.Actions.updateActorMeta(${idx}, 'birthdate', this.value); app.CardModal.refresh();" ${isReadOnly ? 'disabled' : ''}>`);
+                const ageTxt = PublicProfile.ageTexte(item);
+                idHtml += FicheUI.field('Âge', `<div class="fid-calcule">${ageTxt ? Utils.escape(ageTxt) : '<span style="opacity:.6">renseignez la date de naissance</span>'}</div>`);
                 if(!isReadOnly) {
                     const photoBtnLabel = item.photo ? '🖼️ Changer la photo' : '📤 Importer une photo';
                     idHtml += `<div class="fid-field"><div class="flex-gap10" style="align-items:center;">
@@ -546,6 +551,11 @@
             idHtml += FicheUI.field('Département', `<select class="crew-input" onchange="app.Crew.updateMember(${idx}, 'group_id', this.value)" ${isLocked ? 'disabled' : ''}>${groupOptions}</select>`);
             idHtml += FicheUI.field('Poste', `<select class="crew-input" id="role-select-${idx}" onchange="app.UIData.handleRoleChange(${idx}, this.value)" ${isLocked ? 'disabled' : ''}>${rolesOptions}</select>`);
             idHtml += FicheUI.field('Sexe', `<select class="crew-input" onchange="app.Crew.updateMember(${idx}, 'gender', this.value)" ${isLocked ? 'disabled' : ''}>${ProfileRenderer.selectOptions.gender.map(o => '<option value="'+o.value+'" '+(member.gender === o.value ? 'selected' : '')+'>'+o.label+'</option>').join('')}</select>`);
+            idHtml += FicheUI.field('Date de naissance', `<input type="date" class="crew-input" value="${Utils.escape(member.birthdate || '')}" onchange="app.Crew.updateMember(${idx}, 'birthdate', this.value); app.CardModal.refresh();" ${isLocked ? 'disabled' : ''}>`);
+        }
+        {
+            const ageTxtC = PublicProfile.ageTexte(member);
+            if(ageTxtC || !isView) idHtml += FicheUI.field('Âge', `<div class="fid-calcule">${ageTxtC ? Utils.escape(ageTxtC) : '<span style="opacity:.6">renseignez la date de naissance</span>'}</div>`);
         }
         if(!isReadOnly) {
             idHtml += `<div class="fid-field"><div class="flex-gap10" style="align-items:center;">

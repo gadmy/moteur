@@ -417,7 +417,9 @@
               else if(g === gn) { score += 30; raisons.push('genre'); }
               else return { score: 0, raisons: [] };   // genre incompatible : on sort
           } else { score += 10; }
-          const age = parseInt(profil.age || facet.age, 10) || 0;
+          // v601 : l'age passe par la SEULE porte qui sait le calculer
+          // depuis la date de naissance (PublicProfile.ageDe).
+          const age = PublicProfile.ageDe(profil, facet) || 0;
           const min = parseInt(need.ageMin, 10) || 0;
           const max = parseInt(need.ageMax, 10) || 999;
           if(age) {

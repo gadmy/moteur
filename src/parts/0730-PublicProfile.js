@@ -429,7 +429,56 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     // comedien n'a pas a supprimer son numero de telephone.
     // RESTENT PAR CASQUETTE a dessein : hidePhone (choix d'affichage public,
     // carte par carte) et agentPhone (un agent ne concerne que le comedien).
-    FACET_COMMON_KEYS: ['phone','availabilityText','availabilityDates','unavailabilityDates','hasVehicle','vehicleType','vehiclePlate','vehicleSeats','vehicleTrunk','vehicleNotes','licenses','vehicleUsage'],
+    FACET_COMMON_KEYS: ['phone','birthdate','availabilityText','availabilityDates','unavailabilityDates','hasVehicle','vehicleType','vehiclePlate','vehicleSeats','vehicleTrunk','vehicleNotes','licenses','vehicleUsage'],
+
+    // ==================================================================
+    //  L'AGE SE CALCULE, IL NE SE TAPE PAS (v601)
+    // ==================================================================
+    //  Un age ecrit a la main est juste le jour ou on l'ecrit et faux
+    //  l'annee suivante — et personne ne revient corriger son profil pour
+    //  vieillir d'un an. Une recherche « 30-35 ans » tombait donc sur des
+    //  profils remplis il y a trois ans.
+    //  LA DATE DE NAISSANCE APPARTIENT A LA PERSONNE, PAS A LA CASQUETTE :
+    //  elle rejoint FACET_COMMON_KEYS, a cote du telephone et du vehicule.
+    //  Un comedien qui est aussi cadreur n'a pas deux dates de naissance, et
+    //  vider une carte ne l'efface pas.
+    //  ON NE CREE PAS UN NOUVEAU CHAMP : la colonne « birthdate » existe
+    //  depuis toujours dans user_profiles, elle etait chargee et enregistree
+    //  — simplement, aucun ecran ne la montrait et aucune recherche ne la
+    //  lisait. Inventer « birthDate » a cote aurait refait le probleme de la
+    //  journee : deux noms pour la meme chose.
+    //  UNE SEULE PORTE POUR LA LIRE, et c'est tout l'interet : l'ecran, les
+    //  filtres de l'Univers, le tri du casting et le controle de profil
+    //  incomplet posent la MEME question au MEME endroit.
+    //  L'age tape reste accepte en repli, pour les profils d'avant qui n'ont
+    //  pas encore de date — on ne casse rien, on prefere seulement la date
+    //  quand elle est la.
+    ageDe: (source, facet) => {
+        const d = (facet && (facet.birthDate || facet.birthdate))
+               || (source && (source.birthDate || source.birthdate)) || '';
+        const n = PublicProfile._ageAuJour(d);
+        if(n !== null) return n;
+        const tape = parseInt((facet && facet.age) || (source && source.age), 10);
+        return (tape > 0 && tape < 130) ? tape : null;
+    },
+    //  Le calcul lui-meme : l'anniversaire de cette annee est-il passe ?
+    _ageAuJour: (dateTexte, aujourdhui) => {
+        const t = String(dateTexte || '').trim();
+        if(!t) return null;
+        const d = new Date(t);
+        if(isNaN(d.getTime())) return null;
+        const now = aujourdhui ? new Date(aujourdhui) : new Date();
+        let a = now.getFullYear() - d.getFullYear();
+        const m = now.getMonth() - d.getMonth();
+        if(m < 0 || (m === 0 && now.getDate() < d.getDate())) a--;
+        if(a < 0 || a > 130) return null;
+        return a;
+    },
+    //  Ce qu'on affiche sous le champ. Vide tant qu'il n'y a pas de date.
+    ageTexte: (source, facet) => {
+        const n = PublicProfile.ageDe(source, facet);
+        return (n === null) ? '' : (n + ' ans');
+    },
 
     // MIGRATION DOUCE des profils d'avant, qui portent ces champs dans leurs
     // casquettes : on remonte au profil la premiere valeur trouvee quand le
@@ -1124,7 +1173,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
                    quoi: 'un moyen d’être contacté (e-mail ou téléphone)' },
         metier:  { test: (f) => !!((f.role || '').trim()), quoi: 'votre poste (la fiche de poste)', pour: ['crew'] },
         genre:   { test: (f, p) => !!((f.gender || p.gender || '').trim()), quoi: 'votre genre', pour: ['actor'] },
-        age:     { test: (f, p) => !!(String(f.age || p.age || p.birthDate || '').trim()), quoi: 'votre âge', pour: ['actor'] },
+        age:     { test: (f, p) => PublicProfile.ageDe(p, f) !== null, quoi: 'votre date de naissance', pour: ['actor'] },
         photo:   { test: (f, p) => !!((f.photo || p.photo || '').trim()), quoi: 'une photo', pour: ['actor'] }
     },
     //  Ce qui manque a une casquette pour etre trouvee et contactee.

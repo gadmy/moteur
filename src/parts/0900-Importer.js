@@ -8096,7 +8096,7 @@ const MatchingEngine = {
         // 2. ÂGE
         if(project.searchAgeMin || project.searchAgeMax || project.castingAgeMin || project.castingAgeMax) {
             maxPossible += MatchingEngine.weights.age;
-            const profileAge = parseInt(profile.age) || 0;
+            const profileAge = PublicProfile.ageDe(profile) || 0;   // v601 : date de naissance d'abord
             const minAge = parseInt(project.searchAgeMin || project.castingAgeMin) || 0;
             const maxAge = parseInt(project.searchAgeMax || project.castingAgeMax) || 999;
             
@@ -8353,7 +8353,7 @@ const MatchingEngine = {
         if(!actorNeeds || actorNeeds.length === 0) return null;
         
         const profileGender = (profile.gender || '').toLowerCase();
-        const profileAge = parseInt(profile.age) || 0;
+        const profileAge = PublicProfile.ageDe(profile) || 0;   // v601 : date de naissance d'abord
         
         let bestMatch = null;
         let bestScore = -1;
@@ -10781,11 +10781,18 @@ const UniverseSearch = {
             }
         }
         
+        // v601 : L'AGE N'EST PLUS UN FILTRE DE COMEDIEN, c'en est un pour
+        // tout le monde — on cherche aussi un chef op de moins de 40 ans.
+        // Il est donc applique AVANT le tri par type, et le champ vit
+        // desormais dans les filtres communs.
+        const ageMin = document.getElementById('universe-age-min')?.value;
+        const ageMax = document.getElementById('universe-age-max')?.value;
+        if(ageMin) results = results.filter(p => p.age && parseInt(p.age) >= parseInt(ageMin));
+        if(ageMax) results = results.filter(p => p.age && parseInt(p.age) <= parseInt(ageMax));
+
         // Filtres comédiens
         if(type === 'actor') {
             const gender = document.getElementById('universe-actor-gender')?.value;
-            const ageMin = document.getElementById('universe-actor-age-min')?.value;
-            const ageMax = document.getElementById('universe-actor-age-max')?.value;
             const heightMin = document.getElementById('universe-actor-height-min')?.value;
             const heightMax = document.getElementById('universe-actor-height-max')?.value;
             const weightMin = document.getElementById('universe-actor-weight-min')?.value;
@@ -10799,8 +10806,6 @@ const UniverseSearch = {
             const languages = document.getElementById('universe-actor-languages')?.value.trim().toLowerCase();
             
             if(gender) results = results.filter(p => p.gender === gender);
-            if(ageMin) results = results.filter(p => p.age && parseInt(p.age) >= parseInt(ageMin));
-            if(ageMax) results = results.filter(p => p.age && parseInt(p.age) <= parseInt(ageMax));
             if(heightMin) results = results.filter(p => p.height && parseInt(p.height) >= parseInt(heightMin));
             if(heightMax) results = results.filter(p => p.height && parseInt(p.height) <= parseInt(heightMax));
             if(weightMin) results = results.filter(p => p.weight && parseInt(p.weight) >= parseInt(weightMin));
@@ -11006,8 +11011,8 @@ const UniverseSearch = {
         
         // Reset filtres comédiens
         if(document.getElementById('universe-actor-gender')) document.getElementById('universe-actor-gender').value = '';
-        if(document.getElementById('universe-actor-age-min')) document.getElementById('universe-actor-age-min').value = '';
-        if(document.getElementById('universe-actor-age-max')) document.getElementById('universe-actor-age-max').value = '';
+        if(document.getElementById('universe-age-min')) document.getElementById('universe-age-min').value = '';
+        if(document.getElementById('universe-age-max')) document.getElementById('universe-age-max').value = '';
         if(document.getElementById('universe-actor-height-min')) document.getElementById('universe-actor-height-min').value = '';
         if(document.getElementById('universe-actor-height-max')) document.getElementById('universe-actor-height-max').value = '';
         if(document.getElementById('universe-actor-weight-min')) document.getElementById('universe-actor-weight-min').value = '';
@@ -11338,7 +11343,8 @@ const UniverseProfileModal = {
             
             // Section Description Physique
             if(UniverseProfileModal.isSectionVisible(fullProfile, 'physical', 'public')) {
-                if(fullProfile.age) infoHtml += `<div class="profile-modal-info-item"><label>Âge</label><span>${Utils.escape(fullProfile.age)} ans</span></div>`;
+                const _ageTxt = PublicProfile.ageTexte(fullProfile);   // v601 : calcule
+                if(_ageTxt) infoHtml += `<div class="profile-modal-info-item"><label>Âge</label><span>${Utils.escape(_ageTxt)}</span></div>`;
                 if(fullProfile.height) infoHtml += `<div class="profile-modal-info-item"><label>Taille</label><span>${Utils.escape(fullProfile.height)} cm</span></div>`;
                 if(fullProfile.weight) infoHtml += `<div class="profile-modal-info-item"><label>Poids</label><span>${Utils.escape(fullProfile.weight)} kg</span></div>`;
                 if(fullProfile.eyeColor) infoHtml += `<div class="profile-modal-info-item"><label>Yeux</label><span>${Utils.escape(fullProfile.eyeColor)}</span></div>`;
@@ -11644,7 +11650,7 @@ const UniverseProfileModal = {
             if(hasPhysical) {
                 addSection('DESCRIPTION PHYSIQUE', [76, 175, 80]);
                 addInfo('Genre', profile.gender);
-                addInfo('Âge', profile.age ? profile.age + ' ans' : '');
+                addInfo('Âge', PublicProfile.ageTexte(profile));   // v601 : calcule
                 addInfo('Taille', profile.height ? profile.height + ' cm' : '');
                 addInfo('Poids', profile.weight ? profile.weight + ' kg' : '');
                 addInfo('Yeux', profile.eyeColor);
@@ -12760,6 +12766,14 @@ Universe.setViewMode('map');
                             availabilityText: p.availability || '',
                             profileComplete: true 
                         };
+                        // v601 : L'AGE EST RECALCULE ICI, une fois, pour tout
+                        // le monde. Tous ceux qui lisent « p.age » plus loin
+                        // — filtres, carte, tri du casting, moteur de
+                        // correspondance — recoivent donc un age juste
+                        // AUJOURD'HUI, sans avoir a connaitre la date de
+                        // naissance ni a la recalculer chacun de son cote.
+                        const _age = PublicProfile.ageDe(item);
+                        if(_age !== null) item.age = _age;
                         // Le marqueur porte les infos de la première casquette visible
                         const ff0 = PublicProfile.facetByKey(facets, visibleFacets[0]);
                         ['name', 'photo', 'city', 'latitude', 'longitude'].forEach(k => {
