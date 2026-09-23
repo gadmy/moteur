@@ -95,8 +95,9 @@
             b.style.marginLeft = ''; b.style.marginRight = '';
         });
     },
-    _ecarter: (selecteur) => {
-        const btns = [...document.querySelectorAll(selecteur)];
+    _ecarter: (selecteur) => UIHidden._ecarterElements([...document.querySelectorAll(selecteur)]),
+    _ecarterElements: (elements) => {
+        const btns = [...elements];
         if(!btns.length) return;
         // D'abord rendre sa feuille de style, ENSUITE mesurer.
         UIHidden._nettoyerPart(btns);
@@ -203,6 +204,66 @@
     },
     
     // === GESTION DES CATÉGORIES MASQUÉES ===
+    //  ==================================================================
+    //  LE BOUTON « MASQUÉS » NE SURGIT PAS : IL POUSSE (v601)
+    //  ==================================================================
+    //  Il apparaissait d'un coup, a l'instant precis ou l'onglet finissait de
+    //  se retracter : un element qui part et un autre qui arrive dans la meme
+    //  image, donc un saut. Il s'ouvre maintenant en largeur comme un onglet
+    //  qui revient, et se replie de meme quand il n'y a plus rien de masque.
+    //  MEME DUREE, MEME COURBE que le reste de la barre : deux animations
+    //  voisines qui ne vont pas a la meme vitesse se voient plus qu'une seule.
+    montrerPastille: (el, affichage) => {
+        if(!el) return;
+        UIHidden._annulerRepli(el);
+        if(getComputedStyle(el).display !== 'none') return;   // deja la
+        el.style.display = affichage || 'flex';
+        UIHidden._ecarterElements([el]);
+    },
+    _annulerRepli: (el) => {
+        if(!el || !el.__replie) return;
+        if(el.__tReplie) clearTimeout(el.__tReplie);
+        el.__tReplie = null; el.__replie = false;
+        el.style.transition = ''; el.style.width = ''; el.style.overflow = '';
+        el.style.paddingLeft = ''; el.style.paddingRight = '';
+        el.style.marginLeft = ''; el.style.marginRight = '';
+        el.style.opacity = '';
+    },
+    cacherPastille: (el) => {
+        if(!el || el.__replie) return;
+        if(getComputedStyle(el).display === 'none') return;
+        const large = el.offsetWidth;
+        // Mesure a zero = rien de mesure : on masque sans animer plutot que
+        // de replier un element de zero pixel qui n'en sortirait jamais.
+        if(UIHidden._sansAnimation() || !large) { el.style.display = 'none'; return; }
+        const D = UIHidden.DUREE_ECART;
+        el.__replie = true;
+        el.style.overflow = 'hidden';
+        el.style.transition = 'none';
+        el.style.width = large + 'px';
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            if(!el.__replie) return;   // quelqu'un l'a rouvert entre-temps
+            const c = 'cubic-bezier(.22,.7,.3,1)';
+            el.style.transition = 'width ' + D + 'ms ' + c + ', padding ' + D + 'ms ' + c
+                                + ', margin ' + D + 'ms ' + c + ', opacity ' + D + 'ms ' + c;
+            el.style.width = '0px';
+            el.style.paddingLeft = '0px'; el.style.paddingRight = '0px';
+            el.style.marginLeft = '0px'; el.style.marginRight = '0px';
+            el.style.opacity = '0';
+            el.__tReplie = setTimeout(() => {
+                el.style.display = 'none';
+                el.__replie = false; el.__tReplie = null;
+                // On lui rend sa feuille de style : une largeur figee a zero
+                // oubliee ici, et le bouton ne reviendrait plus jamais. C'est
+                // le bug qui a fait disparaitre toute la ligne des categories.
+                el.style.transition = ''; el.style.width = ''; el.style.overflow = '';
+                el.style.paddingLeft = ''; el.style.paddingRight = '';
+                el.style.marginLeft = ''; el.style.marginRight = '';
+                el.style.opacity = '';
+            }, D + 40);
+        }));
+    },
+
     hideCategory: (category) => {
         if(UIHidden.hiddenCategories.includes(category)) return;
         if(UIHidden._derniereCategorie(category)) { UIHidden._masquerCategorie(category); return; }
@@ -316,10 +377,10 @@
         if(toggle && countBadge) {
             const totalHidden = UIHidden.hiddenCategories.length + UIHidden.hiddenTabs.length;
             if(totalHidden > 0) {
-                toggle.style.display = 'flex';
                 countBadge.textContent = totalHidden;
+                UIHidden.montrerPastille(toggle, 'flex');
             } else {
-                toggle.style.display = 'none';
+                UIHidden.cacherPastille(toggle);
             }
         }
     },
