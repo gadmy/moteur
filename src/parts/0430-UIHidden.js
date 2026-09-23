@@ -79,9 +79,28 @@
     //  porte — une seule reponse, sinon les deux barres finiront par ne plus
     //  se comporter pareil.
     ecarterCategorie: (cat) => UIHidden._ecarter('.tab-category[data-category="' + cat + '"]'),
+    //  ON REND TOUJOURS L'ELEMENT A SA FEUILLE DE STYLE. L'animation de
+    //  depart fige une largeur en pixels et pose une classe ; si personne ne
+    //  les enleve, elles restent — et un onglet qui revient est mesure a ZERO,
+    //  donc on renonce a l'animer... en le laissant invisible POUR DE BON.
+    //  C'est exactement le bug signale sur la barre des categories : les
+    //  onglets du bas y echappaient par chance, parce que leur barre est
+    //  reconstruite a chaque changement de categorie, tandis que la barre des
+    //  categories, elle, garde ses memes boutons du debut a la fin.
+    _nettoyerPart: (btns) => {
+        [...btns].forEach(b => {
+            b.classList.remove('onglet-part');
+            b.style.width = '';
+            b.style.paddingLeft = ''; b.style.paddingRight = '';
+            b.style.marginLeft = ''; b.style.marginRight = '';
+        });
+    },
     _ecarter: (selecteur) => {
         const btns = [...document.querySelectorAll(selecteur)];
-        if(!btns.length || UIHidden._sansAnimation()) return;
+        if(!btns.length) return;
+        // D'abord rendre sa feuille de style, ENSUITE mesurer.
+        UIHidden._nettoyerPart(btns);
+        if(UIHidden._sansAnimation()) return;
         btns.forEach(b => {
             const large = b.offsetWidth;
             // Mesure a zero = rien de mesure : on preferera ne rien animer
@@ -111,13 +130,32 @@
             }));
         });
     },
+    //  LE REFUS SE VERIFIE AVANT L'ANIMATION, pas apres. On masquait d'abord
+    //  l'onglet a l'ecran, puis on decouvrait que c'etait le dernier et on
+    //  refusait : le bouton restait replie et invisible, alors que
+    //  l'application le croyait affiche. C'est l'autre moitie du bug « toute
+    //  la ligne du haut a disparu ».
+    _dernierOnglet: (tabName) => {
+        const tous = ['presentation', 'synopsis', 'board', 'titlepage', 'script', 'storyboard', 'chars',
+                      'actors', 'locs', 'resources', 'crew', 'breakdown', 'stats', 'planning', 'expenses'];
+        return tous.filter(t => !UIHidden.hiddenTabs.includes(t) && t !== tabName).length === 0;
+    },
+    _derniereCategorie: (cat) => ['ecriture', 'casting', 'production', 'admin']
+        .filter(c => !UIHidden.hiddenCategories.includes(c) && c !== cat).length === 0,
     hideTab: (tabName) => {
         if(UIHidden.hiddenTabs.includes(tabName)) return;
+        if(UIHidden._dernierOnglet(tabName)) { UIHidden._masquerVraiment(tabName); return; }
         const boutons = [...document.querySelectorAll('.tab-subbtn[data-tab="' + tabName + '"], .tab-btn[data-tab="' + tabName + '"]')];
         if(boutons.length && !UIHidden._enPartance) {
             UIHidden._enPartance = true;
             boutons.forEach(b => { b.style.width = b.offsetWidth + 'px'; b.classList.add('onglet-part'); });
-            setTimeout(() => { UIHidden._enPartance = false; UIHidden._masquerVraiment(tabName); }, UIHidden.DUREE_ONGLET);
+            setTimeout(() => {
+                UIHidden._enPartance = false;
+                // Masquer D'ABORD, nettoyer ENSUITE : l'element est deja
+                // hors de vue, donc on ne le voit pas reprendre sa taille.
+                UIHidden._masquerVraiment(tabName);
+                UIHidden._nettoyerPart(boutons);
+            }, UIHidden.DUREE_ONGLET);
             return;
         }
         UIHidden._masquerVraiment(tabName);
@@ -167,6 +205,7 @@
     // === GESTION DES CATÉGORIES MASQUÉES ===
     hideCategory: (category) => {
         if(UIHidden.hiddenCategories.includes(category)) return;
+        if(UIHidden._derniereCategorie(category)) { UIHidden._masquerCategorie(category); return; }
         const boutons = [...document.querySelectorAll('.tab-category[data-category="' + category + '"]')];
         if(boutons.length && !UIHidden._enPartanceCat && !UIHidden._sansAnimation()) {
             UIHidden._enPartanceCat = true;
@@ -174,6 +213,7 @@
             setTimeout(() => {
                 UIHidden._enPartanceCat = false;
                 UIHidden._masquerCategorie(category);
+                UIHidden._nettoyerPart(boutons);
             }, UIHidden.DUREE_ONGLET);
             return;
         }
@@ -233,6 +273,11 @@
     },
     
     showAllHidden: () => {
+        // MEME NETTOYAGE QUE POUR UNE RESTAURATION UNITAIRE : cette porte-ci
+        // ne passait pas par ecarterOnglet, donc elle rendait des onglets qui
+        // portaient encore une largeur figee a zero.
+        UIHidden._nettoyerPart(document.querySelectorAll('.tab-category[data-category], '
+            + '.tab-subbtn[data-tab], .tab-btn[data-tab]'));
         UIHidden.hiddenCategories = [];
         UIHidden.hiddenTabs = [];
         UIHidden.saveHiddenCategories();
@@ -255,7 +300,13 @@
                 !UIHidden.hiddenTabs.includes(t)
                 && ((typeof Permissions === 'undefined') || Permissions.tabVisible(t))
                 && (state.currentProjectType === 'series' || (t !== 'episodes' && t !== 'seasons')));
-            cat.style.display = (UIHidden.hiddenCategories.includes(catName) || rienDeVisible) ? 'none' : '';
+            const cache = UIHidden.hiddenCategories.includes(catName) || rienDeVisible;
+            cat.style.display = cache ? 'none' : '';
+            // FILET DE SECURITE : ce qui redevient visible repart PROPRE. Une
+            // largeur figee a zero, oubliee par une animation, rendrait le
+            // bouton invisible alors que tout le reste le croit affiche —
+            // c'est le bug « toute la ligne du haut a disparu ».
+            if(!cache) UIHidden._nettoyerPart([cat]);
         });
         
         // Mettre à jour le bouton des éléments masqués (catégories + onglets)
@@ -387,7 +438,9 @@
             const tabName = tab.getAttribute('data-tab');
             // v570 : masquage manuel OU permission fermee (❌)
             const interdit = (typeof Permissions !== 'undefined') && !Permissions.tabVisible(tabName);
-            tab.style.display = (UIHidden.hiddenTabs.includes(tabName) || interdit) ? 'none' : '';
+            const cache = UIHidden.hiddenTabs.includes(tabName) || interdit;
+            tab.style.display = cache ? 'none' : '';
+            if(!cache) UIHidden._nettoyerPart([tab]);
         });
         // Construction du menu #hiddenTabsToggle/#hiddenTabsMenu retirée v569 :
         // ce menu vivait dans le bandeau classique, inatteignable (étape 4).
