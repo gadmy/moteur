@@ -115,8 +115,8 @@
           const r = ScriptReader._root();
           const esc = ScriptReader._esc;
           const lab = ScriptReader._lab();
-          const left = ScriptReader._scenes.map(s => `<div class="rd-scene" id="rdL-${esc(s.id)}"><div class="rd-scene-h" style="cursor:pointer;" title="Voir les commentaires" onclick="app.ScriptReader._toComment('${esc(s.id)}')">${s.number}. ${esc(s.title)}</div><div class="rd-scene-body">${s.content || ''}</div></div>`).join('') || '<p>(Document vide)</p>';
-          const perScene = ScriptReader._scenes.map(s => `<div class="rd-sc-block" id="rdR-${esc(s.id)}"><div class="rd-sc-title" style="cursor:pointer;" title="Aller à cet endroit du document" onclick="app.ScriptReader._toScene('${esc(s.id)}')">${s.number}. ${esc(s.title)}</div><textarea rows="3" class="rd-sc-input" data-scene="${esc(s.id)}" data-allow-emojis="true" placeholder="${esc(lab.hint)}" data-tooltip="${esc(lab.hint)}">${esc(ScriptReader._mine.scenes[s.id] || '')}</textarea></div>`).join('');
+          const left = ScriptReader._scenes.map(s => `<div class="rd-scene" id="rdL-${esc(s.id)}"><div class="rd-scene-h" style="cursor:pointer;" title="Voir les commentaires" onclick="app.ScriptReader._toComment(${Utils.jsArg(s.id)})">${s.number}. ${esc(s.title)}</div><div class="rd-scene-body">${s.content || ''}</div></div>`).join('') || '<p>(Document vide)</p>';
+          const perScene = ScriptReader._scenes.map(s => `<div class="rd-sc-block" id="rdR-${esc(s.id)}"><div class="rd-sc-title" style="cursor:pointer;" title="Aller à cet endroit du document" onclick="app.ScriptReader._toScene(${Utils.jsArg(s.id)})">${s.number}. ${esc(s.title)}</div><textarea rows="3" class="rd-sc-input" data-scene="${esc(s.id)}" data-allow-emojis="true" placeholder="${esc(lab.hint)}" data-tooltip="${esc(lab.hint)}">${esc(ScriptReader._mine.scenes[s.id] || '')}</textarea></div>`).join('');
           r.innerHTML = `<div class="rd-top"><span class="rd-logo">🎬 Moteur</span><span class="rd-sub">${esc(ScriptReader._title)} — relecture</span></div>
               <div class="rd-body">
                   <div class="rd-left"><div class="rd-page">${left}</div></div>

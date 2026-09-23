@@ -201,17 +201,17 @@
                 const tr = row.transport || {};
                 const isOther = (tr.mode || '') === 'Autre';
                 const nameCell = f
-                    ? `<span class="fdsw-ro">${esc(f.name || 'sans nom')}</span> <button type="button" class="fdsw-btn" onclick="app.Figuration.openFigurant('${esc(row.figurantId)}')">Changer l'info source</button>`
+                    ? `<span class="fdsw-ro">${esc(f.name || 'sans nom')}</span> <button type="button" class="fdsw-btn" onclick="app.Figuration.openFigurant(${Utils.jsArg(row.figurantId)})">Changer l'info source</button>`
                     : `<span class="fdsw-empty">comédien·ne supprimé·e</span>`;
                 h += `<tr>
                     <td style="text-align:center">${i + 1}</td>
                     <td>${nameCell}</td>
-                    <td><input class="fdsw-in" type="time" value="${esc(row.callTime || '')}" title="Vide = convocation équipe (${esc(day.crewCall || '—')})" onchange="app.Figuration.updateCallsheetField('${esc(row.figurantId)}', 'callTime', this.value)" ${ro ? 'disabled' : ''}></td>
-                    <td><select class="fdsw-in" onchange="app.Figuration.updateCallsheetTransport('${esc(row.figurantId)}', 'mode', this.value)" ${ro ? 'disabled' : ''}>
+                    <td><input class="fdsw-in" type="time" value="${esc(row.callTime || '')}" title="Vide = convocation équipe (${esc(day.crewCall || '—')})" onchange="app.Figuration.updateCallsheetField(${Utils.jsArg(row.figurantId)}, 'callTime', this.value)" ${ro ? 'disabled' : ''}></td>
+                    <td><select class="fdsw-in" onchange="app.Figuration.updateCallsheetTransport(${Utils.jsArg(row.figurantId)}, 'mode', this.value)" ${ro ? 'disabled' : ''}>
                         ${transportModes.map(m => `<option value="${esc(m)}" ${(tr.mode || '') === m ? 'selected' : ''}>${m || '-- transport --'}</option>`).join('')}
-                        </select>${isOther ? `<input class="fdsw-in" placeholder="préciser..." data-tooltip="préciser..." value="${esc(tr.note || '')}" onchange="app.Figuration.updateCallsheetTransport('${esc(row.figurantId)}', 'note', this.value)" ${ro ? 'disabled' : ''}>` : ''}</td>
-                    <td><input class="fdsw-in" placeholder="rien à apporter" data-tooltip="rien à apporter" value="${esc(row.notes || '')}" onchange="app.Figuration.updateCallsheetField('${esc(row.figurantId)}', 'notes', this.value)" ${ro ? 'disabled' : ''}></td>
-                    <td style="text-align:center">${ro ? '' : `<button type="button" class="fdsw-link" title="Déconvoquer" onclick="app.Figuration.removeFromCallsheet('${esc(row.figurantId)}')">✖</button>`}</td>
+                        </select>${isOther ? `<input class="fdsw-in" placeholder="préciser..." data-tooltip="préciser..." value="${esc(tr.note || '')}" onchange="app.Figuration.updateCallsheetTransport(${Utils.jsArg(row.figurantId)}, 'note', this.value)" ${ro ? 'disabled' : ''}>` : ''}</td>
+                    <td><input class="fdsw-in" placeholder="rien à apporter" data-tooltip="rien à apporter" value="${esc(row.notes || '')}" onchange="app.Figuration.updateCallsheetField(${Utils.jsArg(row.figurantId)}, 'notes', this.value)" ${ro ? 'disabled' : ''}></td>
+                    <td style="text-align:center">${ro ? '' : `<button type="button" class="fdsw-link" title="Déconvoquer" onclick="app.Figuration.removeFromCallsheet(${Utils.jsArg(row.figurantId)})">✖</button>`}</td>
                 </tr>`;
             });
         }

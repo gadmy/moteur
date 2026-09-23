@@ -737,7 +737,7 @@
                   return;
               }
               html += '<div class="match-groupe-cartes">' + gens.map(c =>
-                  '<div class="compact-card match-carte" onclick="app.CastingMatch.ouvrirProfil(\'' + esc(c.cle) + '\')">'
+                  '<div class="compact-card match-carte" onclick="app.CastingMatch.ouvrirProfil(' + Utils.jsArg(c.cle) + ')">'
                   + '<div class="compact-card-photo">' + (c.photo
                       ? '<img src="' + Utils.safeMediaUrl(c.photo) + '" alt="">'
                       : (b.kind === 'crew' ? '🎥' : '🎭')) + '</div>'
@@ -915,7 +915,7 @@
               ? '<div class="tri-choix-menu">' + CastingMatch.besoins.map(b2 => {
                     const r2 = CastingMatch.restants(b2);
                     return '<button class="tri-choix-ligne' + (b2.id === CastingMatch.besoinCourant ? ' is-actif' : '')
-                        + (r2 ? '' : ' is-fini') + '" onclick="app.CastingMatch.allerAu(\'' + esc(b2.id) + '\')">'
+                        + (r2 ? '' : ' is-fini') + '" onclick="app.CastingMatch.allerAu(' + Utils.jsArg(b2.id) + ')">'
                         + '<span class="tri-choix-nom">' + esc(b2.label) + '</span>'
                         + '<span class="tri-poste-n">' + r2 + '</span></button>';
                 }).join('') + '</div>'
@@ -942,7 +942,7 @@
                         + (b.candidats.length - CastingMatch.liste(b).length) + ' plus loin</button> '
                       : '')
                   + (suivant
-                      ? '<button class="tri-fin" onclick="app.CastingMatch.allerAu(\'' + esc(suivant.id) + '\')">→ Passer à ' + esc(suivant.poste) + '</button>'
+                      ? '<button class="tri-fin" onclick="app.CastingMatch.allerAu(' + Utils.jsArg(suivant.id) + ')">→ Passer à ' + esc(suivant.poste) + '</button>'
                       : '<button class="tri-fin" onclick="app.CastingMatch.rendreRecap()">🏁 Voir le récapitulatif</button>')
                   + '</div>';
               return;

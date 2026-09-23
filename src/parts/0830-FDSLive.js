@@ -289,7 +289,7 @@
         const items = shots.map(sh => {
             const lab = sh.shotNumber || sh.name || ('Plan ' + sh.id);
             return `<label style="display:block; text-align:left; white-space:nowrap; font-size:0.7rem;">
-                <input type="checkbox" data-fds-scene="${id}" data-fds-shot="${esc(String(sh.id))}" ${sel.some(x => String(x) === String(sh.id)) ? 'checked' : ''} onchange="app.PlanningBreakdown.toggleShotSelection('${id}', '${esc(String(sh.id))}')"> ${esc(lab)}
+                <input type="checkbox" data-fds-scene="${id}" data-fds-shot="${esc(String(sh.id))}" ${sel.some(x => String(x) === String(sh.id)) ? 'checked' : ''} onchange="app.PlanningBreakdown.toggleShotSelection('${id}', ${Utils.jsArg(String(sh.id))})"> ${esc(lab)}
             </label>`;
         }).join('');
         return `<details style="text-align:left">
@@ -863,16 +863,16 @@
                 if(!s) return;
                 const idx = allScenes.findIndex(x => x.id === ref.sceneId);
                 h += `<tr>
-                    <td><input class="fdsw-in" type="time" value="${esc(ref.startTime || '')}" onchange="app.FDSLive.setSceneTime('${esc(ref.sceneId)}', this.value)"></td>
+                    <td><input class="fdsw-in" type="time" value="${esc(ref.startTime || '')}" onchange="app.FDSLive.setSceneTime(${Utils.jsArg(ref.sceneId)}, this.value)"></td>
                     <td style="text-align:center">${esc(idx >= 0 ? idx + 1 : '')}</td>
                     <td>${FDSLive.roSrc(PlanningFDS.effet(s.title), 'INT/EXT ?', `app.FDSLive.openFiche('scene','${esc(ref.sceneId)}')`, 'Fiche scène')}</td>
-                    <td style="text-align:center"><input class="fdsw-in" style="text-align:center" value="${esc(s.chrono || '')}" placeholder="J1" title="Jour de récit" onchange="app.FDSLive.setChrono('${esc(ref.sceneId)}', this.value)"></td>
+                    <td style="text-align:center"><input class="fdsw-in" style="text-align:center" value="${esc(s.chrono || '')}" placeholder="J1" title="Jour de récit" onchange="app.FDSLive.setChrono(${Utils.jsArg(ref.sceneId)}, this.value)"></td>
                     <td>${FDSLive.roSrc(PlanningFDS.decor(s), 'décor illisible', `app.FDSLive.openFiche('scene','${esc(ref.sceneId)}')`, 'Fiche scène')}</td>
                     <td>${FDSLive.roSrc(s.resume || '', 'résumé vide', `app.FDSLive.openFiche('scene','${esc(ref.sceneId)}')`, 'Fiche scène')}</td>
                     <td>${FDSLive.roSrc(s.perso || '', 'aucun personnage', `app.FDSLive.openFiche('scene','${esc(ref.sceneId)}')`, 'Fiche scène')}</td>
                     <td style="text-align:center">${FDSLive.shotsCell(ref, s)}</td>
                     <td style="text-align:center">${FDSLive.roSrc(PlanningFDS.min(s.time), '—', `app.FDSLive.openFiche('scene','${esc(ref.sceneId)}')`, 'Fiche scène')}</td>
-                    <td style="text-align:center"><button type="button" class="fdsw-link" title="Retirer du jour" onclick="app.FDSLive.removeScene('${esc(ref.sceneId)}')">✖</button></td>
+                    <td style="text-align:center"><button type="button" class="fdsw-link" title="Retirer du jour" onclick="app.FDSLive.removeScene(${Utils.jsArg(ref.sceneId)})">✖</button></td>
                 </tr>`;
             });
         }
@@ -940,7 +940,7 @@
                         <td>${c(`call-hmc-actor-${p.id}`, '', 'time')}</td>
                         <td>${c(`call-pat-actor-${p.id}`, '', 'time')}</td>
                         ${extra ? extra.cells(p.id) : ''}
-                        <td style="text-align:center"><button type="button" class="fdsw-link" title="Déconvoquer" onclick="app.FDSLive.removePerson('actor','${esc(p.id)}')">✖</button></td>
+                        <td style="text-align:center"><button type="button" class="fdsw-link" title="Déconvoquer" onclick="app.FDSLive.removePerson('actor',${Utils.jsArg(p.id)})">✖</button></td>
                     </tr>`;
                 });
             }
@@ -992,10 +992,10 @@
                         const isOther = (tr.mode || '') === 'Autre';
                         const opts = Figuration._transportModes.map(m =>
                             `<option value="${esc(m)}" ${(tr.mode || '') === m ? 'selected' : ''}>${esc(m || '-- transport --')}</option>`).join('');
-                        return `<td><select class="fdsw-in" onchange="app.Figuration.updateCallsheetTransport('${esc(pid)}', 'mode', this.value)">${opts}</select>`
-                            + (isOther ? `<input class="fdsw-in" placeholder="préciser..." data-tooltip="préciser..." value="${esc(tr.note || '')}" onchange="app.Figuration.updateCallsheetTransport('${esc(pid)}', 'note', this.value)">` : '')
+                        return `<td><select class="fdsw-in" onchange="app.Figuration.updateCallsheetTransport(${Utils.jsArg(pid)}, 'mode', this.value)">${opts}</select>`
+                            + (isOther ? `<input class="fdsw-in" placeholder="préciser..." data-tooltip="préciser..." value="${esc(tr.note || '')}" onchange="app.Figuration.updateCallsheetTransport(${Utils.jsArg(pid)}, 'note', this.value)">` : '')
                             + `</td>`
-                            + `<td><input class="fdsw-in" placeholder="tenue à prévoir" data-tooltip="tenue à prévoir" value="${esc(row.costume || '')}" onchange="app.Figuration.updateCallsheetField('${esc(pid)}', 'costume', this.value)"></td>`
+                            + `<td><input class="fdsw-in" placeholder="tenue à prévoir" data-tooltip="tenue à prévoir" value="${esc(row.costume || '')}" onchange="app.Figuration.updateCallsheetField(${Utils.jsArg(pid)}, 'costume', this.value)"></td>`
                             + `<td>${c(`call-notes-actor-${pid}`, 'rien à apporter')}</td>`;
                     }
                 };
@@ -1043,7 +1043,7 @@
                     <td>${c(`call-pickup-crew-${p.id}`, '', 'time')}</td>
                     <td>${c(`call-pat-crew-${p.id}`, '', 'time')}</td>
                     <td>${FDSLive.roSrc(grpName(m.group_id), 'non classé', `app.FDSLive.openFiche('crew','${esc(p.id)}')`)}</td>
-                    <td style="text-align:center"><button type="button" class="fdsw-link" title="Déconvoquer" onclick="app.FDSLive.removePerson('crew','${esc(p.id)}')">✖</button></td>
+                    <td style="text-align:center"><button type="button" class="fdsw-link" title="Déconvoquer" onclick="app.FDSLive.removePerson('crew',${Utils.jsArg(p.id)})">✖</button></td>
                 </tr>`;
             });
         }
@@ -1087,7 +1087,7 @@
             choix.forEach(([v, lab, off]) => {
                 opts += `<option value="${esc(v)}"${v === cur ? ' selected' : ''}${off ? ' disabled' : ''}>${esc(lab)}</option>`;
             });
-            return `<select class="fdsw-in" onchange="app.FDSLive.setTransport('${type}','${esc(id)}', this.value)">${opts}</select>`;
+            return `<select class="fdsw-in" onchange="app.FDSLive.setTransport('${type}',${Utils.jsArg(id)}, this.value)">${opts}</select>`;
         };
         const modeOf = (type, id) => (PlanningTransport.model.get(type, id) || {}).transport || '';
         const withCell = (type, id) => {
@@ -1116,7 +1116,7 @@
                 // « Part avec » : un seul conducteur, la logique existante force déjà l'unicité
                 const cur = picked[0] || '';
                 return `<select class="fdsw-in" style="width:100%; border:1px solid #999;"
-                    onchange="app.FDSLive.setWith('${type}','${esc(id)}', this.value)">
+                    onchange="app.FDSLive.setWith('${type}',${Utils.jsArg(id)}, this.value)">
                     <option value="">-- qui conduit ? --</option>
                     ${others.map(o => { const v = o.type + '_' + o.id;
                         return `<option value="${esc(v)}"${(cur && memeQue(o, cur)) ? ' selected' : ''}>${esc(nameFor(o))}</option>`; }).join('')}
@@ -1127,12 +1127,12 @@
                 const o = others.find(x => memeQue(x, v));
                 if(!o) return '';
                 return `<span style="display:inline-block; background:#eee; border:1px solid #999; border-radius:3px; padding:0 4px; margin:1px 3px 1px 0; white-space:nowrap;">${esc(nameFor(o))}
-                    <button type="button" class="fdsw-link" title="Retirer" onclick="app.FDSLive.toggleWith('${type}','${esc(id)}','${esc(v)}', false)">✖</button></span>`;
+                    <button type="button" class="fdsw-link" title="Retirer" onclick="app.FDSLive.toggleWith('${type}',${Utils.jsArg(id)},${Utils.jsArg(v)}, false)">✖</button></span>`;
             }).join('');
             const free = others.filter(o => !picked.some(v => memeQue(o, v))
                 && PlanningTransport.model.canBePassenger(o.type, o.id));
             const adder = free.length ? `<select class="fdsw-in" style="width:100%; border:1px solid #999; margin-top:2px;"
-                onchange="app.FDSLive.toggleWith('${type}','${esc(id)}', this.value, true)">
+                onchange="app.FDSLive.toggleWith('${type}',${Utils.jsArg(id)}, this.value, true)">
                 <option value="">-- ajouter un passager --</option>${free.map(optFor).join('')}
             </select>` : `<span class="fdsw-empty">tout le monde est déjà passager</span>`;
             return chips + adder;
@@ -1185,7 +1185,7 @@
                     const lab = `${v.name || 'véhicule'}${v.seats ? ' (' + v.seats + ' pl.)' : ''}${occupe ? ' — conduit par ' + prisPar[v.id] : ''}`;
                     opts += `<option value="${esc(v.id)}"${v.id === cur ? ' selected' : ''}${occupe ? ' disabled' : ''}>${esc(lab)}</option>`;
                 });
-                return `<select class="fdsw-in" onchange="app.FDSLive.setVehicle('${type}','${esc(id)}', this.value)">${opts}</select>`;
+                return `<select class="fdsw-in" onchange="app.FDSLive.setVehicle('${type}',${Utils.jsArg(id)}, this.value)">${opts}</select>`;
             }
             if(mode === 'with') {
                 const driver = (FDSLive.withWhoOf(type, id) || [])[0] || '';
@@ -1259,7 +1259,7 @@
                         const tip = d.n > 1
                             ? `${d.n} fiches distinctes portent ce nom — ouvrir la première`
                             : 'Ouvrir la fiche';
-                        return `<span role="button" title="${esc(tip)}" onclick="app.FDSLive.openFiche('${k}','${esc(String(lk.id))}')" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px;">${esc(d.label)}</span>`;
+                        return `<span role="button" title="${esc(tip)}" onclick="app.FDSLive.openFiche('${k}',${Utils.jsArg(String(lk.id))})" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px;">${esc(d.label)}</span>`;
                     }).join('  -  ');
                     const auto = (x.autoDetail || []).length
                         ? autoHtml

@@ -81,16 +81,16 @@
               : (k ? Links.icon(k) : '📝');
           let onclick = '';
           let titre = txt;
-          if(k && rec) { onclick = ` onclick="app.UI.openFiche('${k}', '${esc(String(rec.id))}')"`; titre = 'Ouvrir la fiche de ' + txt; }
+          if(k && rec) { onclick = ` onclick="app.UI.openFiche('${k}', ${Utils.jsArg(String(rec.id))})"`; titre = 'Ouvrir la fiche de ' + txt; }
           else if(link && link.masque) { titre = txt + ' — fiche rattachée, mais vous n\'avez pas accès à cette section.'; }
-          else if(kind && canEdit) { onclick = ` onclick="app.Breakdown.resolveItem('${scene.id}', '${esc(cat)}', ${i})"`; titre = 'Aucune fiche — cliquez pour en créer une ou rattacher l\u2019élément'; }
+          else if(kind && canEdit) { onclick = ` onclick="app.Breakdown.resolveItem('${scene.id}', ${Utils.jsArg(cat)}, ${i})"`; titre = 'Aucune fiche — cliquez pour en créer une ou rattacher l\u2019élément'; }
           // La carte GARDE la classe .bd-tag : c'est elle que lit le trace de
           // liaison vers le scenario. v594 : simplifiee en ligne (photo + nom
           // seulement, la categorie est deja portee par le groupe).
           const etat = kind ? (link ? ' is-linked' : ' is-unlinked') : '';
           return `<div class="bd-fiche-row bd-tag${etat}" data-term="${esc(txt.toLowerCase())}"${extraAttr}${onclick} title="${esc(titre)}">
                       ${canEdit ? `<div class="compact-card-actions">
-                          <button class="delete-btn" onclick="event.stopPropagation(); app.Breakdown.removeItem('${scene.id}', '${esc(cat)}', ${i}, event)" title="Retirer de cette scène">×</button>
+                          <button class="delete-btn" onclick="event.stopPropagation(); app.Breakdown.removeItem('${scene.id}', ${Utils.jsArg(cat)}, ${i}, event)" title="Retirer de cette scène">×</button>
                       </div>` : ''}
                       ${kind ? `<div class="bd-fiche-state ${link ? 'ok' : 'missing'}" title="${link ? 'Rattaché à une fiche' : 'Aucune fiche'}"></div>` : ''}
                       <div class="bd-fiche-row-photo">${vignette}</div>
@@ -191,7 +191,7 @@
               const collapsed = g.titre && Breakdown._loadCollapsedGroups().has(g.titre);
               return `
               <div class="bd-fiches-group${collapsed ? ' is-collapsed' : ''}">
-                  ${g.titre ? `<div class="bd-cat-name" onclick="app.Breakdown.toggleGroup('${Utils.escape(g.titre).replace(/'/g, "\\'")}')"><span class="bd-cat-name-arrow">▾</span> ${Utils.escape(g.titre)} <span class="bd-cat-name-count">${g.entrees.length}</span></div>` : ''}
+                  ${g.titre ? `<div class="bd-cat-name" onclick="app.Breakdown.toggleGroup(${Utils.jsArg(g.titre)})"><span class="bd-cat-name-arrow">▾</span> ${Utils.escape(g.titre)} <span class="bd-cat-name-count">${g.entrees.length}</span></div>` : ''}
                   <div class="bd-fiches-list">
                       ${g.entrees.map(x => Breakdown.ficheCard(scene, x.cat, x.item, x.i, canEdit)).join('')}
                   </div>
@@ -3242,7 +3242,7 @@ const MoodBoard = {
         }
         
         if(el.type === 'link') {
-            content = `<div class="moodboard-element-link" ondblclick="window.open('${Utils.escape(Utils.safeUrl(el.url))}', '_blank')">
+            content = `<div class="moodboard-element-link" ondblclick="window.open(${Utils.jsArg(Utils.safeUrl(el.url))}, '_blank')">
                 <div class="link-icon">🔗</div>
                 <div class="link-title">${Utils.escape(el.title || 'Lien')}</div>
                 <div class="link-url">${Utils.escape(el.url || '').substring(0, 40)}...</div>

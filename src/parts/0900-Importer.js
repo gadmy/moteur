@@ -4386,7 +4386,7 @@ const Presentation = {
         } else {
             listHtml = orgsList.map(o => {
                 const fn = [o.department, o.role].filter(Boolean).join(' — ');
-                return `<div onclick="app.Presentation.addPartner('${type}', '${Utils.escape(o.id)}', '${Utils.escape(o.name)}', '')"
+                return `<div onclick="app.Presentation.addPartner('${type}', ${Utils.jsArg(o.id)}, ${Utils.jsArg(o.name)}, '')"
                     style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: all 0.2s;"
                     onmouseover="this.style.borderColor='var(--primary)'" onmouseout="this.style.borderColor='var(--border)'">
                     <div style="font-size:1.4rem;">${isAssociation ? '🏛️' : '🏢'}</div>
@@ -7399,7 +7399,7 @@ const Expenses = {
             // Le nom redevient ce qu'il est — ce qu'on y tourne — au lieu de tenir
             // lieu de reperage dans le temps.
             const meta = [r.typeLabel, r.sub].filter(Boolean).join(' · ');
-            return '<div class="compact-card" style="' + (vide ? 'opacity:0.6;' : '') + '" onclick="app.UI.openFiche(\'day\', \'' + Utils.escape(String(r.id)) + '\')" title="' + r.typeLabel + ' — ouvrir la feuille de service">'
+            return '<div class="compact-card" style="' + (vide ? 'opacity:0.6;' : '') + '" onclick="app.UI.openFiche(\'day\', ' + Utils.jsArg(String(r.id)) + ')" title="' + r.typeLabel + ' — ouvrir la feuille de service">'
                 + '<div class="compact-card-badge" title="Nombre de dépenses rattachées">' + r.count + '</div>'
                 + '<div class="compact-card-photo">' + r.icon + '</div>'
                 + '<div class="compact-card-name">' + Utils.escape(r.label) + '</div>'
@@ -8839,8 +8839,8 @@ const Admin = {
                 +   '</div>'
                 +   (e.pile ? '<pre style="background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:10px; overflow:auto; font-size:0.75rem; max-height:260px;">' + Utils.escape(e.pile) + '</pre>' : '')
                 +   '<div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">'
-                +     '<button class="btn btn--sm" onclick="app.Admin.copyError(\'' + Utils.escape(e.empreinte) + '\')">📋 Copier</button>'
-                +     '<button class="btn btn--sm" onclick="app.Admin.markErrorDone(\'' + Utils.escape(e.empreinte) + '\', ' + (g.traite ? 'false' : 'true') + ')">' + (g.traite ? '↩️ À retraiter' : '✔️ Traitée') + '</button>'
+                +     '<button class="btn btn--sm" onclick="app.Admin.copyError(' + Utils.jsArg(e.empreinte) + ')">📋 Copier</button>'
+                +     '<button class="btn btn--sm" onclick="app.Admin.markErrorDone(' + Utils.jsArg(e.empreinte) + ', ' + (g.traite ? 'false' : 'true') + ')">' + (g.traite ? '↩️ À retraiter' : '✔️ Traitée') + '</button>'
                 +   '</div>'
                 + '</div>'
             + '</details>';

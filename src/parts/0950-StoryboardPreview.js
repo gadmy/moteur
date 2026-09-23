@@ -3440,7 +3440,7 @@ const FicheLinks = {
         const kind = FicheLinks.KIND4[coll];
         if(!kind || !item || !item.id || isView) return '';
         if(!item.keepGroup && FicheLinks.inAnyScene(kind, item.id)) return '';
-        return `<label style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:0.8rem; color:var(--text-sec); cursor:pointer;" onclick="event.stopPropagation()"><input type="checkbox" ${item.keepGroup ? 'checked' : ''} onchange="app.FicheLinks.setKeepGroup('${coll}', '${Utils.escape(String(item.id))}', this.checked)"> 📌 Classement manuel (ne pas ranger dans « Sans scène »)</label>`;
+        return `<label style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:0.8rem; color:var(--text-sec); cursor:pointer;" onclick="event.stopPropagation()"><input type="checkbox" ${item.keepGroup ? 'checked' : ''} onchange="app.FicheLinks.setKeepGroup('${coll}', ${Utils.jsArg(String(item.id))}, this.checked)"> 📌 Classement manuel (ne pas ranger dans « Sans scène »)</label>`;
     },
 
     // MIGRATION, idempotente, appelee au chargement du projet juste apres
@@ -4424,7 +4424,7 @@ const Board = {
         if(photos.length) {
             html += `<div class="board-scroller">`;
             photos.forEach(p => {
-                html += `<div class="board-photo"><img src="${Utils.safeMediaUrl(p.url)}" alt="Idée de référence">${!isView ? `<button class="board-del" title="Supprimer" onclick="app.Board.remove('${fam}','${sid}','${esc(p.id)}')">✕</button>` : ''}</div>`;
+                html += `<div class="board-photo"><img src="${Utils.safeMediaUrl(p.url)}" alt="Idée de référence">${!isView ? `<button class="board-del" title="Supprimer" onclick="app.Board.remove('${fam}','${sid}',${Utils.jsArg(p.id)})">✕</button>` : ''}</div>`;
             });
             html += `</div>`;
         }
@@ -4434,7 +4434,7 @@ const Board = {
                 if(isView) {
                     html += `<div class="board-note">${esc(n.text || '')}</div>`;
                 } else {
-                    html += `<div class="board-note"><textarea class="board-note-input" placeholder="Idée, référence, remarque..." data-tooltip="Idée, référence, remarque..." oninput="app.Board.updateNote('${fam}','${sid}','${esc(n.id)}', this.value)">${esc(n.text || '')}</textarea><button class="board-del" title="Supprimer" onclick="app.Board.remove('${fam}','${sid}','${esc(n.id)}')">✕</button></div>`;
+                    html += `<div class="board-note"><textarea class="board-note-input" placeholder="Idée, référence, remarque..." data-tooltip="Idée, référence, remarque..." oninput="app.Board.updateNote('${fam}','${sid}',${Utils.jsArg(n.id)}, this.value)">${esc(n.text || '')}</textarea><button class="board-del" title="Supprimer" onclick="app.Board.remove('${fam}','${sid}',${Utils.jsArg(n.id)})">✕</button></div>`;
                 }
             });
             html += `</div>`;
@@ -5113,7 +5113,7 @@ const CardModal = {
         if(shots.length) {
             const tags = shots.map((s, i) => {
                 const lbl = 'Plan ' + (i + 1) + (s.name ? ' — ' + String(s.name).slice(0, 30) : '');
-                return `<span class="appearance-tag is-clickable" onclick="app.UI.openFiche('shot','${Utils.escape(String(s.id))}')" title="${Utils.escape(s.shotType || '')}">${Utils.escape(lbl)}</span>`;
+                return `<span class="appearance-tag is-clickable" onclick="app.UI.openFiche('shot',${Utils.jsArg(String(s.id))})" title="${Utils.escape(s.shotType || '')}">${Utils.escape(lbl)}</span>`;
             }).join(' ');
             plansHtml = `<div class="appearances-section"><span class="appearances-label">🎬 Plans (${shots.length}) :</span> ${tags}</div>`;
         }
@@ -5289,7 +5289,7 @@ const CardModal = {
         });
         const daysHtml = days.length
             ? `<div class="appearances-section"><span class="appearances-label">📅 Retenu pour (${days.length}) :</span> `
-              + days.map(d => `<span class="appearance-tag is-clickable" onclick="app.UI.openFiche('day','${esc(String(d.id))}')">${esc(String(d.date || d.startDate))}</span>`).join(' ')
+              + days.map(d => `<span class="appearance-tag is-clickable" onclick="app.UI.openFiche('day',${Utils.jsArg(String(d.id))})">${esc(String(d.date || d.startDate))}</span>`).join(' ')
               + `</div>`
             : '';
         
@@ -5305,41 +5305,41 @@ const CardModal = {
             ${apercu}
             <div style="padding:10px 12px; background:var(--bg); border-radius:8px; border:1px solid var(--border); margin-bottom:12px;">
                 ${scene
-                    ? `<span style="font-size:0.85rem; color:var(--text-sec);">Scène :</span> <span class="appearance-tag is-clickable" onclick="app.UI.openFiche('scene','${esc(String(scene.id))}')">#${sceneIdx + 1}${scene.title ? ' — ' + esc(String(scene.title).slice(0, 50)) : ''}</span>`
+                    ? `<span style="font-size:0.85rem; color:var(--text-sec);">Scène :</span> <span class="appearance-tag is-clickable" onclick="app.UI.openFiche('scene',${Utils.jsArg(String(scene.id))})">#${sceneIdx + 1}${scene.title ? ' — ' + esc(String(scene.title).slice(0, 50)) : ''}</span>`
                     : `<span style="font-size:0.85rem; color:var(--danger);">Ce plan n'est rattaché à aucune scène.</span>`}
                 <div style="font-size:0.78rem; color:var(--text-sec); margin-top:6px;">Le dessin et les annotations se modifient dans l'onglet Storyboard.</div>
             </div>
             <label class="form-label-block">🏷️ Nom du plan</label>
-            <input class="actor-input" placeholder="Ex: Arrivée en voiture" data-tooltip="Ex: Arrivée en voiture" value="${esc(shot.name || '')}" onchange="app.CardModal.setShotField('${esc(String(shot.id))}','name',this.value)" ${dis} style="margin-bottom:10px;">
+            <input class="actor-input" placeholder="Ex: Arrivée en voiture" data-tooltip="Ex: Arrivée en voiture" value="${esc(shot.name || '')}" onchange="app.CardModal.setShotField(${Utils.jsArg(String(shot.id))},'name',this.value)" ${dis} style="margin-bottom:10px;">
             <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
                 <div style="flex:1; min-width:150px;">
                     <label class="form-label-block">🎥 Type de plan</label>
-                    <select class="actor-input" onchange="app.CardModal.setShotField('${esc(String(shot.id))}','shotType',this.value)" ${dis}>
+                    <select class="actor-input" onchange="app.CardModal.setShotField(${Utils.jsArg(String(shot.id))},'shotType',this.value)" ${dis}>
                         <option value="">—</option>
                         ${CONFIG.shotTypes.map(t => `<option value="${esc(t)}" ${shot.shotType === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
                     </select>
                 </div>
                 <div style="flex:1; min-width:150px;">
                     <label class="form-label-block">↔️ Mouvement</label>
-                    <select class="actor-input" onchange="app.CardModal.setShotField('${esc(String(shot.id))}','cameraMove',this.value)" ${dis}>
+                    <select class="actor-input" onchange="app.CardModal.setShotField(${Utils.jsArg(String(shot.id))},'cameraMove',this.value)" ${dis}>
                         <option value="">—</option>
                         ${CONFIG.cameraMoves.map(m => `<option value="${esc(m)}" ${shot.cameraMove === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}
                     </select>
                 </div>
                 <div style="flex:1; min-width:150px;">
                     <label class="form-label-block">📷 Mode caméra</label>
-                    <select class="actor-input" onchange="app.CardModal.setShotField('${esc(String(shot.id))}','cameraMode',this.value)" ${dis}>
+                    <select class="actor-input" onchange="app.CardModal.setShotField(${Utils.jsArg(String(shot.id))},'cameraMode',this.value)" ${dis}>
                         <option value="">—</option>
                         ${(CONFIG.cameraModes || []).map(m => `<option value="${esc(m)}" ${shot.cameraMode === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}
                     </select>
                 </div>
             </div>
             <label class="form-label-block">📝 Description</label>
-            <textarea class="data-desc" style="min-height:70px;" placeholder="Ce que montre le plan..." data-tooltip="Ce que montre le plan..." onchange="app.CardModal.setShotField('${esc(String(shot.id))}','description',this.value)" ${dis}>${esc(shot.description || '')}</textarea>
+            <textarea class="data-desc" style="min-height:70px;" placeholder="Ce que montre le plan..." data-tooltip="Ce que montre le plan..." onchange="app.CardModal.setShotField(${Utils.jsArg(String(shot.id))},'description',this.value)" ${dis}>${esc(shot.description || '')}</textarea>
             <label class="form-label-block">🎭 Direction des acteurs</label>
-            <textarea class="data-desc" style="min-height:60px;" onchange="app.CardModal.setShotField('${esc(String(shot.id))}','actorDirection',this.value)" ${dis}>${esc(shot.actorDirection || '')}</textarea>
+            <textarea class="data-desc" style="min-height:60px;" onchange="app.CardModal.setShotField(${Utils.jsArg(String(shot.id))},'actorDirection',this.value)" ${dis}>${esc(shot.actorDirection || '')}</textarea>
             <label class="form-label-block">🔧 Direction technique</label>
-            <textarea class="data-desc" style="min-height:60px;" onchange="app.CardModal.setShotField('${esc(String(shot.id))}','technicalDirection',this.value)" ${dis}>${esc(shot.technicalDirection || '')}</textarea>
+            <textarea class="data-desc" style="min-height:60px;" onchange="app.CardModal.setShotField(${Utils.jsArg(String(shot.id))},'technicalDirection',this.value)" ${dis}>${esc(shot.technicalDirection || '')}</textarea>
             ${daysHtml}
             </div>
         `;

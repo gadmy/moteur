@@ -1243,7 +1243,7 @@
               const n = Planning.dayLabel(d);
               const dt = d.date || d.startDate || '';
               const t = Utils.escape(dt ? (n + ' — ' + dt) : n);
-              return `<span class="appearance-tag is-clickable" onclick="app.UI.openFiche('day', '${Utils.escape(String(d.id))}')" title="Ouvrir la feuille de service : ${t}">${t}</span>`;
+              return `<span class="appearance-tag is-clickable" onclick="app.UI.openFiche('day', ${Utils.jsArg(String(d.id))})" title="Ouvrir la feuille de service : ${t}">${t}</span>`;
           }).join(' ');
           return `<div class="appearances-section">
                         <span class="appearances-label">${label} (${days.length}) :</span>
@@ -1276,7 +1276,7 @@
           if(!prets.length) return '';
           const tags = prets.map(n => {
               const t = Utils.escape(String(n.label || ''));
-              return `<span class="appearance-tag is-clickable" onclick="app.UI.openFiche('resource', '${Utils.escape(String(n.id))}')" title="Ouvrir la fiche : ${t}">${t}</span>`;
+              return `<span class="appearance-tag is-clickable" onclick="app.UI.openFiche('resource', ${Utils.jsArg(String(n.id))})" title="Ouvrir la fiche : ${t}">${t}</span>`;
           }).join(' ');
           return `<div class="appearances-section">
                         <span class="appearances-label">📦 Prête au tournage (${prets.length}) :</span>
@@ -2663,7 +2663,7 @@
                           const coords = f.geometry && f.geometry.coordinates ? f.geometry.coordinates : [null, null];
                           const label = props.label || '';
                           const context = props.context || '';
-                          return `<div class="address-suggestion" onclick="app.Actions.selectLocationAddress(${idx}, '${Utils.escape(label).replace(/'/g, "\\'")}', ${coords[1]}, ${coords[0]})">
+                          return `<div class="address-suggestion" onclick="app.Actions.selectLocationAddress(${idx}, ${Utils.jsArg(label)}, ${coords[1]}, ${coords[0]})">
                               <div class="address-suggestion-main">${Utils.escape(props.name || label.split(',')[0])}</div>
                               <div class="address-suggestion-secondary">${Utils.escape(context)}</div>
                           </div>`;
