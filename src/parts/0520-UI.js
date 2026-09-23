@@ -2059,10 +2059,9 @@
           
           try {
               // Chercher dans user_profiles
-              const { data: profiles, error } = await supabase
-                  .from('user_profiles')
-                  .select('*')
-                  .eq('email', email.toLowerCase());
+              // v602 : par la porte unique des profils (Utils.profils).
+              const { data: _trouves, error } = await Utils.profils({ emails: [email.toLowerCase()] });
+              const profiles = _trouves.filter(p => String(p.email || '').toLowerCase() === email.toLowerCase());
               
               if(!error && profiles && profiles.length > 0) {
                   const existingProfile = profiles[0];
@@ -2118,11 +2117,7 @@
           const dataArray = type === 'actor' ? state.data.actors : state.data.crew;
           
           try {
-              const { data: publicData, error } = await supabase
-                  .from('user_profiles')
-                  .select('*')
-                  .eq('id', profileId)
-                  .maybeSingle();
+              const { data: publicData, error } = await Utils.profils({ ids: [profileId] }).then(r => ({ data: r.data[0] || null, error: r.error }));
               
               if (error) throw error;
               
@@ -2197,11 +2192,7 @@
               const actor = state.data.actors[i];
               if(actor.publicProfileId) {
                   try {
-                      const { data: publicData, error: errSyncAD } = await supabase
-                          .from('user_profiles')
-                          .select('*')
-                          .eq('id', actor.publicProfileId)
-                          .maybeSingle();
+                      const { data: publicData, error: errSyncAD } = await Utils.profils({ ids: [actor.publicProfileId] }).then(r => ({ data: r.data[0] || null, error: r.error }));
                       if(errSyncAD) console.warn('[PublicProfile] sync actors (données):', errSyncAD);
                       if(publicData) {
                           // Extraire les données du champ JSONB
@@ -2298,11 +2289,7 @@
               const member = state.data.crew[i];
               if(member.publicProfileId) {
                   try {
-                      const { data: publicData, error: errSyncCD } = await supabase
-                          .from('user_profiles')
-                          .select('*')
-                          .eq('id', member.publicProfileId)
-                          .maybeSingle();
+                      const { data: publicData, error: errSyncCD } = await Utils.profils({ ids: [member.publicProfileId] }).then(r => ({ data: r.data[0] || null, error: r.error }));
                       if(errSyncCD) console.warn('[PublicProfile] sync crew (données):', errSyncCD);
                       if(publicData) {
                           // Extraire les données du champ JSONB

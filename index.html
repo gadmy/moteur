@@ -12916,6 +12916,22 @@ crewRoles: {
       // puis on l'echappe pour l'attribut. S'utilise SANS guillemets autour :
       // onclick="app.X.y(${Utils.jsArg(nom)})".
       jsArg: (s) => Utils.escape(JSON.stringify(String(s == null ? '' : s))),
+      // v602 (audit securite) : LA seule porte de lecture des profils
+      // (user_profiles). Le telephone, la date de naissance, l'adresse et
+      // les preferences ne se lisent plus en direct : cette fonction serveur
+      // rend sa propre ligne intacte, et celle des autres avec le telephone
+      // masque selon leur choix (numero d'agent, « masquer »). Memes regles
+      // que l'Univers. Renvoie { data: [...], error }.
+      //   { ids: [...] } / { emails: [...] } / { recherche: 'texte' } /
+      //   { tous: true } (administration seulement)
+      profils: async (q) => {
+          q = q || {};
+          const { data, error } = await supabase.rpc('profils_visibles', {
+              p_ids: q.ids || null, p_emails: q.emails || null,
+              p_recherche: q.recherche || null, p_tous: !!q.tous
+          });
+          return { data: data || [], error };
+      },
       // Sanitize du HTML riche inter-utilisateurs (forum, actualites) : allowlist de balises, zero attribut
       sanitizeRich: (html) => {
         const allowed = ['B','I','U','STRONG','EM','UL','OL','LI','BR','P','DIV','SPAN'];
@@ -14363,12 +14379,11 @@ crewRoles: {
           try {
               // Multi-profils : plusieurs lignes possibles, on prend la première qui a des préférences
               const email = state.currentUser.email.toLowerCase();
-              const { data, error } = await supabase
-                  .from('user_profiles')
-                  .select('preferences')
-                  .or(`owner_email.eq.${Utils.pgSafe(email)},email.eq.${Utils.pgSafe(email)}`)
-                  .not('preferences', 'is', null)
-                  .limit(1);
+              // v602 : par la porte unique des profils ; les preferences ne
+              // se lisent plus en direct.
+              const _p = await Utils.profils({ emails: [email] });
+              const error = _p.error;
+              const data = _p.data.filter(p => p && p.preferences);
               if (error) { console.warn('[PreferencesSync] load error:', error.message); return; }
               const remote = data && data.length > 0 ? data[0].preferences : null;
               if (remote && Object.keys(remote).length > 0) {
@@ -15812,11 +15827,10 @@ showDashboard: async () => {
     els.authView.style.display = 'none'; 
     // Charger le profil utilisateur depuis Supabase
     try {
-        const { data, error } = await supabase
-            .from('user_profiles')
-            .select('*')
-            .eq('email', state.currentUser.email.toLowerCase())
-            .maybeSingle();
+        // v602 : lecture par la porte unique des profils (Utils.profils).
+        const _mesProfils = await Utils.profils({ emails: [state.currentUser.email.toLowerCase()] });
+        const error = _mesProfils.error;
+        const data = _mesProfils.data.find(p => String(p.email || '').toLowerCase() === state.currentUser.email.toLowerCase()) || null;
         
         if (data) {
             state.userProfile = data;
@@ -15838,7 +15852,7 @@ showDashboard: async () => {
                         profile_type: 'producer',
                         created_at: nowIso,
                         is_public: false
-                    }).select().maybeSingle();
+                    }).select('id, email, owner_email, name, profile_type, terms_accepted, is_public, created_at').maybeSingle();
                     if(!insErr && created) {
                         state.userProfile = created;
                         state.userProfile.accountType = created.profile_type || 'producer';
@@ -28079,10 +28093,9 @@ initCategoriesDragDrop: () => {
           
           try {
               // Chercher dans user_profiles
-              const { data: profiles, error } = await supabase
-                  .from('user_profiles')
-                  .select('*')
-                  .eq('email', email.toLowerCase());
+              // v602 : par la porte unique des profils (Utils.profils).
+              const { data: _trouves, error } = await Utils.profils({ emails: [email.toLowerCase()] });
+              const profiles = _trouves.filter(p => String(p.email || '').toLowerCase() === email.toLowerCase());
               
               if(!error && profiles && profiles.length > 0) {
                   const existingProfile = profiles[0];
@@ -28138,11 +28151,7 @@ initCategoriesDragDrop: () => {
           const dataArray = type === 'actor' ? state.data.actors : state.data.crew;
           
           try {
-              const { data: publicData, error } = await supabase
-                  .from('user_profiles')
-                  .select('*')
-                  .eq('id', profileId)
-                  .maybeSingle();
+              const { data: publicData, error } = await Utils.profils({ ids: [profileId] }).then(r => ({ data: r.data[0] || null, error: r.error }));
               
               if (error) throw error;
               
@@ -28217,11 +28226,7 @@ initCategoriesDragDrop: () => {
               const actor = state.data.actors[i];
               if(actor.publicProfileId) {
                   try {
-                      const { data: publicData, error: errSyncAD } = await supabase
-                          .from('user_profiles')
-                          .select('*')
-                          .eq('id', actor.publicProfileId)
-                          .maybeSingle();
+                      const { data: publicData, error: errSyncAD } = await Utils.profils({ ids: [actor.publicProfileId] }).then(r => ({ data: r.data[0] || null, error: r.error }));
                       if(errSyncAD) console.warn('[PublicProfile] sync actors (données):', errSyncAD);
                       if(publicData) {
                           // Extraire les données du champ JSONB
@@ -28318,11 +28323,7 @@ initCategoriesDragDrop: () => {
               const member = state.data.crew[i];
               if(member.publicProfileId) {
                   try {
-                      const { data: publicData, error: errSyncCD } = await supabase
-                          .from('user_profiles')
-                          .select('*')
-                          .eq('id', member.publicProfileId)
-                          .maybeSingle();
+                      const { data: publicData, error: errSyncCD } = await Utils.profils({ ids: [member.publicProfileId] }).then(r => ({ data: r.data[0] || null, error: r.error }));
                       if(errSyncCD) console.warn('[PublicProfile] sync crew (données):', errSyncCD);
                       if(publicData) {
                           // Extraire les données du champ JSONB
@@ -45629,11 +45630,12 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         
         try {
             // I2 : charger TOUS les profils où je suis owner (tableau au lieu d'un seul)
-            const { data: userProfiles, error } = await supabase
-                .from('user_profiles')
-                .select('*')
-                .eq('owner_email', email)
-                .order('created_at', { ascending: true });
+            // v602 : par la porte unique des profils ; les siens reviennent
+            // intacts (telephone, naissance, preferences compris).
+            const _mes = await Utils.profils({ emails: [email] });
+            const error = _mes.error;
+            const userProfiles = _mes.data.filter(p => String(p.owner_email || '').toLowerCase() === email)
+                .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
             
             if(error) {
                 console.error('Erreur chargement profils:', error);
@@ -60408,7 +60410,7 @@ const Orgs = {
         const ids = [...new Set(list.filter(o => o.profileId).map(o => o.profileId))];
         if(!ids.length) return;
         try {
-            const { data, error } = await supabase.from('user_profiles').select('*').in('id', ids);
+            const { data, error } = await Utils.profils({ ids: ids });
             if(error || !data) return;
             const byId = {};
             data.forEach(p => { byId[p.id] = p; });
@@ -68935,11 +68937,9 @@ const Admin = {
     loadStats: async () => {
         try {
             // Charger les profils (filtré si exclusion démo active)
-            let query = supabase.from('user_profiles').select('*');
-            if(Admin.excludeDemoProfiles) {
-                query = query.eq('is_demo', false);
-            }
-            const { data: profiles } = await query;
+            // v602 : par la porte unique des profils (administration : tout).
+            const _tous = await Utils.profils({ tous: true });
+            const profiles = Admin.excludeDemoProfiles ? _tous.data.filter(p => !p.is_demo) : _tous.data;
             Admin.statsData.profiles = profiles || [];
             
             // Réinitialiser les compteurs détaillés
@@ -69540,10 +69540,10 @@ const Admin = {
         
         try {
             // Charger les profils
-            const { data: users, error } = await supabase
-                .from('user_profiles')
-                .select('*')
-                .order('created_at', { ascending: false });
+            // v602 : l'administration lit tout par la porte unique des profils.
+            const _tous = await Utils.profils({ tous: true });
+            const error = _tous.error;
+            const users = _tous.data.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
             
             if(error) throw error;
             
@@ -71173,11 +71173,7 @@ const UniverseProfileModal = {
         let fullProfile = profile;
         if(!isProject) {
             try {
-                const { data: profileData, error: errPd2 } = await supabase
-                    .from('user_profiles')
-                    .select('*')
-                    .eq('id', profile.id)
-                    .maybeSingle();
+                const { data: profileData, error: errPd2 } = await Utils.profils({ ids: [profile.id] }).then(r => ({ data: r.data[0] || null, error: r.error }));
                 if(errPd2) { console.warn('[PublicProfile] chargement profil:', errPd2); Utils.toast('Certaines informations du profil n\u2019ont pas pu être chargées.', 'warning'); }
                 
                 if(profileData) {
@@ -72158,14 +72154,10 @@ const UniverseMap = {
         // 3) Base Supabase — coordonnées pré-calculées côté serveur
         //    (colonnes latitude/longitude ajoutées via patch_C1 + remplies via patch_C2)
         try {
-            const { data: dbRow, error: dbErr } = await supabase
-                .from('user_profiles')
-                .select('latitude, longitude')
-                .ilike('city', city.trim())
-                .not('latitude', 'is', null)
-                .not('longitude', 'is', null)
-                .limit(1)
-                .maybeSingle();
+            // v602 : les coordonnees ne se lisent plus en direct ; la
+            // fonction serveur ne rend que celles d'une ville.
+            const { data: _coords, error: dbErr } = await supabase.rpc('coordonnees_ville', { p_ville: city.trim() });
+            const dbRow = (_coords && _coords[0]) || null;
             
             if(!dbErr && dbRow && dbRow.latitude != null && dbRow.longitude != null) {
                 const result = { lat: dbRow.latitude, lng: dbRow.longitude };

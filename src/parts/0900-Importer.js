@@ -481,7 +481,7 @@ const Orgs = {
         const ids = [...new Set(list.filter(o => o.profileId).map(o => o.profileId))];
         if(!ids.length) return;
         try {
-            const { data, error } = await supabase.from('user_profiles').select('*').in('id', ids);
+            const { data, error } = await Utils.profils({ ids: ids });
             if(error || !data) return;
             const byId = {};
             data.forEach(p => { byId[p.id] = p; });
@@ -9008,11 +9008,9 @@ const Admin = {
     loadStats: async () => {
         try {
             // Charger les profils (filtré si exclusion démo active)
-            let query = supabase.from('user_profiles').select('*');
-            if(Admin.excludeDemoProfiles) {
-                query = query.eq('is_demo', false);
-            }
-            const { data: profiles } = await query;
+            // v602 : par la porte unique des profils (administration : tout).
+            const _tous = await Utils.profils({ tous: true });
+            const profiles = Admin.excludeDemoProfiles ? _tous.data.filter(p => !p.is_demo) : _tous.data;
             Admin.statsData.profiles = profiles || [];
             
             // Réinitialiser les compteurs détaillés
@@ -9613,10 +9611,10 @@ const Admin = {
         
         try {
             // Charger les profils
-            const { data: users, error } = await supabase
-                .from('user_profiles')
-                .select('*')
-                .order('created_at', { ascending: false });
+            // v602 : l'administration lit tout par la porte unique des profils.
+            const _tous = await Utils.profils({ tous: true });
+            const error = _tous.error;
+            const users = _tous.data.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
             
             if(error) throw error;
             
@@ -11246,11 +11244,7 @@ const UniverseProfileModal = {
         let fullProfile = profile;
         if(!isProject) {
             try {
-                const { data: profileData, error: errPd2 } = await supabase
-                    .from('user_profiles')
-                    .select('*')
-                    .eq('id', profile.id)
-                    .maybeSingle();
+                const { data: profileData, error: errPd2 } = await Utils.profils({ ids: [profile.id] }).then(r => ({ data: r.data[0] || null, error: r.error }));
                 if(errPd2) { console.warn('[PublicProfile] chargement profil:', errPd2); Utils.toast('Certaines informations du profil n\u2019ont pas pu être chargées.', 'warning'); }
                 
                 if(profileData) {
@@ -12231,14 +12225,10 @@ const UniverseMap = {
         // 3) Base Supabase — coordonnées pré-calculées côté serveur
         //    (colonnes latitude/longitude ajoutées via patch_C1 + remplies via patch_C2)
         try {
-            const { data: dbRow, error: dbErr } = await supabase
-                .from('user_profiles')
-                .select('latitude, longitude')
-                .ilike('city', city.trim())
-                .not('latitude', 'is', null)
-                .not('longitude', 'is', null)
-                .limit(1)
-                .maybeSingle();
+            // v602 : les coordonnees ne se lisent plus en direct ; la
+            // fonction serveur ne rend que celles d'une ville.
+            const { data: _coords, error: dbErr } = await supabase.rpc('coordonnees_ville', { p_ville: city.trim() });
+            const dbRow = (_coords && _coords[0]) || null;
             
             if(!dbErr && dbRow && dbRow.latitude != null && dbRow.longitude != null) {
                 const result = { lat: dbRow.latitude, lng: dbRow.longitude };

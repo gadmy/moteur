@@ -51,6 +51,22 @@
       // puis on l'echappe pour l'attribut. S'utilise SANS guillemets autour :
       // onclick="app.X.y(${Utils.jsArg(nom)})".
       jsArg: (s) => Utils.escape(JSON.stringify(String(s == null ? '' : s))),
+      // v602 (audit securite) : LA seule porte de lecture des profils
+      // (user_profiles). Le telephone, la date de naissance, l'adresse et
+      // les preferences ne se lisent plus en direct : cette fonction serveur
+      // rend sa propre ligne intacte, et celle des autres avec le telephone
+      // masque selon leur choix (numero d'agent, « masquer »). Memes regles
+      // que l'Univers. Renvoie { data: [...], error }.
+      //   { ids: [...] } / { emails: [...] } / { recherche: 'texte' } /
+      //   { tous: true } (administration seulement)
+      profils: async (q) => {
+          q = q || {};
+          const { data, error } = await supabase.rpc('profils_visibles', {
+              p_ids: q.ids || null, p_emails: q.emails || null,
+              p_recherche: q.recherche || null, p_tous: !!q.tous
+          });
+          return { data: data || [], error };
+      },
       // Sanitize du HTML riche inter-utilisateurs (forum, actualites) : allowlist de balises, zero attribut
       sanitizeRich: (html) => {
         const allowed = ['B','I','U','STRONG','EM','UL','OL','LI','BR','P','DIV','SPAN'];

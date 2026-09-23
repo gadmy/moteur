@@ -117,11 +117,10 @@ showDashboard: async () => {
     els.authView.style.display = 'none'; 
     // Charger le profil utilisateur depuis Supabase
     try {
-        const { data, error } = await supabase
-            .from('user_profiles')
-            .select('*')
-            .eq('email', state.currentUser.email.toLowerCase())
-            .maybeSingle();
+        // v602 : lecture par la porte unique des profils (Utils.profils).
+        const _mesProfils = await Utils.profils({ emails: [state.currentUser.email.toLowerCase()] });
+        const error = _mesProfils.error;
+        const data = _mesProfils.data.find(p => String(p.email || '').toLowerCase() === state.currentUser.email.toLowerCase()) || null;
         
         if (data) {
             state.userProfile = data;
@@ -143,7 +142,7 @@ showDashboard: async () => {
                         profile_type: 'producer',
                         created_at: nowIso,
                         is_public: false
-                    }).select().maybeSingle();
+                    }).select('id, email, owner_email, name, profile_type, terms_accepted, is_public, created_at').maybeSingle();
                     if(!insErr && created) {
                         state.userProfile = created;
                         state.userProfile.accountType = created.profile_type || 'producer';

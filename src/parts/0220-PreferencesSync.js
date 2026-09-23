@@ -15,12 +15,11 @@
           try {
               // Multi-profils : plusieurs lignes possibles, on prend la première qui a des préférences
               const email = state.currentUser.email.toLowerCase();
-              const { data, error } = await supabase
-                  .from('user_profiles')
-                  .select('preferences')
-                  .or(`owner_email.eq.${Utils.pgSafe(email)},email.eq.${Utils.pgSafe(email)}`)
-                  .not('preferences', 'is', null)
-                  .limit(1);
+              // v602 : par la porte unique des profils ; les preferences ne
+              // se lisent plus en direct.
+              const _p = await Utils.profils({ emails: [email] });
+              const error = _p.error;
+              const data = _p.data.filter(p => p && p.preferences);
               if (error) { console.warn('[PreferencesSync] load error:', error.message); return; }
               const remote = data && data.length > 0 ? data[0].preferences : null;
               if (remote && Object.keys(remote).length > 0) {

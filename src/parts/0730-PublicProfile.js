@@ -1586,11 +1586,12 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         
         try {
             // I2 : charger TOUS les profils où je suis owner (tableau au lieu d'un seul)
-            const { data: userProfiles, error } = await supabase
-                .from('user_profiles')
-                .select('*')
-                .eq('owner_email', email)
-                .order('created_at', { ascending: true });
+            // v602 : par la porte unique des profils ; les siens reviennent
+            // intacts (telephone, naissance, preferences compris).
+            const _mes = await Utils.profils({ emails: [email] });
+            const error = _mes.error;
+            const userProfiles = _mes.data.filter(p => String(p.owner_email || '').toLowerCase() === email)
+                .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
             
             if(error) {
                 console.error('Erreur chargement profils:', error);
