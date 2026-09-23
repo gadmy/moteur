@@ -322,8 +322,16 @@
         return present ? 'W' : 'H';
     },
     joursTravailles: (map, cle) => (map && map[cle]) ? Object.keys(map[cle].days).length : 0,
+    //  LE LIEN PERSONNAGE -> COMEDIEN S'ECRIT « actor_id », PAS « actorId ».
+    //  Mesure en base : 22 personnages distribues, TOUS en actor_id, aucun en
+    //  actorId — et 41 lectures en actor_id dans le reste du code contre une
+    //  seule ici. Les colonnes de roles portaient donc le nom du comedien au
+    //  lieu de celui du personnage, en silence, puisqu'il y a un repli.
+    //  On lit les deux : l'ancienne orthographe ne coute rien et un import
+    //  ancien peut encore la porter.
     persoDe: (actorId) => {
-        const c = (state.data.characters || []).find(x => x && x.actorId === actorId);
+        const c = (state.data.characters || []).find(x => x &&
+            ((x.actor_id && x.actor_id === actorId) || (x.actorId && x.actorId === actorId)));
         return c ? (c.name || '') : '';
     },
     //  LES COLONNES DE ROLES DU MODELE : les comediens d'abord, numerotes
