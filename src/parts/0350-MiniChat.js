@@ -156,7 +156,10 @@
               const t = new Date(m.ts);
               const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
               let content;
-              if(m.fileUrl) {
+              // v602 (audit securite) : un lien de fichier ne peut etre qu'une
+              // adresse https — jamais « javascript: », qu'un message forge
+              // aurait pu glisser.
+              if(m.fileUrl && /^https:\/\//i.test(String(m.fileUrl))) {
                   content = '<a class="minichat-file" href="' + Utils.escape(m.fileUrl) + '" target="_blank" rel="noopener" download>📎 ' + Utils.escape(m.fileName || 'fichier') + '</a> <span class="minichat-msg-meta">' + MiniChat._fmtSize(m.fileSize || 0) + '</span>';
               } else {
                   content = Utils.escape(m.text || '');

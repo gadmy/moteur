@@ -341,7 +341,10 @@
                   status: 'draft',
                   data: empty
               })
-              .select()
+              // v602 (audit securite) : on relit la ligne creee SANS sa colonne
+              // « data » — les connectes n'ont plus le droit de la lire en direct
+              // (le contenu ne passe que par project_data_for_me).
+              .select('id, title, created_at, owner_email, owner_profile_id, project_type, episode_count')
               .single();
           
           if (error) {
@@ -496,7 +499,10 @@
                   status: 'draft',
                   data: importedData
               })
-              .select()
+              // v602 (audit securite) : on relit la ligne creee SANS sa colonne
+              // « data » — les connectes n'ont plus le droit de la lire en direct
+              // (le contenu ne passe que par project_data_for_me).
+              .select('id, title, created_at, owner_email, owner_profile_id, project_type, episode_count')
               .single();
           
           if (error) {

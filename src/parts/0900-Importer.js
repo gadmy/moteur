@@ -3349,7 +3349,7 @@ const Presentation = {
         }
         
         resultsDiv.innerHTML = results.slice(0, 10).map(r => `
-            <div onclick="app.Presentation.selectTeamMember('${r.type}', '${r.id}', '${Utils.escape(r.name || '')}', '${Utils.escape(r.email || '')}')" 
+            <div onclick="app.Presentation.selectTeamMember(${Utils.jsArg(r.type)}, ${Utils.jsArg(r.id)}, ${Utils.jsArg(r.name || '')}, ${Utils.jsArg(r.email || '')})" 
                  style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; cursor: pointer; border-radius: 6px; transition: background 0.2s;"
                  onmouseover="this.style.background='var(--primary-light, rgba(43,110,246,0.12))'" onmouseout="this.style.background='transparent'">
                 <div style="width: 35px; height: 35px; border-radius: 50%; background: var(--border); display: flex; align-items: center; justify-content: center; overflow: hidden;">
@@ -13036,10 +13036,13 @@ Universe.setViewMode('map');
         let datesHtml = '';
         if(vis.dates !== false && (project.datePreprodStart || project.dateShootingStart || project.dateRelease)) {
             datesHtml = '<div class="mb-15-bg"><strong>📅 Calendrier :</strong><div style="margin-top: 8px; display: grid; gap: 5px;">';
-            if(project.datePreprodStart) datesHtml += `<div>• Pré-prod : ${project.datePreprodStart}${project.datePreprodEnd ? ' → ' + project.datePreprodEnd : ''}</div>`;
-            if(project.dateShootingStart) datesHtml += `<div>• Tournage : ${project.dateShootingStart}${project.dateShootingEnd ? ' → ' + project.dateShootingEnd : ''}</div>`;
-            if(project.datePostprodStart) datesHtml += `<div>• Post-prod : ${project.datePostprodStart}${project.datePostprodEnd ? ' → ' + project.datePostprodEnd : ''}</div>`;
-            if(project.dateRelease) datesHtml += `<div>• Sortie prévue : ${project.dateRelease}</div>`;
+            // v602 (audit securite) : ces champs viennent de la fiche publique
+            // d'un AUTRE utilisateur — tout s'echappe, meme une « date ».
+            const e = Utils.escape;
+            if(project.datePreprodStart) datesHtml += `<div>• Pré-prod : ${e(project.datePreprodStart)}${project.datePreprodEnd ? ' → ' + e(project.datePreprodEnd) : ''}</div>`;
+            if(project.dateShootingStart) datesHtml += `<div>• Tournage : ${e(project.dateShootingStart)}${project.dateShootingEnd ? ' → ' + e(project.dateShootingEnd) : ''}</div>`;
+            if(project.datePostprodStart) datesHtml += `<div>• Post-prod : ${e(project.datePostprodStart)}${project.datePostprodEnd ? ' → ' + e(project.datePostprodEnd) : ''}</div>`;
+            if(project.dateRelease) datesHtml += `<div>• Sortie prévue : ${e(project.dateRelease)}</div>`;
             datesHtml += '</div></div>';
         }
         
@@ -13062,7 +13065,7 @@ Universe.setViewMode('map');
         let productionTypeHtml = '';
         if(vis.productionType !== false && project.productionType) {
             productionTypeHtml = `<div class="mb-15-bg">
-                <strong>Type de production :</strong> ${productionTypeLabels[project.productionType] || project.productionType}
+                <strong>Type de production :</strong> ${Utils.escape(productionTypeLabels[project.productionType] || project.productionType)}
             </div>`;
         }
         
@@ -13095,8 +13098,8 @@ Universe.setViewMode('map');
             project.actorNeeds.forEach(need => {
                 const ageRange = (need.ageMin || need.ageMax) ? ` • ${need.ageMin || '?'}-${need.ageMax || '?'} ans` : '';
                 actorNeedsHtml += `<div style="background: var(--bg); padding: 10px; border-radius: 6px; margin-bottom: 8px;">
-                    <strong>${Utils.escape(need.roleName || 'Rôle')}</strong> (${need.type || 'principal'})
-                    ${need.gender ? ' • ' + need.gender : ''}${ageRange}
+                    <strong>${Utils.escape(need.roleName || 'Rôle')}</strong> (${Utils.escape(need.type || 'principal')})
+                    ${need.gender ? ' • ' + Utils.escape(need.gender) : ''}${Utils.escape(ageRange)}
                     ${need.description ? `<div style="font-size: 0.85rem; color: var(--text-sec); margin-top: 5px;">${Utils.escape(need.description)}</div>` : ''}
                 </div>`;
             });
@@ -13132,12 +13135,12 @@ Universe.setViewMode('map');
                 <div class="profile-modal-box">
                     <div class="profile-modal-header" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; position: relative;">
                         <button class="favorite-btn ${isFav ? 'active' : ''}" id="project-favorite-btn" onclick="app.Universe.toggleProjectFavorite()" style="position: absolute; top: 15px; left: 15px; background: rgba(255,255,255,0.2); border: none; font-size: 1.5rem; cursor: pointer; padding: 5px 10px; border-radius: 8px; color: ${isFav ? '#f59e0b' : 'white'};" title="Ajouter aux favoris">${isFav ? '★' : '☆'}</button>
-                        <button class="report-btn" onclick="app.Universe.reportProject('${project.id || project.projectId}')" style="position: absolute; top: 15px; left: 60px; background: rgba(255,255,255,0.2); border: none; font-size: 1.2rem; cursor: pointer; padding: 5px 10px; border-radius: 8px; color: white; opacity: 0.7;" title="Signaler ce projet">🚩</button>
+                        <button class="report-btn" onclick="app.Universe.reportProject(${Utils.jsArg(project.id || project.projectId)})" style="position: absolute; top: 15px; left: 60px; background: rgba(255,255,255,0.2); border: none; font-size: 1.2rem; cursor: pointer; padding: 5px 10px; border-radius: 8px; color: white; opacity: 0.7;" title="Signaler ce projet">🚩</button>
                         <button class="profile-modal-close" onclick="this.closest('.profile-modal-overlay').remove()" style="color: white;">✕</button>
                         ${project.image ? `<img src="${Utils.safeMediaUrl(project.image)}" alt="Affiche du projet" style="width: 150px; height: 200px; object-fit: cover; border-radius: 8px; margin-bottom: 15px; border: 2px solid #e94560;">` : '<div style="font-size: 4rem; margin-bottom: 15px;">🎬</div>'}
                         <div class="profile-modal-name">${Utils.escape(project.title || 'Sans titre')}</div>
-                        <div style="color: #e94560; font-weight: bold;">${Utils.escape(typeText)}${genreText ? ' • ' + genreText : ''}</div>
-                        ${project.city ? `<div style="margin-top: 5px; opacity: 0.8;">📍 ${Utils.escape(project.city)}${project.region ? ', ' + project.region : ''}</div>` : ''}
+                        <div style="color: #e94560; font-weight: bold;">${Utils.escape(typeText)}${genreText ? ' • ' + Utils.escape(genreText) : ''}</div>
+                        ${project.city ? `<div style="margin-top: 5px; opacity: 0.8;">📍 ${Utils.escape(project.city)}${project.region ? ', ' + Utils.escape(project.region) : ''}</div>` : ''}
                     </div>
                     <div class="profile-modal-body" style="padding: 20px; max-height: 60vh; overflow-y: auto;">
                         ${locationHtml}
@@ -13150,7 +13153,7 @@ Universe.setViewMode('map');
                         ${crewNeedsHtml}
                         
                         <div class="profile-modal-actions mt-20">
-                            <button onclick="app.Universe.contactProject('${project.projectId}', '${Utils.escape(project.title)}', '${Utils.escape(project.ownerEmail)}')" style="flex: 1; padding: 12px; background: #e94560; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">📧 Contacter le projet</button>
+                            <button onclick="app.Universe.contactProject(${Utils.jsArg(project.projectId)}, ${Utils.jsArg(project.title)}, ${Utils.jsArg(project.ownerEmail)})" style="flex: 1; padding: 12px; background: #e94560; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">📧 Contacter le projet</button>
                         </div>
                     </div>
                 </div>

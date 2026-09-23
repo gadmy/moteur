@@ -312,8 +312,14 @@
                       const p = msg && msg.payload;
                       if(!p || p.from === StoreRealtime.clientId) return;
                       StoreRealtime._lastBroadcastAt = Date.now();
-                      if(p.full) { StoreRealtime.refetchRemote(); return; }
-                      StoreRealtime.applyRemote(p.patch);
+                      // v602 (audit securite) : on ne fusionne PLUS JAMAIS un
+                      // contenu recu par ce canal. Depuis v578 l'appli n'y envoie
+                      // qu'un signal (« full ») ; accepter encore un « patch »
+                      // laissait n'importe qui connaissant l'identifiant du projet
+                      // pousser des donnees dans l'ecran des membres — qui les
+                      // auraient ensuite enregistrees eux-memes. Tout message,
+                      // quel qu'il soit, ne declenche qu'une relecture filtree.
+                      StoreRealtime.refetchRemote();
                   }
               )
               .subscribe();

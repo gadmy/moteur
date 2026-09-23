@@ -44,6 +44,13 @@
       // au lieu de simplement échapper le texte. Comportement inchangé pour les chaînes
       // et les valeurs vides (null/undefined/0/false → '', comme avant).
       escape: (s) => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'),
+      // v602 (audit securite) : un texte place comme ARGUMENT dans un onclick.
+      // Utils.escape ne suffit pas la : le navigateur redecode &#39; en ' avant
+      // d'executer l'attribut, et un nom « x');alert(1)// » sortait de la
+      // chaine. On fabrique un vrai litteral JavaScript (guillemets compris),
+      // puis on l'echappe pour l'attribut. S'utilise SANS guillemets autour :
+      // onclick="app.X.y(${Utils.jsArg(nom)})".
+      jsArg: (s) => Utils.escape(JSON.stringify(String(s == null ? '' : s))),
       // Sanitize du HTML riche inter-utilisateurs (forum, actualites) : allowlist de balises, zero attribut
       sanitizeRich: (html) => {
         const allowed = ['B','I','U','STRONG','EM','UL','OL','LI','BR','P','DIV','SPAN'];

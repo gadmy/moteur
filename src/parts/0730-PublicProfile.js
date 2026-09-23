@@ -2701,7 +2701,7 @@ const Permissions = {
             // pouvoir ecrire le role deduit dans project_members a la sauvegarde.
             if(member.email) Permissions._emailByKey[emailKey] = member.email;
             const currentPerms = state.data.memberPermissions?.[emailKey] || Permissions.getForMember(member, type);
-            const photoHTML = member.photo ? `<img src="${member.photo}" alt="Photo du membre de l'équipe">` : '👤';
+            const photoHTML = member.photo ? `<img src="${Utils.safeMediaUrl(member.photo)}" alt="Photo du membre de l'équipe">` : '👤';
             // v570 : le libellé du rôle passe par Permissions._roleCell (sélecteur pour les invités).
             
             html += `<tr>
@@ -2740,7 +2740,7 @@ const Permissions = {
                     </td>
                 `).join('')}
 
-                ${options.revoke ? `<td style="text-align:center; vertical-align:middle;">${ (member.email && options.accessEmails && options.accessEmails.has((member.email || '').toLowerCase()) && (member.email || '').toLowerCase() !== (state.currentUser?.email || '').toLowerCase()) ? `<button onclick="app.Permissions.revokeAccess('${Utils.escape(member.email)}')" style="padding:4px 10px; background:var(--danger,#dc2626); color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:0.8rem;">Révoquer</button>` : '' }</td>` : ''}
+                ${options.revoke ? `<td style="text-align:center; vertical-align:middle;">${ (member.email && options.accessEmails && options.accessEmails.has((member.email || '').toLowerCase()) && (member.email || '').toLowerCase() !== (state.currentUser?.email || '').toLowerCase()) ? `<button onclick="app.Permissions.revokeAccess(${Utils.jsArg(member.email)})" style="padding:4px 10px; background:var(--danger,#dc2626); color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:0.8rem;">Révoquer</button>` : '' }</td>` : ''}
             </tr>`;
         });
         
