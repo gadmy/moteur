@@ -326,13 +326,19 @@
         // documents. Tant que le choix n'est pas fait, on le demande ; sinon
         // le bouton imprime directement, comme avant.
         const box = document.getElementById('fds-print-choice');
-        const split = !!(Planning.tempShootDay && Planning.tempShootDay.figuSplit);
-        if(!scope && split) {
+        // v602 : avec une equipe B, le jour a aussi deux feuilles (voir EquipeB).
+        const vueA = Planning._jourComplet ? EquipeB.vue(EquipeB.rentrer(Planning._jourComplet, Planning.tempShootDay), 'A') : Planning.tempShootDay;
+        const split = !!(vueA && vueA.figuSplit);
+        const aB = !!Planning._jourComplet;
+        if(!scope && (split || aB)) {
+            const bF = document.getElementById('fds-print-figu'), bB = document.getElementById('fds-print-B');
+            if(bF) bF.style.display = split ? '' : 'none';
+            if(bB) { bB.style.display = aB ? '' : 'none'; bB.textContent = aB ? EquipeB.nom(Planning._jourComplet) : ''; }
             if(box) box.style.display = (box.style.display === 'none' || !box.style.display) ? 'block' : 'none';
             return;
         }
         if(box) box.style.display = 'none';
-        const which = split ? (scope || 'both') : 'main';
+        const which = (split || aB) ? (scope || 'both') : 'main';
 
         // L'id doit etre capture AVANT la sauvegarde : saveShootDay ferme la
         // modale, ce qui remet editingDayId et tempShootDay a null.
@@ -340,6 +346,8 @@
         const dayId = Planning.editingDayId;
         const startDate = (Planning.tempShootDay || {}).startDate || '';
         Planning.saveShootDay();
+        // saveShootDay refuse parfois (droits, date manquante) : la fenetre
+        // reste alors ouverte, on n'imprime pas.
 
         // Trouver le jour sauvegardé par son ID
         const savedDay = (!wasNew ? state.data.shootingDays.find(sd => sd.id === dayId) : null)

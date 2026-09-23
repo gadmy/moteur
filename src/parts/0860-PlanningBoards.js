@@ -45,9 +45,23 @@
         });
     },
     //  Les scenes d'une journee, retrouvees par leur identifiant.
-    _scenesDe: (j) => (j && j.scenes || [])
+    //  v602 : « eq » ('A' ou 'B') ne garde que les scenes d'une equipe (voir
+    //  EquipeB). Sans lui, TOUTES les scenes du jour : c'est ce que veulent la
+    //  duree, les personnages, les ressources — la journee compte les deux.
+    _scenesDe: (j, eq) => (eq === 'A' ? EquipeB.scenesA(j) : eq === 'B' ? EquipeB.scenesB(j) : (j && j.scenes || []))
         .map(ref => (state.data.scenes || []).find(s => s && s.id === (ref && ref.sceneId)))
         .filter(Boolean),
+    //  LA COLONNE « EQUIPE B EN // » du modele AFAR : ou tourne la deuxieme
+    //  equipe ce jour-la, et quoi. Vide pour un jour sans equipe B.
+    avecEquipeB: () => (state.data.shootingDays || []).some(EquipeB.existe),
+    equipeBTexte: (j) => {
+        if(!EquipeB.existe(j)) return '';
+        const sc = PlanningBoards._scenesDe(j, 'B');
+        const decors = [];
+        sc.forEach(x => { const d = PlanningBoards._decorDe(x); if(d && decors.indexOf(d) < 0) decors.push(d); });
+        return EquipeB.nom(j) + (decors.length ? ' : ' + decors.join(' · ') : '')
+            + (sc.length ? ' — séq. ' + sc.map(x => x.number || '?').join(' ') : '');
+    },
     //  Le decor d'une scene : la fiche liee si elle existe, sinon ce que dit
     //  l'en-tete de scene (meme lecture que la feuille de service).
     _decorDe: (sc) => {
@@ -535,7 +549,9 @@
         // n'est pas la meme chose que les croix. Les croix NOMMENT (la 2CV, le
         // chien) et se ferment ; « À préparer » COMPTE (1 véhicule, 1 animal)
         // et reste la quand on referme tout.
-        const GAUCHE = 12;
+        // v602 : plus une colonne « Équipe B en // » quand un jour en a une.
+        const avecB = PlanningBoards.avecEquipeB();
+        const GAUCHE = avecB ? 13 : 12;
         // Les familles, fusionnees en bandeaux : on parcourt les colonnes une
         // fois et on regroupe les voisines de meme famille. Compter chaque
         // famille a part ferait un deuxieme decompte a maintenir.
@@ -576,6 +592,7 @@
                  + '<th title="Séquences">Séq.</th><th title="Intérieur / Extérieur">I/E</th>'
                  + '<th title="Jour / Nuit">Effet</th><th title="Convocation équipe">Horaires</th>'
                  + '<th title="Préminutage de la journée">Min</th>'
+                 + (avecB ? '<th title="Équipe B en parallèle : son décor et ses séquences">Éq. B</th>' : '')
                  + '<th>Personnages</th><th>À préparer</th>'
                  + roles.map(r => '<th class="pdt-rnum" title="' + esc(r.titre + ' \u2014 ' + r.nom) + '">'
                        + (r.kind === 'res' ? '\u00b7' : r.num) + '</th>').join('')
@@ -593,7 +610,9 @@
                      : '');
         lignes.forEach((l, iJour) => {
             const j = l.jour;
-            const scenes = PlanningBoards._scenesDe(j);
+            // v602 : decors, sequences, I/E et effet sont ceux de la feuille
+            // principale ; l'equipe B a sa colonne.
+            const scenes = PlanningBoards._scenesDe(j, 'A');
             const decors = [];
             scenes.forEach(sc => { const d = PlanningBoards._decorDe(sc); if(d && decors.indexOf(d) < 0) decors.push(d); });
             const effets = [];
@@ -632,6 +651,7 @@
                     return '<td class="pdt-duree' + (lourde ? ' est-lourde' : '') + '"' + info + '>'
                          + PlanningBoards._hms(d) + (lourde ? ' ⚠' : '') + '</td>';
                   })()
+                + (avecB ? '<td class="pdt-persos">' + esc(PlanningBoards.equipeBTexte(j)) + '</td>' : '')
                 + '<td class="pdt-persos">' + esc(persos.join(', ')) + '</td>'
                 + '<td class="pdt-lourds">' + lourds.map(x => '<span class="pdt-lourd" title="' + esc(x.quoi.join(', ')) + '">' + x.icone + ' ' + x.n + ' ' + esc(x.mot) + '</span>').join(' ') + '</td>'
                 // Les cases de presence, sur la MEME ligne que la journee.
@@ -917,21 +937,25 @@
             ? Math.max(m, Number(c.num)) : m, 0);
         const nActeurs = colonnes.filter(c => c.famille).length;
         const numCol = (c, i) => c.famille ? String(c.num) : String(maxNum + i - nActeurs + 1);
+        const avecB = PlanningBoards.avecEquipeB();
         const cols = [
             { t: 'JT', w: 7 }, { t: 'S', w: 6 }, { t: 'M', w: 11 }, { t: 'Dates', w: 20 },
             { t: 'Décors', w: 34, g: 1 }, { t: 'Séq.', w: 20, g: 1 }, { t: 'I/E', w: 8 },
-            { t: 'Effet', w: 9 }, { t: 'Horaires', w: 14 }, { t: 'Min', w: 16 },
+            { t: 'Effet', w: 9 }, { t: 'Horaires', w: 14 }, { t: 'Min', w: 16 }
+        ].concat(avecB ? [{ t: 'Éq. B', w: 30, g: 1 }] : []).concat([
             { t: 'Personnages', w: 34, g: 1 }
         // UNE COLONNE DE 7 MM NE PORTE PAS UN NOM : « ROLE1 » a « ROLE12 »
         // sortaient tous « ROL », douze colonnes identiques. Le modele AFAR
         // fait exactement l'inverse — la colonne porte SON NUMERO, et une
         // legende dit qui est qui. C'est le numero qu'on se dit au telephone.
-        ].concat(colonnes.map((c, i) => ({ t: numCol(c, i), w: 7 })));
+        ]).concat(colonnes.map((c, i) => ({ t: numCol(c, i), w: 7 })));
         const legende = colonnes.map((c, i) => numCol(c, i) + ' · ' + c.titre
             + (c.kind === 'res' ? '' : (c.nom && c.nom !== c.titre ? ' (' + c.nom + ')' : '')));
         const rangs = lignes.map((l, i) => {
             const j = l.jour;
-            const scenes = PlanningBoards._scenesDe(j);
+            // v602 : decors, sequences, I/E et effet sont ceux de la feuille
+            // principale ; l'equipe B a sa colonne.
+            const scenes = PlanningBoards._scenesDe(j, 'A');
             const decors = [];
             scenes.forEach(sc => { const d = PlanningBoards._decorDe(sc); if(d && decors.indexOf(d) < 0) decors.push(d); });
             const dJour = j.startDate || j.date;
@@ -947,16 +971,17 @@
                 [...new Set(scenes.map(sc => sc && sc.intExt).filter(Boolean))].join('/'),
                 [...new Set(scenes.map(sc => sc && sc.dayNight).filter(Boolean))].join('/'),
                 j.crewCall || '',
-                d ? PlanningBoards._hms(d) : '',
+                d ? PlanningBoards._hms(d) : ''
+            ].concat(avecB ? [PlanningBoards.equipeBTexte(j)] : []).concat([
                 PlanningBoards._personnagesDe(j).join(', ')
-            ].concat(colonnes.map(c => c.kind === 'res'
+            ]).concat(colonnes.map(c => c.kind === 'res'
                 ? (((resJour[i] || {})[c.cat] || {})[c.res] ? 'X' : '')
                 : PlanningBoards.codeCase(pres, c.cle, i)));
         });
         // Le libelle va dans la colonne « Décors » (34 mm) : dans « JT »
         // (7 mm) il ne tient pas, et une colonne fusionnee sur du jsPDF
         // fabrique a la main coute plus cher que ce qu'elle rapporte.
-        const recap = ['', '', '', '', 'RÉCAPITULATIF (jours)', '', '', '', '', '', '']
+        const recap = ['', '', '', '', 'RÉCAPITULATIF (jours)', '', '', '', '', '', ''].concat(avecB ? [''] : [])
             .concat(colonnes.map(c => String(c.kind === 'res'
                 ? ((PlanningBoards.inventaireRessources()[c.cat] || {})[c.res] || 0)
                 : PlanningBoards.joursTravailles(pres, c.cle))));

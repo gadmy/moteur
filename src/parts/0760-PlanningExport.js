@@ -415,7 +415,9 @@
                 prodLogoData = map[filmIdentity.logo] || null;
             } catch(e) { console.warn('Préchargement du logo de production échoué :', e); }
         }
-        days.forEach((shootDay, dayIdx) => {
+        // v602 : une feuille par equipe (voir EquipeB) — un jour avec une
+        // equipe B sort deux feuilles, sa principale et celle de l'equipe B.
+        EquipeB.feuilles(days, opts.fdsScope).forEach((shootDay) => {
             doc.addPage();
             y = margin;
             
@@ -495,6 +497,7 @@
             const tag = (typeof Planning !== 'undefined' && Planning.dayShortLabel)
                 ? Planning.dayShortLabel(shootDay) : '';
             const tete = 'FEUILLE DE SERVICE'
+                + (shootDay._equipe === 'B' ? ' ' + String(shootDay.name || 'EQUIPE B').toUpperCase() : '')
                 + (tag && (shootDay.dayType || 'tournage') === 'tournage' ? ' - ' + tag : '')
                 + ((shootDay.dayType || 'tournage') !== 'tournage' && tag ? ' - ' + tag.toUpperCase() : '');
             doc.text(pdfSafe(`${tete} DU ${dateStr.toUpperCase()}`), pageWidth / 2, y + 5.2, { align: 'center' });
@@ -961,13 +964,15 @@
         // plusieurs jours par page tant que la place le permet (fini 1 page par jour).
         if(typeof Figuration !== 'undefined' && Figuration._renderFiguPage) {
             let figY = null;
-            days.forEach(shootDay => {
+            // v602 : la feuille figuration dediee est celle de la feuille
+            // principale ; les figurants de l'equipe B sont nommes sur la sienne.
+            EquipeB.feuilles(days, 'main').forEach(shootDay => {
                 const fcs = Figuration._fcs(shootDay);
                 // Uniquement pour les jours bascules en feuille dediee : sinon
                 // la figuration est deja nommee sur la feuille de service, et
                 // sortirait deux fois. « fdsScope » permet en plus de ne
                 // demander que la feuille de service.
-                if(fcs.length > 0 && shootDay.figuSplit && opts.fdsScope !== 'main') {
+                if(fcs.length > 0 && shootDay.figuSplit && opts.fdsScope !== 'main' && opts.fdsScope !== 'B') {
                     const estH = 42 + fcs.length * 6;
                     if(figY === null || figY + estH > pageHeight - margin - 10) {
                         doc.addPage();

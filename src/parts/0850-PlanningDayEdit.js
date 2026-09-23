@@ -86,6 +86,8 @@
         // Store temp copy for editing
         Planning.tempShootDay = JSON.parse(JSON.stringify(shootDay));
         PlanningDayEdit.normalizeTemp();
+        // v602 : un jour avec une equipe B s'ouvre sur la vue de l'equipe A.
+        EquipeB.ouvrir();
         
         const modal = document.getElementById('planning-modal');
         const title = document.getElementById('planningModalTitle');
@@ -99,6 +101,7 @@
             <div class="fds-tabs">
                 <button type="button" class="fds-tabbtn fds-tabbtn-active" onclick="app.Planning.switchFDSTab('live')">📄 Feuille de service</button>
                 <button type="button" id="fds-tabbtn-figu" class="fds-tabbtn fds-tabbtn-dim" onclick="app.Planning.switchFDSTab('figu')">🎭 FDS figu ${shootDay.startDate ? new Date(shootDay.startDate).toLocaleDateString('fr-FR') : ''} <span role="button" title="Vider la feuille de figuration" onclick="event.stopPropagation(); app.Figuration.clearDay();" style="margin-left:6px; padding:0 4px; opacity:.6; cursor:pointer;">✖</span></button>
+                <button type="button" id="fds-tabbtn-B" class="fds-tabbtn fds-tabbtn-dim" onclick="app.Planning.switchFDSTab('B')"></button>
             </div>
             <div id="fds-pane-live" style="display:none;"></div>
             <div id="fds-pane-figu" style="display:none;"></div>
@@ -154,6 +157,7 @@
     },
     
 closeModal: () => {
+        EquipeB.fermer();
         document.getElementById('planning-modal').classList.remove('active');
         Planning.editingDayId = null;
         Planning.tempShootDay = null;
@@ -227,6 +231,16 @@ closeModal: () => {
     // L'onglet figuration ne s'allume que si le jour est en feuille separee.
     // Eteint, il reste visible (pour qu'on sache qu'il existe) mais inerte.
     refreshFDSTabs: () => {
+        // v602 : l'onglet de l'equipe B. Sans equipe B, il propose d'en creer
+        // une ; avec, il porte son nom et une croix pour la supprimer.
+        const bB = document.getElementById('fds-tabbtn-B');
+        if(bB) {
+            const full = Planning._jourComplet;
+            bB.innerHTML = full
+                ? '📄 ' + Utils.escape(EquipeB.nom(full)) + ' <span role="button" title="Supprimer cette feuille" onclick="event.stopPropagation(); app.EquipeB.supprimer();" style="margin-left:6px; padding:0 4px; opacity:.6; cursor:pointer;">✖</span>'
+                : '➕ Équipe B';
+            bB.title = full ? 'Deuxième feuille de service du même jour' : 'Ajouter une deuxième équipe qui tourne en parallèle le même jour';
+        }
         const btn = document.getElementById('fds-tabbtn-figu');
         if(!btn) return;
         const on = !!(Planning.tempShootDay && Planning.tempShootDay.figuSplit);
@@ -238,6 +252,14 @@ closeModal: () => {
         const paneF = document.getElementById('fds-pane-figu');
         const paneL = document.getElementById('fds-pane-live');
         if(!paneF || !paneL) return;
+        // v602 : l'onglet B cree l'equipe au premier clic ; les deux autres
+        // onglets sont ceux de la feuille principale (equipe A).
+        if(which === 'B') {
+            if(!Planning._jourComplet && !EquipeB.creer()) return;
+            EquipeB.basculer('B');
+        } else {
+            EquipeB.basculer('A');
+        }
         if(which === 'figu' && !(Planning.tempShootDay && Planning.tempShootDay.figuSplit)) {
             Utils.toast('La figuration est intégrée à la feuille de service. Coche « Feuille de figuration séparée » pour ouvrir cet onglet.', 'info');
             return;
@@ -255,9 +277,10 @@ closeModal: () => {
             Figuration.renderDays();
         } else {
             paneF.style.display = 'none'; paneL.style.display = '';
-            setActive(0);
+            setActive(which === 'B' ? 2 : 0);
             FDSLive.render();
         }
+        PlanningDayEdit.refreshFDSTabs();
     },
     // ===== VOIE B — SOURCE DE VERITE UNIQUE : Planning.tempShootDay =====
     // Le pane Formulaire a ete retire (temps 3). La feuille de service ecrit
@@ -295,6 +318,9 @@ closeModal: () => {
         if(!PlanningDayEdit.canWrite()) { Utils.toast("Vous n'avez pas les droits de modification sur le planning.", 'error'); return; }
         
         PlanningDayEdit.syncFormToTemp();
+        // v602 : si une equipe B existe, la vue ouverte rentre dans le jour
+        // complet, qui est seul enregistre.
+        EquipeB.complet();
         const t = Planning.tempShootDay || {};
         const v = (key) => (t[key] == null ? '' : String(t[key]));
 
@@ -372,14 +398,19 @@ closeModal: () => {
             figuSplit: !!t.figuSplit,
             figuration: t.figuration || { groups: [] }
         };
+        // v602 : l'en-tete de la feuille de l'equipe B (voir EquipeB).
+        if(t.equipeB) shootDay.equipeB = t.equipeB;
         
         // Scenes et convocations : deja alignees par syncFormToTemp
         (t.scenes || []).forEach(ref => {
-            shootDay.scenes.push({
+            const r = {
                 sceneId: ref.sceneId,
                 startTime: ref.startTime || '',
                 selectedShots: ref.selectedShots || []
-            });
+            };
+            // v602 : la marque de l'equipe B voyage avec la scene.
+            if(ref.equipe === 'B') r.equipe = 'B';
+            shootDay.scenes.push(r);
         });
         shootDay.callSheet = (t.callSheet || []).map(cl => Object.assign({}, cl));
         

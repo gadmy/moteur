@@ -188,6 +188,10 @@
         const type = FDSLive.get('edit-dayType') || 'tournage';
         const txt = dt ? new Date(dt).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' }).toUpperCase() : '';
         let tete = 'FEUILLE DE SERVICE';
+        // v602 : la feuille de l'equipe B se nomme dans son bandeau.
+        const tq = Planning.tempShootDay || {};
+        if(tq._equipe === 'B') tete += ' ' + String(tq.name || 'Équipe B').toUpperCase();
+        else if(tq._equipe === 'A') tete += ' PRINCIPALE';
         if(type === 'tournage') {
             const t = Planning.tempShootDay || {};
             const n = t.dayNumber || Planning.previewDayNumber(Planning.editingDayId, dt, type);
@@ -956,7 +960,10 @@
             const figIds = FDSLive.scopeIds('figu');
             // L'interrupteur vit dans la barre, comme pour les autres tableaux.
             // ON = feuille dédiée ; OFF = tableau complet ici même.
-            const figBar = FDSLive.barTog('FIGURATION', split,
+            // v602 : la feuille dediee est un reglage de la feuille principale ;
+            // sur celle de l'equipe B, la figuration est toujours nommee ici.
+            const figBar = (FDSLive.temp()._equipe === 'B') ? '<div class="fdsw-bar">FIGURATION</div>'
+                : FDSLive.barTog('FIGURATION', split,
                 `app.FDSLive.setFiguSplit(${!split})`, 'feuille dédiée', 'sur cette feuille');
             if(!split) {
                 // Mode « sur cette feuille » : la feuille principale doit
