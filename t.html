@@ -71,16 +71,11 @@ OUVERT
 --------------------------------------------------------------------------------
 Rien d'ouvert côté code au 20 septembre en dehors des chantiers ci-dessous.
 
-[ ] PLAN DE TRAVAIL : DEUX COLONNES DU MODELE AFAR RESTENT A FAIRE. Le
-    chemin est INSTRUIT depuis le 23 septembre — les deux sont faisables avec
+[ ] PLAN DE TRAVAIL : UNE COLONNE DU MODELE AFAR RESTE A FAIRE. Le
+    chemin est INSTRUIT depuis le 23 septembre — elle est faisable avec
     ce qui existe, il ne manque plus de donnee. Le reste du modele horizontal
     est en place.
-    - EQUIPE B EN // : ce sera une DEUXIEME FEUILLE DE SERVICE le meme jour,
-      pas une journee jumelle. Le mecanisme existe deja : « figuSplit » sort
-      une seconde feuille avec ses propres convocations. Il suffira de le
-      generaliser — la 2e feuille cesse d'etre « figuration » pour devenir
-      « une 2e feuille, avec son nom » — et la colonne du plan de travail
-      affichera son decor et ses sequences.
+    - [x] EQUIPE B EN // : FAIT le 23 septembre (v602). Detail au journal.
     - HEURES SUPPLEMENTAIRES PREVUES et la colonne « +/- ». MA NOTE
       PRECEDENTE ETAIT FAUSSE : l'heure de fin EXISTE, c'est
       « estimatedWrap », remplie sur 20 jours sur 21 en base (07:00 → 19:00,
@@ -1307,6 +1302,43 @@ vv602 (23 septembre 2026) — EN COURS.
   cree ses groupes partout » reste la bonne LA OU AUCUN DOCUMENT NE LES LIT.
   Les departements vides restent caches hors glisser-deposer : dix-huit
   sections vides noieraient l'onglet ; le menu de la fiche les propose tous.
+
+  L'EQUIPE B EN PARALLELE : UNE DEUXIEME FEUILLE LE MEME JOUR. Le
+  developpeur ne pouvait pas la tester : ajouter une scene a un jour deja
+  prevu la mettait sur la feuille existante, et creer une deuxieme journee a
+  la meme date faisait compter DEUX jours de tournage (J1 et J2) au plan de
+  travail — mesure dans le code avant de le dire.
+  CE QU'ON VOIT : un onglet « ➕ Équipe B » dans la fenetre du jour. Au
+  premier clic il demande un nom (« Équipe sous-marine ») et ouvre une
+  feuille de service complete — ses scenes, ses convocations, son decor, ses
+  horaires, ses notes — avec « FEUILLE DE SERVICE EQUIPE SOUS-MARINE » dans
+  son bandeau (la principale dit « PRINCIPALE »). La croix de l'onglet la
+  supprime SANS RIEN PERDRE : ses scenes et convocations repassent sur la
+  feuille principale. L'impression propose la principale, la B, ou tout.
+  LE POINT D'ARCHITECTURE (EquipeB) : les scenes et convocations de l'equipe
+  B restent DANS day.scenes et day.callSheet, MARQUEES « equipe: 'B' ». La
+  quinzaine d'endroits qui demandent « cette scene est-elle planifiee ? » ou
+  « qui est la ce jour-la ? » continuent donc de marcher sans une ligne de
+  retouche. day.equipeB ne porte que l'en-tete de la feuille B ; la date, le
+  type et le numero restent ceux de la journee.
+  A L'ECRAN, LA FENETRE TRAVAILLE SUR UNE VUE : quand une equipe B existe,
+  Planning.tempShootDay est la vue d'UNE equipe et le jour complet est garde
+  a part (Planning._jourComplet) ; changer d'onglet ou enregistrer rentre la
+  vue dans le jour. SANS EQUIPE B, RIEN DE TOUT CELA N'EXISTE : la fenetre
+  marche exactement comme avant. PIEGE EVITE : saveShootDay recopiait les
+  scenes champ par champ et aurait perdu la marque « B » en silence.
+  AU PLAN DE TRAVAIL : colonne « Éq. B » (nom, decor, sequences), affichee
+  seulement si un jour en a une. Decors, sequences, I/E et effet de la ligne
+  sont ceux de la feuille principale ; la duree, les personnages, les
+  ressources et les presences comptent LES DEUX equipes — c'est la journee
+  qui les paie. Le jour compte UNE fois.
+  La feuille figuration dediee reste un reglage de la feuille principale ;
+  sur la feuille B, la figuration est toujours nommee.
+  VERIFIE dans un navigateur de bout en bout : creer, remplir, changer
+  d'onglet, enregistrer, rouvrir, supprimer. Le PDF lui-meme n'a pas pu etre
+  genere ici (bibliotheque bloquee par le reseau).
+  NON FAIT : la grille verticale des presences montre les decors des deux
+  equipes melanges dans sa bande « DECORS ».
 
 -->
 <head>
@@ -48662,7 +48694,8 @@ if(isActors) {
             afarRow(hdCols2, [
                 'Météo : ' + (shootDay.customWeather ? String(shootDay.customWeather).replace(/\s*\n\s*/g, ' ') : ''),
                 'H. Supp éventuelles :',
-                ''
+                // v602 : deduites des horaires, comme au plan de travail.
+                (() => { const hs = PlanningBoards.heuresSup(shootDay); return hs === null ? '' : (hs > 0 ? PlanningBoards._duree(hs) : 'aucune'); })()
             ], { height: 5.5, fontSize: 8, boldCols: [1] });
             afarRow(hdCols6, [
                 'Lever soleil :', sunDay.sunrise, 'Coucher soleil :', sunDay.sunset, 'Repas', mealStr
@@ -50665,7 +50698,18 @@ END:VEVENT
     // Champs dont dépendent des cases calculées de la feuille
     // 'edit-dayType' ajoute le 31 aout : changer le type de journee change le
     // bandeau (« J3 » devient « REPERAGE »), il doit donc le rafraichir.
-    DERIVED_FROM: ['edit-startDate', 'edit-locationLat', 'edit-locationLng', 'edit-crewCall', 'edit-dayType'],
+    DERIVED_FROM: ['edit-startDate', 'edit-locationLat', 'edit-locationLng', 'edit-crewCall', 'edit-dayType',
+                   'edit-estimatedWrap', 'edit-lunchStart', 'edit-lunchEnd'],
+    // v602 : les heures sup se DEDUISENT des horaires de la feuille (meme
+    // calcul que le plan de travail, voir PlanningBoards.heuresSup). Sans
+    // convocation ou sans fin prevue, la case dit ce qui manque.
+    hsupCell: () => {
+        const t = FDSLive.temp();
+        const hs = PlanningBoards.heuresSup(t);
+        if(hs === null) return FDSLive.ro('', 'convocation et fin prévue nécessaires');
+        const seuil = PlanningBoards._duree(Math.round(PlanningBoards.seuilHS() * 60));
+        return FDSLive.ro(hs > 0 ? PlanningBoards._duree(hs) + ' (au-delà de ' + seuil + ')' : 'Aucune (journée de ' + PlanningBoards._duree(PlanningBoards.travailJour(t)) + ')', '');
+    },
     
     // ===== BANDEAU DE TETE (31 aout) =====
     // Il n'annoncait que la date : le numero du jour n'apparaissait NULLE PART
@@ -50709,6 +50753,8 @@ END:VEVENT
         // (shootDay.crewCall). Elle est donc affichée en écho, non saisie : deux
         // champs de saisie sur la même donnée laissaient l'un des deux périmé
         // à l'écran jusqu'au rendu suivant.
+        const hsup = document.getElementById('fdsw-cell-hsup');
+        if(hsup) hsup.innerHTML = '<span class="fdsw-lab">H. supp éventuelles</span><br>' + FDSLive.hsupCell();
         const crewEcho = document.getElementById('fdsw-cell-crewcall');
         if(crewEcho) crewEcho.innerHTML = FDSLive.ro(FDSLive.get('edit-crewCall'), 'non renseignée');
     },
@@ -51288,7 +51334,7 @@ END:VEVENT
         h += `<table class="fdsw-grid"><tr>
             <td style="width:25%" id="fdsw-cell-sunrise"><span class="fdsw-lab">Lever du soleil</span><br>${FDSLive.sunCell('sunrise', _lat, _lng, _dt)}</td>
             <td style="width:25%" id="fdsw-cell-sunset"><span class="fdsw-lab">Coucher du soleil</span><br>${FDSLive.sunCell('sunset', _lat, _lng, _dt)}</td>
-            <td style="width:50%"><span class="fdsw-lab">H. supp éventuelles</span><br>${ro('', 'aucun champ dans l\'app', 'à créer', "app.FDSLive.missing('HEURES SUPPLÉMENTAIRES')")}</td>
+            <td style="width:50%" id="fdsw-cell-hsup"><span class="fdsw-lab">H. supp éventuelles</span><br>${FDSLive.hsupCell()}</td>
         </tr></table>`;
 
         h += `<div class="fdsw-bar" id="fdsw-datebar">${esc(FDSLive.dayBarText())}</div>`;
@@ -53060,6 +53106,68 @@ closeModal: () => {
     //  donc chaque journee a la moyenne DE CE TOURNAGE, et on le dit dans
     //  l'infobulle pour que le signal reste interpretable.
     SEUIL_LOURD: 1.5,
+    //  ==================================================================
+    //  HEURES SUPPLEMENTAIRES PREVUES (v602)
+    //  ==================================================================
+    //  Travail d'une journee = fin prevue (estimatedWrap) - convocation
+    //  equipe (crewCall) - pause repas quand elle est renseignee. Les heures
+    //  sup sont ce qui depasse le SEUIL DU BUDGET (Reglages du budget, « Seuil
+    //  heures sup », 8 h par defaut) : un seul chiffre pour la paie et le
+    //  plan de travail, sinon ils finiraient par se contredire.
+    //  UNE JOURNEE QUI PASSE MINUIT (15:00 -> 03:00) fait 12 h, pas -12 h.
+    //  Sans convocation ou sans fin prevue : rien, pas un zero — on ne sait pas.
+    _hhmm: (t) => {
+        const m = /^(\d{1,2}):(\d{2})/.exec(String(t || ''));
+        return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+    },
+    seuilHS: () => {
+        const v = parseFloat(((state.data && state.data.budget) || {}).overtimeThreshold);
+        return (isFinite(v) && v > 0) ? v : 8;
+    },
+    travailJour: (j) => {
+        const a = PlanningBoards._hhmm(j && j.crewCall), f = PlanningBoards._hhmm(j && j.estimatedWrap);
+        if(a === null || f === null) return null;
+        let d = f - a;
+        if(d <= 0) d += 1440;
+        const ls = PlanningBoards._hhmm(j.lunchStart), le = PlanningBoards._hhmm(j.lunchEnd);
+        if(ls !== null && le !== null) {
+            let p = le - ls;
+            if(p < 0) p += 1440;
+            if(p < d) d -= p;
+        }
+        return d;
+    },
+    //  Ecart a la journee de reference, en minutes (negatif = journee courte).
+    ecartJour: (j) => {
+        const t = PlanningBoards.travailJour(j);
+        return t === null ? null : t - Math.round(PlanningBoards.seuilHS() * 60);
+    },
+    heuresSup: (j) => {
+        const e = PlanningBoards.ecartJour(j);
+        return e === null ? null : Math.max(0, e);
+    },
+    //  « 3h », « 2h30 », « -1h15 » ; signe force pour la colonne +/-.
+    _duree: (min, signe) => {
+        if(min === null || min === undefined) return '';
+        const neg = min < 0, a = Math.abs(Math.round(min));
+        const h = Math.floor(a / 60), m = a % 60;
+        const txt = h + 'h' + (m ? String(m).padStart(2, '0') : '');
+        return (neg ? '-' : (signe && a ? '+' : '')) + txt;
+    },
+    //  Les deux colonnes du modele pour toutes les journees d'un coup : les
+    //  heures sup du jour, et le « +/- » CUMULE depuis le debut du tournage
+    //  (les journees courtes compensent-elles les longues ?). Seuls les jours
+    //  de plateau comptent.
+    heuresSupParJour: (lignes) => {
+        let cumul = 0, connu = false;
+        return (lignes || []).map(l => {
+            if(!l.plateau) return { hs: '', cumul: '' };
+            const e = PlanningBoards.ecartJour(l.jour);
+            if(e === null) return { hs: '', cumul: connu ? PlanningBoards._duree(cumul, true) : '' };
+            cumul += e; connu = true;
+            return { hs: e > 0 ? PlanningBoards._duree(e) : '0', cumul: PlanningBoards._duree(cumul, true) || '0' };
+        });
+    },
     dureeMoyenne: () => {
         const jours = PlanningBoards.journees().filter(l => l.plateau);
         const avec = jours.filter(l => PlanningBoards.dureeJour(l.jour) > 0);
@@ -53468,7 +53576,9 @@ closeModal: () => {
         // et reste la quand on referme tout.
         // v602 : plus une colonne « Équipe B en // » quand un jour en a une.
         const avecB = PlanningBoards.avecEquipeB();
-        const GAUCHE = avecB ? 13 : 12;
+        const GAUCHE = avecB ? 15 : 14;
+        const hsJours = PlanningBoards.heuresSupParJour(lignes);
+        const seuilTxt = PlanningBoards._duree(Math.round(PlanningBoards.seuilHS() * 60));
         // Les familles, fusionnees en bandeaux : on parcourt les colonnes une
         // fois et on regroupe les voisines de meme famille. Compter chaque
         // famille a part ferait un deuxieme decompte a maintenir.
@@ -53509,6 +53619,8 @@ closeModal: () => {
                  + '<th title="Séquences">Séq.</th><th title="Intérieur / Extérieur">I/E</th>'
                  + '<th title="Jour / Nuit">Effet</th><th title="Convocation équipe">Horaires</th>'
                  + '<th title="Préminutage de la journée">Min</th>'
+                 + '<th title="Heures supplémentaires prévues : au-delà de ' + esc(seuilTxt) + ' de travail (seuil des Réglages du budget), pause repas déduite">H. sup</th>'
+                 + '<th title="Écart cumulé à la journée de ' + esc(seuilTxt) + ' depuis le début du tournage">+/-</th>'
                  + (avecB ? '<th title="Équipe B en parallèle : son décor et ses séquences">Éq. B</th>' : '')
                  + '<th>Personnages</th><th>À préparer</th>'
                  + roles.map(r => '<th class="pdt-rnum" title="' + esc(r.titre + ' \u2014 ' + r.nom) + '">'
@@ -53553,7 +53665,7 @@ closeModal: () => {
                       : '') + '</td>'
                 + '<td class="pdt-fin">' + esc([...new Set(scenes.map(sc => sc && sc.intExt).filter(Boolean))].join('/')) + '</td>'
                 + '<td class="pdt-fin">' + esc([...new Set(scenes.map(sc => sc && sc.dayNight).filter(Boolean))].join('/')) + '</td>'
-                + '<td class="pdt-fin">' + esc(j.crewCall || '') + '</td>'
+                + '<td class="pdt-fin">' + esc((j.crewCall || '') + (j.estimatedWrap ? '–' + j.estimatedWrap : '')) + '</td>'
                 + (() => {
                     const d = PlanningBoards.dureeJour(j);
                     total += d;
@@ -53568,6 +53680,8 @@ closeModal: () => {
                     return '<td class="pdt-duree' + (lourde ? ' est-lourde' : '') + '"' + info + '>'
                          + PlanningBoards._hms(d) + (lourde ? ' ⚠' : '') + '</td>';
                   })()
+                + '<td class="pdt-fin' + (hsJours[iJour].hs && hsJours[iJour].hs !== '0' ? ' est-lourde' : '') + '">' + esc(hsJours[iJour].hs) + '</td>'
+                + '<td class="pdt-fin">' + esc(hsJours[iJour].cumul) + '</td>'
                 + (avecB ? '<td class="pdt-persos">' + esc(PlanningBoards.equipeBTexte(j)) + '</td>' : '')
                 + '<td class="pdt-persos">' + esc(persos.join(', ')) + '</td>'
                 + '<td class="pdt-lourds">' + lourds.map(x => '<span class="pdt-lourd" title="' + esc(x.quoi.join(', ')) + '">' + x.icone + ' ' + x.n + ' ' + esc(x.mot) + '</span>').join(' ') + '</td>'
@@ -53855,10 +53969,12 @@ closeModal: () => {
         const nActeurs = colonnes.filter(c => c.famille).length;
         const numCol = (c, i) => c.famille ? String(c.num) : String(maxNum + i - nActeurs + 1);
         const avecB = PlanningBoards.avecEquipeB();
+        const hsJours = PlanningBoards.heuresSupParJour(lignes);
         const cols = [
             { t: 'JT', w: 7 }, { t: 'S', w: 6 }, { t: 'M', w: 11 }, { t: 'Dates', w: 20 },
             { t: 'Décors', w: 34, g: 1 }, { t: 'Séq.', w: 20, g: 1 }, { t: 'I/E', w: 8 },
-            { t: 'Effet', w: 9 }, { t: 'Horaires', w: 14 }, { t: 'Min', w: 16 }
+            { t: 'Effet', w: 9 }, { t: 'Horaires', w: 18 }, { t: 'Min', w: 16 },
+            { t: 'H. sup', w: 11 }, { t: '+/-', w: 11 }
         ].concat(avecB ? [{ t: 'Éq. B', w: 30, g: 1 }] : []).concat([
             { t: 'Personnages', w: 34, g: 1 }
         // UNE COLONNE DE 7 MM NE PORTE PAS UN NOM : « ROLE1 » a « ROLE12 »
@@ -53887,8 +54003,10 @@ closeModal: () => {
                 scenes.map(sc => sc.number || '?').join(' '),
                 [...new Set(scenes.map(sc => sc && sc.intExt).filter(Boolean))].join('/'),
                 [...new Set(scenes.map(sc => sc && sc.dayNight).filter(Boolean))].join('/'),
-                j.crewCall || '',
-                d ? PlanningBoards._hms(d) : ''
+                (j.crewCall || '') + (j.estimatedWrap ? '-' + j.estimatedWrap : ''),
+                d ? PlanningBoards._hms(d) : '',
+                hsJours[i].hs,
+                hsJours[i].cumul
             ].concat(avecB ? [PlanningBoards.equipeBTexte(j)] : []).concat([
                 PlanningBoards._personnagesDe(j).join(', ')
             ]).concat(colonnes.map(c => c.kind === 'res'
@@ -53898,7 +54016,7 @@ closeModal: () => {
         // Le libelle va dans la colonne « Décors » (34 mm) : dans « JT »
         // (7 mm) il ne tient pas, et une colonne fusionnee sur du jsPDF
         // fabrique a la main coute plus cher que ce qu'elle rapporte.
-        const recap = ['', '', '', '', 'RÉCAPITULATIF (jours)', '', '', '', '', '', ''].concat(avecB ? [''] : [])
+        const recap = ['', '', '', '', 'RÉCAPITULATIF (jours)', '', '', '', '', '', '', '', ''].concat(avecB ? [''] : [])
             .concat(colonnes.map(c => String(c.kind === 'res'
                 ? ((PlanningBoards.inventaireRessources()[c.cat] || {})[c.res] || 0)
                 : PlanningBoards.joursTravailles(pres, c.cle))));

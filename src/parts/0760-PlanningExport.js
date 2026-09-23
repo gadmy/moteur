@@ -475,7 +475,8 @@
             afarRow(hdCols2, [
                 'Météo : ' + (shootDay.customWeather ? String(shootDay.customWeather).replace(/\s*\n\s*/g, ' ') : ''),
                 'H. Supp éventuelles :',
-                ''
+                // v602 : deduites des horaires, comme au plan de travail.
+                (() => { const hs = PlanningBoards.heuresSup(shootDay); return hs === null ? '' : (hs > 0 ? PlanningBoards._duree(hs) : 'aucune'); })()
             ], { height: 5.5, fontSize: 8, boldCols: [1] });
             afarRow(hdCols6, [
                 'Lever soleil :', sunDay.sunrise, 'Coucher soleil :', sunDay.sunset, 'Repas', mealStr

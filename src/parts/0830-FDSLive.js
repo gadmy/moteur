@@ -174,7 +174,18 @@
     // Champs dont dépendent des cases calculées de la feuille
     // 'edit-dayType' ajoute le 31 aout : changer le type de journee change le
     // bandeau (« J3 » devient « REPERAGE »), il doit donc le rafraichir.
-    DERIVED_FROM: ['edit-startDate', 'edit-locationLat', 'edit-locationLng', 'edit-crewCall', 'edit-dayType'],
+    DERIVED_FROM: ['edit-startDate', 'edit-locationLat', 'edit-locationLng', 'edit-crewCall', 'edit-dayType',
+                   'edit-estimatedWrap', 'edit-lunchStart', 'edit-lunchEnd'],
+    // v602 : les heures sup se DEDUISENT des horaires de la feuille (meme
+    // calcul que le plan de travail, voir PlanningBoards.heuresSup). Sans
+    // convocation ou sans fin prevue, la case dit ce qui manque.
+    hsupCell: () => {
+        const t = FDSLive.temp();
+        const hs = PlanningBoards.heuresSup(t);
+        if(hs === null) return FDSLive.ro('', 'convocation et fin prévue nécessaires');
+        const seuil = PlanningBoards._duree(Math.round(PlanningBoards.seuilHS() * 60));
+        return FDSLive.ro(hs > 0 ? PlanningBoards._duree(hs) + ' (au-delà de ' + seuil + ')' : 'Aucune (journée de ' + PlanningBoards._duree(PlanningBoards.travailJour(t)) + ')', '');
+    },
     
     // ===== BANDEAU DE TETE (31 aout) =====
     // Il n'annoncait que la date : le numero du jour n'apparaissait NULLE PART
@@ -218,6 +229,8 @@
         // (shootDay.crewCall). Elle est donc affichée en écho, non saisie : deux
         // champs de saisie sur la même donnée laissaient l'un des deux périmé
         // à l'écran jusqu'au rendu suivant.
+        const hsup = document.getElementById('fdsw-cell-hsup');
+        if(hsup) hsup.innerHTML = '<span class="fdsw-lab">H. supp éventuelles</span><br>' + FDSLive.hsupCell();
         const crewEcho = document.getElementById('fdsw-cell-crewcall');
         if(crewEcho) crewEcho.innerHTML = FDSLive.ro(FDSLive.get('edit-crewCall'), 'non renseignée');
     },
@@ -797,7 +810,7 @@
         h += `<table class="fdsw-grid"><tr>
             <td style="width:25%" id="fdsw-cell-sunrise"><span class="fdsw-lab">Lever du soleil</span><br>${FDSLive.sunCell('sunrise', _lat, _lng, _dt)}</td>
             <td style="width:25%" id="fdsw-cell-sunset"><span class="fdsw-lab">Coucher du soleil</span><br>${FDSLive.sunCell('sunset', _lat, _lng, _dt)}</td>
-            <td style="width:50%"><span class="fdsw-lab">H. supp éventuelles</span><br>${ro('', 'aucun champ dans l\'app', 'à créer', "app.FDSLive.missing('HEURES SUPPLÉMENTAIRES')")}</td>
+            <td style="width:50%" id="fdsw-cell-hsup"><span class="fdsw-lab">H. supp éventuelles</span><br>${FDSLive.hsupCell()}</td>
         </tr></table>`;
 
         h += `<div class="fdsw-bar" id="fdsw-datebar">${esc(FDSLive.dayBarText())}</div>`;
