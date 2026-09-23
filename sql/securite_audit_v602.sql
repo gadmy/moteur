@@ -232,5 +232,14 @@ end $$;
 -- APPLIQUE le 23/09 a 12h29 (migration colonnes_profils_fermees_v602), une
 -- fois le site a jour. Verifie : telephone ferme en direct, son profil lu par
 -- la porte, sauvegarde du profil et liste des profils publics fonctionnent.
+-- ROUVERT le 23/09 a 12h48 (migration reouverture_temporaire_colonnes_
+-- profils_v602 : grant select on user_profiles to authenticated). LE
+-- DEVELOPPEUR A « PERDU SES PROFILS » : son navigateur (Firefox) faisait
+-- encore tourner l'ANCIENNE version de l'appli, gardee en cache, qui lisait
+-- les profils en direct (journaux : GET user_profiles?select=* -> 403).
+-- Aucune donnee perdue (ligne intacte, verifiee). LECON : attendre la fin du
+-- deploiement NE SUFFIT PAS — un onglet ou un cache peut garder l'ancien code
+-- des heures. Avant de refermer : un mecanisme qui oblige les anciennes
+-- versions a se recharger, puis on referme.
 -- ATTENTION pour l'avenir : une colonne AJOUTEE a user_profiles ne sera pas
 -- lisible tant qu'on ne l'a pas accordee (grant select (colonne) ...).
