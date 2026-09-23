@@ -1983,12 +1983,16 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             // I2 : upsert par id (UUID du profil) et non plus par email,
             // pour supporter plusieurs profils par utilisateur.
             // owner_email = compte propriétaire, email = email public du profil (peut différer)
-            const {error: upErr} = await supabase.from('user_profiles').upsert({
-                id: profile.id,
-                owner_email: email,
-                email: email,  // mono-profil : l'email du profil est toujours celui du compte
-                ...dataToSave
-            }, { onConflict: 'id' });
+            // v602 (audit securite) : « mise a jour, sinon creation » au lieu
+            // d'un upsert. Depuis que le telephone, la naissance et l'adresse ne
+            // se lisent plus en direct, la base refuse l'upsert (il relit la
+            // ligne existante) ; une mise a jour puis une creation passent.
+            const _ligne = { id: profile.id, owner_email: email, email: email, ...dataToSave };
+            let { data: _maj, error: upErr } = await supabase.from('user_profiles')
+                .update(_ligne).eq('id', profile.id).select('id');
+            if(!upErr && (!_maj || _maj.length === 0)) {
+                ({ error: upErr } = await supabase.from('user_profiles').insert(_ligne));
+            }
             if(upErr) {
                 // Détection du trigger de limite 3 profils
                 if((upErr.message || '').includes('LIMIT_3_PROFILES')) {
