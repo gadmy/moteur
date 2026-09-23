@@ -29,7 +29,6 @@
       // ------------------------------------------------------------------
       projet: null,        // { id, titre, besoins: [...] }
       besoins: [],         // [{ id, kind, label, need, candidats: [...] }]
-      pile: [],            // les cartes qu'il reste a trancher, dans l'ordre
       rang: 0,             // ou l'on en est dans la pile
       gardes: [],          // les cartes retenues (coeur)
       dernier: null,       // la derniere carte tranchee — pour pouvoir annuler

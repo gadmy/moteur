@@ -521,9 +521,6 @@
             }
         }, 300);
     },
-    missing: (label) => {
-        Utils.toast(`« ${label} » n'existe encore nulle part dans l'app : champ à créer sur le jour de tournage.`, 'warning');
-    },
     // --- Lien jour <-> fiche décor -------------------------------------------
     // Le jour RECOPIE la fiche décor au moment où on le choisit, puis vit sa
     // vie : corriger l'adresse ou le code de porte sur la fiche ne redescend
@@ -700,9 +697,6 @@
         const allScenes = state.data.scenes || [];
         // Titre et auteur sont desormais lus par PlanningFDS.filmIdentity, qui
         // porte toute l'identite du film pour l'ecran comme pour le PDF.
-        const dateTxt = g('edit-startDate')
-            ? new Date(g('edit-startDate')).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' }).toUpperCase()
-            : '';
 
         let h = '';
         h += `<div class="fdsw-legend">

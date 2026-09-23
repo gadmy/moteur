@@ -4,7 +4,6 @@
       // V7.8.e — délégations rétrocompatibles vers ScriptEditorToolbar.
       // La méthode privée placeCursorInside a migré intégralement dans ScriptEditorToolbar (zéro appel externe).
       getBlockNode: (node) => { if(!node) return null; if (node.nodeType === 1 && node.classList.contains('script-editor-box')) return node.firstElementChild || null; while (node && node.nodeName !== 'DIV' && !node.classList?.contains('script-editor-box')) node = node.parentNode; return (node && node.classList && !node.classList.contains('script-editor-box')) ? node : null; },
-      updateToolbar: (editor, toolbar) => ScriptEditorToolbar.updateToolbar(editor, toolbar),
       // ========== AUTO-COMPLÉTION (V7.6 → ScriptEditorAC) ==========
       // V7.6.e — délégations rétrocompatibles vers ScriptEditorAC.
       // Les 3 méthodes privées (_getCaretOffsetInBlock, _setCaretAtOffset, renderScriptACList)
@@ -66,7 +65,6 @@
       initViewMode: () => ScriptEditorViewMode.init(),
       
       // V7.3 → délégué à ScriptEditorViewMode.set()
-      setViewMode: (mode) => ScriptEditorViewMode.set(mode),
       
       // 31 aout — COMPTEUR PAGES / SCENES (etape 8e).
       // C'est l'information qu'on cherche le plus souvent dans un onglet

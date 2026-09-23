@@ -160,26 +160,6 @@
                 crew: 'crew', location: 'locs', resource: 'resources', day: 'planning',
                 expense: 'expenses', org: 'orgs', vehicle: 'crew' },
       hideNodeMenu: () => { const m = document.getElementById('web-node-menu'); if(m) m.remove(); },
-      showNodeMenu: (ev, i) => {
-          const n = Web.nodes[i];
-          if(!Web._nodeIsFiche(n)) return;   // projet, bulle de famille ou element non rattache : rien a ouvrir
-          Web.hideNodeMenu();
-          const menu = document.createElement('div');
-          menu.id = 'web-node-menu';
-          let left = ev.clientX, top = ev.clientY;
-          if(left + 220 > window.innerWidth) left = window.innerWidth - 230;
-          if(top + 130 > window.innerHeight) top = window.innerHeight - 140;
-          if(left < 10) left = 10;
-          if(top < 10) top = 10;
-          menu.style.cssText = 'position:fixed; top:' + top + 'px; left:' + left + 'px; background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); z-index:var(--z-tooltip); min-width:200px; overflow:hidden;';
-          const titre = Links.label(n.kind, n.id) || n.label || '';
-          menu.innerHTML =
-              '<div style="padding:10px 15px; border-bottom:1px solid var(--border); font-weight:600; color:var(--text-sec); font-size:0.85rem;">' + Links.icon(n.kind) + ' ' + Utils.escape(String(titre).substring(0, 28)) + '</div>'
-            + '<div class="context-menu-item" onclick="event.stopPropagation(); app.Web.hideNodeMenu(); app.Web.openNode(' + i + ');" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:10px;"><span>📄</span> Ouvrir la fiche</div>'
-            + '<div class="context-menu-item" onclick="event.stopPropagation(); app.Web.hideNodeMenu(); app.Web.revealInProject(' + i + ');" style="padding:12px 15px; cursor:pointer; display:flex; align-items:center; gap:10px;"><span>🗂️</span> Voir dans le projet</div>';
-          document.body.appendChild(menu);
-          setTimeout(() => { document.addEventListener('click', Web.hideNodeMenu, { once: true }); }, 10);
-      },
       // IMPRIMER UNE FICHE, QUELLE QUE SOIT SA FAMILLE. Les exports PDF
       // existants travaillent par FAMILLE ENTIERE (tous les personnages, tous
       // les decors) : aucun ne sait sortir une fiche seule, et onze familles

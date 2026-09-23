@@ -1,4 +1,7 @@
 
+  // ScriptEditorViewMode — sous-module V7.3, allégé en v619 (Vue Scènes retirée,
+  // il ne reste que la Vue Script). Conservé sous ce nom pour ne pas casser les
+  // appels existants (Actions.finalizeScene, ScriptEditorEpisodes.switch, etc.)
   const ScriptEditorViewMode = {
       init: () => {
           // v619 : on ignore délibérément toute préférence 'scenes' enregistrée

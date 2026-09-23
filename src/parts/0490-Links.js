@@ -213,7 +213,6 @@
           return out;
       },
       
-      count: (kind, id) => Links.neighbors(kind, id).length,
 
       // ===== LECTURE FILTREE, POUR LES BLOCS DES FICHES (1er septembre) =====
       // Etape 8a, derniere marche : les trois blocs des fiches (« Apparait

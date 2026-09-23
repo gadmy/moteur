@@ -1559,13 +1559,6 @@
     
     // Récupérer les éléments du dépouillement pour une personne selon son département
     // Planning.getBreakdownItemsForPerson (31 l.) retirée v569, jamais appelée.
-    
-    // Imprimer le Plan de Travail
-    //  L'ancienne impression avait SA PROPRE feuille de style, qui ne
-    //  connaissait que la grille des presences : tout ce qui a ete ajoute
-    //  depuis sortait sans bordure et sans fond. Elle passe par la porte
-    //  commune, qui previent aussi sur les tableaux trop larges.
-    printWorkPlan: () => PlanningBoards.imprimerTout(),
 
     // Afficher le Kanban
     renderKanban: () => {

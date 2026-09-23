@@ -111,7 +111,6 @@ const LockManager = {
       currentDomain: null,
       pendingDomain: null,
       channel: null,
-      ORDER: ['presentation','synopsis','board','titlepage','script','storyboard','chars','actors','locs','resources','crew','breakdown','stats','planning','expenses'],
 
       init: (projectId) => {
           if(window.location.protocol === 'file:') return;

@@ -532,7 +532,6 @@
                   div.onclick = (ev) => {
                       ev.stopPropagation();
                       // showPersonMenu utilise state.activeBdSceneId en interne ; on le set temporairement
-                      const prevId = state.activeBdSceneId;
                       state.activeBdSceneId = sceneId;
                       Breakdown.showPersonMenu(cat, text, sel, dataList, itemLabel);
                       // Le set est valable pour la durée de l'interaction de showPersonMenu, on le restaure pas

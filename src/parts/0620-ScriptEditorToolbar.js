@@ -2,13 +2,12 @@
   const ScriptEditorToolbar = {
       wrapNote: (block) => { let txt = block.innerText.trim(); if(!txt.startsWith('{')) { block.innerText = '{ ' + txt + ' }'; ScriptEditorToolbar.placeCursorInside(block, '{', '}'); } },
       wrapParen: (block) => { let txt = block.innerText.trim(); if(!txt.startsWith('(')) { block.innerText = '( ' + txt + ' )'; ScriptEditorToolbar.placeCursorInside(block, '(', ')'); } },
-      placeCursorInside: (block, openChar, closeChar) => { const text = block.innerText; const startPos = text.indexOf(openChar) + 2; const endPos = text.lastIndexOf(closeChar) - 1; if(block.firstChild) { const range = document.createRange(); const sel = window.getSelection(); try { const textNode = block.firstChild; const safeStart = Math.min(startPos, textNode.length); range.setStart(textNode, safeStart); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); } catch(e) { console.warn('Cursor placement error', e); } } },
+      placeCursorInside: (block, openChar, closeChar) => { const text = block.innerText; const startPos = text.indexOf(openChar) + 2; if(block.firstChild) { const range = document.createRange(); const sel = window.getSelection(); try { const textNode = block.firstChild; const safeStart = Math.min(startPos, textNode.length); range.setStart(textNode, safeStart); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); } catch(e) { console.warn('Cursor placement error', e); } } },
       
       // V7.8.b — Mise à jour visuelle des toolbars + sauvegarde/restauration de la sélection
       // État local (sera retiré de ScriptEditor à V7.8.e)
       savedSelection: null,
       
-      updateToolbar: (editor, toolbar) => { const sel = window.getSelection(); if(!sel.rangeCount) return; let block = ScriptEditor.getBlockNode(sel.anchorNode); if(!block && editor.children.length > 0) block = editor.firstElementChild; toolbar.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active')); const topToolbar = document.getElementById('continuous-toolbar'); if(topToolbar) topToolbar.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active')); if(!block) return; const type = block.className || 'sc-action'; const btn = toolbar.querySelector(`[data-type="${type}"]`); if(btn) btn.classList.add('active'); if(topToolbar) { const topBtn = topToolbar.querySelector(`[data-type="${type}"]`); if(topBtn) topBtn.classList.add('active'); } },
       
       saveSelection: () => {
           const sel = window.getSelection();

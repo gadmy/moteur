@@ -61,7 +61,6 @@
     },
     info: (cle) => CastFamilies.LISTE.find(f => f.cle === cle) || CastFamilies.LISTE[0],
     _groupes: () => (state.data.groups || []).filter(g => g && g.type === 'actor'),
-    groupIds: (cle) => CastFamilies._groupes().filter(g => CastFamilies.deGroupe(g) === cle).map(g => g.id),
     de: (actor) => {
         if(!actor) return 'role';
         const g = CastFamilies._groupes().find(x => x.id === actor.group_id);

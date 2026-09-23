@@ -1299,15 +1299,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
             return out;
         } catch(e) { return []; }
     },
-    //  Le profil entier est-il incomplet ? (au moins une casquette active a
-    //  qui il manque quelque chose)
-    profilIncomplet: (profil) => {
-        try {
-            const p = profil || PublicProfile.profiles[PublicProfile.currentProfileIndex];
-            if(!p) return false;
-            return PublicProfile._casquettesActives(p).some(c => PublicProfile.manquesDe(p, c).length > 0);
-        } catch(e) { return false; }
-    },
     _casquettesActives: (p) => {
         const out = [];
         const f = (p && p.facets) || {};
@@ -1487,8 +1478,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
     },
     
  // ===== REVENDICATION DE PROFIL (claims) — délégué à ProfileClaims =====
-    get pendingClaims() { return ProfileClaims.pendingClaims; },
-    set pendingClaims(v) { ProfileClaims.pendingClaims = v; },
     loadPendingClaims: (...a) => ProfileClaims.loadPendingClaims(...a),
     
     // ===== Facettes : 1 personne, 4 casquettes (comédien / technicien / asso / entreprise) =====
@@ -1740,12 +1729,6 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         }
     },
     
-// Ancienne fonction load pour compatibilité
-    load: async () => {
-        await PublicProfile.loadProfiles();
-        ActiveProfile.ensureValid();
-        setTimeout(() => ActiveProfile.attachToDom(), 100);
-    },
     
     // Sauvegarde le profil actuel
     saveCurrentProfile: async () => {
@@ -2055,49 +2038,7 @@ document.getElementById('profile-title').textContent = '🎭 Mon Profil Public';
         Utils.toast('Carte ' + label + ' remise à zéro — pensez à Sauvegarder pour confirmer.', 'success', 5000);
     },
     
-    // Ancienne fonction save conservée pour compatibilité
-    save: async () => {
-        await PublicProfile.saveCurrentProfile();
-    },
 
-    compressImage: (file, maxSize, quality) => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    let width = img.width;
-                    let height = img.height;
-                    
-                    // Redimensionner si nécessaire
-                    if (width > maxSize || height > maxSize) {
-                        if (width > height) {
-                            height = Math.round(height * maxSize / width);
-                            width = maxSize;
-                        } else {
-                            width = Math.round(width * maxSize / height);
-                            height = maxSize;
-                        }
-                    }
-                    
-                    canvas.width = width;
-                    canvas.height = height;
-                    
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, width, height);
-                    
-                    // Convertir en JPEG compressé
-                    const base64 = canvas.toDataURL('image/jpeg', quality);
-                    resolve(base64);
-                };
-                img.onerror = reject;
-                img.src = e.target.result;
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-        });
-    },
     
     // Compresse et retourne un Blob (pour upload Supabase Storage)
     compressImageToBlob: (file, maxSize, quality) => {

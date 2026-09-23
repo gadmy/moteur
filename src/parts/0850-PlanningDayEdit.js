@@ -214,16 +214,6 @@ closeModal: () => {
                 }
             });
         });
-        
-        // Synchroniser vers les profils publics sur Supabase
-        PlanningDayEdit.syncShootingDatesToPublicProfiles();
-    },
-    
-    // Pousse les dates de tournage vers les profils publics (Supabase)
-    syncShootingDatesToPublicProfiles: async () => {
-        // Les dates de tournage sont maintenant stockées dans le projet lui-même
-        // La synchronisation vers les profils publics se fera via le champ availability du user_profiles
-        // Dates de tournage sauvegardées
     },
     
     // Deux onglets depuis le retrait du pane Formulaire (voie B, temps 3) :

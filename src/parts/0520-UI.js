@@ -428,12 +428,6 @@
       set categoryTabs(v) { UICategories.categoryTabs = v; },
       get categoryLabels() { return UICategories.categoryLabels; },
       set categoryLabels(v) { UICategories.categoryLabels = v; },
-      get currentTabTarget() { return UICategories.currentTabTarget; },
-      set currentTabTarget(v) { UICategories.currentTabTarget = v; },
-      get subnavDraggedTab() { return UICategories.subnavDraggedTab; },
-      set subnavDraggedTab(v) { UICategories.subnavDraggedTab = v; },
-      get subnavDraggedCategory() { return UICategories.subnavDraggedCategory; },
-      set subnavDraggedCategory(v) { UICategories.subnavDraggedCategory = v; },
       setNavMode: (...a) => UICategories.setNavMode(...a),
       switchCategory: (...a) => UICategories.switchCategory(...a),
       getCategoryForTab: (...a) => UICategories.getCategoryForTab(...a),
@@ -583,8 +577,6 @@
 // ===== ONGLETS/CATÉGORIES MASQUÉS — délégué à UIHidden =====
       get hiddenTabs() { return UIHidden.hiddenTabs; },
       set hiddenTabs(v) { UIHidden.hiddenTabs = v; },
-      get hiddenCategories() { return UIHidden.hiddenCategories; },
-      set hiddenCategories(v) { UIHidden.hiddenCategories = v; },
       // ===== ONGLETS/CATÉGORIES MASQUÉS — délégué à UIHidden =====
       initHiddenTabs: (...a) => UIHidden.initHiddenTabs(...a),
       loadHiddenCategories: (...a) => UIHidden.loadHiddenCategories(...a),
@@ -2569,23 +2561,6 @@
           }
       },
       
-      removeActorAvailability: (actorIdx, dateIdx) => {
-          if(state.data.actors[actorIdx] && state.data.actors[actorIdx].availabilityDates) {
-              state.data.actors[actorIdx].availabilityDates.splice(dateIdx, 1);
-              Store.save();
-              UI.renderDataTab('actors', els.actorContainer);
-          }
-      },
-
-      
-      removeActorUnavailability: (actorIdx, dateIdx) => {
-          if(state.data.actors[actorIdx] && state.data.actors[actorIdx].unavailabilityDates) {
-              state.data.actors[actorIdx].unavailabilityDates.splice(dateIdx, 1);
-              Store.save();
-              UI.renderDataTab('actors', els.actorContainer);
-          }
-      },
-      
       // === DÉCORS (locations) ===
       updateLocationMeta: (idx, field, value) => {
           if(!Permissions.canEditFiche('location')) return;
@@ -2706,7 +2681,6 @@
               const typeLabel = type === 'actor' ? 'comédien.ne' : 'technicien.ne';
               
               // Créer un pending claim dans Supabase
-              const recipientEmailKey = Utils.sanitizeEmail(person.email);
               const claimId = 'claim_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11);
               
               const claimData = {
@@ -2851,12 +2825,9 @@
       expOpenCheckOptions: (...a) => ActionsExport.expOpenCheckOptions(...a),
       expOpenWorkplanOptions: (...a) => ActionsExport.expOpenWorkplanOptions(...a),
       expOpenBoardSeasons: (...a) => ActionsExport.expOpenBoardSeasons(...a),
-      expApplyPermissions: (...a) => ActionsExport.expApplyPermissions(...a),
       expToggleAll: (...a) => ActionsExport.expToggleAll(...a),
       expToggleAllCovers: (...a) => ActionsExport.expToggleAllCovers(...a),
       expToggleMerged: (...a) => ActionsExport.expToggleMerged(...a),
-      get _expDefaultOrder() { return ActionsExport._expDefaultOrder; },
-      get _EXP_ORDER_STORAGE_KEY() { return ActionsExport._EXP_ORDER_STORAGE_KEY; },
       _expReadOrderFromDOM: (...a) => ActionsExport._expReadOrderFromDOM(...a),
       expSaveOrder: (...a) => ActionsExport.expSaveOrder(...a),
       expRestoreOrder: (...a) => ActionsExport.expRestoreOrder(...a),

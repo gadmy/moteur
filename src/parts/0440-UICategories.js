@@ -66,7 +66,6 @@
             visibleTabs = visibleTabs.filter(t => t !== 'episodes' && t !== 'seasons');
         }
         
-        const hiddenInCategory = tabs.filter(t => UI.hiddenTabs.includes(t));
         
         let subnavHtml = visibleTabs.map(tab => {
             const isActive = document.getElementById('tab-' + tab)?.classList.contains('active');

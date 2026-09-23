@@ -124,7 +124,6 @@
                       const newBefore = before.substring(0, before.length - lastWordMatch[0].length) + chosen + ' ';
                       block.innerText = newBefore + after;
                       // Replacer le curseur après le mot inséré
-                      const newRange = document.createRange();
                       const newOffset = newBefore.length;
                       ScriptEditorAC._setCaretAtOffset(block, newOffset);
                   }

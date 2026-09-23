@@ -49,18 +49,6 @@
 const Comments = {
     currentSceneId: null,
     
-    open: (sceneId) => {
-        const _panel = document.getElementById('comments-panel');
-        if(_panel.classList.contains('open') && Comments.currentSceneId === sceneId) { Comments.close(); return; }
-        Comments.currentSceneId = sceneId;
-        const scene = state.data.scenes.find(s => s.id === sceneId);
-        const sceneIndex = state.data.scenes.findIndex(s => s.id === sceneId) + 1;
-        document.getElementById('comments-scene-title').innerText = `Scène ${sceneIndex} - ${scene?.title || ''}`;
-        document.getElementById('comments-panel').classList.add('open');
-        document.getElementById('comment-input').value = '';
-        Comments.load();
-    },
-    
     close: () => {
         document.getElementById('comments-panel').classList.remove('open');
         Comments.currentSceneId = null;
@@ -8373,7 +8361,6 @@ const FichesPDF = {
                 const nameW = usableWidth * 0.28;
                 const roleW = usableWidth * 0.22;
                 const emailW = usableWidth * 0.30;
-                const phoneW = usableWidth * 0.20;
                 
                 doc.setFont('helvetica', 'bold');
                 doc.setFontSize(9);

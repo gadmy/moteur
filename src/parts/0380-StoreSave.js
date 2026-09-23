@@ -1,80 +1,11 @@
 
   const StoreSave = {
       // ====================================================================
-      // ECRITURE D'UNE SEULE SCENE (v601) — PREALABLE AU VERROU PAR SCENE
+      // ECRITURE D'UNE SEULE SCENE : saveScene (RPC patch_project_scene,
+      // sql/ecriture_par_scene.sql) n'etait appelee par aucun ecran ; retiree
+      // en v602 (code mort). Toute ecriture de scene passe par save(). La
+      // retrouver dans l'historique git le jour du verrou par scene.
       // ====================================================================
-      // save() envoie la LISTE COMPLETE des scenes. Deux personnes qui ecrivent
-      // chacune la sienne s'ecrasent, la derniere gagne. Aujourd'hui le verrou
-      // par DOMAINE l'empeche, en bloquant d'un coup Scenario, Sequencier et
-      // Depouillement. Descendre le verrou a la scene sans descendre l'ecriture
-      // ferait donc PERDRE de la securite, pas en gagner.
-      // saveScene n'ecrit que LA scene donnee, cote serveur, sans toucher aux
-      // autres (fonction patch_project_scene, sql/ecriture_par_scene.sql).
-      //
-      // ETAT AU 20 SEPTEMBRE : PERSONNE NE L'APPELLE ENCORE. Verifie sur tout le
-      // depot — aucun ecran n'appelle saveScene ; le scenario, le depouillement
-      // et la fiche passent tous par save(), c'est-a-dire par l'ecriture du
-      // tableau entier. C'est pourquoi le refus d'ecriture vit dans save() et
-      // non ici : pose ici seulement, il ne refusait rien. La fonction reste,
-      // elle est juste, et elle servira le jour ou les editeurs y passeront —
-      // mais elle ne protege rien tant que personne ne l'emprunte.
-      // REPLI AUTOMATIQUE : si la fonction n'existe pas encore sur la base, on
-      // retombe sur save(). Le code peut donc partir avant le SQL sans rien
-      // casser, et l'ecriture fine s'active d'elle-meme le jour ou le SQL est
-      // applique. Le repli ne se declenche QUE sur « fonction inconnue » : une
-      // erreur de droit ou de reseau ne doit pas se transformer en reecriture
-      // complete, silencieuse et bien plus large que demande.
-      _sceneRpcAbsente: false,
-      saveScene: async (scene) => {
-          if(typeof PublicProfile !== 'undefined' && PublicProfile._engineActif()) return false;
-          if(!scene || !scene.id || !state.currentProjectId) return false;
-          // REFUS AU POINT DE PASSAGE, PAS A L'ECRAN (v601). Chaque ecran qui
-          // montre une scene pourrait oublier de verifier le verrou — il y en a
-          // cinq, et il en viendra d'autres. La garde est donc posee LA OU
-          // L'ECRITURE PART : une scene tenue par quelqu'un d'autre n'est jamais
-          // ecrite, quel que soit l'ecran qui le demande.
-          if(typeof SceneLock !== 'undefined' && !SceneLock.peutEcrire(scene.id)) {
-              const qui = SceneLock.qui(scene.id);
-              console.warn('[Store] ecriture refusee : scene tenue par', qui);
-              Utils.toast('Cette scène est verrouillée' + (qui ? ' par ' + qui : '') + ' : votre modification n\'a pas été enregistrée.', 'warning', 7000);
-              return false;
-          }
-          if(StoreSave._sceneRpcAbsente) { StoreSave.save(); return false; }
-          try {
-              const propre = JSON.parse(JSON.stringify(scene, (k, v) => v === undefined ? null : v));
-              const { error } = await supabase.rpc('patch_project_scene', {
-                  p_id: state.currentProjectId,
-                  p_scene: propre
-              });
-              if(error) {
-                  const msg = String(error.message || '');
-                  // 42883 = fonction inconnue cote Postgres ; PostgREST renvoie
-                  // aussi un 404 avec « Could not find the function ».
-                  if(error.code === '42883' || /could not find the function|does not exist/i.test(msg)) {
-                      StoreSave._sceneRpcAbsente = true;
-                      console.warn('[Store] patch_project_scene absente : ecriture par scene desactivee, repli sur la sauvegarde complete.');
-                      StoreSave.save();
-                      return false;
-                  }
-                  console.warn('[Store] saveScene :', msg);
-                  return false;
-              }
-              // La baseline doit suivre, sinon la fusion temps reel croirait que
-              // cette scene est encore « modifiee localement » et refuserait les
-              // versions suivantes venues des autres.
-              if(state.savedBaseline && Array.isArray(state.savedBaseline.scenes)) {
-                  const i = state.savedBaseline.scenes.findIndex(x => x && String(x.id) === String(scene.id));
-                  const copie = JSON.parse(JSON.stringify(scene));
-                  if(i >= 0) state.savedBaseline.scenes[i] = copie;
-                  else state.savedBaseline.scenes.push(copie);
-              }
-              StoreRealtime.broadcastPatch();
-              return true;
-          } catch(e) {
-              console.warn('[Store] saveScene :', e && e.message);
-              return false;
-          }
-      },
 
       // ====================================================================
       //  LE VERROU DE SAUVEGARDE NE PEUT PLUS RESTER COINCE (v601)

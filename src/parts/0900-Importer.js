@@ -4103,7 +4103,6 @@ const Presentation = {
 
     //  Ancien nom du bouton, garde parce que des visites guidees et de
     //  vieux liens l'appellent encore : il mene maintenant a la seule porte.
-    addActorNeed: () => Presentation.ajouterPersonnage(),
     
     //  updateActorNeed / removeActorNeed retirees en v601 : plus personne ne
     //  les appelle, la liste qu'elles modifiaient n'existe plus. Un role se
@@ -7194,7 +7193,6 @@ const Expenses = {
                     .reduce((sum, e) => sum + (vatMode === 'HT' ? (e.amountHT || e.amount || 0) : (e.amountTTC || e.amount || 0)), 0);
                 
                 const countPending = catExpenses.filter(e => e.status === 'pending').length;
-                const countApproved = catExpenses.filter(e => e.status === 'approved' || e.status === 'done').length;
                 const countMissingRate = catExpenses.filter(e => e.salaryMissingRate).length;
                 
                 // Calculer le pourcentage et l'état d'alerte
@@ -12665,7 +12663,6 @@ const Universe = {
     tileLayer: null,
     viewMode: 'map', // 'map' ou 'fan'
     geoCache: {}, // Cache des géolocalisations
-hoverCard: null,
     
     // Positions réelles des markers (écrites par UniverseMap)
     markerPositions: {}, // { "profile_id": {lat, lng} }

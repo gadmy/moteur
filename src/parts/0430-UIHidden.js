@@ -62,7 +62,6 @@
     //  seconde, le temps qu'il faut pour suivre un deplacement des yeux.
     DUREE_ONGLET: 320,
     DUREE_ECART: 300,
-    SEL_ONGLETS: '.tab-subbtn[data-tab], .tab-btn[data-tab]',
     _sansAnimation: () => {
         try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
         catch(e) { return false; }

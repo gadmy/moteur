@@ -171,7 +171,6 @@
     renderWorkPlan: (...a) => PlanningBoards.renderWorkPlan(...a),
     openWorkplanMenu: (...a) => PlanningBoards.openWorkplanMenu(...a),
     setWorkplanOverride: (...a) => PlanningBoards.setWorkplanOverride(...a),
-    printWorkPlan: (...a) => PlanningBoards.printWorkPlan(...a),
     renderKanban: (...a) => PlanningBoards.renderKanban(...a),
     
     // ========================= VUES CALENDRIER (mois / semaine / jour) =========================
@@ -193,7 +192,6 @@
             const dayCells = document.querySelectorAll('.planning-day');
             dayCells.forEach(cell => {
                 cell.style.cursor = 'default';
-                const originalOnclick = cell.onclick;
                 cell.onclick = (e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -623,26 +621,6 @@
     },
     
 // ========== DRAG & DROP / REDIMENSIONNEMENT — délégué à PlanningDragResize ==========
-    get draggedDayId() { return PlanningDragResize.draggedDayId; },
-    set draggedDayId(v) { PlanningDragResize.draggedDayId = v; },
-    get resizingDayId() { return PlanningDragResize.resizingDayId; },
-    set resizingDayId(v) { PlanningDragResize.resizingDayId = v; },
-    get resizeDirection() { return PlanningDragResize.resizeDirection; },
-    set resizeDirection(v) { PlanningDragResize.resizeDirection = v; },
-    get resizeStartY() { return PlanningDragResize.resizeStartY; },
-    set resizeStartY(v) { PlanningDragResize.resizeStartY = v; },
-    get resizeStartHour() { return PlanningDragResize.resizeStartHour; },
-    set resizeStartHour(v) { PlanningDragResize.resizeStartHour = v; },
-    get resizeHorizontalDayId() { return PlanningDragResize.resizeHorizontalDayId; },
-    set resizeHorizontalDayId(v) { PlanningDragResize.resizeHorizontalDayId = v; },
-    get resizeHorizontalStartX() { return PlanningDragResize.resizeHorizontalStartX; },
-    set resizeHorizontalStartX(v) { PlanningDragResize.resizeHorizontalStartX = v; },
-    get resizeHorizontalDirection() { return PlanningDragResize.resizeHorizontalDirection; },
-    set resizeHorizontalDirection(v) { PlanningDragResize.resizeHorizontalDirection = v; },
-    get resizeHorizontalOriginalStartDate() { return PlanningDragResize.resizeHorizontalOriginalStartDate; },
-    set resizeHorizontalOriginalStartDate(v) { PlanningDragResize.resizeHorizontalOriginalStartDate = v; },
-    get resizeHorizontalOriginalEndDate() { return PlanningDragResize.resizeHorizontalOriginalEndDate; },
-    set resizeHorizontalOriginalEndDate(v) { PlanningDragResize.resizeHorizontalOriginalEndDate = v; },
     onDragStart: (...a) => PlanningDragResize.onDragStart(...a),
     onDragOver: (...a) => PlanningDragResize.onDragOver(...a),
     onDrop: (...a) => PlanningDragResize.onDrop(...a),
@@ -740,10 +718,6 @@
     sendCallSheet: (...a) => PlanningCallSheets.sendCallSheet(...a),
 	
     // ========== FEUILLE DE SERVICE (FDS) — délégué à PlanningFDS ==========
-    get currentFDSDay() { return PlanningFDS.currentFDSDay; },
-    set currentFDSDay(v) { PlanningFDS.currentFDSDay = v; },
-    get currentFDSMap() { return PlanningFDS.currentFDSMap; },
-    set currentFDSMap(v) { PlanningFDS.currentFDSMap = v; },
     generateFDS: (...a) => PlanningFDS.generateFDS(...a),
     
 // ========== CALENDRIER VISUEL DISPONIBILITÉS — délégué à PlanningAvailability ==========
@@ -2524,7 +2498,6 @@ const Stats = {
         if(!PdfTheme.DEBUG) return;
         const prevDraw = doc.getDrawColor();
         const prevLine = doc.getLineWidth();
-        const prevDash = doc.internal.write ? null : undefined; // best effort
         try {
             doc.setDrawColor(255, 0, 0);
             doc.setLineWidth(0.2);
@@ -3505,7 +3478,6 @@ const MoteurArchive = {
             blocks.forEach((blk, blkIdx) => {
                 const txt = blk.text;
                 if(!txt) return;
-                const nextBlk = blocks[blkIdx + 1];
                 
                 switch(blk.type) {
                     case 'action':
