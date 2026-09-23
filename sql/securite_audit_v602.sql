@@ -138,6 +138,10 @@ create policy callsheets_delete_fds on storage.objects for delete to authenticat
 --    profil prive (un compte existe-t-il pour cette adresse, le nom d'un
 --    invite, un badge de moderation) passe par profils_minimaux, qui ne rend
 --    que cela — et une adresse seulement si c'est celle qu'on a demandee.
+--    APPLIQUE (migrations profils_minimaux_v602 puis, une fois le code en
+--    ligne, lecture_profils_et_badge_v602). Verifie : un inconnu voit 8
+--    profils (les publics), aucun prive ; le proprietaire voit le sien ;
+--    l'admin voit tout.
 create or replace function public.profils_minimaux(p_emails text[] default null, p_ids uuid[] default null)
 returns table(id uuid, name text, profile_type text, email text, owner_email text, moderation_badge text)
 language sql stable security definer set search_path = public as $$
@@ -169,6 +173,7 @@ create policy "Profils lisibles : les miens, les publics, l'admin" on public.use
 -- 7. LE BADGE DE MODERATION NE SE RETIRE PAS SOI-MEME. La regle de mise a
 --    jour autorise toutes les colonnes de sa propre ligne : un utilisateur
 --    averti pouvait effacer l'avertissement. Seule l'administration y touche.
+--    APPLIQUE et verifie (badge pose puis tentative d'effacement : refusee).
 create or replace function public.user_profiles_badge_guard()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare me text := lower(coalesce(auth.jwt() ->> 'email', ''));
