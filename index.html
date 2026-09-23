@@ -1522,6 +1522,20 @@ vv602 (23 septembre 2026) — EN COURS.
     que le TEXTE des scenes affichees et modifiables ; « Annuler » ecrasait
     sans regarder — il saute les scenes retouchees depuis. Mot entier :
     tient compte des accents (« caf » ne trouve plus « café »).
+
+  BARRE DE BOUTONS DES ONGLETS FICHES : Personnages, Comediens, Decors,
+  Ressources, Equipe, Asso/Entreprises. Collee en haut a top:0, elle
+  laissait ouverte la marge de 20px du conteneur : au defilement, le
+  contenu passait entre les onglets et les boutons. top:-20px, comme la
+  barre du Scenario (.data-toolbar, une seule regle pour les six).
+
+  HUB, CLIC DROIT sur un projet ou un dossier : Priorite, Deplacer vers un
+  dossier, Supprimer. Ce sont les fonctions des petits boutons des cartes,
+  donc les memes droits : seul le proprietaire met un projet a la
+  corbeille, les autres le quittent. NOUVEAU pour les dossiers : priorite
+  et deplacement sans glisser-deposer (un dossier ne se voit pas proposer
+  lui-meme ni ses sous-dossiers). Le menu se pose au pointeur, reste
+  entier dans la fenetre, et coche la priorite / le dossier actuels.
   - Outils de migration console (Utils.migrate*, purgeSnapshots...) : la
     base montre des migrations NON finies (sur 40 projets : 11 ont encore
     des images en base64, 13 des snapshots, 6 un ancien journal).
@@ -4684,7 +4698,11 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(43, 110, 
      (formatContinuous traite les deux cas explicitement) : ils ne sont ni
      deplaces ni masques. */
   .script-unified-bar { position: sticky; top: -20px; z-index: 150; background: var(--bg); border-bottom: 1px solid var(--border); padding: 2px 0 0; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.04); }
-  .data-toolbar { position: sticky; top: 0; z-index: var(--z-sticky); background: var(--bg); padding-top: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); box-shadow: 0 2px 4px rgba(0,0,0,0.04); }
+  /* v602 : top -20px comme la barre du Scenario. Le conteneur qui defile a
+     20px de marge haute ; colle a top:0, la barre laissait cette bande
+     ouverte et le contenu defilait entre les onglets et les boutons
+     (Personnages, Comediens, Decors, Ressources, Equipe, Asso/Entreprises). */
+  .data-toolbar { position: sticky; top: -20px; z-index: var(--z-sticky); background: var(--bg); padding-top: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); box-shadow: 0 2px 4px rgba(0,0,0,0.04); }
   /* v620 : même largeur max que .script-continuous-wrapper juste en dessous,
      avec deux cales invisibles de la largeur exacte des colonnes (+ gouttière)
      de part et d'autre — les boutons se centrent alors VRAIMENT sur le texte,
@@ -23241,35 +23259,34 @@ initCategoriesDragDrop: () => {
     },
     
     // T6 : menu "Deplacer vers..." sur une carte projet (liste arborescente des dossiers).
-    showMoveMenu: (e, projectId) => {
+    // kind = 'dossier' : on range un DOSSIER (v602, clic droit). Les
+    // dossiers ou il ne peut pas aller (lui-meme, ses sous-dossiers) ne sont
+    // pas proposes.
+    showMoveMenu: (e, id, pos, kind) => {
         e.stopPropagation();
         document.querySelectorAll('.priority-menu').forEach(m => m.remove());
-        const current = ProjectFolders.folderOf(projectId);
+        const dossier = kind === 'dossier';
+        const current = dossier ? ((ProjectFolders.get(id) || {}).parentId || null) : ProjectFolders.folderOf(id);
         const items = [{ id: '', name: '🏠 Racine (aucun dossier)', depth: 0, color: '' }];
         const walk = (parentId, depth) => {
-            ProjectFolders.children(parentId).forEach(f => { items.push({ id: f.id, name: f.name, depth: depth, color: f.color }); walk(f.id, depth + 1); });
+            ProjectFolders.children(parentId).forEach(f => {
+                if(dossier && !ProjectFolders.accepte(id, f.id)) return;
+                items.push({ id: f.id, name: f.name, depth: depth, color: f.color }); walk(f.id, depth + 1);
+            });
         };
         walk(null, 0);
         const menu = document.createElement('div');
         menu.className = 'priority-menu';
         menu.style.maxHeight = '300px';
         menu.style.overflowY = 'auto';
+        const action = dossier ? 'app.UIDashboard._rangerDossier' : 'app.UIDashboard.moveToFolder';
         menu.innerHTML = items.map(it => `
-            <div class="priority-menu-item" onclick="app.UIDashboard.moveToFolder('${projectId}', '${it.id}')">
+            <div class="priority-menu-item" onclick="document.querySelectorAll('.priority-menu').forEach(m => m.remove()); ${action}(${Utils.jsArg(id)}, ${Utils.jsArg(it.id)})">
                 <span style="display:inline-block; width:${it.depth * 14}px;"></span>
-                ${it.id ? `<span class="dot" style="background:${it.color || '#9E9E9E'}"></span>` : ''}
+                ${it.id ? `<span class="dot" style="background:${Utils.escape(it.color || '#9E9E9E')}"></span>` : ''}
                 ${Utils.escape(it.name)}${it.id === (current || '') ? ' ✓' : ''}
             </div>`).join('');
-        const rect = e.target.getBoundingClientRect();
-        menu.style.position = 'fixed';
-        menu.style.top = (rect.bottom + 5) + 'px';
-        menu.style.left = rect.left + 'px';
-        document.body.appendChild(menu);
-        setTimeout(() => {
-            document.addEventListener('click', function closeMenu(ev) {
-                if(!menu.contains(ev.target)) { Utils.fermerMenu(menu, () => menu.remove()); document.removeEventListener('click', closeMenu); }
-            });
-        }, 10);
+        UIDashboard._placerMenu(menu, e, pos);
     },
 
     moveToFolder: (projectId, folderId) => {
@@ -23280,8 +23297,9 @@ initCategoriesDragDrop: () => {
         UIDashboard.renderProjectList();
     },
 
-    showPriorityMenu: (e, projectId) => {
+    showPriorityMenu: (e, projectId, pos, kind) => {
         e.stopPropagation();
+        const dossier = kind === 'dossier';
         // Fermer menu existant
         const existing = document.querySelector('.priority-menu');
         if(existing) existing.remove();
@@ -23299,26 +23317,85 @@ initCategoriesDragDrop: () => {
         
         const menu = document.createElement('div');
         menu.className = 'priority-menu';
-        menu.innerHTML = priorities.map(p => `
-            <div class="priority-menu-item" onclick="app.UIDashboard.setPriority('${projectId}', '${p.label === 'Aucune' ? '' : p.label}')">
+        const action = dossier ? 'app.UIDashboard.setFolderPriority' : 'app.UIDashboard.setPriority';
+        const actuelle = dossier ? ((ProjectFolders.get(projectId) || {}).priority || '')
+            : (((UIDashboard._projets || []).find(x => String(x.id) === String(projectId)) || {}).priority || '');
+        menu.innerHTML = priorities.map(p => {
+            const val = p.label === 'Aucune' ? '' : p.label;
+            return `
+            <div class="priority-menu-item" onclick="${action}(${Utils.jsArg(projectId)}, ${Utils.jsArg(val)})">
                 <span class="dot" style="background:${p.color}"></span>
-                ${p.label}
-            </div>
-        `).join('');
-        
-        const rect = e.target.getBoundingClientRect();
+                ${p.label}${val === actuelle ? ' ✓' : ''}
+            </div>`;
+        }).join('');
+        UIDashboard._placerMenu(menu, e, pos);
+    },
+
+    setFolderPriority: (id, priority) => {
+        document.querySelectorAll('.priority-menu').forEach(m => m.remove());
+        if(!ProjectFolders.update(id, { priority: priority || '' })) return;
+        Utils.toast(priority ? `Priorité "${priority}" définie` : 'Priorité supprimée', 'success');
+        UIDashboard.renderProjectList();
+    },
+
+    // Pose un menu : au pointeur (clic droit, pos) ou sous le bouton clique,
+    // toujours entier dans la fenetre, et ferme au clic ailleurs.
+    _placerMenu: (menu, e, pos) => {
         menu.style.position = 'fixed';
-        menu.style.top = (rect.bottom + 5) + 'px';
-        menu.style.left = rect.left + 'px';
-        
         document.body.appendChild(menu);
-        
-        // Fermer au clic ailleurs
+        let x, y;
+        if(pos) { x = pos.x; y = pos.y; }
+        else { const r = e.target.getBoundingClientRect(); x = r.left; y = r.bottom + 5; }
+        x = Math.max(8, Math.min(x, window.innerWidth - menu.offsetWidth - 8));
+        y = Math.max(8, Math.min(y, window.innerHeight - menu.offsetHeight - 8));
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
         setTimeout(() => {
             document.addEventListener('click', function closeMenu(ev) {
                 if(!menu.contains(ev.target)) { Utils.fermerMenu(menu, () => menu.remove()); document.removeEventListener('click', closeMenu); }
             });
         }, 10);
+    },
+
+    // CLIC DROIT SUR UN PROJET OU UN DOSSIER DU HUB (v602) : priorite,
+    // deplacer vers un dossier, supprimer. Memes fonctions que les petits
+    // boutons des cartes, donc memes droits : seul le proprietaire met un
+    // projet a la corbeille, les autres le quittent (il sort de leur hub).
+    menuContextuel: (e, kind, id) => {
+        e.preventDefault(); e.stopPropagation();
+        document.querySelectorAll('.priority-menu').forEach(m => m.remove());
+        let pos = { x: e.clientX, y: e.clientY };
+        // Touche « menu » du clavier : pas de pointeur, on se pose sur la tuile.
+        if(!e.clientX && !e.clientY && e.currentTarget && e.currentTarget.getBoundingClientRect) {
+            const r = e.currentTarget.getBoundingClientRect(); pos = { x: r.left + 20, y: r.top + 20 };
+        }
+        UIDashboard._ctxPos = pos;
+        const p = kind === 'projet' ? (UIDashboard._projets || []).find(x => String(x.id) === String(id)) : null;
+        if(kind === 'projet' && !p) return;
+        const suppr = kind === 'dossier' ? '🗑️ Supprimer le dossier'
+            : (p.role === 'owner' ? '🗑️ Mettre à la corbeille' : '🚪 Quitter ce projet');
+        const fleche = ' <span style="margin-left:auto; opacity:.6;">▸</span>';
+        const item = (act, txt) => `<div class="priority-menu-item" role="menuitem" onclick="app.UIDashboard._ctxAction('${kind}', ${Utils.jsArg(id)}, '${act}')">${txt}</div>`;
+        const menu = document.createElement('div');
+        menu.className = 'priority-menu';
+        menu.setAttribute('role', 'menu');
+        menu.innerHTML = item('prio', '🏷️ Priorité' + fleche)
+            + item('deplacer', '📁 Déplacer vers un dossier' + fleche)
+            + item('suppr', suppr);
+        UIDashboard._placerMenu(menu, e, pos);
+    },
+    _ctxAction: (kind, id, act) => {
+        document.querySelectorAll('.priority-menu').forEach(m => m.remove());
+        const pos = UIDashboard._ctxPos;
+        const faux = { stopPropagation: () => {}, target: document.body };
+        if(act === 'prio') return UIDashboard.showPriorityMenu(faux, id, pos, kind);
+        if(act === 'deplacer') return UIDashboard.showMoveMenu(faux, id, pos, kind);
+        if(act !== 'suppr') return;
+        if(kind === 'dossier') return UIDashboard.deleteFolder(id);
+        const p = (UIDashboard._projets || []).find(x => String(x.id) === String(id));
+        if(!p) return;
+        if(p.role === 'owner') Store.deleteProject(p.id, p.role);
+        else Store.leaveProject(p.id, p.role);
     },
     
     setPriority: async (projectId, priority) => {
@@ -23545,6 +23622,7 @@ initCategoriesDragDrop: () => {
                 + `<button class="p-btn-del" onclick="app.UIDashboard.deleteFolder('${f.id}')" title="Supprimer">🗑️</button></div>`;
             tile.onclick = (e) => { if(!e.target.closest('.folder-tile-actions')) UIDashboard.openFolder(f.id); };
             tile.setAttribute('role', 'button'); tile.setAttribute('tabindex', '0');
+            tile.addEventListener('contextmenu', (e) => UIDashboard.menuContextuel(e, 'dossier', f.id));
             // v601 : le dossier se prend et se pose, comme un projet.
             tile.draggable = true;
             tile.addEventListener('dragstart', (e) => {
@@ -23680,6 +23758,7 @@ initCategoriesDragDrop: () => {
     renderProjectList: async () => {
         els.projectList.innerHTML = '<div style="padding:20px; color:#999">Chargement...</div>'; 
         const list = await Store.getProjectsList(); 
+        UIDashboard._projets = list; // lu par le clic droit (role, priorite)
         els.projectList.innerHTML = ''; 
         
         const accountType = state.userProfile?.accountType || 'crew';
@@ -23750,6 +23829,7 @@ initCategoriesDragDrop: () => {
                 card.innerHTML = `<span class="p-role-badge" style="color:${badgeColor}; border-color:${badgeColor}">${badgeText}</span><div><div class="p-title">${Utils.escape(p.title)}</div>${seriesBadge}<div class="p-meta">Modifié : ${p.date} ${priorityBadge}</div><div class="p-meta" style="margin-top:2px;" title="Poids des données du projet">💾 ${Utils.formatWeight(p.weightBytes)}</div></div><div class="p-actions"><button class="p-btn-priority" onclick="app.UIDashboard.showMoveMenu(event, '${p.id}')" title="Déplacer vers un dossier">📁</button><button class="p-btn-priority" onclick="app.UIDashboard.showPriorityMenu(event, '${p.id}')" title="Priorité">🏷️</button>${ownerBtn}</div>`; 
                 card.onclick = (e) => { if(!e.target.closest('.p-actions')) Store.loadProject(p.id); };
                 card.setAttribute('role', 'button'); card.setAttribute('tabindex', '0');
+                card.addEventListener('contextmenu', (e) => UIDashboard.menuContextuel(e, 'projet', p.id));
                 
                 // Drag & drop events
                 card.addEventListener('dragstart', (e) => { 
