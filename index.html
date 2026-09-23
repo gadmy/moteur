@@ -14593,11 +14593,10 @@ crewRoles: {
           try {
               // Multi-profils : un email peut avoir plusieurs lignes
               // On prend le badge le plus restrictif (black > red > yellow > null)
-              const { data, error } = await supabase
-                  .from('user_profiles')
-                  .select('moderation_badge')
-                  .or(`email.eq.${Utils.pgSafe(key)},owner_email.eq.${Utils.pgSafe(key)}`)
-                  .not('moderation_badge', 'is', null);
+              // v602 : par la fonction serveur — le badge d'un profil prive doit
+              // rester visible, alors que le profil ne se lit plus en direct.
+              const { data: tous, error } = await supabase.rpc('profils_minimaux', { p_emails: [key], p_ids: null });
+              const data = (tous || []).filter(p => p.moderation_badge);
               if(error) console.warn('[Moderation] getBadge:', error);
               
               let badge = null;
@@ -27522,8 +27521,13 @@ initCategoriesDragDrop: () => {
                           day.scenes = day.scenes.filter(ref => ref.sceneId !== id && String(ref.sceneId) !== String(id));
                       }
                   });
-                  // Supprimer les jours de tournage vides
-                  state.data.shootingDays = state.data.shootingDays.filter(day => day.scenes && day.scenes.length > 0);
+                  // Supprimer les jours de tournage vides — v602 : seulement pour
+                  // qui a le droit de supprimer une journee (sinon la base
+                  // refuserait TOUT l'enregistrement). Pour les autres, la
+                  // journee reste, vide, et l'assistant·e la retirera.
+                  if(Planning.peutSupprimerJour()) {
+                      state.data.shootingDays = state.data.shootingDays.filter(day => day.scenes && day.scenes.length > 0);
+                  }
               }
               
               // 3. Supprimer les commentaires (stockés dans data.comments)
@@ -46155,7 +46159,7 @@ const Permissions = {
             const profileIds = [...new Set(pure.map(m => m.profile_id).filter(Boolean))];
             const nameById = {};
             if(profileIds.length > 0) {
-                const { data: profs, error: errProfs } = await supabase.from('user_profiles').select('id, name').in('id', profileIds);
+                const { data: profs, error: errProfs } = await supabase.rpc('profils_minimaux', { p_emails: null, p_ids: profileIds });
                 if(errProfs) console.warn('[Invites] noms des profils:', errProfs);
                 (profs || []).forEach(p => { nameById[p.id] = p.name || ''; });
             }
@@ -49707,7 +49711,7 @@ if(isActors) {
                         <button onclick="app.Planning.exportPlanningPDF({ dayIds: ['${day.id}'], includeCover: false })" style="padding:8px 15px; background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; cursor:pointer;">📄 PDF</button>
                         <button onclick="app.Planning.sendCallSheet('${day.id}')" style="padding:8px 15px; background:var(--warning, #FF9800); color:white; border:none; border-radius:6px; cursor:pointer;">📧 Envoyer</button>
                         <button onclick="app.Planning.validateCallSheet('${day.id}')" style="padding:8px 15px; background:${day.validated ? 'var(--text-sec)' : 'var(--success)'}; color:white; border:none; border-radius:6px; cursor:pointer;">${day.validated ? '🔓 Dé-valider' : '✅ Valider'}</button>
-                        <button onclick="app.Planning.deleteShootDayFromList('${day.id}')" style="padding:8px 15px; background:var(--danger); color:white; border:none; border-radius:6px; cursor:pointer;">🗑️ Supprimer</button>
+                        ${Planning.peutSupprimerJour() ? `<button onclick="app.Planning.deleteShootDayFromList('${day.id}')" style="padding:8px 15px; background:var(--danger); color:white; border:none; border-radius:6px; cursor:pointer;">🗑️ Supprimer</button>` : ''}
                     </div>
                 </div>`;
             });
@@ -52575,7 +52579,8 @@ addSceneToDay: (sceneIdArg) => {
         // Masque pour un jour pas encore enregistre, ET pour qui n'a pas le
         // droit de modifier : un bouton de suppression qui ne supprime pas est
         // pire qu'absent.
-        if(delBtn) delBtn.style.display = (Planning.editingDayId === 'new' || !PlanningDayEdit.canWrite()) ? 'none' : '';
+        // v602 : et reserve au createur et a l'assistant·e realisateur.
+        if(delBtn) delBtn.style.display = (Planning.editingDayId === 'new' || !PlanningDayEdit.canWrite() || !Planning.peutSupprimerJour()) ? 'none' : '';
         // Le pied etant statique, le choix d'impression survivrait d'un jour a
         // l'autre : on le referme a chaque ouverture.
         const printBox = document.getElementById('fds-print-choice');
@@ -55805,7 +55810,32 @@ closeModal: () => {
     switchFDSTab: (...a) => PlanningDayEdit.switchFDSTab(...a),
     refreshFDSTabs: (...a) => PlanningDayEdit.refreshFDSTabs(...a),
     
+    //  ==================================================================
+    //  QUI PEUT SUPPRIMER UNE JOURNEE (ET SA FEUILLE DE SERVICE) — v602
+    //  ==================================================================
+    //  Decision du developpeur : le CREATEUR du projet, ou l'ASSISTANT·E
+    //  REALISATEUR s'il a l'ecriture sur le Planning. Modifier une journee
+    //  reste ouvert a tous ceux qui ecrivent le Planning ; seule la
+    //  suppression est reservee. La meme regle est posee EN BASE
+    //  (projects_suppressions_guard, peut_supprimer_fds) : ceci n'est que
+    //  l'affichage, qui evite de proposer un bouton qui serait refuse.
+    //  L'assistant se reconnait a sa fiche dans l'equipe (meme adresse que
+    //  le compte), comme pour les alertes de desistement.
+    peutSupprimerJour: () => {
+        if(state.currentRole === 'owner') return true;
+        if(typeof Permissions !== 'undefined' && Permissions.canEdit && !Permissions.canEdit('planning')) return false;
+        const me = String((state.currentUser && state.currentUser.email) || '').toLowerCase();
+        if(!me) return false;
+        return (state.data.crew || []).some(m => m && String(m.email || '').toLowerCase() === me
+            && PublicProfile.estAssistantReal(m));
+    },
+    _refusSuppression: () => {
+        if(Planning.peutSupprimerJour()) return false;
+        Utils.toast('Supprimer une journée de tournage est réservé au créateur du projet et à l\'assistant·e réalisateur.', 'warning');
+        return true;
+    },
     deleteShootDay: async (dayId) => {
+        if(Planning._refusSuppression()) return;
         if(!await ConfirmModal.confirmDelete("Ce jour de tournage sera supprimé.")) return;
         
         const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
@@ -55830,6 +55860,7 @@ closeModal: () => {
     },
     
     deleteShootDayFromList: async (dayId) => {
+        if(Planning._refusSuppression()) return;
         const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
         if(!await ConfirmModal.confirmDelete(`Le tournage "${shootDay?.name || 'Tournage'}" (${shootDay?.startDate || shootDay?.date || '?'}) sera supprimé.`)) return;
         
@@ -55892,9 +55923,9 @@ closeModal: () => {
             <div class="context-menu-item" onclick="event.stopPropagation(); app.Planning.hideContextMenu(); app.Planning.duplicateShootDay('${dayId}');" style="padding: 12px 15px; cursor: pointer; display: flex; align-items: center; gap: 10px;">
                 <span>📋</span> Dupliquer
             </div>
-            <div class="context-menu-item" onclick="event.stopPropagation(); app.Planning.hideContextMenu(); app.Planning.deleteShootDayFromCalendar('${dayId}');" style="padding: 12px 15px; cursor: pointer; display: flex; align-items: center; gap: 10px; color: var(--danger);">
+            ${Planning.peutSupprimerJour() ? `<div class="context-menu-item" onclick="event.stopPropagation(); app.Planning.hideContextMenu(); app.Planning.deleteShootDayFromCalendar('${dayId}');" style="padding: 12px 15px; cursor: pointer; display: flex; align-items: center; gap: 10px; color: var(--danger);">
                 <span>🗑️</span> Supprimer
-            </div>
+            </div>` : ''}
         `;
         
         document.body.appendChild(menu);
@@ -55911,6 +55942,7 @@ closeModal: () => {
     },
     
     deleteShootDayFromCalendar: async (dayId) => {
+        if(Planning._refusSuppression()) return;
         const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
         if(!await ConfirmModal.confirmDelete(`Le tournage "${shootDay?.name || 'Tournage'}" (${shootDay?.startDate || shootDay?.date || '?'}) sera supprimé.`)) return;
         
@@ -60530,7 +60562,9 @@ const Orgs = {
 
     _maybeNotify: async (org, email) => {
         try {
-            const { data, error } = await supabase.from('user_profiles').select('id, name').ilike('email', email).limit(1);
+            // v602 : les profils des autres ne se lisent plus en direct ; la
+            // fonction serveur ne rend que le strict minimum.
+            const { data, error } = await supabase.rpc('profils_minimaux', { p_emails: [email], p_ids: null });
             if(error) { console.warn('[Orgs] _maybeNotify:', error); return; }
             if(!data || !data.length) return; // pas de compte : rien a envoyer
             const ok = await ConfirmModal.show({ title: 'Prévenir cette structure ?', message: 'Un compte existe pour ' + email + '. Lui envoyer une notification pour l\u2019informer que sa structure a été ajoutée au projet ?', icon: '📧', confirmText: 'Envoyer' });
@@ -73487,14 +73521,12 @@ const Invitations = {
         // Elle levait donc une exception a tous les coups et le bandeau ne
         // s'affichait jamais. On interroge owner_email, seule cle fiable d'un compte.
         try {
-            const { data: profils, error } = await supabase
-                .from('user_profiles')
-                .select('id')
-                .eq('owner_email', saisi)
-                .limit(1);
+            // v602 : par la fonction serveur (les profils prives ne se lisent
+            // plus en direct). owner_email n'est rendu que s'il correspond.
+            const { data: profils, error } = await supabase.rpc('profils_minimaux', { p_emails: [saisi], p_ids: null });
             if(error) throw error;
 
-            const compteExiste = !!(profils && profils.length > 0);
+            const compteExiste = !!(profils && profils.some(p => p.owner_email));
             statusEl.style.display = 'block';
             if(compteExiste) {
                 statusEl.innerHTML = '✅ <strong>Utilisateur existant</strong> — l\'invitation l\'attendra sur son tableau de bord';
@@ -73531,10 +73563,10 @@ const Invitations = {
         
         // Charger les profils publics liés à cet email
         try {
-            const { data: profiles, error } = await supabase
-                .from('user_profiles')
-                .select('id, name, profile_type')
-                .eq('owner_email', email);
+            // v602 : par la fonction serveur, en ne gardant que les profils
+            // dont le COMPTE est cette adresse (owner_email).
+            const { data: trouves, error } = await supabase.rpc('profils_minimaux', { p_emails: [email], p_ids: null });
+            const profiles = (trouves || []).filter(p => p.owner_email);
             
             if(error || !profiles || profiles.length === 0) {
                 // Aucun profil trouvé : on masque, l'invitation partira sans to_profile_id
@@ -73672,8 +73704,7 @@ const Invitations = {
         Utils.toast('Envoi de ' + liste.length + ' invitation' + (liste.length > 1 ? 's' : '') + '…', 'info', 3000);
         let comptes = {};
         try {
-            const { data } = await supabase.from('user_profiles').select('owner_email')
-                .in('owner_email', liste.map(p => p.email));
+            const { data } = await supabase.rpc('profils_minimaux', { p_emails: liste.map(p => p.email), p_ids: null });
             (data || []).forEach(u => { comptes[String(u.owner_email || '').toLowerCase()] = 1; });
         } catch(e) { console.warn('[Invitations] comptes:', e && e.message); }
         let ok = 0, rates = [];
@@ -73756,11 +73787,10 @@ const Invitations = {
         try {
             // T10 fix : un user peut avoir plusieurs profils publics, chacun avec owner_email = son email.
             // On vérifie l'existence du compte via owner_email (et non la colonne email, devenue ambiguë).
-            const { data: existingProfiles, error: errExProf } = await supabase
-                .from('user_profiles')
-                .select('id, owner_email')
-                .eq('owner_email', email.toLowerCase());
+            // v602 : par la fonction serveur (profils prives compris).
+            const { data: trouvesEx, error: errExProf } = await supabase.rpc('profils_minimaux', { p_emails: [email.toLowerCase()], p_ids: null });
             if(errExProf) throw errExProf;
+            const existingProfiles = (trouvesEx || []).filter(p => p.owner_email);
             
             const userExists = !!(existingProfiles && existingProfiles.length > 0);
             
@@ -80533,12 +80563,10 @@ const Forum = {
         const uniq = [...new Set((emails || []).filter(Boolean).map(e => e.toLowerCase()))];
         if(uniq.length === 0) return;
         try {
-            const list = uniq.map(e => Utils.pgSafe(e)).join(',');
-            const { data, error: errBadgesF } = await supabase
-                .from('user_profiles')
-                .select('email, owner_email, moderation_badge')
-                .or(`email.in.(${list}),owner_email.in.(${list})`)
-                .not('moderation_badge', 'is', null);
+            // v602 : par la fonction serveur (les auteurs ont souvent un
+            // profil prive, illisible en direct).
+            const { data: tous, error: errBadgesF } = await supabase.rpc('profils_minimaux', { p_emails: uniq, p_ids: null });
+            const data = (tous || []).filter(p => p.moderation_badge);
             if(errBadgesF) console.warn('[Forum] _loadBadges:', errBadgesF);
             (data || []).forEach(p => {
                 if(p.email) Forum._badgeByEmail[p.email.toLowerCase()] = p.moderation_badge;

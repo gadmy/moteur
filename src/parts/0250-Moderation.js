@@ -15,11 +15,10 @@
           try {
               // Multi-profils : un email peut avoir plusieurs lignes
               // On prend le badge le plus restrictif (black > red > yellow > null)
-              const { data, error } = await supabase
-                  .from('user_profiles')
-                  .select('moderation_badge')
-                  .or(`email.eq.${Utils.pgSafe(key)},owner_email.eq.${Utils.pgSafe(key)}`)
-                  .not('moderation_badge', 'is', null);
+              // v602 : par la fonction serveur — le badge d'un profil prive doit
+              // rester visible, alors que le profil ne se lit plus en direct.
+              const { data: tous, error } = await supabase.rpc('profils_minimaux', { p_emails: [key], p_ids: null });
+              const data = (tous || []).filter(p => p.moderation_badge);
               if(error) console.warn('[Moderation] getBadge:', error);
               
               let badge = null;

@@ -41,7 +41,7 @@
                         <button onclick="app.Planning.exportPlanningPDF({ dayIds: ['${day.id}'], includeCover: false })" style="padding:8px 15px; background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; cursor:pointer;">📄 PDF</button>
                         <button onclick="app.Planning.sendCallSheet('${day.id}')" style="padding:8px 15px; background:var(--warning, #FF9800); color:white; border:none; border-radius:6px; cursor:pointer;">📧 Envoyer</button>
                         <button onclick="app.Planning.validateCallSheet('${day.id}')" style="padding:8px 15px; background:${day.validated ? 'var(--text-sec)' : 'var(--success)'}; color:white; border:none; border-radius:6px; cursor:pointer;">${day.validated ? '🔓 Dé-valider' : '✅ Valider'}</button>
-                        <button onclick="app.Planning.deleteShootDayFromList('${day.id}')" style="padding:8px 15px; background:var(--danger); color:white; border:none; border-radius:6px; cursor:pointer;">🗑️ Supprimer</button>
+                        ${Planning.peutSupprimerJour() ? `<button onclick="app.Planning.deleteShootDayFromList('${day.id}')" style="padding:8px 15px; background:var(--danger); color:white; border:none; border-radius:6px; cursor:pointer;">🗑️ Supprimer</button>` : ''}
                     </div>
                 </div>`;
             });

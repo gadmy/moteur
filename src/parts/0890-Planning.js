@@ -432,7 +432,32 @@
     switchFDSTab: (...a) => PlanningDayEdit.switchFDSTab(...a),
     refreshFDSTabs: (...a) => PlanningDayEdit.refreshFDSTabs(...a),
     
+    //  ==================================================================
+    //  QUI PEUT SUPPRIMER UNE JOURNEE (ET SA FEUILLE DE SERVICE) — v602
+    //  ==================================================================
+    //  Decision du developpeur : le CREATEUR du projet, ou l'ASSISTANT·E
+    //  REALISATEUR s'il a l'ecriture sur le Planning. Modifier une journee
+    //  reste ouvert a tous ceux qui ecrivent le Planning ; seule la
+    //  suppression est reservee. La meme regle est posee EN BASE
+    //  (projects_suppressions_guard, peut_supprimer_fds) : ceci n'est que
+    //  l'affichage, qui evite de proposer un bouton qui serait refuse.
+    //  L'assistant se reconnait a sa fiche dans l'equipe (meme adresse que
+    //  le compte), comme pour les alertes de desistement.
+    peutSupprimerJour: () => {
+        if(state.currentRole === 'owner') return true;
+        if(typeof Permissions !== 'undefined' && Permissions.canEdit && !Permissions.canEdit('planning')) return false;
+        const me = String((state.currentUser && state.currentUser.email) || '').toLowerCase();
+        if(!me) return false;
+        return (state.data.crew || []).some(m => m && String(m.email || '').toLowerCase() === me
+            && PublicProfile.estAssistantReal(m));
+    },
+    _refusSuppression: () => {
+        if(Planning.peutSupprimerJour()) return false;
+        Utils.toast('Supprimer une journée de tournage est réservé au créateur du projet et à l\'assistant·e réalisateur.', 'warning');
+        return true;
+    },
     deleteShootDay: async (dayId) => {
+        if(Planning._refusSuppression()) return;
         if(!await ConfirmModal.confirmDelete("Ce jour de tournage sera supprimé.")) return;
         
         const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
@@ -457,6 +482,7 @@
     },
     
     deleteShootDayFromList: async (dayId) => {
+        if(Planning._refusSuppression()) return;
         const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
         if(!await ConfirmModal.confirmDelete(`Le tournage "${shootDay?.name || 'Tournage'}" (${shootDay?.startDate || shootDay?.date || '?'}) sera supprimé.`)) return;
         
@@ -519,9 +545,9 @@
             <div class="context-menu-item" onclick="event.stopPropagation(); app.Planning.hideContextMenu(); app.Planning.duplicateShootDay('${dayId}');" style="padding: 12px 15px; cursor: pointer; display: flex; align-items: center; gap: 10px;">
                 <span>📋</span> Dupliquer
             </div>
-            <div class="context-menu-item" onclick="event.stopPropagation(); app.Planning.hideContextMenu(); app.Planning.deleteShootDayFromCalendar('${dayId}');" style="padding: 12px 15px; cursor: pointer; display: flex; align-items: center; gap: 10px; color: var(--danger);">
+            ${Planning.peutSupprimerJour() ? `<div class="context-menu-item" onclick="event.stopPropagation(); app.Planning.hideContextMenu(); app.Planning.deleteShootDayFromCalendar('${dayId}');" style="padding: 12px 15px; cursor: pointer; display: flex; align-items: center; gap: 10px; color: var(--danger);">
                 <span>🗑️</span> Supprimer
-            </div>
+            </div>` : ''}
         `;
         
         document.body.appendChild(menu);
@@ -538,6 +564,7 @@
     },
     
     deleteShootDayFromCalendar: async (dayId) => {
+        if(Planning._refusSuppression()) return;
         const shootDay = state.data.shootingDays.find(sd => sd.id === dayId);
         if(!await ConfirmModal.confirmDelete(`Le tournage "${shootDay?.name || 'Tournage'}" (${shootDay?.startDate || shootDay?.date || '?'}) sera supprimé.`)) return;
         

@@ -140,7 +140,8 @@
         // Masque pour un jour pas encore enregistre, ET pour qui n'a pas le
         // droit de modifier : un bouton de suppression qui ne supprime pas est
         // pire qu'absent.
-        if(delBtn) delBtn.style.display = (Planning.editingDayId === 'new' || !PlanningDayEdit.canWrite()) ? 'none' : '';
+        // v602 : et reserve au createur et a l'assistant·e realisateur.
+        if(delBtn) delBtn.style.display = (Planning.editingDayId === 'new' || !PlanningDayEdit.canWrite() || !Planning.peutSupprimerJour()) ? 'none' : '';
         // Le pied etant statique, le choix d'impression survivrait d'un jour a
         // l'autre : on le referme a chaque ouverture.
         const printBox = document.getElementById('fds-print-choice');

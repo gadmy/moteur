@@ -1553,8 +1553,13 @@
                           day.scenes = day.scenes.filter(ref => ref.sceneId !== id && String(ref.sceneId) !== String(id));
                       }
                   });
-                  // Supprimer les jours de tournage vides
-                  state.data.shootingDays = state.data.shootingDays.filter(day => day.scenes && day.scenes.length > 0);
+                  // Supprimer les jours de tournage vides — v602 : seulement pour
+                  // qui a le droit de supprimer une journee (sinon la base
+                  // refuserait TOUT l'enregistrement). Pour les autres, la
+                  // journee reste, vide, et l'assistant·e la retirera.
+                  if(Planning.peutSupprimerJour()) {
+                      state.data.shootingDays = state.data.shootingDays.filter(day => day.scenes && day.scenes.length > 0);
+                  }
               }
               
               // 3. Supprimer les commentaires (stockés dans data.comments)

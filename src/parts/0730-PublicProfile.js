@@ -2168,7 +2168,7 @@ const Permissions = {
             const profileIds = [...new Set(pure.map(m => m.profile_id).filter(Boolean))];
             const nameById = {};
             if(profileIds.length > 0) {
-                const { data: profs, error: errProfs } = await supabase.from('user_profiles').select('id, name').in('id', profileIds);
+                const { data: profs, error: errProfs } = await supabase.rpc('profils_minimaux', { p_emails: null, p_ids: profileIds });
                 if(errProfs) console.warn('[Invites] noms des profils:', errProfs);
                 (profs || []).forEach(p => { nameById[p.id] = p.name || ''; });
             }

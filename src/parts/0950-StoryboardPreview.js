@@ -2676,12 +2676,10 @@ const Forum = {
         const uniq = [...new Set((emails || []).filter(Boolean).map(e => e.toLowerCase()))];
         if(uniq.length === 0) return;
         try {
-            const list = uniq.map(e => Utils.pgSafe(e)).join(',');
-            const { data, error: errBadgesF } = await supabase
-                .from('user_profiles')
-                .select('email, owner_email, moderation_badge')
-                .or(`email.in.(${list}),owner_email.in.(${list})`)
-                .not('moderation_badge', 'is', null);
+            // v602 : par la fonction serveur (les auteurs ont souvent un
+            // profil prive, illisible en direct).
+            const { data: tous, error: errBadgesF } = await supabase.rpc('profils_minimaux', { p_emails: uniq, p_ids: null });
+            const data = (tous || []).filter(p => p.moderation_badge);
             if(errBadgesF) console.warn('[Forum] _loadBadges:', errBadgesF);
             (data || []).forEach(p => {
                 if(p.email) Forum._badgeByEmail[p.email.toLowerCase()] = p.moderation_badge;

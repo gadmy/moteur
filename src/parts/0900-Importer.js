@@ -687,7 +687,9 @@ const Orgs = {
 
     _maybeNotify: async (org, email) => {
         try {
-            const { data, error } = await supabase.from('user_profiles').select('id, name').ilike('email', email).limit(1);
+            // v602 : les profils des autres ne se lisent plus en direct ; la
+            // fonction serveur ne rend que le strict minimum.
+            const { data, error } = await supabase.rpc('profils_minimaux', { p_emails: [email], p_ids: null });
             if(error) { console.warn('[Orgs] _maybeNotify:', error); return; }
             if(!data || !data.length) return; // pas de compte : rien a envoyer
             const ok = await ConfirmModal.show({ title: 'Prévenir cette structure ?', message: 'Un compte existe pour ' + email + '. Lui envoyer une notification pour l\u2019informer que sa structure a été ajoutée au projet ?', icon: '📧', confirmText: 'Envoyer' });
@@ -13644,14 +13646,12 @@ const Invitations = {
         // Elle levait donc une exception a tous les coups et le bandeau ne
         // s'affichait jamais. On interroge owner_email, seule cle fiable d'un compte.
         try {
-            const { data: profils, error } = await supabase
-                .from('user_profiles')
-                .select('id')
-                .eq('owner_email', saisi)
-                .limit(1);
+            // v602 : par la fonction serveur (les profils prives ne se lisent
+            // plus en direct). owner_email n'est rendu que s'il correspond.
+            const { data: profils, error } = await supabase.rpc('profils_minimaux', { p_emails: [saisi], p_ids: null });
             if(error) throw error;
 
-            const compteExiste = !!(profils && profils.length > 0);
+            const compteExiste = !!(profils && profils.some(p => p.owner_email));
             statusEl.style.display = 'block';
             if(compteExiste) {
                 statusEl.innerHTML = '✅ <strong>Utilisateur existant</strong> — l\'invitation l\'attendra sur son tableau de bord';
@@ -13688,10 +13688,10 @@ const Invitations = {
         
         // Charger les profils publics liés à cet email
         try {
-            const { data: profiles, error } = await supabase
-                .from('user_profiles')
-                .select('id, name, profile_type')
-                .eq('owner_email', email);
+            // v602 : par la fonction serveur, en ne gardant que les profils
+            // dont le COMPTE est cette adresse (owner_email).
+            const { data: trouves, error } = await supabase.rpc('profils_minimaux', { p_emails: [email], p_ids: null });
+            const profiles = (trouves || []).filter(p => p.owner_email);
             
             if(error || !profiles || profiles.length === 0) {
                 // Aucun profil trouvé : on masque, l'invitation partira sans to_profile_id
@@ -13829,8 +13829,7 @@ const Invitations = {
         Utils.toast('Envoi de ' + liste.length + ' invitation' + (liste.length > 1 ? 's' : '') + '…', 'info', 3000);
         let comptes = {};
         try {
-            const { data } = await supabase.from('user_profiles').select('owner_email')
-                .in('owner_email', liste.map(p => p.email));
+            const { data } = await supabase.rpc('profils_minimaux', { p_emails: liste.map(p => p.email), p_ids: null });
             (data || []).forEach(u => { comptes[String(u.owner_email || '').toLowerCase()] = 1; });
         } catch(e) { console.warn('[Invitations] comptes:', e && e.message); }
         let ok = 0, rates = [];
@@ -13913,11 +13912,10 @@ const Invitations = {
         try {
             // T10 fix : un user peut avoir plusieurs profils publics, chacun avec owner_email = son email.
             // On vérifie l'existence du compte via owner_email (et non la colonne email, devenue ambiguë).
-            const { data: existingProfiles, error: errExProf } = await supabase
-                .from('user_profiles')
-                .select('id, owner_email')
-                .eq('owner_email', email.toLowerCase());
+            // v602 : par la fonction serveur (profils prives compris).
+            const { data: trouvesEx, error: errExProf } = await supabase.rpc('profils_minimaux', { p_emails: [email.toLowerCase()], p_ids: null });
             if(errExProf) throw errExProf;
+            const existingProfiles = (trouvesEx || []).filter(p => p.owner_email);
             
             const userExists = !!(existingProfiles && existingProfiles.length > 0);
             
