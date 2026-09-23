@@ -664,8 +664,6 @@ CONFIG.crewGroups.forEach(defaultGrp => {
     }
 });
               if(!safeData.groups.some(g => g.type === 'actor')) { safeData.groups.push({id: 'ga1', name: 'Casting Principal', type: 'actor'}); safeData.groups.push({id: 'ga2', name: 'Rôles Secondaires', type: 'actor'}); safeData.groups.push({id: 'ga3', name: 'Figuration', type: 'actor'}); }
-              // Filet : groupes casting ga4 a ga8 (silhouettes parlantes et muettes, doublures, cascadeurs, pilotes) pour les projets existants
-              CastFamilies.completerGroupes(safeData);
               if(!safeData.groups.some(g => g.type === 'org')) { safeData.groups.push({id: 'go1', name: 'Partenaires', type: 'org'}); safeData.groups.push({id: 'go2', name: 'Financeurs', type: 'org'}); safeData.groups.push({id: 'go3', name: 'Prestataires', type: 'org'}); }
               if(!safeData.tags || safeData.tags.length === 0) safeData.tags = CONFIG.defaultTags;
               ['scenes', 'characters', 'locations'].forEach(k => { if(!Array.isArray(safeData[k])) safeData[k] = []; });
@@ -794,6 +792,11 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               // TOUTE sauvegarde du projet, en silence.
               try { if(typeof PublicProfile !== 'undefined' && PublicProfile._engineMode) PublicProfile._engineRecoller(); } catch(e) {}
               state.savedBaseline = JSON.parse(JSON.stringify(safeData)); // Phase 0 : état de référence pour sauvegarde partielle / merge sélectif
+              // v602 : les huit groupes officiels de comediens, et eux seuls (voir
+              // CastFamilies). APRES la baseline, comme les migrations qui suivent :
+              // la reprise est alors une vraie difference, enregistree une fois,
+              // au lieu d'etre refaite en memoire a chaque ouverture.
+              if(CastFamilies.completerGroupes(safeData, (state.dataMissingKeys || []).indexOf('actors') < 0)) needsMigrationSave = true;
               // Lot 4 : migration hygiène URLs publiques 'projects' -> paths (one-shot, idempotent, gated par flag). APRÈS la baseline => la diff URL->path est réelle et sera persistée au prochain save.
               // v599 — LE DRAPEAU DEVIENT VERSIONNE. Il valait true/false : une
               // fois pose, la migration ne repassait PLUS JAMAIS. Les medias

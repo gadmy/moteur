@@ -63,7 +63,10 @@
             relevantGroups.forEach(grp => {
                 const itemsInGroup = arr.filter(item => item.group_id === grp.id && !sansScene.has(item));
                 if(itemsInGroup.length > 0 || !isView) {
-                    const section = document.createElement('div'); section.className = 'group-section' + (itemsInGroup.length ? '' : ' dnd-empty-target');
+                    // v602 : les groupes de comediens sont la liste fermee du
+                    // metier — vides, ils restent visibles pour qu'on voie ou
+                    // ranger les gens. Les autres onglets gardent la regle.
+                    const section = document.createElement('div'); section.className = 'group-section' + ((itemsInGroup.length || groupType === 'actor') ? '' : ' dnd-empty-target');
                     section.innerHTML = `<div class="group-header">${Utils.escape(grp.name)}${GroupDnD.delBtnHtml(type, grp.id, isView)}</div><div class="compact-cards-grid" data-dnd-coll="${type}" data-dnd-group="${grp.id}"></div>`;
                     const grid = section.querySelector('.compact-cards-grid');
                     CardModal.renderCompactCards(itemsInGroup, type, grid);

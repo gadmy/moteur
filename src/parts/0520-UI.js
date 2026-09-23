@@ -1963,6 +1963,9 @@
           } 
       },
       addGroup: (type) => { 
+        // v602 : les groupes de comediens forment une liste FERMEE (voir
+        // CastFamilies) — chacun porte une numerotation officielle.
+        if(type === 'actor') { Utils.toast('Les groupes de comédiens sont ceux du métier, chacun avec sa numérotation officielle : on n\'en crée pas d\'autre.', 'info'); return; }
         const typeLabel = type === 'perso' ? 'personnages' : (type === 'actor' ? 'comédiens' : (type === 'org' ? 'structures' : (type === 'crew' ? 'techniciens' : (type === 'resource' ? 'ressources' : 'lieux'))));
         
         const modal = document.createElement('div');
