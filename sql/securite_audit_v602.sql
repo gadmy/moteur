@@ -229,5 +229,8 @@ begin
   execute 'revoke select on public.user_profiles from authenticated';
   execute 'grant select (' || cols || ') on public.user_profiles to authenticated';
 end $$;
+-- APPLIQUE le 23/09 a 12h29 (migration colonnes_profils_fermees_v602), une
+-- fois le site a jour. Verifie : telephone ferme en direct, son profil lu par
+-- la porte, sauvegarde du profil et liste des profils publics fonctionnent.
 -- ATTENTION pour l'avenir : une colonne AJOUTEE a user_profiles ne sera pas
 -- lisible tant qu'on ne l'a pas accordee (grant select (colonne) ...).
