@@ -351,6 +351,8 @@
           
           // Raccourcis Ctrl/Cmd/Alt
           if(e.ctrlKey || e.metaKey || e.altKey) {
+              // Ctrl+H : Rechercher / Remplacer (v602, la fenetre n'avait plus d'entree)
+              if(e.ctrlKey && !e.altKey && !e.shiftKey && e.code === 'KeyH') { e.preventDefault(); e.stopPropagation(); ScriptEditor.openSearchReplace(); return; }
               // Ctrl+1-7 : changer le type du bloc
               const codeToType = { 'Digit1': 'sc-action', 'Digit2': 'sc-perso', 'Digit3': 'sc-dial', 'Digit4': 'sc-paren', 'Digit5': 'sc-trans', 'Digit6': 'sc-centered', 'Digit7': 'sc-note', 'Numpad1': 'sc-action', 'Numpad2': 'sc-perso', 'Numpad3': 'sc-dial', 'Numpad4': 'sc-paren', 'Numpad5': 'sc-trans', 'Numpad6': 'sc-centered', 'Numpad7': 'sc-note' };
               if(codeToType[e.code]) { e.preventDefault(); e.stopPropagation(); ScriptEditor.setFormatDirectContinuous(content, codeToType[e.code]); return; }

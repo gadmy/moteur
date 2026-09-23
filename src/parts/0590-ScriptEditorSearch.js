@@ -16,13 +16,6 @@
           });
       },
       
-      saveBackup: () => {
-          ScriptEditorSearch.backupScripts = state.data.scenes.map(s => ({
-              id: s.id,
-              scriptContent: s.scriptContent
-          }));
-      },
-      
       // V7.5.b — helpers navigation et highlight
       findInElement: (element, query, caseSensitive, wholeWord, sceneId) => {
           const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
@@ -39,7 +32,7 @@
                   if(wholeWord) {
                       const before = index > 0 ? searchText[index - 1] : ' ';
                       const after = index + searchQuery.length < searchText.length ? searchText[index + searchQuery.length] : ' ';
-                      if(/\w/.test(before) || /\w/.test(after)) {
+                      if(/[\p{L}\p{N}_]/u.test(before) || /[\p{L}\p{N}_]/u.test(after)) {
                           index++;
                           continue;
                       }
@@ -144,14 +137,42 @@
           }
       },
       
+      // REBRANCHE EN v602 (la fenetre n'avait plus de bouton). Avant de le
+      // rendre, trois trous bouches :
+      //  - DROITS ET VERROUS : le remplacement ecrivait meme en lecture seule,
+      //    sur un scenario tenu par quelqu'un d'autre ou une scene verrouillee.
+      //    Il ne touche plus qu'aux scenes AFFICHEES et MODIFIABLES ici
+      //    (editeur ouvert en ecriture, domaine a moi, scene libre) ;
+      //  - LA MISE EN FORME : « Tout remplacer » cherchait dans le HTML brut.
+      //    Chercher « div » ou « class » cassait les blocs, et le texte de
+      //    remplacement etait colle tel quel dans la page (du HTML tape la
+      //    s'executait chez tous les membres). On ne remplace plus que dans
+      //    le TEXTE, et le remplacement reste du texte ;
+      //  - « Tout remplacer » touchait aussi les episodes non affiches.
+      _peutRemplacer: (sceneId) => {
+          if(state.currentRole === 'viewer') return false;
+          if(typeof Permissions !== 'undefined' && !Permissions.canEdit('scenario')) return false;
+          if(typeof LockManager !== 'undefined' && typeof LockDomains !== 'undefined'
+              && !LockManager._editable(LockDomains.forTab('script'))) return false;
+          if(sceneId && typeof SceneLock !== 'undefined' && !SceneLock.peutEcrire(sceneId)) return false;
+          return true;
+      },
+      _refus: () => Utils.toast('Remplacement impossible : scénario en lecture seule ou verrouillé.', 'warning'),
+      _editeurs: () => Array.from(document.querySelectorAll('.script-continuous-scene')).map(div => ({
+          sceneId: div.dataset.sceneId,
+          editor: div.querySelector('.script-continuous-content')
+      })).filter(x => x.sceneId && x.editor && x.editor.isContentEditable),
+
       replaceOne: () => {
           if(ScriptEditorSearch.searchResults.length === 0) return;
-          
+
           const replaceText = document.getElementById('replace-input').value;
           const highlight = document.querySelector('.search-highlight.current');
-          
+
           if(highlight) {
               const sceneId = highlight.closest('.script-continuous-scene')?.dataset.sceneId;
+              const ed = highlight.closest('.script-continuous-content');
+              if(!sceneId || !ed || !ed.isContentEditable || !ScriptEditorSearch._peutRemplacer(sceneId)) { ScriptEditorSearch._refus(); return; }
               highlight.replaceWith(document.createTextNode(replaceText));
               
               // Sauvegarder la scène
@@ -179,30 +200,43 @@
           const wholeWord = document.getElementById('search-whole-word').checked;
           
           if(query.length < 1) return;
-          
-          // Sauvegarder avant remplacement
-          ScriptEditorSearch.saveBackup();
-          
-          let totalReplaced = 0;
-          
-          // Remplacer dans chaque scène
-          state.data.scenes.forEach(scene => {
-              if(!scene.scriptContent) return;
-              
-              let content = scene.scriptContent;
-              let flags = caseSensitive ? 'g' : 'gi';
-              let pattern = wholeWord ? `\\b${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b` : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-              
-              const regex = new RegExp(pattern, flags);
-              const matches = content.match(regex);
-              
-              if(matches) {
-                  totalReplaced += matches.length;
-                  scene.scriptContent = content.replace(regex, replaceText);
+          if(!ScriptEditorSearch._peutRemplacer()) { ScriptEditorSearch._refus(); return; }
+          ScriptEditorSearch.clearHighlights();
+
+          let totalReplaced = 0, bloquees = 0;
+          const flags = caseSensitive ? 'gu' : 'giu';
+          const echappe = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(wholeWord ? `(^|[^\\p{L}\\p{N}_])${echappe}(?=[^\\p{L}\\p{N}_]|$)` : echappe, flags);
+          const backup = [];
+
+          // Remplacer dans le TEXTE des scenes affichees et modifiables
+          ScriptEditorSearch._editeurs().forEach(({ sceneId, editor }) => {
+              const scene = state.data.scenes.find(s => String(s.id) === String(sceneId));
+              if(!scene) return;
+              if(!ScriptEditorSearch._peutRemplacer(sceneId)) { bloquees++; return; }
+              const avant = editor.innerHTML;
+              let n = 0;
+              const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT, null, false);
+              const noeuds = [];
+              let node;
+              while(node = walker.nextNode()) noeuds.push(node);
+              noeuds.forEach(t => {
+                  const neuf = t.textContent.replace(regex, (m, pre) => {
+                      n++;
+                      return wholeWord ? (pre || '') + replaceText : replaceText;
+                  });
+                  if(neuf !== t.textContent) t.textContent = neuf;
+              });
+              if(n > 0) {
+                  totalReplaced += n;
+                  backup.push({ id: scene.id, scriptContent: avant, apres: editor.innerHTML });
+                  scene.scriptContent = editor.innerHTML;
               }
           });
-          
-          Store.save();
+          ScriptEditorSearch.backupScripts = backup.length ? backup : null;
+
+          if(totalReplaced > 0) Store.save();
+          if(bloquees > 0) Utils.toast(bloquees + ' scène(s) verrouillée(s) laissée(s) telle(s) quelle(s).', 'info');
           UI.renderScript();
           
           document.getElementById('search-results-info').textContent = `✅ ${totalReplaced} remplacement(s) effectué(s)`;
@@ -223,13 +257,16 @@
               return;
           }
           
-          // Restaurer le contenu
+          // Restaurer le contenu. Une scene retouchee depuis (par moi ou par
+          // un autre membre) n'est PAS ecrasee : on perdrait son travail.
+          let sautees = 0;
           ScriptEditorSearch.backupScripts.forEach(backup => {
               const scene = state.data.scenes.find(s => String(s.id) === String(backup.id));
-              if(scene) {
-                  scene.scriptContent = backup.scriptContent;
-              }
+              if(!scene) return;
+              if(scene.scriptContent !== backup.apres || !ScriptEditorSearch._peutRemplacer(scene.id)) { sautees++; return; }
+              scene.scriptContent = backup.scriptContent;
           });
+          if(sautees > 0) Utils.toast(sautees + ' scène(s) modifiée(s) depuis : non restaurée(s).', 'info');
           
           Store.save();
           UI.renderScript();
