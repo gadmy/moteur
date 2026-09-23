@@ -23,7 +23,7 @@
   //  si l'onglet est en arriere-plan (la personne regarde ailleurs). Sinon,
   //  un bandeau propose « Recharger maintenant », et la personne choisit.
   const MiseAJour = {
-    REVISION: 1,
+    REVISION: 2, // 2 : colonnes privees des profils fermees (v602)
     VERIF_MS: 5 * 60 * 1000,
     CALME_MS: 2 * 60 * 1000,
     _requise: false,
