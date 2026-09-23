@@ -317,7 +317,17 @@
         document.body.appendChild(menu);
         setTimeout(() => { document.addEventListener('click', Planning.fermerMenuJour, { once: true }); }, 10);
     },
-    fermerMenuJour: () => { const m = document.getElementById('menu-jour-vide'); if(m) m.remove(); },
+    fermerMenuJour: () => {
+        const m = document.getElementById('menu-jour-vide');
+        if(!m) return;
+        // ON LUI RETIRE SON IDENTIFIANT TOUT DE SUITE. Pendant la fermeture il
+        // est encore dans la page ; un menu rouvert aussitot porterait le meme
+        // identifiant, et deux elements pour un identifiant, c'est toujours le
+        // mauvais qu'on retrouve. Pour tout le reste de l'application, le menu
+        // est ferme des maintenant — il ne fait plus que s'effacer.
+        m.removeAttribute('id');
+        Utils.fermerMenu(m, () => m.remove());
+    },
     jolieDate: (dateStr) => {
         try {
             const d = new Date(String(dateStr) + 'T12:00:00');

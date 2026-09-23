@@ -902,7 +902,9 @@
       // systeme que ceux du hub (.dropdown-menu) : ils ne repondent pas a
       // la ligne ci-dessus, il faut les fermer explicitement.
       try {
-        document.querySelectorAll('.menu-dropdown.visible').forEach(function (m) { m.classList.remove('visible'); });
+        document.querySelectorAll('.menu-dropdown.visible').forEach(function (m) {
+          Utils.fermerMenu(m, function () { m.classList.remove('visible'); });
+        });
       } catch (e) {}
     },
 

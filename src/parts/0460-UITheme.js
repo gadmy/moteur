@@ -22,8 +22,12 @@
     toggleTabsPositionMenu: () => {
         const menu = document.getElementById('tabs-position-menu');
         if(!menu) return;
-        const wasOpen = menu.style.display === 'block';
-        menu.style.display = wasOpen ? 'none' : 'block';
+        // Un menu en train de se fermer est deja ferme pour l'utilisateur,
+        // meme s'il est encore affiche le temps de son animation.
+        const enFermeture = !!menu.__ferme;
+        const wasOpen = menu.style.display === 'block' && !enFermeture;
+        if(wasOpen) { Utils.fermerMenu(menu); }
+        else { Utils.annulerFermeture(menu); menu.style.display = 'block'; }
         if(!wasOpen && UI.updatePositionMenuState) UI.updatePositionMenuState();
     },
 
@@ -33,7 +37,8 @@
     // posée ailleurs.
     
     closeAllDropdowns: () => {
-        document.querySelectorAll('.menu-dropdown.visible').forEach(d => d.classList.remove('visible'));
+        document.querySelectorAll('.menu-dropdown.visible').forEach(d =>
+            Utils.fermerMenu(d, () => d.classList.remove('visible')));
     },
     
     // 1er septembre — closeMobileSidebar RETIREE, avec tout le tiroir mobile.

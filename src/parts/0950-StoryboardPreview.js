@@ -9805,7 +9805,7 @@ const ScriptReport = {
         // Fermer au clic ailleurs
         setTimeout(() => {
             document.addEventListener('click', function closeMenu() {
-                menu.remove();
+                Utils.fermerMenu(menu, () => menu.remove());
                 document.removeEventListener('click', closeMenu);
             }, { once: true });
         }, 10);

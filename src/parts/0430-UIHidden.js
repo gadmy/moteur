@@ -71,9 +71,16 @@
     //  depend du mot qu'il porte : elle ne peut pas s'ecrire dans une feuille
     //  de style, on la MESURE une fois pose, on le remet a zero, et on le
     //  laisse s'ouvrir. Les voisins suivent, puisque c'est la meme barre.
-    ecarterOnglet: (tabName) => {
-        const btns = [...document.querySelectorAll(
-            '.tab-subbtn[data-tab="' + tabName + '"], .tab-btn[data-tab="' + tabName + '"]')];
+    ecarterOnglet: (tabName) => UIHidden._ecarter(
+        '.tab-subbtn[data-tab="' + tabName + '"], .tab-btn[data-tab="' + tabName + '"]'),
+    //  LES CATEGORIES DU HAUT SONT DES ONGLETS COMME LES AUTRES. Elles
+    //  n'avaient aucune animation : « l'animation se fait bien sur la ligne du
+    //  bas mais pas sur les categories du haut ». Elles passent par la meme
+    //  porte — une seule reponse, sinon les deux barres finiront par ne plus
+    //  se comporter pareil.
+    ecarterCategorie: (cat) => UIHidden._ecarter('.tab-category[data-category="' + cat + '"]'),
+    _ecarter: (selecteur) => {
+        const btns = [...document.querySelectorAll(selecteur)];
         if(!btns.length || UIHidden._sansAnimation()) return;
         btns.forEach(b => {
             const large = b.offsetWidth;
@@ -160,6 +167,21 @@
     // === GESTION DES CATÉGORIES MASQUÉES ===
     hideCategory: (category) => {
         if(UIHidden.hiddenCategories.includes(category)) return;
+        const boutons = [...document.querySelectorAll('.tab-category[data-category="' + category + '"]')];
+        if(boutons.length && !UIHidden._enPartanceCat && !UIHidden._sansAnimation()) {
+            UIHidden._enPartanceCat = true;
+            boutons.forEach(b => { b.style.width = b.offsetWidth + 'px'; b.classList.add('onglet-part'); });
+            setTimeout(() => {
+                UIHidden._enPartanceCat = false;
+                UIHidden._masquerCategorie(category);
+            }, UIHidden.DUREE_ONGLET);
+            return;
+        }
+        UIHidden._masquerCategorie(category);
+    },
+    _enPartanceCat: false,
+    _masquerCategorie: (category) => {
+        if(UIHidden.hiddenCategories.includes(category)) return;
         
         // Empêcher de masquer la dernière catégorie
         const allCategories = ['ecriture', 'casting', 'production', 'admin'];
@@ -204,6 +226,8 @@
         UIHidden.applyHiddenCategories();
         UIHidden.applyHiddenTabs();
         UI.switchCategory(category);
+        // Apres le re-rendu, pas avant : le bouton n'existe qu'a ce moment-la.
+        setTimeout(() => UIHidden.ecarterCategorie(category), 20);
         UIHidden.closeHiddenCategoriesMenu();
         Utils.toast('Catégorie restaurée', 'success');
     },
@@ -329,7 +353,8 @@
     
     closeHiddenCategoriesMenu: () => {
         const menu = document.getElementById('hiddenCategoriesMenu');
-        if(menu) menu.classList.remove('visible');
+        if(!menu || !menu.classList.contains('visible')) return;
+        Utils.fermerMenu(menu, () => menu.classList.remove('visible'));
     },
     
     showTab: (tabName) => {

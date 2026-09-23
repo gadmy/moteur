@@ -1378,7 +1378,10 @@
         // Fermer au clic ailleurs
         setTimeout(() => {
             document.addEventListener('click', function closeMenu() {
-                menu.remove();
+                // Meme regle que pour le menu du calendrier : l'identifiant
+                // part tout de suite, l'element s'efface ensuite.
+                menu.removeAttribute('id');
+                Utils.fermerMenu(menu, () => menu.remove());
                 document.removeEventListener('click', closeMenu);
             });
         }, 10);
@@ -1398,7 +1401,7 @@
         
         // Fermer le menu
         const menu = document.getElementById('workplan-cell-menu');
-        if(menu) menu.remove();
+        if(menu) { menu.removeAttribute('id'); Utils.fermerMenu(menu, () => menu.remove()); }
         
         // Sauvegarder et rafraîchir
         Store.save();

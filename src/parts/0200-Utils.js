@@ -87,6 +87,48 @@
       // qu'elles servent d'identifiant dans scene.breakdown : elles ne doivent
       // jamais changer, sous peine de perdre le depouillement des projets
       // existants. Seul l'AFFICHAGE passe par ici, jamais la donnee.
+      // ==================================================================
+      //  UN MENU QUI S'OUVRE ET SE FERME EN DOUCEUR (v601)
+      // ==================================================================
+      //  L'OUVERTURE S'ANIME TOUTE SEULE, EN CSS : un element qui passe de
+      //  « pas affiche » a « affiche » rejoue son animation, sans une ligne
+      //  de JavaScript. Rien a brancher, donc aucun menu oublie.
+      //  LA FERMETURE, ELLE, DOIT ETRE RETENUE : une fois l'element retire du
+      //  document ou repasse en display:none, il n'y a plus rien a animer.
+      //  D'ou cette porte unique, qu'on appelle a la place de remove() ou de
+      //  display='none'.
+      DUREE_MENU: 130,
+      fermerMenu: (el, apres) => {
+          if(!el) return;
+          const fin = () => {
+              try { if(apres) apres(); else el.style.display = 'none'; } catch(e) {}
+          };
+          // Deux demandes de fermeture pour un meme menu (un clic dehors ET
+          // un clic sur un item) ne doivent pas jouer deux animations ni
+          // fermer deux fois.
+          if(el.__ferme) return;
+          let sobre = false;
+          try { sobre = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch(e) {}
+          if(sobre) { fin(); return; }
+          el.__ferme = true;
+          el.classList.add('menu-se-ferme');
+          el.__tFerme = setTimeout(() => {
+              el.classList.remove('menu-se-ferme');
+              el.__ferme = false; el.__tFerme = null;
+              fin();
+          }, Utils.DUREE_MENU);
+      },
+      //  PENDANT LES 130 MILLISECONDES DE LA FERMETURE, LE MENU EST ENCORE LA.
+      //  Un second clic sur le bouton qui l'ouvre le lirait donc comme
+      //  « ouvert » et le refermerait une deuxieme fois : le menu ne se
+      //  rouvrirait plus. Celui qui rouvre annule la fermeture en cours.
+      annulerFermeture: (el) => {
+          if(!el || !el.__ferme) return;
+          if(el.__tFerme) clearTimeout(el.__tFerme);
+          el.__tFerme = null; el.__ferme = false;
+          el.classList.remove('menu-se-ferme');
+      },
+
       CAT_LABELS: {
         'DECORS-LIEUX': 'Décors / Lieux',
         'MAQUILLAGE-COIFFURE': 'Maquillage / Coiffure',

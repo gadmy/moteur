@@ -119,7 +119,7 @@
         document.body.appendChild(menu);
         setTimeout(() => {
             document.addEventListener('click', function closeMenu(ev) {
-                if(!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', closeMenu); }
+                if(!menu.contains(ev.target)) { Utils.fermerMenu(menu, () => menu.remove()); document.removeEventListener('click', closeMenu); }
             });
         }, 10);
     },
@@ -168,7 +168,7 @@
         // Fermer au clic ailleurs
         setTimeout(() => {
             document.addEventListener('click', function closeMenu(ev) {
-                if(!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', closeMenu); }
+                if(!menu.contains(ev.target)) { Utils.fermerMenu(menu, () => menu.remove()); document.removeEventListener('click', closeMenu); }
             });
         }, 10);
     },
