@@ -243,3 +243,18 @@ end $$;
 -- versions a se recharger, puis on referme.
 -- ATTENTION pour l'avenir : une colonne AJOUTEE a user_profiles ne sera pas
 -- lisible tant qu'on ne l'a pas accordee (grant select (colonne) ...).
+
+-- ============================================================================
+-- 10. POINTS MINEURS (23 septembre, migration securite_mineurs_v602)
+-- ============================================================================
+-- Messages : seul « read » modifiable par un compte (trigger messages_update_guard).
+-- Notifications : sender_email pose par la base a l'insertion
+--   (notifications_sender_stamp), seul « read » modifiable ensuite
+--   (notifications_update_guard).
+-- Presence : policy "Presence viewable" = soi, ou projet dont on est membre
+--   (is_project_member) ou proprietaire.
+-- get_public_projects : execute retire a public et anon, garde a authenticated.
+-- VERIFIE (transaction annulee) : contenu et expediteur d'un message refuses
+--   au destinataire, « lu » accepte ; expediteur falsifie remplace par le vrai ;
+--   presence vue par un etranger = 0, par soi = 1 ; anon sans acces aux projets
+--   publics.

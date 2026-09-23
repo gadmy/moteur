@@ -18,7 +18,14 @@
             if(!error && notifications) {
                 ProfileClaims.pendingClaims = notifications.map(n => {
                     try {
-                        return { ...JSON.parse(n.message), notificationId: n.id };
+                        // v602 : « Créé par » vient de l'expediteur pose par la
+                        // base, pas du texte de la notification (falsifiable).
+                        const c = { ...JSON.parse(n.message), notificationId: n.id };
+                        if(n.sender_email) {
+                            if(String(c.createdBy || '').toLowerCase() !== n.sender_email) c.createdByName = n.sender_email;
+                            c.createdBy = n.sender_email;
+                        }
+                        return c;
                     } catch(e) {
                         return null;
                     }
@@ -61,10 +68,10 @@
                         <div class="fw-bold">${Utils.escape(claim.name)}</div>
                         <div style="font-size: 0.85rem; opacity: 0.9;">${typeLabel} • Créé par ${Utils.escape(claim.createdByName)} pour "${Utils.escape(claim.projectTitle)}"</div>
                     </div>
-                    <button onclick="app.ProfileClaims.claimProfile('${claim.id}')" style="padding: 10px 20px; background: white; color: #764ba2; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
+                    <button onclick="app.ProfileClaims.claimProfile(${Utils.jsArg(claim.id)})" style="padding: 10px 20px; background: white; color: #764ba2; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
                         ✨ Revendiquer
                     </button>
-                    <button onclick="app.ProfileClaims.rejectClaim('${claim.id}')" style="padding: 10px 15px; background: rgba(255,255,255,0.2); color: white; border: none; border-radius: 6px; cursor: pointer;" title="Ignorer">
+                    <button onclick="app.ProfileClaims.rejectClaim(${Utils.jsArg(claim.id)})" style="padding: 10px 15px; background: rgba(255,255,255,0.2); color: white; border: none; border-radius: 6px; cursor: pointer;" title="Ignorer">
                         ✖
                     </button>
                 </div>

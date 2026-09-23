@@ -2174,6 +2174,8 @@ const Notifications = {
                     message: n.message,
                     link: n.link,
                     read: n.read,
+                    // v602 : pose par la base (trigger), impossible a falsifier.
+                    sender: n.sender_email || '',
                     timestamp: new Date(n.created_at).getTime()
                 }));
                 
@@ -2240,6 +2242,7 @@ const Notifications = {
     renderList: () => {
         const list = document.getElementById('notif-list');
         if(!list) return;
+        const email = ((state.currentUser && state.currentUser.email) || '').toLowerCase();
         
         if(Notifications.items.length === 0) {
             list.innerHTML = '<div class="notif-empty">🔕 Aucune notification</div>';
@@ -2253,11 +2256,11 @@ const Notifications = {
             const unreadClass = n.read ? '' : 'unread';
             
             return `
-                <div class="notif-item ${unreadClass}" onclick="app.Notifications.handleClick('${n.id}', '${n.type}', '${n.projectId || ''}')">
+                <div class="notif-item ${unreadClass}" onclick="app.Notifications.handleClick(${Utils.jsArg(n.id)}, ${Utils.jsArg(n.type)}, ${Utils.jsArg(n.projectId || '')})">
                     <span class="notif-icon">${icon}</span>
                     <div class="notif-content">
                         <div class="notif-text">${Utils.escape(Notifications._displayText(n))}</div>
-                        <div class="notif-time">${timeAgo}</div>
+                        <div class="notif-time">${n.sender && n.sender !== email ? 'De ' + Utils.escape(n.sender) + ' · ' : ''}${timeAgo}</div>
                     </div>
                 </div>
             `;

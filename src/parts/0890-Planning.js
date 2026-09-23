@@ -2673,7 +2673,12 @@ const MoteurArchive = {
         return new Promise((resolve, reject) => {
             if(typeof JSZip !== 'undefined') { resolve(); return; }
             const script = document.createElement('script');
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+            // v602 : empreinte verifiee (SRI) — si le fichier du CDN change,
+            // le navigateur refuse de l'executer. jsDelivr sert le fichier
+            // exact du paquet npm, dont l'empreinte a ete calculee.
+            script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+            script.integrity = 'sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG';
+            script.crossOrigin = 'anonymous';
             script.onload = () => resolve();
             script.onerror = () => reject(new Error('JSZip introuvable'));
             document.head.appendChild(script);
