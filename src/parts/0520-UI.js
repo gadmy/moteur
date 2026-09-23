@@ -527,10 +527,13 @@
           // Protection contre la fermeture pendant une sauvegarde
           window.addEventListener('beforeunload', (e) => {
               // Flush des modifs debouncées en attente avant de quitter
-              if(Store._saveDebounceTimer) {
+              // v602 (audit) : le minuteur vit dans StoreSave, pas dans Store —
+              // la derniere saisie pouvait se perdre a la fermeture de l'onglet.
+              const _enAttente = !!StoreSave._saveDebounceTimer;
+              if(_enAttente) {
                   Store.saveFlush();
               }
-              if(state.savingInProgress || Store._saveDebounceTimer) {
+              if(state.savingInProgress || _enAttente) {
                   e.preventDefault();
                   e.returnValue = 'Une sauvegarde est en cours. Voulez-vous vraiment quitter ?';
                   return e.returnValue;
@@ -1531,7 +1534,7 @@
           
           let confirmMessage = 'Supprimer cette scène ?';
           if(affectedDays.length > 0) {
-              const dayNames = affectedDays.map(d => d.name || Utils.formatDate(d.date || d.startDate)).join(', ');
+              const dayNames = affectedDays.map(d => d.name || Planning.formatDate(d.date || d.startDate)).join(', ');
               confirmMessage = `⚠️ ATTENTION !\n\nCette scène est programmée dans ${affectedDays.length} jour(s) de tournage :\n${dayNames}\n\nLa scène sera automatiquement retirée de ces feuilles de service.\n\nVoulez-vous vraiment supprimer cette scène ?`;
           }
           
@@ -1718,7 +1721,7 @@
                                   title: scene.title,
                                   oldNum: oldIdx + 1,
                                   newNum: newIdx + 1,
-                                  day: day.name || Utils.formatDate(day.date || day.startDate)
+                                  day: day.name || Planning.formatDate(day.date || day.startDate)
                               });
                           }
                       });

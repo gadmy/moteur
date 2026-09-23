@@ -70,7 +70,16 @@
     tenter: () => {
         if(!MiseAJour._requise) return;
         const cache = document.visibilityState === 'hidden';
-        if(cache && !MiseAJour.occupe()) { MiseAJour.recharger(); return; }
+        // Garde anti-boucle (audit) : si on s'est DEJA recharge pour cette
+        // raison il y a moins d'une heure et qu'on est toujours en retard
+        // (cache tenace, REVISION oubliee), on ne recharge plus tout seul ;
+        // le bandeau reste la seule voie.
+        let dejaFait = false;
+        try { dejaFait = Date.now() - parseInt(sessionStorage.getItem('moteur_maj_auto') || '0', 10) < 3600000; } catch(e) {}
+        if(cache && !dejaFait && !MiseAJour.occupe()) {
+            try { sessionStorage.setItem('moteur_maj_auto', String(Date.now())); } catch(e) {}
+            MiseAJour.recharger(); return;
+        }
         if(Date.now() >= MiseAJour._plusTardJusqua) MiseAJour.bandeau();
     },
     recharger: async () => {

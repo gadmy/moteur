@@ -1475,6 +1475,31 @@ vv602 (23 septembre 2026) — EN COURS.
   LIMITE : les onglets ouverts AVANT ce mecanisme ne le connaissent pas. Pour
   les colonnes du profil, on attend donc un a deux jours avant de refermer.
 
+  AUDIT DES ERREURS (relance, la premiere analyse s'etait arretee) : AUCUNE
+  erreur au chargement, aucun doublon de cle, tous les onclick pointent vers
+  une methode qui existe. CORRIGE, tous verifies avant :
+  - BLOQUANTS : retirer d'une scene la derniere occurrence d'un accessoire
+    lie a une fiche Ressource plantait (UI.confirmModal inexistant) — l'objet
+    ne se retirait JAMAIS ; supprimer une scene programmee un jour sans nom,
+    et reordonner des scenes dans ce cas, plantaient (Utils.formatDate
+    inexistant) ; « Ajouter un personnage » de la Presentation ne faisait
+    rien (UI.addDataItem au lieu d'Actions).
+  - Fermer l'onglet juste apres une saisie perdait la derniere frappe (le
+    garde-fou regardait Store au lieu de StoreSave).
+  - LE PLAN DE TRAVAIL AFFICHAIT « ? » POUR CHAQUE SEQUENCE : il lisait
+    sc.number, champ que les scenes n'ont pas. Numero par PlanningBoards._numDe
+    (le rang, ou le code episode d'une serie), comme partout ailleurs.
+    Present depuis vv601, jamais vu : mes jeux d'essai donnaient un « number »
+    aux scenes. LECON : un jeu d'essai invente des champs que la vraie donnee
+    n'a pas — le construire depuis la forme reelle (getEmpty, creation d'une
+    scene), pas de tete.
+  - L'import d'un fichier ecrasait le projet avec n'importe quel JSON :
+    forme verifiee, confirmation demandee, groupes officiels completes.
+  - Equipe B : un refus d'enregistrer (pas de date) laissait l'onglet B
+    ecrire dans la feuille principale. Garde deplacee avant.
+  - Casting : le repli sur les profils de l'utilisateur ne servait jamais.
+  - MiseAJour : garde anti-boucle (une recharge automatique par heure).
+
 -->
 <head>
 <meta charset="utf-8">
@@ -16058,7 +16083,7 @@ showDashboard: async () => {
           // ========== VÉRIFICATION LIMITE UTILISATEURS PRÉ-ALPHA ==========
           if(CONFIG.preAlpha.maxUsers) {
               try {
-                  const { count, error } = await supabase.from('user_profiles').select('*', { count: 'exact', head: true });
+                  const { count, error } = await supabase.from('user_profiles').select('id', { count: 'exact', head: true });
                   if(!error && count >= CONFIG.preAlpha.maxUsers) {
                       els.signupError.innerHTML = "🚫 <strong>Limite atteinte</strong><br><br>La pré-alpha de Moteur a atteint sa limite de " + CONFIG.preAlpha.maxUsers + " utilisateurs.<br><br>Les inscriptions reprendront bientôt. Merci de votre patience !";
                       els.signupError.style.display = 'block';
@@ -19709,7 +19734,16 @@ const LockManager = {
     tenter: () => {
         if(!MiseAJour._requise) return;
         const cache = document.visibilityState === 'hidden';
-        if(cache && !MiseAJour.occupe()) { MiseAJour.recharger(); return; }
+        // Garde anti-boucle (audit) : si on s'est DEJA recharge pour cette
+        // raison il y a moins d'une heure et qu'on est toujours en retard
+        // (cache tenace, REVISION oubliee), on ne recharge plus tout seul ;
+        // le bandeau reste la seule voie.
+        let dejaFait = false;
+        try { dejaFait = Date.now() - parseInt(sessionStorage.getItem('moteur_maj_auto') || '0', 10) < 3600000; } catch(e) {}
+        if(cache && !dejaFait && !MiseAJour.occupe()) {
+            try { sessionStorage.setItem('moteur_maj_auto', String(Date.now())); } catch(e) {}
+            MiseAJour.recharger(); return;
+        }
         if(Date.now() >= MiseAJour._plusTardJusqua) MiseAJour.bandeau();
     },
     recharger: async () => {
@@ -20689,7 +20723,15 @@ CONFIG.crewGroups.forEach(defaultGrp => {
       },
 
       clearCurrent: async () => { if(state.currentRole === 'viewer') return; if(Store.isPartial()) { Utils.toast("Ce projet vous est transmis partiellement : vous ne pouvez pas le vider. Seul le propriétaire le peut.", 'error', 8000); return; } if(await ConfirmModal.confirmDelete("Toutes les données du projet seront effacées.", "Vider tout ?")){ state.data = Store.getEmpty(); Store.save(); UI.renderAll(); } },
-      importJSON: (e) => { if(state.currentRole === 'viewer') return; if(Store.isPartial()) { Utils.toast("Ce projet vous est transmis partiellement : un import remplacerait tout le contenu par une copie incomplète. Opération refusée.", 'error', 9000); e.target.value=''; return; } const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>{ try{ state.data = JSON.parse(ev.target.result); Store.save(); UI.renderAll(); UI.switchTab('synopsis'); Utils.toast('Import réussi !', 'success'); } catch(x){ Utils.toast('Erreur fichier.', 'error'); } }; r.readAsText(f); e.target.value=''; },
+      importJSON: (e) => { if(state.currentRole === 'viewer') return; if(Store.isPartial()) { Utils.toast("Ce projet vous est transmis partiellement : un import remplacerait tout le contenu par une copie incomplète. Opération refusée.", 'error', 9000); e.target.value=''; return; } const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=async ev=>{ let lu; try{ lu = JSON.parse(ev.target.result); } catch(x){ Utils.toast('Erreur fichier : ce n\'est pas un export Moteur lisible.', 'error'); return; }
+          // v602 (audit) : l'import ecrasait le projet avec N'IMPORTE QUEL JSON
+          // valide (null, tableau, export partiel), sans confirmation ni
+          // migrations. On verifie la forme, on demande, on complete.
+          if(!lu || typeof lu !== 'object' || Array.isArray(lu) || !Array.isArray(lu.scenes)) { Utils.toast('Ce fichier n\'est pas un export de projet Moteur : rien n\'a été modifié.', 'error', 7000); return; }
+          if(!await ConfirmModal.confirmDelete('Le contenu actuel du projet sera REMPLACÉ par celui du fichier.', 'Importer ce fichier ?')) return;
+          const d = Object.assign(Store.getEmpty(), lu);
+          try { CastFamilies.completerGroupes(d, true); CrewDepartements.fermer(d, true); } catch(x) {}
+          state.data = d; Store.save(); UI.renderAll(); UI.switchTab('synopsis'); Utils.toast('Import réussi !', 'success'); }; r.readAsText(f); e.target.value=''; },
       
       // saveDebounced / saveFlush (B.1.5 → StoreSave)
       saveDebounced: () => StoreSave.saveDebounced(),
@@ -26699,10 +26741,13 @@ initCategoriesDragDrop: () => {
           // Protection contre la fermeture pendant une sauvegarde
           window.addEventListener('beforeunload', (e) => {
               // Flush des modifs debouncées en attente avant de quitter
-              if(Store._saveDebounceTimer) {
+              // v602 (audit) : le minuteur vit dans StoreSave, pas dans Store —
+              // la derniere saisie pouvait se perdre a la fermeture de l'onglet.
+              const _enAttente = !!StoreSave._saveDebounceTimer;
+              if(_enAttente) {
                   Store.saveFlush();
               }
-              if(state.savingInProgress || Store._saveDebounceTimer) {
+              if(state.savingInProgress || _enAttente) {
                   e.preventDefault();
                   e.returnValue = 'Une sauvegarde est en cours. Voulez-vous vraiment quitter ?';
                   return e.returnValue;
@@ -27703,7 +27748,7 @@ initCategoriesDragDrop: () => {
           
           let confirmMessage = 'Supprimer cette scène ?';
           if(affectedDays.length > 0) {
-              const dayNames = affectedDays.map(d => d.name || Utils.formatDate(d.date || d.startDate)).join(', ');
+              const dayNames = affectedDays.map(d => d.name || Planning.formatDate(d.date || d.startDate)).join(', ');
               confirmMessage = `⚠️ ATTENTION !\n\nCette scène est programmée dans ${affectedDays.length} jour(s) de tournage :\n${dayNames}\n\nLa scène sera automatiquement retirée de ces feuilles de service.\n\nVoulez-vous vraiment supprimer cette scène ?`;
           }
           
@@ -27890,7 +27935,7 @@ initCategoriesDragDrop: () => {
                                   title: scene.title,
                                   oldNum: oldIdx + 1,
                                   newNum: newIdx + 1,
-                                  day: day.name || Utils.formatDate(day.date || day.startDate)
+                                  day: day.name || Planning.formatDate(day.date || day.startDate)
                               });
                           }
                       });
@@ -31660,9 +31705,11 @@ initCategoriesDragDrop: () => {
                   });
                   
                   if(count <= 1) {
-                      const deleteResource = await UI.confirmModal({
+                      // v602 (audit) : UI.confirmModal n'existait pas — l'appel levait
+                      // une erreur et l'element ne se retirait JAMAIS de la scene.
+                      const deleteResource = await ConfirmModal.show({
                           title: '🗑️ Supprimer aussi la fiche Ressource ?',
-                          message: `"${itemName}" n'apparaît plus dans aucune scène. Voulez-vous aussi supprimer la fiche Ressource associée ?`,
+                          message: `"${Utils.escape(itemName)}" n'apparaît plus dans aucune scène. Voulez-vous aussi supprimer la fiche Ressource associée ?`,
                           confirmText: 'Supprimer la fiche',
                           cancelText: 'Garder la fiche',
                           type: 'warning'
@@ -52954,6 +53001,13 @@ closeModal: () => {
         if(!PlanningDayEdit.canWrite()) { Utils.toast("Vous n'avez pas les droits de modification sur le planning.", 'error'); return; }
         
         PlanningDayEdit.syncFormToTemp();
+        // v602 (audit) : la garde de date AVANT de rentrer la vue — sinon un
+        // refus laissait la fenetre ouverte sur le jour complet, et l'onglet
+        // de l'equipe B ecrivait dans la feuille principale.
+        if(!(Planning.tempShootDay || {}).startDate) {
+            Utils.toast('Ce jour n\u2019a pas de date : renseigne-la avant d\u2019enregistrer, sinon il n\u2019apparaîtra dans aucun planning.', 'error');
+            return;
+        }
         // v602 : si une equipe B existe, la vue ouverte rentre dans le jour
         // complet, qui est seul enregistre.
         EquipeB.complet();
@@ -53292,6 +53346,21 @@ closeModal: () => {
     _scenesDe: (j, eq) => (eq === 'A' ? EquipeB.scenesA(j) : eq === 'B' ? EquipeB.scenesB(j) : (j && j.scenes || []))
         .map(ref => (state.data.scenes || []).find(s => s && s.id === (ref && ref.sceneId)))
         .filter(Boolean),
+    //  LE NUMERO D'UNE SCENE, tel que l'appli l'affiche partout : son RANG
+    //  (un film) ou son code episode (une serie), via UI.formatSceneNumber.
+    //  v602 (audit) : le plan de travail lisait « sc.number », un champ que
+    //  les scenes n'ont pas — chaque sequence s'affichait « ? ».
+    _numDe: (sc) => {
+        if(!sc) return '?';
+        const toutes = state.data.scenes || [];
+        let idx = toutes.indexOf(sc);
+        if(state.currentProjectType === 'series' && sc.episodeId) {
+            idx = toutes.filter(x => x && x.episodeId === sc.episodeId).indexOf(sc);
+        }
+        if(idx < 0) return '?';
+        const n = (typeof UI !== 'undefined' && UI.formatSceneNumber) ? UI.formatSceneNumber(sc, idx) : '#' + (idx + 1);
+        return String(n).replace(/^#/, '');
+    },
     //  LA COLONNE « EQUIPE B EN // » du modele AFAR : ou tourne la deuxieme
     //  equipe ce jour-la, et quoi. Vide pour un jour sans equipe B.
     avecEquipeB: () => (state.data.shootingDays || []).some(EquipeB.existe),
@@ -53301,7 +53370,7 @@ closeModal: () => {
         const decors = [];
         sc.forEach(x => { const d = PlanningBoards._decorDe(x); if(d && decors.indexOf(d) < 0) decors.push(d); });
         return EquipeB.nom(j) + (decors.length ? ' : ' + decors.join(' · ') : '')
-            + (sc.length ? ' — séq. ' + sc.map(x => x.number || '?').join(' ') : '');
+            + (sc.length ? ' — séq. ' + sc.map(x => PlanningBoards._numDe(x)).join(' ') : '');
     },
     //  Le decor d'une scene : la fiche liee si elle existe, sinon ce que dit
     //  l'en-tete de scene (meme lecture que la feuille de service).
@@ -53563,7 +53632,7 @@ closeModal: () => {
             + (plur ? 's' : '') + ' sur ' + total + (plur ? ' ne sont pas encore placées' : ' n’est pas encore placée') + combien + '</h3>'
             + '<div class="pdt-scenes-libres">'
             + reste.map(sc => '<span class="pdt-scene" title="' + esc(sc.title || '') + '">'
-                + esc(sc.number || '?') + '</span>').join(' ')
+                + esc(PlanningBoards._numDe(sc)) + '</span>').join(' ')
             + '</div></div>';
     },
 
@@ -53946,7 +54015,7 @@ closeModal: () => {
                 + '<td>' + (decors.length ? esc(decors.join(' · ')) + (alerteDecors ? ' <span class="pdt-alerte" title="Trois décors ou plus dans la journée : prévoyez les déplacements">⚠</span>' : '')
                                           : '<span class="pdt-vide">' + esc(j.name || typeInfo.label) + '</span>') + '</td>'
                 + '<td>' + (scenes.length
-                      ? scenes.map(sc => '<span class="pdt-scene" title="' + esc(sc.title || '') + '">' + esc(sc.number || '?') + '</span>').join(' ')
+                      ? scenes.map(sc => '<span class="pdt-scene" title="' + esc(sc.title || '') + '">' + esc(PlanningBoards._numDe(sc)) + '</span>').join(' ')
                       : '') + '</td>'
                 + '<td class="pdt-fin">' + esc([...new Set(scenes.map(sc => sc && sc.intExt).filter(Boolean))].join('/')) + '</td>'
                 + '<td class="pdt-fin">' + esc([...new Set(scenes.map(sc => sc && sc.dayNight).filter(Boolean))].join('/')) + '</td>'
@@ -54285,7 +54354,7 @@ closeModal: () => {
                 PlanningBoards._moisDe(dJour),
                 PlanningBoards._dateCourte(dJour),
                 decors.length ? decors.join(' · ') : (j.name || type.label),
-                scenes.map(sc => sc.number || '?').join(' '),
+                scenes.map(sc => PlanningBoards._numDe(sc)).join(' '),
                 [...new Set(scenes.map(sc => sc && sc.intExt).filter(Boolean))].join('/'),
                 [...new Set(scenes.map(sc => sc && sc.dayNight).filter(Boolean))].join('/'),
                 (j.crewCall || '') + (j.estimatedWrap ? '-' + j.estimatedWrap : ''),
@@ -54620,8 +54689,8 @@ closeModal: () => {
             titre: i.decors.join(' · ')
         }), 'wp-bande-decors');
         html += bande('SÉQUENCES', (i) => ({
-            txt: i.scenes.map(x => x.number || '?').join(' '),
-            titre: i.scenes.map(x => (x.number || '?') + ' — ' + (x.title || '')).join('\n')
+            txt: i.scenes.map(x => PlanningBoards._numDe(x)).join(' '),
+            titre: i.scenes.map(x => (PlanningBoards._numDe(x)) + ' — ' + (x.title || '')).join('\n')
         }));
         html += '<tr><th class="workplan-col-num">N°</th>';
         html += '<th class="workplan-col-role">RÔLE</th>';
@@ -64075,8 +64144,10 @@ const Presentation = {
     //  il ajoute maintenant un PERSONNAGE — c'est la meme chose, et il n'y a
     //  plus qu'un endroit ou l'ecrire.
     ajouterPersonnage: async () => {
-        if(typeof UI === 'undefined' || !UI.addDataItem) return;
-        await UI.addDataItem('characters');
+        // v602 (audit) : la methode vit dans Actions ; le test sur UI
+        // faisait sortir sans rien dire, le bouton ne faisait rien.
+        if(typeof Actions === 'undefined' || !Actions.addDataItem) return;
+        await Actions.addDataItem('characters');
         Presentation.renderActorNeeds();
     },
 
@@ -74386,8 +74457,10 @@ ${window.location.origin}${window.location.pathname}
           const sorties = [];
           try {
               let profils = Universe.myProfiles || [];
-              if(!profils.length && typeof PublicProfile !== 'undefined' && PublicProfile.current) {
-                  profils = [PublicProfile.current];
+              // v602 (audit) : PublicProfile.current n'existe pas ; les profils
+              // de l'utilisateur sont dans PublicProfile.profiles.
+              if(!profils.length && typeof PublicProfile !== 'undefined' && (PublicProfile.profiles || []).length) {
+                  profils = PublicProfile.profiles.slice();
               }
               profils.forEach((p, idx) => {
                   const facets = (typeof PublicProfile !== 'undefined' && PublicProfile._normalizeFacets)

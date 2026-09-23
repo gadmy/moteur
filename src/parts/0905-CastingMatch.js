@@ -110,8 +110,10 @@
           const sorties = [];
           try {
               let profils = Universe.myProfiles || [];
-              if(!profils.length && typeof PublicProfile !== 'undefined' && PublicProfile.current) {
-                  profils = [PublicProfile.current];
+              // v602 (audit) : PublicProfile.current n'existe pas ; les profils
+              // de l'utilisateur sont dans PublicProfile.profiles.
+              if(!profils.length && typeof PublicProfile !== 'undefined' && (PublicProfile.profiles || []).length) {
+                  profils = PublicProfile.profiles.slice();
               }
               profils.forEach((p, idx) => {
                   const facets = (typeof PublicProfile !== 'undefined' && PublicProfile._normalizeFacets)

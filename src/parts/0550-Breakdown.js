@@ -1425,9 +1425,11 @@
                   });
                   
                   if(count <= 1) {
-                      const deleteResource = await UI.confirmModal({
+                      // v602 (audit) : UI.confirmModal n'existait pas — l'appel levait
+                      // une erreur et l'element ne se retirait JAMAIS de la scene.
+                      const deleteResource = await ConfirmModal.show({
                           title: '🗑️ Supprimer aussi la fiche Ressource ?',
-                          message: `"${itemName}" n'apparaît plus dans aucune scène. Voulez-vous aussi supprimer la fiche Ressource associée ?`,
+                          message: `"${Utils.escape(itemName)}" n'apparaît plus dans aucune scène. Voulez-vous aussi supprimer la fiche Ressource associée ?`,
                           confirmText: 'Supprimer la fiche',
                           cancelText: 'Garder la fiche',
                           type: 'warning'

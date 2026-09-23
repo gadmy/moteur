@@ -316,7 +316,7 @@ showDashboard: async () => {
           // ========== VÉRIFICATION LIMITE UTILISATEURS PRÉ-ALPHA ==========
           if(CONFIG.preAlpha.maxUsers) {
               try {
-                  const { count, error } = await supabase.from('user_profiles').select('*', { count: 'exact', head: true });
+                  const { count, error } = await supabase.from('user_profiles').select('id', { count: 'exact', head: true });
                   if(!error && count >= CONFIG.preAlpha.maxUsers) {
                       els.signupError.innerHTML = "🚫 <strong>Limite atteinte</strong><br><br>La pré-alpha de Moteur a atteint sa limite de " + CONFIG.preAlpha.maxUsers + " utilisateurs.<br><br>Les inscriptions reprendront bientôt. Merci de votre patience !";
                       els.signupError.style.display = 'block';

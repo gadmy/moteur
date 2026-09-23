@@ -944,7 +944,15 @@ CONFIG.crewGroups.forEach(defaultGrp => {
       },
 
       clearCurrent: async () => { if(state.currentRole === 'viewer') return; if(Store.isPartial()) { Utils.toast("Ce projet vous est transmis partiellement : vous ne pouvez pas le vider. Seul le propriétaire le peut.", 'error', 8000); return; } if(await ConfirmModal.confirmDelete("Toutes les données du projet seront effacées.", "Vider tout ?")){ state.data = Store.getEmpty(); Store.save(); UI.renderAll(); } },
-      importJSON: (e) => { if(state.currentRole === 'viewer') return; if(Store.isPartial()) { Utils.toast("Ce projet vous est transmis partiellement : un import remplacerait tout le contenu par une copie incomplète. Opération refusée.", 'error', 9000); e.target.value=''; return; } const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>{ try{ state.data = JSON.parse(ev.target.result); Store.save(); UI.renderAll(); UI.switchTab('synopsis'); Utils.toast('Import réussi !', 'success'); } catch(x){ Utils.toast('Erreur fichier.', 'error'); } }; r.readAsText(f); e.target.value=''; },
+      importJSON: (e) => { if(state.currentRole === 'viewer') return; if(Store.isPartial()) { Utils.toast("Ce projet vous est transmis partiellement : un import remplacerait tout le contenu par une copie incomplète. Opération refusée.", 'error', 9000); e.target.value=''; return; } const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=async ev=>{ let lu; try{ lu = JSON.parse(ev.target.result); } catch(x){ Utils.toast('Erreur fichier : ce n\'est pas un export Moteur lisible.', 'error'); return; }
+          // v602 (audit) : l'import ecrasait le projet avec N'IMPORTE QUEL JSON
+          // valide (null, tableau, export partiel), sans confirmation ni
+          // migrations. On verifie la forme, on demande, on complete.
+          if(!lu || typeof lu !== 'object' || Array.isArray(lu) || !Array.isArray(lu.scenes)) { Utils.toast('Ce fichier n\'est pas un export de projet Moteur : rien n\'a été modifié.', 'error', 7000); return; }
+          if(!await ConfirmModal.confirmDelete('Le contenu actuel du projet sera REMPLACÉ par celui du fichier.', 'Importer ce fichier ?')) return;
+          const d = Object.assign(Store.getEmpty(), lu);
+          try { CastFamilies.completerGroupes(d, true); CrewDepartements.fermer(d, true); } catch(x) {}
+          state.data = d; Store.save(); UI.renderAll(); UI.switchTab('synopsis'); Utils.toast('Import réussi !', 'success'); }; r.readAsText(f); e.target.value=''; },
       
       // saveDebounced / saveFlush (B.1.5 → StoreSave)
       saveDebounced: () => StoreSave.saveDebounced(),

@@ -51,6 +51,21 @@
     _scenesDe: (j, eq) => (eq === 'A' ? EquipeB.scenesA(j) : eq === 'B' ? EquipeB.scenesB(j) : (j && j.scenes || []))
         .map(ref => (state.data.scenes || []).find(s => s && s.id === (ref && ref.sceneId)))
         .filter(Boolean),
+    //  LE NUMERO D'UNE SCENE, tel que l'appli l'affiche partout : son RANG
+    //  (un film) ou son code episode (une serie), via UI.formatSceneNumber.
+    //  v602 (audit) : le plan de travail lisait « sc.number », un champ que
+    //  les scenes n'ont pas — chaque sequence s'affichait « ? ».
+    _numDe: (sc) => {
+        if(!sc) return '?';
+        const toutes = state.data.scenes || [];
+        let idx = toutes.indexOf(sc);
+        if(state.currentProjectType === 'series' && sc.episodeId) {
+            idx = toutes.filter(x => x && x.episodeId === sc.episodeId).indexOf(sc);
+        }
+        if(idx < 0) return '?';
+        const n = (typeof UI !== 'undefined' && UI.formatSceneNumber) ? UI.formatSceneNumber(sc, idx) : '#' + (idx + 1);
+        return String(n).replace(/^#/, '');
+    },
     //  LA COLONNE « EQUIPE B EN // » du modele AFAR : ou tourne la deuxieme
     //  equipe ce jour-la, et quoi. Vide pour un jour sans equipe B.
     avecEquipeB: () => (state.data.shootingDays || []).some(EquipeB.existe),
@@ -60,7 +75,7 @@
         const decors = [];
         sc.forEach(x => { const d = PlanningBoards._decorDe(x); if(d && decors.indexOf(d) < 0) decors.push(d); });
         return EquipeB.nom(j) + (decors.length ? ' : ' + decors.join(' · ') : '')
-            + (sc.length ? ' — séq. ' + sc.map(x => x.number || '?').join(' ') : '');
+            + (sc.length ? ' — séq. ' + sc.map(x => PlanningBoards._numDe(x)).join(' ') : '');
     },
     //  Le decor d'une scene : la fiche liee si elle existe, sinon ce que dit
     //  l'en-tete de scene (meme lecture que la feuille de service).
@@ -322,7 +337,7 @@
             + (plur ? 's' : '') + ' sur ' + total + (plur ? ' ne sont pas encore placées' : ' n’est pas encore placée') + combien + '</h3>'
             + '<div class="pdt-scenes-libres">'
             + reste.map(sc => '<span class="pdt-scene" title="' + esc(sc.title || '') + '">'
-                + esc(sc.number || '?') + '</span>').join(' ')
+                + esc(PlanningBoards._numDe(sc)) + '</span>').join(' ')
             + '</div></div>';
     },
 
@@ -705,7 +720,7 @@
                 + '<td>' + (decors.length ? esc(decors.join(' · ')) + (alerteDecors ? ' <span class="pdt-alerte" title="Trois décors ou plus dans la journée : prévoyez les déplacements">⚠</span>' : '')
                                           : '<span class="pdt-vide">' + esc(j.name || typeInfo.label) + '</span>') + '</td>'
                 + '<td>' + (scenes.length
-                      ? scenes.map(sc => '<span class="pdt-scene" title="' + esc(sc.title || '') + '">' + esc(sc.number || '?') + '</span>').join(' ')
+                      ? scenes.map(sc => '<span class="pdt-scene" title="' + esc(sc.title || '') + '">' + esc(PlanningBoards._numDe(sc)) + '</span>').join(' ')
                       : '') + '</td>'
                 + '<td class="pdt-fin">' + esc([...new Set(scenes.map(sc => sc && sc.intExt).filter(Boolean))].join('/')) + '</td>'
                 + '<td class="pdt-fin">' + esc([...new Set(scenes.map(sc => sc && sc.dayNight).filter(Boolean))].join('/')) + '</td>'
@@ -1044,7 +1059,7 @@
                 PlanningBoards._moisDe(dJour),
                 PlanningBoards._dateCourte(dJour),
                 decors.length ? decors.join(' · ') : (j.name || type.label),
-                scenes.map(sc => sc.number || '?').join(' '),
+                scenes.map(sc => PlanningBoards._numDe(sc)).join(' '),
                 [...new Set(scenes.map(sc => sc && sc.intExt).filter(Boolean))].join('/'),
                 [...new Set(scenes.map(sc => sc && sc.dayNight).filter(Boolean))].join('/'),
                 (j.crewCall || '') + (j.estimatedWrap ? '-' + j.estimatedWrap : ''),
@@ -1379,8 +1394,8 @@
             titre: i.decors.join(' · ')
         }), 'wp-bande-decors');
         html += bande('SÉQUENCES', (i) => ({
-            txt: i.scenes.map(x => x.number || '?').join(' '),
-            titre: i.scenes.map(x => (x.number || '?') + ' — ' + (x.title || '')).join('\n')
+            txt: i.scenes.map(x => PlanningBoards._numDe(x)).join(' '),
+            titre: i.scenes.map(x => (PlanningBoards._numDe(x)) + ' — ' + (x.title || '')).join('\n')
         }));
         html += '<tr><th class="workplan-col-num">N°</th>';
         html += '<th class="workplan-col-role">RÔLE</th>';

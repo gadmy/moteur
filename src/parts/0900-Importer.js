@@ -4004,8 +4004,10 @@ const Presentation = {
     //  il ajoute maintenant un PERSONNAGE — c'est la meme chose, et il n'y a
     //  plus qu'un endroit ou l'ecrire.
     ajouterPersonnage: async () => {
-        if(typeof UI === 'undefined' || !UI.addDataItem) return;
-        await UI.addDataItem('characters');
+        // v602 (audit) : la methode vit dans Actions ; le test sur UI
+        // faisait sortir sans rien dire, le bouton ne faisait rien.
+        if(typeof Actions === 'undefined' || !Actions.addDataItem) return;
+        await Actions.addDataItem('characters');
         Presentation.renderActorNeeds();
     },
 

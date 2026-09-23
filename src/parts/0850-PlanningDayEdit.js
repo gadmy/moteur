@@ -319,6 +319,13 @@ closeModal: () => {
         if(!PlanningDayEdit.canWrite()) { Utils.toast("Vous n'avez pas les droits de modification sur le planning.", 'error'); return; }
         
         PlanningDayEdit.syncFormToTemp();
+        // v602 (audit) : la garde de date AVANT de rentrer la vue — sinon un
+        // refus laissait la fenetre ouverte sur le jour complet, et l'onglet
+        // de l'equipe B ecrivait dans la feuille principale.
+        if(!(Planning.tempShootDay || {}).startDate) {
+            Utils.toast('Ce jour n\u2019a pas de date : renseigne-la avant d\u2019enregistrer, sinon il n\u2019apparaîtra dans aucun planning.', 'error');
+            return;
+        }
         // v602 : si une equipe B existe, la vue ouverte rentre dans le jour
         // complet, qui est seul enregistre.
         EquipeB.complet();
