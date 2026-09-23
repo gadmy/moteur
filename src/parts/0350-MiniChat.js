@@ -20,7 +20,7 @@
           MiniChat._unseen = 0;
           MiniChat._expanded = false;
           MiniChat._buildWidget();
-          MiniChat.channel = supabase.channel('minichat_' + projectId, { config: { broadcast: { self: true } } })
+          MiniChat.channel = supabase.channel('minichat_' + projectId, { config: { private: true, broadcast: { self: true } } })
               .on('broadcast', { event: 'msg' }, (p) => MiniChat._receive(p.payload))
               .subscribe();
           MiniChat._gcTimer = setInterval(MiniChat._tick, 30000);

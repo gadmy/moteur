@@ -291,7 +291,11 @@
           }
           
           state.dbListener = supabase
-              .channel('project_' + id, { config: { broadcast: { self: false } } })
+              // v602 (audit securite) : canal PRIVE. Public, n'importe qui
+              // connaissant l'identifiant du projet pouvait l'ecouter et y
+              // parler. La regle « canaux projet » (realtime.messages, voir
+              // sql/securite_audit_v602.sql) ne laisse entrer que les membres.
+              .channel('project_' + id, { config: { private: true, broadcast: { self: false } } })
               .on('postgres_changes', 
                   { event: 'UPDATE', schema: 'public', table: 'projects', filter: 'id=eq.' + id },
                   (payload) => {
