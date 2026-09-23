@@ -437,7 +437,9 @@
     colonnesTableau: () => {
         const cols = PlanningBoards.colonnesRoles().map(r => Object.assign({}, r, {
             kind: 'presence',
-            groupe: r.groupe === 'actor' ? '\u{1F3AD} RÔLES' : '\u{1F3A5} ÉQUIPE',
+            groupe: r.groupe === 'actor'
+                ? (r.famille === 'figu' ? '\u{1F465} ' : '\u{1F3AD} ') + CastFamilies.info(r.famille).label.toUpperCase()
+                : '\u{1F3A5} ÉQUIPE',
             classe: r.groupe === 'actor' ? 'pdt-grp-com' : 'pdt-grp-tec'
         }));
         const inv = PlanningBoards.inventaireRessources();
@@ -456,11 +458,18 @@
 
     colonnesRoles: () => {
         const out = [];
-        (state.data.actors || []).forEach((a, i) => out.push({
-            cle: 'actor_' + a.id, num: i + 1, groupe: 'actor',
-            titre: PlanningBoards.persoDe(a.id) || a.name || 'Sans nom',
-            nom: a.name || 'Sans nom'
-        }));
+        // v602 : les comediens par FAMILLE, dans l'ordre officiel, chacun
+        // avec son numero (1, 21, S3, D1, C2, P1). La figuration n'a pas de
+        // numero officiel : « F1, F2 » ne sert qu'a lire la colonne.
+        const numeros = CastFamilies.numeros();
+        CastFamilies.LISTE.forEach(f => {
+            CastFamilies.membres(f.cle).forEach((a, i) => out.push({
+                cle: 'actor_' + a.id, groupe: 'actor', famille: f.cle,
+                num: numeros[a.id] || ('F' + (i + 1)),
+                titre: PlanningBoards.persoDe(a.id) || a.name || 'Sans nom',
+                nom: a.name || 'Sans nom'
+            }));
+        });
         (state.data.crew || []).forEach((m, i) => out.push({
             cle: 'crew_' + m.id, num: i + 1, groupe: 'crew',
             titre: m.role || m.name || 'Sans nom',
@@ -901,6 +910,13 @@
         const resJour = PlanningBoards.ressourcesParJour();
         const premiere = (lignes.find(l => l.plateau) || {}).jour;
         const depart = premiere ? (premiere.startDate || premiere.date) : '';
+        // v602 : un comedien garde son numero officiel (1, 21, S3...). Les
+        // autres colonnes sont numerotees APRES le plus grand numero de role,
+        // sinon l'equipe pourrait porter le 21 d'une silhouette parlante.
+        const maxNum = colonnes.reduce((m, c) => (c.famille && /^\d+$/.test(String(c.num)))
+            ? Math.max(m, Number(c.num)) : m, 0);
+        const nActeurs = colonnes.filter(c => c.famille).length;
+        const numCol = (c, i) => c.famille ? String(c.num) : String(maxNum + i - nActeurs + 1);
         const cols = [
             { t: 'JT', w: 7 }, { t: 'S', w: 6 }, { t: 'M', w: 11 }, { t: 'Dates', w: 20 },
             { t: 'Décors', w: 34, g: 1 }, { t: 'Séq.', w: 20, g: 1 }, { t: 'I/E', w: 8 },
@@ -910,8 +926,8 @@
         // sortaient tous « ROL », douze colonnes identiques. Le modele AFAR
         // fait exactement l'inverse — la colonne porte SON NUMERO, et une
         // legende dit qui est qui. C'est le numero qu'on se dit au telephone.
-        ].concat(colonnes.map((c, i) => ({ t: String(i + 1), w: 7 })));
-        const legende = colonnes.map((c, i) => (i + 1) + ' · ' + c.titre
+        ].concat(colonnes.map((c, i) => ({ t: numCol(c, i), w: 7 })));
+        const legende = colonnes.map((c, i) => numCol(c, i) + ' · ' + c.titre
             + (c.kind === 'res' ? '' : (c.nom && c.nom !== c.titre ? ' (' + c.nom + ')' : '')));
         const rangs = lignes.map((l, i) => {
             const j = l.jour;
@@ -1274,14 +1290,18 @@
         // Section Comédiens
         if(actors.length > 0) {
             html += `<tr class="workplan-section-row"><td colspan="${shootDays.length + 4}">🎭 COMÉDIEN.NES</td></tr>`;
-            
-            actors.forEach((actor, idx) => {
+            // v602 : par famille, dans l'ordre officiel, avec le numero de la
+            // feuille de service (la figuration n'en a pas).
+            const numeros = CastFamilies.numeros();
+            const ordonnes = [];
+            CastFamilies.LISTE.forEach(f => CastFamilies.membres(f.cle).forEach(a => ordonnes.push(a)));
+            ordonnes.forEach((actor) => {
                 const personKey = `actor_${actor.id}`;
                 const character = getCharacterForActor(actor.id);
                 const totalDays = countWorkDays(personKey);
                 
                 html += '<tr>';
-                html += `<td class="workplan-cell-num">${idx + 1}</td>`;
+                html += `<td class="workplan-cell-num">${Utils.escape(numeros[actor.id] || '')}</td>`;
                 html += `<td class="workplan-cell-role">${Utils.escape(character || '—')}</td>`;
                 html += `<td class="workplan-cell-actor">${Utils.escape(actor.name || 'Sans nom')}</td>`;
                 

@@ -664,8 +664,8 @@ CONFIG.crewGroups.forEach(defaultGrp => {
     }
 });
               if(!safeData.groups.some(g => g.type === 'actor')) { safeData.groups.push({id: 'ga1', name: 'Casting Principal', type: 'actor'}); safeData.groups.push({id: 'ga2', name: 'Rôles Secondaires', type: 'actor'}); safeData.groups.push({id: 'ga3', name: 'Figuration', type: 'actor'}); }
-              // Filet : groupes casting ga4/ga5 (Silhouettes / Doublures) pour les projets existants
-              ['ga4', 'ga5'].forEach(gid => { if(!safeData.groups.some(g => g.id === gid)) { const def = CONFIG.defaultGroups.find(g => g.id === gid); if(def) safeData.groups.push(def); } });
+              // Filet : groupes casting ga4 a ga8 (silhouettes parlantes et muettes, doublures, cascadeurs, pilotes) pour les projets existants
+              CastFamilies.completerGroupes(safeData);
               if(!safeData.groups.some(g => g.type === 'org')) { safeData.groups.push({id: 'go1', name: 'Partenaires', type: 'org'}); safeData.groups.push({id: 'go2', name: 'Financeurs', type: 'org'}); safeData.groups.push({id: 'go3', name: 'Prestataires', type: 'org'}); }
               if(!safeData.tags || safeData.tags.length === 0) safeData.tags = CONFIG.defaultTags;
               ['scenes', 'characters', 'locations'].forEach(k => { if(!Array.isArray(safeData[k])) safeData[k] = []; });

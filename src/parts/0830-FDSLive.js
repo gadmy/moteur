@@ -39,18 +39,8 @@
     KIND_LABELS: { time: 'Conv.', pickup: 'Pick-up', hmc: 'HMC', pat: 'PAT' },
     // Le HMC est une donnee comedien : l'equipe technique ne l'a pas.
     scopeKinds: (scope) => (scope === 'crew' ? ['time', 'pickup', 'pat'] : ['time', 'pickup', 'hmc', 'pat']),
-    castGroupIds: () => {
-        const gs = (state.data.groups || []).filter(gr => gr.type === 'actor');
-        const by = (re) => gs.filter(gr => re.test(gr.name || '')).map(gr => gr.id);
-        return { figu: by(/figuration/i), sil: by(/silhouette/i), dbl: by(/doublure/i) };
-    },
-    scopeOf: (actor) => {
-        const G = FDSLive.castGroupIds(), g = actor ? actor.group_id : null;
-        if(G.figu.includes(g)) return 'figu';
-        if(G.sil.includes(g)) return 'sil';
-        if(G.dbl.includes(g)) return 'dbl';
-        return 'role';
-    },
+    // v602 : la famille se lit dans CastFamilies, seule source.
+    scopeOf: (actor) => CastFamilies.de(actor),
     // Identifiants des personnes CONVOQUEES dans un tableau donne.
     scopeIds: (scope) => {
         const calls = PlanningTransport.model.calls();
@@ -93,7 +83,8 @@
     // La figuration n'est PAS ici : elle a son propre interrupteur (figuSplit),
     // qui DEPLACE le detail au lieu de le supprimer. Deux reglages sur la meme
     // chose se seraient contredits.
-    HIDEABLE: [['sil', 'Silhouettes'], ['dbl', 'Doublures']],
+    HIDEABLE: [['sil', 'Silhouettes parlantes'], ['silm', 'Silhouettes muettes'], ['dbl', 'Doublures'],
+               ['casc', 'Cascadeurs'], ['pil', 'Pilotes']],
     hidden: (scope) => (FDSLive.temp().fdsHide || []).indexOf(scope) > -1,
     toggleScope: (scope, show) => {
         const t = FDSLive.temp();
@@ -888,9 +879,8 @@
         const calls = PlanningTransport.model.calls()
             .filter(cl => cl && cl.type && cl.personId != null)
             .map(cl => ({ type: cl.type, id: cl.personId }));
-        const actorGroups = (state.data.groups || []).filter(gr => gr.type === 'actor');
-        const idsByName = (re) => actorGroups.filter(gr => re.test(gr.name || '')).map(gr => gr.id);
-        const figuIds = idsByName(/figuration/i), silIds = idsByName(/silhouette/i), dblIds = idsByName(/doublure/i);
+        // Numeros officiels (v602) : calcules une fois pour toute la feuille.
+        const numeros = CastFamilies.numeros();
         const actorOf = (id) => (state.data.actors || []).find(a => a.id === id);
         const crewOf = (id) => (state.data.crew || []).find(x => x.id === id);
         const castCalls = calls.filter(p => p.type === 'actor');
@@ -925,7 +915,7 @@
                         ? FDSLive.roSrc(ch.name || '', 'personnage sans nom', `app.FDSLive.openFiche('char','${esc(ch.id)}')`)
                         : FDSLive.roSrc('', 'aucun personnage lié', `app.FDSLive.openFiche('actor','${esc(a.id)}')`, 'Lier un personnage');
                     t += `<tr>
-                        <td style="text-align:center">${i + 1}</td>
+                        <td style="text-align:center">${esc(numeros[a.id] || (scope === 'figu' ? String(i + 1) : ''))}</td>
                         <td>${roleCell}</td>
                         <td>${FDSLive.roSrc(a.name || '', 'comédien sans nom', `app.FDSLive.openFiche('actor','${esc(a.id)}')`)}</td>
                         <td>${c(`call-time-actor-${p.id}`, '', 'time')}</td>
@@ -952,9 +942,14 @@
         };
         // Silhouettes et doublures : l'interrupteur vit dans la barre de titre
         // de chaque tableau (FDSLive.barTog), plus dans une rangée de cases.
-        h += castTable('RÔLE(S)', 'role', (a) => !figuIds.includes(a.group_id) && !silIds.includes(a.group_id) && !dblIds.includes(a.group_id));
-        h += castTable('SILHOUETTE(S)', 'sil', (a) => silIds.includes(a.group_id));
-        h += castTable('DOUBLURE(S)', 'dbl', (a) => dblIds.includes(a.group_id));
+        // v602 : une famille sans aucun comedien dans le projet n'a pas de
+        // tableau — il n'y aurait personne a convoquer. Les roles, eux, sont
+        // toujours la.
+        CastFamilies.LISTE.forEach(f => {
+            if(f.cle === 'figu') return;
+            if(f.cle !== 'role' && !CastFamilies.membres(f.cle).length) return;
+            h += castTable(f.titre, f.cle, (a) => CastFamilies.de(a) === f.cle);
+        });
         // --- FIGURATION : nommée ici, ou renvoyée sur sa propre feuille ---
         {
             const split = FDSLive.figuSplit();
@@ -984,7 +979,7 @@
                             + `<td>${c(`call-notes-actor-${pid}`, 'rien à apporter')}</td>`;
                     }
                 };
-                h += castTable('FIGURATION', 'figu', (a) => figuIds.includes(a.group_id), figBar, figExtra);
+                h += castTable('FIGURATION', 'figu', (a) => CastFamilies.de(a) === 'figu', figBar, figExtra);
             } else {
                 // Effectifs par heure de convocation : ce que le modèle AFAR
                 // attend sur la feuille principale quand la figuration est

@@ -54,7 +54,6 @@
         const allActors = state.data.actors || [];
         const allCrew = state.data.crew || [];
         const allCharacters = state.data.characters || [];
-const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
         const crewGroupsAll = (state.data.groups || []).filter(g => g.type === 'crew');
         const isSeries = state.currentProjectType === 'series';
         
@@ -618,13 +617,10 @@ const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
             y += 2;
             
             // Familles de comédiens (portée : tout le rendu du jour, prévisions incluses)
-            const figuGroupIds = actorGroups.filter(g => /figuration/i.test(g.name || '')).map(g => g.id);
-            const silGroupIds  = actorGroups.filter(g => /silhouette/i.test(g.name)).map(g => g.id);
-            const dblGroupIds  = actorGroups.filter(g => /doublure/i.test(g.name)).map(g => g.id);
-            // Tout comédien qui n'est ni figurant, ni silhouette, ni doublure relève des rôles
-            const isFigu = (p) => figuGroupIds.includes(p.group_id);
-            const isSil  = (p) => silGroupIds.includes(p.group_id);
-            const isDbl  = (p) => dblGroupIds.includes(p.group_id);
+            // v602 : la famille et le numero officiel se lisent dans
+            // CastFamilies, la meme source que la feuille a l'ecran.
+            const famDe = (p) => CastFamilies.de(p);
+            const numeros = CastFamilies.numeros();
             
             // ===== CONVOCATIONS — tableaux de distribution format AFAR =====
             if(opts.includeCallSheet !== false) {
@@ -672,7 +668,7 @@ const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
                 } else {
                     rows.forEach((r, ri) => {
                         afarRow(castCols, [
-                            String(ri + 1),
+                            numeros[r.person.id] || '',
                             r.role,
                             r.person.name || '',
                             seqsForCharacter(r.role),
@@ -689,9 +685,10 @@ const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
             
             // Tableaux masques pour ce jour depuis la feuille (v567)
             const fdsHidden = (s) => (shootDay.fdsHide || []).indexOf(s) > -1;
-            drawCastTable('RÔLE(S)',        (p) => !isFigu(p) && !isSil(p) && !isDbl(p), true);
-            if(!fdsHidden('sil')) drawCastTable('SILHOUETTE(S)',  isSil, false);
-            if(!fdsHidden('dbl')) drawCastTable('DOUBLURE(S)',    isDbl, false);
+            CastFamilies.LISTE.forEach(f => {
+                if(f.cle === 'figu' || (f.cle !== 'role' && fdsHidden(f.cle))) return;
+                drawCastTable(f.titre, (p) => famDe(p) === f.cle, f.cle === 'role');
+            });
             
             // Figuration — deux formes selon le mode choisi sur le jour.
             // INTEGRE : tableau nominatif complet, la feuille suffit aux
@@ -949,8 +946,9 @@ const actorGroups = (state.data.groups || []).filter(g => g.type === 'actor');
                     .map(p => p.name);
                 return names.join('  -  ');
             };
-            afarKVRow('Silhouettes :', nextByGroup(isSil), { labelW: prevLabelW });
-            afarKVRow('Doublures :', nextByGroup(isDbl), { labelW: prevLabelW });
+            afarKVRow('Silhouettes :', nextByGroup((p) => famDe(p) === 'sil' || famDe(p) === 'silm'), { labelW: prevLabelW });
+            afarKVRow('Doublures :', nextByGroup((p) => famDe(p) === 'dbl'), { labelW: prevLabelW });
+            afarKVRow('Cascadeurs / pilotes :', nextByGroup((p) => famDe(p) === 'casc' || famDe(p) === 'pil'), { labelW: prevLabelW });
             afarKVRow('Figuration :', nextDay ? String(Figuration._fcs(nextDay).length || '') : '', { labelW: prevLabelW });
             afarKVRow('Véhicules :', nextDay ? uniq((nextDay.callSheet || []).map(cl => {
                 const v = (state.data.vehicles || []).find(x => x.id === cl.vehicleId);

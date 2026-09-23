@@ -127,13 +127,17 @@
                 const isInContacts = state.contacts && state.contacts.actors && state.contacts.actors.some(c => c.id === item.id);
                 const starBtn = !isView ? `<button class="save-contact-btn ${isInContacts ? 'saved' : ''}" onclick="event.stopPropagation(); app.Contacts.saveActorToContacts(${idx})" title="${isInContacts ? 'Déjà dans vos contacts' : 'Sauvegarder dans contacts'}">${isInContacts ? '⭐' : '☆'}</button>` : '';
                 const lockedBadge = isLocked ? FicheUI.badge('🔒 Profil revendiqué') : '';
+                // v602 : le numero officiel (1, 21, S3, D1...), calcule d'apres
+                // le groupe. Il ne se saisit pas : on change de groupe, il suit.
+                const numOfficiel = CastFamilies.numero(item);
+                const numBadge = numOfficiel ? FicheUI.badge('N° ' + numOfficiel + ' · ' + CastFamilies.info(CastFamilies.de(item)).label) : '';
                 contentHtml += FicheUI.headHtml({
                     name: item.name, id: item.id, kindLabel: 'Comédien·ne',
                     placeholder: 'Nom du comédien', photo: item.photo || '',
                     onchangeAttr: isReadOnly ? '' : `onchange="app.Actions.updateActorMeta(${idx}, 'name', this.value)"`,
                     avatarClickAttr: isReadOnly ? '' : `onclick="document.getElementById('fid-photo-actor-${idx}').click()"`,
                     avatarInputHtml: isReadOnly ? '' : `<input type="file" id="fid-photo-actor-${idx}" accept="image/*" style="display:none;" onchange="app.Actions.uploadActorPhoto(${idx}, this)">`,
-                    badgesHtml: (item._offline ? FicheUI.badge('🚧 Hors ligne') : '') + lockedBadge + starBtn, delBtnHtml: delBtn
+                    badgesHtml: numBadge + (item._offline ? FicheUI.badge('🚧 Hors ligne') : '') + lockedBadge + starBtn, delBtnHtml: delBtn
                 });
                 const blocks = [];
 
