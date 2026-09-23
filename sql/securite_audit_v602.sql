@@ -189,3 +189,45 @@ begin
 end $$;
 create trigger user_profiles_badge_guard before update on public.user_profiles
   for each row execute function public.user_profiles_badge_guard();
+
+-- ============================================================================
+--  SUITE 2 DU 23/09 — LES TROIS POINTS RESTANTS (« ok pour 6 »)
+-- ============================================================================
+-- 8. PUBLIER UN PROJET DANS L'UNIVERS demande l'ecriture sur la Presentation.
+--    isPublicProject et publicProjectData n'etaient rattaches a aucun onglet :
+--    un invite limite au Planning pouvait rendre le projet public. Ajoutes a
+--    project_key_sections (meme rattachement que dans l'appli, LockDomains).
+--    APPLIQUE (migration publication_liee_presentation_v602). Verifie : un
+--    invite « planning seulement » ne publie plus, et modifie toujours le
+--    planning. NOTE DE TEST : la clef des droits d'un membre est son adresse
+--    avec les points remplaces par des virgules ; dans un chemin jsonb_set
+--    ecrit en texte ('{a,b}'), ces virgules coupent le chemin — utiliser
+--    array['memberPermissions', cle].
+--
+-- 9. LE TELEPHONE, LA NAISSANCE, L'ADRESSE ET LES PREFERENCES ne se lisent
+--    plus en direct, meme sur un profil PUBLIC. Toutes les lectures de
+--    profils de l'appli passent par profils_visibles (Utils.profils) : sa
+--    propre ligne intacte ; celle des autres avec le telephone masque selon
+--    LEUR choix (numero d'agent, « masquer »), sans leurs preferences ;
+--    l'administration lit tout. Les coordonnees d'une ville passent par
+--    coordonnees_ville. La sauvegarde d'un profil n'est plus un upsert (la
+--    base le refuse une fois ces colonnes fermees) mais « mise a jour, sinon
+--    creation ». Repete a blanc avant application : filtres, mise a jour,
+--    creation, porte, recherche d'equipe passent ; l'upsert cassait.
+--    Colonnes fermees : phone, birthdate, preferences, latitude, longitude,
+--    data (data porte l'adresse, le numero d'agent et les copies du
+--    telephone dans les casquettes).
+--    Fonctions : profils_visibles(p_ids, p_emails, p_recherche, p_tous),
+--    coordonnees_ville(p_ville) — definitions en base (migrations
+--    profils_visibles_v602, profils_visibles_tous_admin_v602).
+do $$
+declare cols text;
+begin
+  select string_agg(quote_ident(column_name), ', ') into cols from information_schema.columns
+   where table_schema='public' and table_name='user_profiles'
+     and column_name not in ('phone','birthdate','preferences','latitude','longitude','data');
+  execute 'revoke select on public.user_profiles from authenticated';
+  execute 'grant select (' || cols || ') on public.user_profiles to authenticated';
+end $$;
+-- ATTENTION pour l'avenir : une colonne AJOUTEE a user_profiles ne sera pas
+-- lisible tant qu'on ne l'a pas accordee (grant select (colonne) ...).
