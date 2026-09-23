@@ -1290,6 +1290,23 @@ vv602 (23 septembre 2026) — EN COURS.
   developpeur ne voyait pas les nouveaux groupes : la regle commune cache
   un groupe vide hors glisser-deposer. Juste pour des groupes libres, fausse
   pour une liste fermee — on doit voir ou ranger les gens.
+  PUIS LES TECHNICIENS, meme regle. Question du developpeur : « y a-t-il des
+  groupes officiels comme ca ailleurs ? » Verifie dans le code : SEULS les
+  departements techniques sont LUS par un document — bandeau d'equipe de la
+  feuille par corps de metier, contacts de production (cherches dans
+  « Production » seulement), responsable de chaque ligne du depouillement,
+  liste des fonctions de la fiche. Un technicien dans un groupe maison
+  tombait dans la case fourre-tout du bandeau. Les dix-huit departements
+  deviennent donc une liste fermee (« Autre » existe pour le reste), plus de
+  bouton « Nouveau departement ». Seul cas en base : « Equipe aquatique »
+  (1 personne), rangee en IMAGE a la demande du developpeur ; un nom inconnu
+  part dans « Autre ». Meme precautions que pour les comediens : apres la
+  baseline, et jamais sans le droit de voir l'equipe (CrewDepartements).
+  PERSONNAGES, DECORS, RESSOURCES, STRUCTURES GARDENT LEURS GROUPES LIBRES :
+  rien d'officiel ne les lit, ils ne servent qu'a ranger. La strategie « on
+  cree ses groupes partout » reste la bonne LA OU AUCUN DOCUMENT NE LES LIT.
+  Les departements vides restent caches hors glisser-deposer : dix-huit
+  sections vides noieraient l'onglet ; le menu de la fiche les propose tous.
 
 -->
 <head>
@@ -10201,7 +10218,6 @@ body.presentation-mode .presentation-bar {
 	<div id="tab-crew" class="tab-content">
 		<h1 class="print-only-title">ÉQUIPES</h1>
 		<div id="crew-toolbar" class="data-toolbar" style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; align-items:center;">
-			<button onclick="app.Actions.addGroup('crew')" class="btn-tool">➕ Nouveau Département</button>
 			<button onclick="app.Crew.addMember()" class="btn-tool">➕ Ajouter Technicien</button>
 			<button onclick="app.Crew.addVehicle()" class="btn-tool">🚐 Ajouter Véhicule</button>
             <button onclick="app.Contacts.importToProject('crew')" class="btn-tool">📇 Mes contacts</button>
@@ -20219,6 +20235,8 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               // la reprise est alors une vraie difference, enregistree une fois,
               // au lieu d'etre refaite en memoire a chaque ouverture.
               if(CastFamilies.completerGroupes(safeData, (state.dataMissingKeys || []).indexOf('actors') < 0)) needsMigrationSave = true;
+              // v602 : meme regle pour les departements techniques (voir CrewDepartements).
+              if(CrewDepartements.fermer(safeData, (state.dataMissingKeys || []).indexOf('crew') < 0)) needsMigrationSave = true;
               // Lot 4 : migration hygiène URLs publiques 'projects' -> paths (one-shot, idempotent, gated par flag). APRÈS la baseline => la diff URL->path est réelle et sera persistée au prochain save.
               // v599 — LE DRAPEAU DEVIENT VERSIONNE. Il valait true/false : une
               // fois pose, la migration ne repassait PLUS JAMAIS. Les medias
@@ -27804,8 +27822,9 @@ initCategoriesDragDrop: () => {
           } 
       },
       addGroup: (type) => { 
-        // v602 : les groupes de comediens forment une liste FERMEE (voir
-        // CastFamilies) — chacun porte une numerotation officielle.
+        // v602 : comediens et techniciens ont une liste FERMEE (voir
+        // CastFamilies et CrewDepartements) — la feuille de service les lit.
+        if(type === 'crew') { Utils.toast('Les départements techniques sont ceux du métier : la feuille de service s\'en sert. Pour ce qui ne rentre nulle part, il y a « Autre ».', 'info'); return; }
         if(type === 'actor') { Utils.toast('Les groupes de comédiens sont ceux du métier, chacun avec sa numérotation officielle : on n\'en crée pas d\'autre.', 'info'); return; }
         const typeLabel = type === 'perso' ? 'personnages' : (type === 'actor' ? 'comédiens' : (type === 'org' ? 'structures' : (type === 'crew' ? 'techniciens' : (type === 'resource' ? 'ressources' : 'lieux'))));
         
@@ -42855,6 +42874,47 @@ const DrawingEditor = {
         const at = pos < 0 ? restants.length : Math.min(pos, restants.length);
         data.groups = restants.slice(0, at).concat(officiels, restants.slice(at));
         return JSON.stringify([data.groups, (data.actors || []).map(a => a && a.group_id)]) !== avant;
+    }
+  };
+
+  // ==========================================================================
+  //  LES DEPARTEMENTS TECHNIQUES : UNE LISTE FERMEE (v602)
+  // ==========================================================================
+  //  Meme decision que pour les comediens (voir CastFamilies) : les groupes
+  //  de l'equipe technique sont les DIX-HUIT DEPARTEMENTS du metier
+  //  (CONFIG.crewGroups), et on n'en cree pas d'autre. Ce ne sont pas des
+  //  etiquettes de rangement : la feuille de service les LIT — bandeau
+  //  d'equipe par corps de metier, contacts de production (cherches dans
+  //  « Production » seulement), responsable de chaque ligne du depouillement
+  //  (CONFIG.crewToBreakdownMap), liste des fonctions de la fiche. Un
+  //  technicien range dans un groupe maison sortait de tout cela et tombait
+  //  dans la case fourre-tout du bandeau.
+  //  « Autre » existe deja pour ce qui ne rentre nulle part.
+  //  Personnages, decors, ressources, structures GARDENT leurs groupes libres :
+  //  aucun document officiel ne les lit, ils ne servent qu'a ranger.
+  const CrewDepartements = {
+    // Ou va un groupe maison. Le seul cas en base au 23 septembre etait
+    // « Equipe aquatique » (1 personne), que le developpeur a range en Image.
+    // Un nom inconnu part dans « Autre ».
+    cibleDe: (g) => {
+        const n = String((g && g.name) || '');
+        if(/aquati|image|cam[eé]ra|photo|cadr/i.test(n)) return 'gc1';
+        return 'gc17';
+    },
+    // A L'OUVERTURE D'UN PROJET, apres la baseline (la reprise s'enregistre
+    // une fois). JAMAIS sans le droit de voir l'equipe : on effacerait un
+    // groupe sans pouvoir y reprendre personne. Renvoie true si ca a change.
+    fermer: (data, equipeVisible) => {
+        if(!data || !Array.isArray(data.groups) || equipeVisible === false) return false;
+        const offIds = CONFIG.crewGroups.map(g => g.id);
+        const maison = data.groups.filter(g => g && g.type === 'crew' && offIds.indexOf(g.id) < 0);
+        if(!maison.length) return false;
+        maison.forEach(g => {
+            const vers = CrewDepartements.cibleDe(g);
+            (data.crew || []).forEach(m => { if(m && m.group_id === g.id) m.group_id = vers; });
+        });
+        data.groups = data.groups.filter(g => maison.indexOf(g) < 0);
+        return true;
     }
   };
 
@@ -90468,7 +90528,7 @@ const Weather = {
       },
   };
 
-  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PersonIdentity, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileSkills, ProfileGear, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, CastingMatch, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, CoursesWeb, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, CastFamilies, GroupDnD, Geo, DBPresence, LockManager, LockDomains, VerrouFin, SceneLock, SceneNews, SynopsisLock, FicheLock, Links, Web, FicheLinks, RenameReview, Diag, FicheUI, FicheBlocks, Board, ScriptShare, ScriptReader, ScriptReview, ProjectWelcome, PhotoViewer };
+  return { Store, StoreMigrations, StoreUpdates, StoreRealtime, StoreSave, UI, UIPrint, UIHidden, UICategories, UIDashboard, UITheme, UIData, Actions, ActionsExport, Breakdown, BreakdownExport, ScriptEditor, ScriptEditorPrefs, ScriptEditorViewMode, ScriptEditorEpisodes, ScriptEditorSearch, ScriptEditorAC, ScriptEditorNav, ScriptEditorToolbar, ScriptEditorContinuous, ScriptImport, ScriptExport, Auth, Stats, Exporter, Importer, MoodBoard, MoodBoardExport, Storyboard, StoryboardExport, DrawingEditor, Crew, CrewExport, Planning, PlanningExport, PlanningFDS, PlanningCallSheets, PlanningAvailability, PlanningDragResize, PersonIdentity, PlanningTransport, FDSLive, PlanningBreakdown, PlanningDayEdit, PlanningBoards, PlanningCalendarViews, PlanningAvailPicker, Contacts, ActorSearch, PublicProfile, ProfileSkills, ProfileGear, ProfileAddress, ProfileClaims, GlobalSearch, Permissions, Messages, Invitations, Universe, UniverseFan, UniverseSearch, UniverseProfileModal, UniverseMap, Expenses, ExpensesExport, ExpensesSalaries, ExpensesBudget, ExpensesCRUD, Utils, Presentation, PresentMode, History, Notifications, Contracts, StoryboardPreview, Comments, Courses, CardModal, Synopsis, TitlePage, SceneVersions, MatchingEngine, CastingMatch, SessionManager, Pricing, Resources, ScriptReport, Weather, ColorWheel, BeatBoard, FocusMode, Forum, Editor, Icons, Admin, AdminEmail, Tour, Feedback, Tutorial, CoursesWeb, Landing, Terms, Router, PreferencesSync, ConfirmModal, LoadingScreen, ProfileRenderer, ActiveProfile, Moderation, Episodes, Seasons, PdfTheme, FichesPDF, Orgs, ProjectFolders, Figuration, CastFamilies, CrewDepartements, GroupDnD, Geo, DBPresence, LockManager, LockDomains, VerrouFin, SceneLock, SceneNews, SynopsisLock, FicheLock, Links, Web, FicheLinks, RenameReview, Diag, FicheUI, FicheBlocks, Board, ScriptShare, ScriptReader, ScriptReview, ProjectWelcome, PhotoViewer };
 })();
 </script>
 

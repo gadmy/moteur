@@ -797,6 +797,8 @@ CONFIG.crewGroups.forEach(defaultGrp => {
               // la reprise est alors une vraie difference, enregistree une fois,
               // au lieu d'etre refaite en memoire a chaque ouverture.
               if(CastFamilies.completerGroupes(safeData, (state.dataMissingKeys || []).indexOf('actors') < 0)) needsMigrationSave = true;
+              // v602 : meme regle pour les departements techniques (voir CrewDepartements).
+              if(CrewDepartements.fermer(safeData, (state.dataMissingKeys || []).indexOf('crew') < 0)) needsMigrationSave = true;
               // Lot 4 : migration hygiène URLs publiques 'projects' -> paths (one-shot, idempotent, gated par flag). APRÈS la baseline => la diff URL->path est réelle et sera persistée au prochain save.
               // v599 — LE DRAPEAU DEVIENT VERSIONNE. Il valait true/false : une
               // fois pose, la migration ne repassait PLUS JAMAIS. Les medias
