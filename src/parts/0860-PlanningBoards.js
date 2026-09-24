@@ -1343,10 +1343,19 @@
         const infosJour = lignesJours.map(l => {
             const j = l.jour;
             const sc = PlanningBoards._scenesDe(j);
-            const decors = [];
-            sc.forEach(x => { const d = PlanningBoards._decorDe(x); if(d && decors.indexOf(d) < 0) decors.push(d); });
+            // v603 : LES DECORS PAR EQUIPE. La bande melangeait ceux de
+            // l'equipe B a ceux de la principale : on lisait trois decors
+            // sans savoir que deux equipes tournaient a deux endroits.
+            const decorsDe = (liste) => {
+                const out = [];
+                liste.forEach(x => { const d = PlanningBoards._decorDe(x); if(d && out.indexOf(d) < 0) out.push(d); });
+                return out;
+            };
+            const avecB = EquipeB.existe(j);
             return {
-                ligne: l, jour: j, date: j.startDate || j.date, scenes: sc, decors: decors,
+                ligne: l, jour: j, date: j.startDate || j.date, scenes: sc,
+                decors: decorsDe(avecB ? PlanningBoards._scenesDe(j, 'A') : sc),
+                decorsB: avecB ? decorsDe(PlanningBoards._scenesDe(j, 'B')) : null,
                 type: Planning.getDayTypeInfo(j.dayType)
             };
         });
@@ -1389,10 +1398,18 @@
             const v = [...new Set(i.scenes.map(x => x && x.intExt).filter(Boolean))];
             return { txt: initiales(v), titre: v.join(' / ') };
         });
-        html += bande('DÉCORS', (i) => ({
-            html: i.decors.length ? '<span class="wp-vert">' + esc(i.decors.join(' · ')) + '</span>' : '',
-            titre: i.decors.join(' · ')
-        }), 'wp-bande-decors');
+        html += bande('DÉCORS', (i) => {
+            const a = i.decors.join(' · ');
+            if(!i.decorsB) return { html: a ? '<span class="wp-vert">' + esc(a) + '</span>' : '', titre: a };
+            // Jour a deux equipes : deux colonnes de texte cote a cote, la B
+            // en retrait et prefixee « B », le nom complet au survol.
+            const b = i.decorsB.join(' · ');
+            return {
+                html: (a ? '<span class="wp-vert">' + esc(a) + '</span>' : '')
+                    + '<span class="wp-vert wp-vert-b">B' + (b ? ' : ' + esc(b) : '') + '</span>',
+                titre: 'Équipe principale : ' + (a || '—') + '\n' + EquipeB.nom(i.jour) + ' : ' + (b || '—')
+            };
+        }, 'wp-bande-decors');
         html += bande('SÉQUENCES', (i) => ({
             txt: i.scenes.map(x => PlanningBoards._numDe(x)).join(' '),
             titre: i.scenes.map(x => (PlanningBoards._numDe(x)) + ' — ' + (x.title || '')).join('\n')
