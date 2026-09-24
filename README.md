@@ -57,7 +57,7 @@
 ## 📝 Suivi du projet
 
 Le reste à faire, les règles du projet et le journal de chaque version sont
-dans [SUIVI.md](SUIVI.md). Le code se modifie dans `src/parts/` (voir
+tenus dans un dépôt privé. Le code se modifie dans `src/parts/` (voir
 [src/README.md](src/README.md)) : `index.html` est généré.
 
 [Voir l'historique des modifications →](https://github.com/gadmy/moteur/commits/main)

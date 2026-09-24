@@ -51,8 +51,9 @@ construction. Le rapport bénéfice / risque ne le justifiait pas.
 ## Le journal
 
 Le bloc de suivi (méthode, reste à faire, journal des versions) ne vit plus
-dans la page : il est dans `SUIVI.md`, à la racine. La tête de `index.html`
-ne garde que la version et un renvoi.
+dans la page ni dans ce dépôt : il est dans le dépôt privé
+`gadmy/moteur-suivi`, avec le SQL de la base. La tête de `index.html` ne garde
+que la version et un renvoi.
 
 ## Le garde-fou
 
