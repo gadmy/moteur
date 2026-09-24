@@ -1,10 +1,12 @@
 # Consignes pour Claude
 
-Le journal du projet (méthode de travail, reste à faire, règles, historique
-des versions) et le SQL de la base NE SONT PAS dans ce dépôt, qui est public.
-Ils vivent dans le dépôt privé **gadmy/moteur-suivi** (`SUIVI.md`, `sql/`).
+Ce dépôt est PUBLIC : il ne contient que ce que le site publie.
+`index.html` est FABRIQUÉ, sans commentaires : ne jamais le modifier ici.
 
-En début de conversation : ajouter `gadmy/moteur-suivi` à la session, lire
-son `SUIVI.md` avant toute chose, et y tenir le journal de la version en
-cours. Le code se modifie ici, dans `src/parts/` (voir `src/README.md`) :
-`index.html` est généré par `node tools/build.mjs`.
+La source commentée (`src/parts/`), l'outil de fabrication (`tools/`), le
+journal du projet (`SUIVI.md`) et le SQL de la base (`sql/`) vivent dans le
+dépôt PRIVÉ **gadmy/moteur-suivi**.
+
+En début de conversation : ajouter `gadmy/moteur-suivi` à la session, le
+cloner À CÔTÉ de celui-ci (`/home/user/moteur-suivi`), lire son `CLAUDE.md`
+et son `SUIVI.md` avant toute chose.

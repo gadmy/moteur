@@ -56,9 +56,9 @@
 
 ## 📝 Suivi du projet
 
-Le reste à faire, les règles du projet et le journal de chaque version sont
-tenus dans un dépôt privé. Le code se modifie dans `src/parts/` (voir
-[src/README.md](src/README.md)) : `index.html` est généré.
+Le code source, le reste à faire et le journal de chaque version sont tenus
+dans un dépôt privé. Ce dépôt ne contient que le site publié : `index.html`
+y est fabriqué, il ne se modifie pas à la main.
 
 [Voir l'historique des modifications →](https://github.com/gadmy/moteur/commits/main)
 
