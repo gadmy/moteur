@@ -439,7 +439,7 @@ const Admin = {
             // Charger les connexions
             const { data: connections, error: connStatsErr } = await supabase.from('user_logins').select('logged_at, user_email');
             if(connStatsErr) console.error('Erreur stats connexions:', connStatsErr);
-            const _connExt = (connections || []).filter(c => !CONFIG.internalEmails.includes((c.user_email || '').toLowerCase()));
+            const _connExt = (connections || []).filter(c => !Utils.estInterne(c.user_email));
             Admin._internalLogins = (connections || []).length - _connExt.length;
             Admin.statsData.connections = _connExt.map(c => c.logged_at);
             
@@ -1089,8 +1089,8 @@ const Admin = {
             
             if (error) throw error;
             
-            // B4 : on ne compte que les connexions externes (hors CONFIG.internalEmails)
-            const logins = (allLogins || []).filter(l => !CONFIG.internalEmails.includes((l.user_email || '').toLowerCase()));
+            // B4 : on ne compte que les connexions externes (hors Utils.estInterne)
+            const logins = (allLogins || []).filter(l => !Utils.estInterne(l.user_email));
             const _intCount = (allLogins || []).length - logins.length;
             Admin.connectionStats = logins;
             

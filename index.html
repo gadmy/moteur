@@ -6690,7 +6690,7 @@ body.presentation-mode .presentation-bar {
                                 </label>
                                 <label class="flex-row-click">
                                     <input type="checkbox" id="filter-test-only" onchange="app.Admin.updateEmailFilter()" class="icon-sm">
-                                    <span class="nowrap">🧪 Test (envoi uniquement à ga.dmy@ikmail.com)</span>
+                                    <span class="nowrap">🧪 Test (envoi uniquement au compte de test)</span>
                                 </label>
                                 <label class="flex-row-click">
                                     <input type="checkbox" id="filter-incomplete-profile" onchange="app.Admin.updateEmailFilter()" class="icon-sm">
@@ -10492,7 +10492,14 @@ const CONFIG = {
     galerieQualite: 0.9,
     // ========== ADMIN ==========
     adminEmails: ['contact@moteur.studio'],  // Emails ayant accès au tableau de bord admin
-    internalEmails: ['contact@moteur.studio', 'ga.dmy@ikmail.com', 'ga.demauroy@gmail.com'],  // B4 : connexions internes (exclues des stats)
+    internalEmails: ['contact@moteur.studio'],  // B4 : connexions internes (exclues des stats)
+    // vv603 : les adresses PERSONNELLES du developpeur ne s'ecrivent plus en
+    // clair (la page est publique, tout visiteur lisait ses deux adresses).
+    // On garde leur EMPREINTE (Utils.empreinte) : on peut reconnaitre une
+    // adresse qu'on a deja, pas la retrouver a partir de l'empreinte.
+    // Pour en ajouter une : Utils.empreinte('adresse') en console.
+    internalEmailHashes: ['24ghnqnb8wr', 'jz2p9b0bgf'],
+    testEmailHash: '24ghnqnb8wr',  // compte qui recoit l'emailing en mode test
     
     // ========== INSCRIPTIONS ==========
     // Ouvertes à tous. maxUsers: null => aucune limite. enabled/whitelist
@@ -11380,6 +11387,28 @@ crewRoles: {
 
   const Utils = {
       sanitizeEmail: (email) => email.replace(/\./g, ','),
+
+      //  vv603 : L'EMPREINTE D'UN TEXTE (hachage cyrb53, synchrone). Sert a
+      //  reconnaitre une adresse sans l'ecrire en clair dans la page publique
+      //  (CONFIG.internalEmailHashes). Ce n'est pas un chiffrement : une
+      //  adresse qu'on connait deja se reconnait, c'est tout ce qu'on veut.
+      empreinte: (s) => {
+          s = String(s || '');
+          let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+          for(let i = 0; i < s.length; i++) {
+              const c = s.charCodeAt(i);
+              h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677);
+          }
+          h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+          h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+          return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+      },
+      //  Une connexion « interne » (le developpeur, exclue des statistiques) :
+      //  l'adresse du site en clair, les adresses personnelles par empreinte.
+      estInterne: (email) => {
+          const e = String(email || '').toLowerCase();
+          return CONFIG.internalEmails.includes(e) || CONFIG.internalEmailHashes.includes(Utils.empreinte(e));
+      },
 
       // ==================================================================
       //  FERMER EN DOUCEUR (v601)
@@ -67453,7 +67482,7 @@ const Admin = {
             // Charger les connexions
             const { data: connections, error: connStatsErr } = await supabase.from('user_logins').select('logged_at, user_email');
             if(connStatsErr) console.error('Erreur stats connexions:', connStatsErr);
-            const _connExt = (connections || []).filter(c => !CONFIG.internalEmails.includes((c.user_email || '').toLowerCase()));
+            const _connExt = (connections || []).filter(c => !Utils.estInterne(c.user_email));
             Admin._internalLogins = (connections || []).length - _connExt.length;
             Admin.statsData.connections = _connExt.map(c => c.logged_at);
             
@@ -68103,8 +68132,8 @@ const Admin = {
             
             if (error) throw error;
             
-            // B4 : on ne compte que les connexions externes (hors CONFIG.internalEmails)
-            const logins = (allLogins || []).filter(l => !CONFIG.internalEmails.includes((l.user_email || '').toLowerCase()));
+            // B4 : on ne compte que les connexions externes (hors Utils.estInterne)
+            const logins = (allLogins || []).filter(l => !Utils.estInterne(l.user_email));
             const _intCount = (allLogins || []).length - logins.length;
             Admin.connectionStats = logins;
             
@@ -68427,11 +68456,11 @@ const AdminEmail = {
         Admin.emailRecipients = Admin.allUsers.filter(user => {
             // 🧪 Mode test : uniquement le compte de test, ignore tout le reste
             if(filters.testOnly) {
-                return (user.email || '').toLowerCase() === 'ga.dmy@ikmail.com';
+                return Utils.empreinte((user.email || '').toLowerCase()) === CONFIG.testEmailHash;
             }
             // 📣 Tous les utilisateurs : ignore les autres filtres (comptes internes exclus)
             if(filters.allUsers) {
-                return !CONFIG.internalEmails.includes((user.email || '').toLowerCase());
+                return !Utils.estInterne(user.email);
             }
             // Vraies casquettes (facettes) — l'ancien champ profile_data n'existe pas sur user_profiles
             const pdata = user.data || {};

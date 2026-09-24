@@ -438,7 +438,14 @@ const CONFIG = {
     galerieQualite: 0.9,
     // ========== ADMIN ==========
     adminEmails: ['contact@moteur.studio'],  // Emails ayant accès au tableau de bord admin
-    internalEmails: ['contact@moteur.studio', 'ga.dmy@ikmail.com', 'ga.demauroy@gmail.com'],  // B4 : connexions internes (exclues des stats)
+    internalEmails: ['contact@moteur.studio'],  // B4 : connexions internes (exclues des stats)
+    // vv603 : les adresses PERSONNELLES du developpeur ne s'ecrivent plus en
+    // clair (la page est publique, tout visiteur lisait ses deux adresses).
+    // On garde leur EMPREINTE (Utils.empreinte) : on peut reconnaitre une
+    // adresse qu'on a deja, pas la retrouver a partir de l'empreinte.
+    // Pour en ajouter une : Utils.empreinte('adresse') en console.
+    internalEmailHashes: ['24ghnqnb8wr', 'jz2p9b0bgf'],
+    testEmailHash: '24ghnqnb8wr',  // compte qui recoit l'emailing en mode test
     
     // ========== INSCRIPTIONS ==========
     // Ouvertes à tous. maxUsers: null => aucune limite. enabled/whitelist

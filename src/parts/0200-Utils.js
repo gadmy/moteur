@@ -2,6 +2,28 @@
   const Utils = {
       sanitizeEmail: (email) => email.replace(/\./g, ','),
 
+      //  vv603 : L'EMPREINTE D'UN TEXTE (hachage cyrb53, synchrone). Sert a
+      //  reconnaitre une adresse sans l'ecrire en clair dans la page publique
+      //  (CONFIG.internalEmailHashes). Ce n'est pas un chiffrement : une
+      //  adresse qu'on connait deja se reconnait, c'est tout ce qu'on veut.
+      empreinte: (s) => {
+          s = String(s || '');
+          let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+          for(let i = 0; i < s.length; i++) {
+              const c = s.charCodeAt(i);
+              h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677);
+          }
+          h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+          h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+          return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+      },
+      //  Une connexion « interne » (le developpeur, exclue des statistiques) :
+      //  l'adresse du site en clair, les adresses personnelles par empreinte.
+      estInterne: (email) => {
+          const e = String(email || '').toLowerCase();
+          return CONFIG.internalEmails.includes(e) || CONFIG.internalEmailHashes.includes(Utils.empreinte(e));
+      },
+
       // ==================================================================
       //  FERMER EN DOUCEUR (v601)
       // ==================================================================

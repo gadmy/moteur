@@ -40,11 +40,11 @@ const AdminEmail = {
         Admin.emailRecipients = Admin.allUsers.filter(user => {
             // 🧪 Mode test : uniquement le compte de test, ignore tout le reste
             if(filters.testOnly) {
-                return (user.email || '').toLowerCase() === 'ga.dmy@ikmail.com';
+                return Utils.empreinte((user.email || '').toLowerCase()) === CONFIG.testEmailHash;
             }
             // 📣 Tous les utilisateurs : ignore les autres filtres (comptes internes exclus)
             if(filters.allUsers) {
-                return !CONFIG.internalEmails.includes((user.email || '').toLowerCase());
+                return !Utils.estInterne(user.email);
             }
             // Vraies casquettes (facettes) — l'ancien champ profile_data n'existe pas sur user_profiles
             const pdata = user.data || {};
