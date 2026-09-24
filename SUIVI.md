@@ -49,7 +49,7 @@ Ce projet est développé en collaboration avec Claude (Anthropic).
 
 
 ================================================================================
-                 RESTE À FAIRE — ÉTAT AU 23 SEPTEMBRE 2026 (v602)
+                 RESTE À FAIRE — ÉTAT AU 24 SEPTEMBRE 2026 (vv603)
 ================================================================================
 En-tête PURGÉ le 15 septembre (v593) : tout ce qui était déjà raconté dans
 l'historique en est sorti, l'historique lui-même est condensé en périodes, et
@@ -1245,369 +1245,133 @@ vv601 (20 - 23 septembre 2026) — PUBLIE.
       onglets figeait 260 ms et repassait rouge des qu'on ralentissait
       l'animation, sans qu'aucun defaut n'existe. Il lit la duree du module.
 
-vv602 (23 septembre 2026) — EN COURS.
+vv602 (23 - 24 septembre 2026) — PUBLIE.
 
-  LES SEPT FAMILLES DE COMEDIENS ET LEUR NUMERO OFFICIEL. Silhouettes
-  parlantes et muettes, doublures, cascadeurs, pilotes : tous restent des
-  COMEDIENS, classes par GROUPE. Une seule piece les connait desormais,
-  CastFamilies : la feuille de service a l'ecran, son PDF et le plan de
-  travail lisaient chacun les groupes a leur maniere, par leur nom.
-  QUATRE GROUPES DE PLUS dans chaque projet : Silhouettes muettes,
-  Cascadeurs, Pilotes, et « Silhouettes » devient « Silhouettes
-  parlantes » — sauf s'il a ete renomme par l'utilisateur. Mesure en base
-  avant de trancher : un seul projet avait des silhouettes (deux), elles
-  deviennent donc parlantes ; on les glisse dans « muettes » si besoin.
-  LE NUMERO SE CALCULE, IL NE SE SAISIT PAS : roles 1, 2, 3... ; parlantes
-  21, 22... ; muettes S1 ; doublures D1 ; cascadeurs C1 ; pilotes P1. L'ordre
-  est celui des groupes (Casting Principal avant Roles Secondaires), puis
-  des comediens dans leur groupe. Changer quelqu'un de groupe change son
-  numero. La figuration n'a pas de numero officiel.
-  UNE PLAGE EST UN REPERE, PAS UN MUR : un seizieme role prend le 16. Seule
-  garde : si les roles depassent 20, les parlantes commencent juste apres
-  eux, sinon deux personnes porteraient le meme numero. Un groupe au nom
-  inconnu (« Seconds roles creoles ») reste un role.
-  OU LE NUMERO APPARAIT : colonne N° de la feuille de service (ecran et
-  PDF), colonnes du plan de travail (un bandeau par famille), grille des
-  presences, et un badge sur la fiche du comedien.
-  UNE FAMILLE SANS PERSONNE N'A PAS DE TABLEAU sur la feuille a l'ecran : six
-  tableaux vides auraient noye la feuille. Chaque famille garde son
-  interrupteur pour le jour. Les cles deja enregistrees (sil, dbl) n'ont
-  pas change, sinon des tableaux masques seraient revenus.
-  Les previsions du lendemain gagnent une ligne « Cascadeurs / pilotes ».
-  NON FAIT : la case « CASCADEURS / PILOTES » du depouillement AFAR reste
-  alimentee par le depouillement des scenes, comme avant.
-  PUIS LA LISTE SE FERME, a la demande du developpeur : « on met les
-  categories utilisees dans l'industrie et on n'autorise pas d'autres
-  groupes qui n'auraient pas de numero officiel ». HUIT GROUPES, dans
-  l'ordre du metier : Casting principal, Roles secondaires, Silhouettes
-  parlantes, Silhouettes muettes, Doublures, Cascadeurs, Pilotes,
-  Figuration. Plus de bouton « Nouveau groupe » chez les comediens (les
-  autres onglets gardent le leur). La famille se lit desormais par
-  l'IDENTIFIANT du groupe, le nom ne sert plus que de repli.
-  UN GROUPE MAISON DISPARAIT A L'OUVERTURE, ses comediens passent dans le
-  groupe officiel de la meme famille — Roles secondaires pour un nom
-  inconnu. Seul cas en base : « Seconds roles creoles » (2 comediens), dont
-  les numeros ne bougent pas. Cette reprise se fait APRES la baseline, donc
-  elle s'enregistre une fois ; et JAMAIS sans le droit de voir les
-  comediens, sinon on effacerait un groupe sans pouvoir y reprendre
-  personne.
-  LES GROUPES VIDES RESTENT VISIBLES dans l'onglet Comedien.nes. Le
-  developpeur ne voyait pas les nouveaux groupes : la regle commune cache
-  un groupe vide hors glisser-deposer. Juste pour des groupes libres, fausse
-  pour une liste fermee — on doit voir ou ranger les gens.
-  PUIS LES TECHNICIENS, meme regle. Question du developpeur : « y a-t-il des
-  groupes officiels comme ca ailleurs ? » Verifie dans le code : SEULS les
-  departements techniques sont LUS par un document — bandeau d'equipe de la
-  feuille par corps de metier, contacts de production (cherches dans
-  « Production » seulement), responsable de chaque ligne du depouillement,
-  liste des fonctions de la fiche. Un technicien dans un groupe maison
-  tombait dans la case fourre-tout du bandeau. Les dix-huit departements
-  deviennent donc une liste fermee (« Autre » existe pour le reste), plus de
-  bouton « Nouveau departement ». Seul cas en base : « Equipe aquatique »
-  (1 personne), rangee en IMAGE a la demande du developpeur ; un nom inconnu
-  part dans « Autre ». Meme precautions que pour les comediens : apres la
-  baseline, et jamais sans le droit de voir l'equipe (CrewDepartements).
-  PERSONNAGES, DECORS, RESSOURCES, STRUCTURES GARDENT LEURS GROUPES LIBRES :
-  rien d'officiel ne les lit, ils ne servent qu'a ranger. La strategie « on
-  cree ses groupes partout » reste la bonne LA OU AUCUN DOCUMENT NE LES LIT.
-  Les departements vides restent caches hors glisser-deposer : dix-huit
-  sections vides noieraient l'onglet ; le menu de la fiche les propose tous.
+  LE PLAN DE TRAVAIL AFAR EST COMPLET : familles de comediens, equipe B,
+  heures supplementaires. Puis un diagnostic complet de l'application, qui
+  a occupe le reste de la version : securite, erreurs, code mort, rangement.
 
-  L'EQUIPE B EN PARALLELE : UNE DEUXIEME FEUILLE LE MEME JOUR. Le
-  developpeur ne pouvait pas la tester : ajouter une scene a un jour deja
-  prevu la mettait sur la feuille existante, et creer une deuxieme journee a
-  la meme date faisait compter DEUX jours de tournage (J1 et J2) au plan de
-  travail — mesure dans le code avant de le dire.
-  CE QU'ON VOIT : un onglet « ➕ Équipe B » dans la fenetre du jour. Au
-  premier clic il demande un nom (« Équipe sous-marine ») et ouvre une
-  feuille de service complete — ses scenes, ses convocations, son decor, ses
-  horaires, ses notes — avec « FEUILLE DE SERVICE EQUIPE SOUS-MARINE » dans
-  son bandeau (la principale dit « PRINCIPALE »). La croix de l'onglet la
-  supprime SANS RIEN PERDRE : ses scenes et convocations repassent sur la
-  feuille principale. L'impression propose la principale, la B, ou tout.
-  LE POINT D'ARCHITECTURE (EquipeB) : les scenes et convocations de l'equipe
-  B restent DANS day.scenes et day.callSheet, MARQUEES « equipe: 'B' ». La
-  quinzaine d'endroits qui demandent « cette scene est-elle planifiee ? » ou
-  « qui est la ce jour-la ? » continuent donc de marcher sans une ligne de
-  retouche. day.equipeB ne porte que l'en-tete de la feuille B ; la date, le
-  type et le numero restent ceux de la journee.
-  A L'ECRAN, LA FENETRE TRAVAILLE SUR UNE VUE : quand une equipe B existe,
-  Planning.tempShootDay est la vue d'UNE equipe et le jour complet est garde
-  a part (Planning._jourComplet) ; changer d'onglet ou enregistrer rentre la
-  vue dans le jour. SANS EQUIPE B, RIEN DE TOUT CELA N'EXISTE : la fenetre
-  marche exactement comme avant. PIEGE EVITE : saveShootDay recopiait les
-  scenes champ par champ et aurait perdu la marque « B » en silence.
-  AU PLAN DE TRAVAIL : colonne « Éq. B » (nom, decor, sequences), affichee
-  seulement si un jour en a une. Decors, sequences, I/E et effet de la ligne
-  sont ceux de la feuille principale ; la duree, les personnages, les
-  ressources et les presences comptent LES DEUX equipes — c'est la journee
-  qui les paie. Le jour compte UNE fois.
-  La feuille figuration dediee reste un reglage de la feuille principale ;
-  sur la feuille B, la figuration est toujours nommee.
-  VERIFIE dans un navigateur de bout en bout : creer, remplir, changer
-  d'onglet, enregistrer, rouvrir, supprimer. Le PDF lui-meme n'a pas pu etre
-  genere ici (bibliotheque bloquee par le reseau).
-  NON FAIT : la grille verticale des presences montre les decors des deux
-  equipes melanges dans sa bande « DECORS ».
+  LES FAMILLES DE COMEDIENS ET LEUR NUMERO OFFICIEL (CastFamilies).
+  Silhouettes parlantes et muettes, doublures, cascadeurs, pilotes restent
+  des COMEDIENS, classes par GROUPE. LE NUMERO SE CALCULE, IL NE SE SAISIT
+  PAS : roles 1, 2... ; parlantes 21... ; muettes S1 ; doublures D1 ;
+  cascadeurs C1 ; pilotes P1 ; figuration sans numero. Une plage est un
+  repere, pas un mur (un seizieme role prend le 16) ; seule garde : au-dela
+  de 20 roles, les parlantes commencent juste apres. Le numero apparait sur
+  la feuille de service (ecran et PDF), au plan de travail (un bandeau par
+  famille), dans la grille des presences et en badge sur la fiche.
+  LISTE FERMEE, a la demande du developpeur : HUIT GROUPES dans l'ordre du
+  metier (Casting principal, Roles secondaires, Silhouettes parlantes,
+  Silhouettes muettes, Doublures, Cascadeurs, Pilotes, Figuration), plus de
+  bouton « Nouveau groupe » chez les comediens. La famille se lit par
+  l'IDENTIFIANT du groupe. Un groupe maison disparait a l'ouverture, ses
+  comediens passent dans le groupe officiel de la meme famille — APRES la
+  baseline, et JAMAIS sans le droit de voir les comediens. Les groupes vides
+  restent visibles (liste fermee : on doit voir ou ranger les gens).
+  MEME REGLE POUR LES DEPARTEMENTS TECHNIQUES (CrewDepartements), les seuls
+  groupes LUS par des documents (bandeau de la feuille, contacts de
+  production, depouillement) : dix-huit departements fermes, « Autre » pour
+  le reste, « Equipe aquatique » rangee en Image. Personnages, decors,
+  ressources, structures gardent leurs groupes libres : rien ne les lit.
 
-  LES HEURES SUPPLEMENTAIRES PREVUES, derniere colonne du modele AFAR. Deux
-  colonnes au plan de travail (ecran et PDF) : « H. sup » du jour, et
-  « +/- », l'ecart CUMULE a la journee de reference depuis le debut du
-  tournage — les journees courtes compensent-elles les longues ? La case
-  « H. supp eventuelles » de la feuille de service, vide depuis toujours
-  (« aucun champ dans l'app »), se remplit a l'ecran et en PDF, et suit la
-  saisie des horaires sans rejouer la feuille.
-  LE CALCUL : fin prevue - convocation - repas. LE SEUIL EST CELUI DU BUDGET
-  (Reglages du budget, « Seuil heures sup », 8 h par defaut) : il existait
-  deja pour la paie, un second chiffre au plan de travail aurait fini par
-  la contredire.
-  DEUX PIEGES, les deux payes en test : UNE JOURNEE QUI PASSE MINUIT
-  (15:00 -> 03:00) fait 12 h, pas -12 h. Et L'APPLI POSE UN REPAS 13:00-14:00
-  PAR DEFAUT sur chaque journee : sur une nuit, il tombe hors des horaires et
-  retirait une heure a tort. On ne deduit plus que la part du repas qui
-  tombe DANS les horaires.
-  Sans convocation ou sans fin prevue : case vide, pas un zero — on ne sait
-  pas. La colonne « Horaires » montre desormais debut ET fin (07:00-19:00).
+  L'EQUIPE B : UNE DEUXIEME FEUILLE LE MEME JOUR (EquipeB). Onglet
+  « ➕ Équipe B » dans la fenetre du jour : nom, scenes, convocations, decor,
+  horaires, notes propres ; la supprimer ne perd rien (tout repasse sur la
+  principale). ARCHITECTURE : scenes et convocations restent DANS day.scenes
+  et day.callSheet, marquees « equipe: 'B' » — tout ce qui demande « cette
+  scene est-elle planifiee ? » marche sans retouche ; day.equipeB ne porte
+  que l'en-tete. La fenetre travaille sur une VUE d'une equipe, le jour
+  complet est garde a part. Au plan de travail : colonne « Éq. B », le jour
+  compte UNE fois, duree et presences comptent les deux equipes. NON FAIT :
+  la bande DECORS de la grille des presences melange les deux equipes.
 
-  DIAGNOSTIC COMPLET, demande par le developpeur (« code mort, erreur,
-  imperfection, nommage, securite, tout »). Quatre analyses en parallele,
-  plus les avertissements de la base. Rapport complet donne en conversation ;
-  ce qui reste a faire est au RESTE A FAIRE.
-  UNE ERREUR A MOI, TROUVEE PAR L'AUDIT : t.html, copie de test de 5 Mo avec
-  une porte ouverte sur l'etat de l'appli, embarquee dans le commit de
-  l'equipe B et donc SERVIE PAR LE SITE. Cause : la commande qui arretait le
-  serveur de test (pkill -f « http.server ») s'est tuee elle-meme avant
-  d'effacer la copie. Retiree. LECON : arreter un serveur de test par
-  « timeout », jamais par pkill sur une ligne de commande qui contient le
-  motif ; et relire git status avant tout git add -A.
-  LES QUATRE FAILLES CRITIQUES, CORRIGEES LE JOUR MEME :
-  1. LES PROFILS SE LISAIENT SANS COMPTE (e-mail, telephone, naissance,
-     coordonnees), avec la seule cle publique de la page. La lecture est
-     retiree au role anonyme. RESTE : un compte connecte lit encore toutes les
-     colonnes de tous les profils — a traiter, c'est un chantier (dix lectures
-     « tout » dans l'appli a remplacer).
-  2. LE CLOISONNEMENT SE CONTOURNAIT : la colonne data des projets se lisait
-     en direct. C'est une REGRESSION de v601 : le correctif « on ne peut plus
-     creer de projet » avait rendu la lecture de TOUTE la table. Les connectes
-     lisent la table SANS la colonne data ; les deux creations de projet, qui
-     relisaient la ligne entiere, nomment leurs colonnes. Verifie en se
-     faisant passer pour un connecte : liste, ouverture, creation marchent,
-     data refusee.
-  3. XSS SUR LA FICHE D'UN PROJET PUBLIC : dates, type, genre, region, roles
-     recherches etaient inseres bruts — le code d'un proprietaire s'executait
-     chez tout visiteur de l'Univers. Et Utils.escape NE PROTEGE PAS un texte
-     place en argument d'un onclick : le navigateur redecode &#39; avant
-     d'executer. Nouvel outil Utils.jsArg pour ce cas, pose sur les boutons
-     entre utilisateurs (Contacter, Signaler, recherche d'equipe, revoquer).
-     IL RESTE ENVIRON 45 onclick avec le vieux motif, presque tous sur des
-     donnees internes au projet.
-  4. LES CANAUX TEMPS REEL ETAIENT PUBLICS : quiconque connaissait
-     l'identifiant d'un projet ecoutait le mini-chat, et pouvait envoyer un
-     « patch » que l'appli FUSIONNAIT chez les membres — qui l'auraient
-     ensuite enregistre. L'appli ne fusionne plus rien de ce canal (relecture
-     filtree seulement), et les canaux project_ et minichat_ sont PRIVES :
-     regle sur realtime.messages, seuls proprietaire et membres acceptes
-     entrent. NON TESTE EN REEL (reseau de la session bloque vers Supabase) :
-     a verifier a deux comptes, synchro et mini-chat.
-  SQL : sql/securite_audit_v602.sql.
+  LES HEURES SUPPLEMENTAIRES PREVUES : colonnes « H. sup » et « +/- »
+  (ecart cumule) au plan de travail, case de la feuille de service remplie.
+  Calcul : fin - convocation - repas, au SEUIL DU BUDGET (8 h par defaut).
+  Deux pieges payes en test : une journee qui passe minuit, et le repas
+  13h-14h pose par defaut qui tombait hors d'une journee de nuit.
 
-  PUIS TROIS DECISIONS DU DEVELOPPEUR, appliquees et verifiees en base :
-  - « SEUL LE CREATEUR D'UN PROJET PEUT LE SUPPRIMER. Les autres peuvent le
-    supprimer de leur hub, c'est tout. » L'ecran le faisait deja (bouton
-    reserve au proprietaire, « Quitter le projet » pour les autres) ; la
-    base, non : tout editeur pouvait mettre le projet a la corbeille. Regle
-    posee (projects_suppressions_guard), restauration comprise.
-  - « SEULS CEUX QUI ONT ACCES AU PLANNING ET SONT ASSISTANT REAL, OU LE
-    PORTEUR DU PROJET, PEUVENT SUPPRIMER UNE FDS. » Supprimer une JOURNEE
-    (donc sa feuille) et effacer un PDF de feuille dans le stockage : le
-    createur, ou l'assistant·e realisateur avec l'ecriture sur le Planning,
-    reconnu a sa fiche d'equipe (meme adresse que le compte). MODIFIER une
-    journee reste ouvert a tous ceux qui ecrivent le Planning. Boutons
-    masques pour les autres (liste des feuilles, fenetre du jour, clic droit
-    du calendrier). PIEGE EVITE : supprimer une scene retirait EN SILENCE
-    les journees devenues vides — pour un editeur non autorise, la base
-    aurait refuse TOUT l'enregistrement. Les journees vides restent donc
-    pour lui.
-  - LA LECTURE DES PROFILS : un compte connecte ne lit plus en direct que
-    les siens, les profils PUBLICS, et tout pour l'administration. Les
-    profils prives (42 sur 50) etaient lisibles en entier par quiconque
-    creait un compte. Ce dont l'appli a besoin sur un profil prive — un
-    compte existe-t-il pour cette adresse, le nom d'un invite, un badge de
-    moderation — passe par profils_minimaux, qui ne rend que cela. Neuf
-    lectures de l'appli y ont ete basculees AVANT de fermer la porte, et la
-    regle n'a ete posee qu'une fois le site a jour.
-  - EN PASSANT : un utilisateur pouvait effacer lui-meme son badge de
-    moderation. Reserve a l'administration.
-  LECON DE TEST : retirer la lecture d'une colonne casse aussi une ECRITURE
-  qui relit cette colonne (« set data = jsonb_set(data, ...) »). Mes premiers
-  essais echouaient pour cette raison, pas a cause de la regle testee.
-  L'appli n'ecrit jamais ainsi (valeurs toutes pretes, ou fonctions serveur),
-  verifie avant de conclure.
+  DIAGNOSTIC COMPLET, puis SECURITE (detail et SQL : sql/securite_audit_
+  v602.sql). Tout verifie en base en se mettant a la place d'un compte.
+  - LES QUATRE CRITIQUES : les profils se lisaient SANS compte ; la colonne
+    data des projets se lisait en direct (regression de v601), contournant
+    le cloisonnement ; XSS sur la fiche d'un projet public ; canaux temps
+    reel publics, dont les « patchs » etaient fusionnes chez les membres
+    (canaux project_ et minichat_ desormais prives, plus aucune fusion).
+  - DECISIONS DU DEVELOPPEUR : seul le createur supprime un projet (les
+    autres le quittent) ; seuls le createur et l'assistant·e realisateur
+    ayant le Planning suppriment une journee / FDS ; publier un projet
+    demande l'ecriture sur la Presentation.
+  - LES PROFILS : un compte connecte ne lit plus en direct que les siens et
+    les profils publics ; UNE SEULE PORTE DE LECTURE, Utils.profils
+    (profils_visibles), qui applique le « masquer » du telephone.
+  - Utils.escape NE PROTEGE PAS un texte place dans un onclick (le
+    navigateur redecode avant d'executer) : outil Utils.jsArg, pose sur
+    52 boutons.
+  - LES CINQ POINTS MINEURS : messages et notifications non falsifiables
+    (expediteur pose par la base, seul « lu » modifiable), presence limitee
+    a ses projets, projets publics reserves aux comptes, JSZip avec
+    empreinte (SRI). TROUVE EN CHEMIN : le TYPE d'une notification et
+    l'identifiant d'une revendication de profil, choisis par l'expediteur,
+    etaient colles dans des onclick — du code pouvait s'executer chez le
+    destinataire. Corrige, teste avec une notification piegee.
+  - EN PASSANT : un utilisateur pouvait effacer son badge de moderation.
+  INCIDENT : juste apres la fermeture des colonnes privees du profil, le
+  developpeur « a perdu tous ses profils ». Rien de perdu : son navigateur
+  faisait tourner l'ANCIENNE version en cache. Porte rouverte dans la
+  minute. D'ou LE MECANISME MiseAJour : l'appli connait sa REVISION, la base
+  exige une « revision_minimale » ; l'appli se recharge SANS COUPER
+  PERSONNE (jamais pendant une sauvegarde, une saisie, une fenetre ouverte ;
+  d'office seulement en arriere-plan, sinon un bandeau). MODE D'EMPLOI :
+  monter REVISION et deployer, monter revision_minimale, attendre, PUIS
+  toucher a la base. Lance le 23 au soir (REVISION 2, minimum 2) ; la
+  fermeture des colonnes est pour le 25.
 
-  PUIS LES TROIS POINTS RESTANTS (« ok pour 6 ») :
-  - PUBLIER UN PROJET demande l'ecriture sur la Presentation, cote base
-    aussi : un invite limite au Planning pouvait rendre le projet public.
-  - LE TELEPHONE, LA NAISSANCE, L'ADRESSE ne se lisent plus en direct, meme
-    sur un profil public — le « masquer » coche par la personne etait
-    contourne partout sauf dans l'Univers. UNE SEULE PORTE DE LECTURE DES
-    PROFILS, Utils.profils (fonction serveur profils_visibles) : sa propre
-    ligne intacte, celle des autres avec les regles de l'Univers (numero
-    d'agent, « masquer »). Toute nouvelle lecture de profil DOIT passer par
-    elle : une lecture directe de ces colonnes est refusee par la base.
-    PIEGE TROUVE EN REPETANT A BLANC : la sauvegarde du profil etait un
-    « upsert », que la base refuse une fois ces colonnes fermees ; remplace
-    par « mise a jour, sinon creation ».
-  - 52 BOUTONS passaient un texte par Utils.escape dans un onclick ; tous par
-    Utils.jsArg. Bonus : une scene dont l'identifiant contient une apostrophe
-    cassait son bouton « Retirer du jour ». Verifie en cliquant.
-  INCIDENT : juste apres la fermeture des colonnes du profil, le developpeur
-  « a perdu tous ses profils ». Aucune donnee perdue : son navigateur faisait
-  tourner l'ANCIENNE version gardee en cache, qui lisait encore par l'ancienne
-  porte. Porte ROUVERTE dans la minute. LECON : attendre la fin du
-  deploiement ne suffit pas, un cache garde l'ancien code des heures. Il faut
-  d'abord un mecanisme qui force les anciennes versions a se recharger.
-  LE MECANISME, dans la foulee (MiseAJour) : l'appli connait son numero
-  (REVISION) et la base porte « revision_minimale » dans app_config. Si la
-  base en exige un plus recent, l'appli se met a jour SANS COUPER PERSONNE,
-  consigne du developpeur : jamais pendant une sauvegarde, une saisie (moins
-  de 2 minutes), une fenetre ouverte ou un champ actif ; d'office SEULEMENT
-  quand l'onglet est en arriere-plan ; sinon un bandeau « Recharger
-  maintenant / Plus tard ». Verifie a l'ouverture, toutes les 5 minutes et au
-  retour sur l'onglet.
-  MODE D'EMPLOI avant tout changement de base que l'ancien code ne
-  supporterait pas : 1) augmenter MiseAJour.REVISION et deployer ; 2) monter
-  revision_minimale dans app_config ; 3) laisser le temps aux onglets de se
-  recharger ; 4) SEULEMENT ALORS toucher a la base.
-  LIMITE : les onglets ouverts AVANT ce mecanisme ne le connaissent pas. Pour
-  les colonnes du profil, on attend donc un a deux jours avant de refermer.
+  AUDIT DES ERREURS : trois fonctions plantaient en silence (retirer un
+  accessoire lie, supprimer une scene d'un jour sans nom, « Ajouter un
+  personnage » de la Presentation) ; fermer l'onglet juste apres une saisie
+  perdait la derniere frappe ; LE PLAN DE TRAVAIL AFFICHAIT « ? » pour
+  chaque sequence depuis vv601 (champ sc.number inexistant) ; l'import d'un
+  fichier ecrasait le projet avec n'importe quel JSON. LECON : mon jeu
+  d'essai donnait un « number » aux scenes et masquait le bug — construire
+  les jeux d'essai depuis la forme reelle des donnees.
 
-  AUDIT DES ERREURS (relance, la premiere analyse s'etait arretee) : AUCUNE
-  erreur au chargement, aucun doublon de cle, tous les onclick pointent vers
-  une methode qui existe. CORRIGE, tous verifies avant :
-  - BLOQUANTS : retirer d'une scene la derniere occurrence d'un accessoire
-    lie a une fiche Ressource plantait (UI.confirmModal inexistant) — l'objet
-    ne se retirait JAMAIS ; supprimer une scene programmee un jour sans nom,
-    et reordonner des scenes dans ce cas, plantaient (Utils.formatDate
-    inexistant) ; « Ajouter un personnage » de la Presentation ne faisait
-    rien (UI.addDataItem au lieu d'Actions).
-  - Fermer l'onglet juste apres une saisie perdait la derniere frappe (le
-    garde-fou regardait Store au lieu de StoreSave).
-  - LE PLAN DE TRAVAIL AFFICHAIT « ? » POUR CHAQUE SEQUENCE : il lisait
-    sc.number, champ que les scenes n'ont pas. Numero par PlanningBoards._numDe
-    (le rang, ou le code episode d'une serie), comme partout ailleurs.
-    Present depuis vv601, jamais vu : mes jeux d'essai donnaient un « number »
-    aux scenes. LECON : un jeu d'essai invente des champs que la vraie donnee
-    n'a pas — le construire depuis la forme reelle (getEmpty, creation d'une
-    scene), pas de tete.
-  - L'import d'un fichier ecrasait le projet avec n'importe quel JSON :
-    forme verifiee, confirmation demandee, groupes officiels completes.
-  - Equipe B : un refus d'enregistrer (pas de date) laissait l'onglet B
-    ecrire dans la feuille principale. Garde deplacee avant.
-  - Casting : le repli sur les profils de l'utilisateur ne servait jamais.
-  - MiseAJour : garde anti-boucle (une recharge automatique par heure).
+  CODE MORT RETIRE (~260 lignes), chaque candidat reverifie avant :
+  ScriptImport, saveScene (jamais branchee — a reprendre dans l'historique
+  git le jour venu), relais et accesseurs jamais appeles, 23 classes CSS.
+  GARDES : les outils de migration console (migrations NON finies en base :
+  11 projets avec des images en base64) et deux constantes documentaires.
+  RECHERCHER / REMPLACER DU SCENARIO : la fenetre n'avait plus de bouton.
+  REBRANCHE (🔍 et Ctrl+H) apres trois trous bouches : il ecrivait en lecture
+  seule et sur les scenes verrouillees ; « Tout remplacer » travaillait dans
+  le HTML brut (casse des blocs, et du HTML tape s'executait chez tous) ;
+  « Annuler » ecrasait sans regarder.
 
-  CODE MORT RETIRE (~200 lignes JS, ~60 lignes CSS), chaque candidat reverifie
-  a la main avant (appels, onclick, HTML) :
-  - le module ScriptImport (ancienne fenetre d'import, aucun bouton ne
-    l'ouvrait ; l'import reel reste Importer.handleFileSelect) ;
-  - StoreSave.saveScene (ecriture par scene jamais branchee : a reprendre
-    dans l'historique git le jour du verrou par scene) ; Icons.map/styles ;
-    PublicProfile.compressImage/load/save/profilIncomplet ; Web.showNodeMenu ;
-    Comments.open (les commentaires passent par ScriptReview) ;
-    FDSLive.missing ; la synchro vide des dates de tournage ; deux fonctions
-    de disponibilites comediens ; relais d'une ligne jamais appeles ;
-    18 accesseurs get/set de UI et Planning ; constantes et variables
-    jamais lues ; 23 classes CSS sans utilisateur.
-  GARDES, VOLONTAIREMENT :
-  - Rechercher/remplacer du scenario : la fenetre existait mais AUCUN bouton
-    ne l'ouvrait. REBRANCHE (bouton 🔍 de la barre du scenario, Ctrl+H),
-    apres trois trous bouches dans le remplacement : il ecrivait en lecture
-    seule et sur les scenes verrouillees ; « Tout remplacer » travaillait
-    dans le HTML brut (chercher « div » cassait les blocs, et du HTML tape
-    en remplacement s'executait chez tous les membres) — il ne touche plus
-    que le TEXTE des scenes affichees et modifiables ; « Annuler » ecrasait
-    sans regarder — il saute les scenes retouchees depuis. Mot entier :
-    tient compte des accents (« caf » ne trouve plus « café »).
-  - Outils de migration console (Utils.migrate*, purgeSnapshots...) : la
-    base montre des migrations NON finies (sur 40 projets : 11 ont encore
-    des images en base64, 13 des snapshots, 6 un ancien journal).
-  - SessionManager.MAX_SESSIONS et StoreRealtime.BROADCAST_MAX : constantes
-    documentaires, citees par les commentaires.
+  PETITES DEMANDES : la barre de boutons des onglets fiches ne laisse plus
+  defiler le contenu au-dessus d'elle (top:-20px, comme le Scenario) ; clic
+  droit au hub sur un projet ou un dossier (priorite, deplacer, supprimer ;
+  les dossiers gagnent priorite et deplacement) ; titre en double retire de
+  l'onglet Asso / Entreprises.
 
-  BARRE DE BOUTONS DES ONGLETS FICHES : Personnages, Comediens, Decors,
-  Ressources, Equipe, Asso/Entreprises. Collee en haut a top:0, elle
-  laissait ouverte la marge de 20px du conteneur : au defilement, le
-  contenu passait entre les onglets et les boutons. top:-20px, comme la
-  barre du Scenario (.data-toolbar, une seule regle pour les six).
+  RANGEMENT :
+  - LE JOURNAL SORT DE LA PAGE : ce fichier, SUIVI.md, a la racine. Chaque
+    visiteur telechargeait ~105 Ko de notes internes.
+  - Images du cours reenregistrees en qualite 82 : 42 -> 5,5 Mo, sans perte
+    visible ; deux illustrations jamais branchees l'ont ete.
+  - README : il annoncait une licence MIT alors que LICENSE dit « tous
+    droits reserves ». Corrige, avec l'image d'apercu cassee et la version.
+  - FICHIERS GEANTS DECOUPES, un module par fichier, au nom du module (116
+    -> 167 morceaux, sous-numeros « 0900.05- » acceptes par tools/build.mjs).
+    PREUVE : empreinte de index.html identique avant et apres.
 
-  HUB, CLIC DROIT sur un projet ou un dossier : Priorite, Deplacer vers un
-  dossier, Supprimer. Ce sont les fonctions des petits boutons des cartes,
-  donc les memes droits : seul le proprietaire met un projet a la
-  corbeille, les autres le quittent. NOUVEAU pour les dossiers : priorite
-  et deplacement sans glisser-deposer (un dossier ne se voit pas proposer
-  lui-meme ni ses sous-dossiers). Le menu se pose au pointeur, reste
-  entier dans la fenetre, et coche la priorite / le dossier actuels.
+  LECONS DE LA VERSION :
+  - Arreter un serveur de test par « timeout », jamais par pkill sur un motif
+    que contient sa propre ligne de commande : la commande s'est tuee avant
+    d'effacer une copie de test, qui a ete publiee (retiree).
+  - Fermer une porte en base casse aussi les ANCIENNES versions encore
+    ouvertes : toujours passer par MiseAJour.
+  - Retirer la lecture d'une colonne casse aussi une ecriture qui la relit.
 
-  ONGLET ASSO / ENTREPRISES : son titre « 🏛️ Asso / Entreprises » etait
-  recrit dans la page, le seul onglet a le faire. Retire (l'onglet le dit
-  deja).
 
-  SECURITE, LES CINQ POINTS MINEURS DE L'AUDIT (base : migration
-  securite_mineurs_v602, verifiee en se mettant a la place d'un compte) :
-  - Messages : le destinataire ne peut plus que marquer lu / non lu (il
-    pouvait reecrire l'expediteur et le texte).
-  - Notifications : la base inscrit elle-meme l'expediteur (sender_email),
-    le client ne peut plus le choisir ; affiche « De ... » dans la liste,
-    et « Créé par » d'une revendication de profil vient de lui. Seul
-    « lu » peut etre modifie ensuite.
-  - TROUVE EN CHEMIN, PLUS GRAVE : le TYPE d'une notification (texte libre,
-    que tout compte peut envoyer a tout autre) etait colle tel quel dans
-    le onclick de la liste, comme l'identifiant d'une revendication de
-    profil : du code pouvait s'executer chez le destinataire. Passes par
-    Utils.jsArg, teste avec une notification piegee.
-  - Presence : on ne voit plus que soi et les gens de ses projets (avant :
-    qui est sur quel projet, pour tout le site).
-  - Projets publics (get_public_projects) : reserves aux comptes connectes.
-  - JSZip : charge avec son empreinte (SRI) depuis jsDelivr, qui sert le
-    fichier exact du paquet npm dont l'empreinte a ete calculee.
+vv603 (24 septembre 2026) — EN COURS.
 
-  COLONNES PRIVEES DES PROFILS, PROCEDURE MiseAJour LANCEE : etape 1,
-  MiseAJour.REVISION passe a 2 (cette version ne lit plus ces colonnes en
-  direct, verifie) ; etape 2, revision_minimale = 2 en base, une fois la
-  version en ligne. Fermeture (bloc 9 de sql/securite_audit_v602.sql) le
-  25 septembre.
-
-  RANGEMENT 1 — LE JOURNAL SORT DE LA PAGE : tout le bloc SUIVI (methode,
-  reste a faire, regles, historique) vit desormais dans SUIVI.md, a la
-  racine du depot. La tete de index.html ne garde que la version et un
-  renvoi (choix du developpeur, le 24). La page servie passe de ~5,06 Mo
-  a ~4,96 Mo ; surtout, les notes internes (failles corrigees comprises)
-  ne sont plus envoyees a chaque visiteur. ELLES RESTENT LISIBLES dans le
-  depot tant qu'il est public (voir DEPOT GITHUB EN PRIVE).
-
-  RANGEMENT 2 — IMAGES : les illustrations du cours etaient enregistrees en
-  qualite maximale (1,5 Mo pour 1344x768). 48 JPEG reenregistres en
-  qualite 82, memes dimensions : 42,3 Mo -> 5,5 Mo (dossier images :
-  47 -> 9,5 Mo), verifie a l'oeil. Deux illustrations jamais branchees
-  l'ont ete (lignes-directrices, balance des blancs : les notions
-  existaient). Supprimes : « casting & décors.png » (aucun usage) et deux
-  .gitkeep dans des dossiers pleins. Les PNG de la page d'accueil ne sont
-  pas touches.
-
-  RANGEMENT 3 — README : le README annoncait une licence MIT (libre,
-  reutilisable par tous) alors que LICENSE dit « tous droits reserves ».
-  Corrige (badge et section Licence). Aussi : image d'apercu cassee
-  (og-image.png au lieu de Og-image.png), version v599 -> vv602, Forum
-  retire (ferme), vieux changelog v537 remplace par un renvoi a SUIVI.md.
-  src/README.md : 116 morceaux, nombre de modules et renvoi a SUIVI.md.
-
-  RANGEMENT 4 — FICHIERS GEANTS DECOUPES : 0900-Importer (14 200 lignes,
-  22 modules dont Presentation, Depenses, Admin, Univers...), 0950-
-  StoryboardPreview (10 400 l., 21 modules dont Cours, Synopsis,
-  FichesPDF), 0550-Breakdown (9 300 l., MoodBoard, Storyboard, Dessin),
-  0890-Planning (Stats, archive), 0730-PublicProfile (Permissions,
-  recherche) : UN MODULE PAR FICHIER, AU NOM DU MODULE. 116 -> 167
-  morceaux. tools/build.mjs accepte un SOUS-NUMERO (0900.05-...) pour
-  intercaler sans renumeroter. PREUVE : empreinte SHA-256 de index.html
-  identique avant et apres (55e98f8f...), la page n'a pas change d'un
-  octet. Le plus gros morceau fait maintenant ~2 900 lignes (MoodBoard).
