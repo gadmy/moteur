@@ -31,21 +31,25 @@ const racine = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dossier = join(racine, 'src', 'parts');
 const cible = join(racine, 'index.html');
 
+//  Numero principal, et un sous-numero facultatif (v602) : « 0900.05-Orgs.js »
+//  se range juste apres « 0900-Importer.js » et avant « 0901-... ». Il sert a
+//  decouper un gros morceau sans renumeroter tous les suivants.
 const rang = (nom) => {
-    const m = /^(\d+)-/.exec(nom);
+    const m = /^(\d+)(?:\.(\d+))?-/.exec(nom);
     if (!m) throw new Error(`Morceau sans préfixe numérique : ${nom}`);
-    return parseInt(m[1], 10);
+    return [parseInt(m[1], 10), m[2] === undefined ? -1 : parseInt(m[2], 10)];
 };
+const compare = (a, b) => { const x = rang(a), y = rang(b); return (x[0] - y[0]) || (x[1] - y[1]); };
 
 const noms = (await readdir(dossier))
-    .filter(n => /^\d+-.*\.(html|css|js)$/.test(n))
-    .sort((a, b) => rang(a) - rang(b));
+    .filter(n => /^\d+(\.\d+)?-.*\.(html|css|js)$/.test(n))
+    .sort(compare);
 
 if (noms.length === 0) throw new Error(`Aucun morceau trouvé dans ${dossier}`);
 
 const vus = new Set();
 for (const n of noms) {
-    const r = rang(n);
+    const r = rang(n).join('.');
     if (vus.has(r)) throw new Error(`Deux morceaux portent le numéro ${r} — l'ordre serait ambigu.`);
     vus.add(r);
 }

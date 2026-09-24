@@ -1600,3 +1600,14 @@ vv602 (23 septembre 2026) — EN COURS.
   (og-image.png au lieu de Og-image.png), version v599 -> vv602, Forum
   retire (ferme), vieux changelog v537 remplace par un renvoi a SUIVI.md.
   src/README.md : 116 morceaux, nombre de modules et renvoi a SUIVI.md.
+
+  RANGEMENT 4 — FICHIERS GEANTS DECOUPES : 0900-Importer (14 200 lignes,
+  22 modules dont Presentation, Depenses, Admin, Univers...), 0950-
+  StoryboardPreview (10 400 l., 21 modules dont Cours, Synopsis,
+  FichesPDF), 0550-Breakdown (9 300 l., MoodBoard, Storyboard, Dessin),
+  0890-Planning (Stats, archive), 0730-PublicProfile (Permissions,
+  recherche) : UN MODULE PAR FICHIER, AU NOM DU MODULE. 116 -> 167
+  morceaux. tools/build.mjs accepte un SOUS-NUMERO (0900.05-...) pour
+  intercaler sans renumeroter. PREUVE : empreinte SHA-256 de index.html
+  identique avant et apres (55e98f8f...), la page n'a pas change d'un
+  octet. Le plus gros morceau fait maintenant ~2 900 lignes (MoodBoard).

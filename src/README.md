@@ -10,7 +10,7 @@ node tools/build.mjs --check   vérifie sans rien écrire
 
 ## Comment c'est découpé
 
-`src/parts/` contient **116 morceaux**, remis bout à bout dans l'ordre de leur
+`src/parts/` contient **167 morceaux**, remis bout à bout dans l'ordre de leur
 préfixe numérique :
 
 | | |
@@ -21,6 +21,11 @@ préfixe numérique :
 
 Les numéros avancent de 10 en 10 : il reste de la place pour insérer un
 morceau entre deux sans tout renuméroter.
+
+Un **sous-numéro** est possible : `0900.05-Presentation.js` se range juste
+après `0900-Importer.js` et avant le numéro suivant. Il a servi à découper
+les fichiers géants (un module par fichier, au nom du module), sans
+renuméroter les autres.
 
 ## Le principe, et pourquoi il est sûr
 
