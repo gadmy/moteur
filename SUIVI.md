@@ -1375,11 +1375,12 @@ vv602 (23 - 24 septembre 2026) — PUBLIE.
 
 vv603 (24 septembre 2026) — EN COURS.
 
-  EQUIPE B, LA BANDE DECORS DU PLAN DE TRAVAIL (reste de vv602) : elle
+  EQUIPE B, BANDES DECORS ET SEQUENCES DU PLAN DE TRAVAIL (reste de vv602) : elle
   melangeait les decors des deux equipes. Un jour a equipe B montre
   maintenant ceux de la principale, puis « B : ... » en italique a cote ;
   le survol nomme les deux equipes. Les jours sans equipe B ne changent pas.
   Teste dans le navigateur sur un jour a deux equipes et un jour simple.
-  NON FAIT : la bande SEQUENCES liste encore les sequences des deux equipes
-  a la suite, sans les distinguer.
+  MEME CHOSE POUR LA BANDE SEQUENCES : celles de la principale, puis
+  « B : ... » en italique ; le survol liste les deux equipes avec les
+  titres. Teste de meme.
 

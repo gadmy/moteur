@@ -1410,10 +1410,18 @@
                 titre: 'Équipe principale : ' + (a || '—') + '\n' + EquipeB.nom(i.jour) + ' : ' + (b || '—')
             };
         }, 'wp-bande-decors');
-        html += bande('SÉQUENCES', (i) => ({
-            txt: i.scenes.map(x => PlanningBoards._numDe(x)).join(' '),
-            titre: i.scenes.map(x => (PlanningBoards._numDe(x)) + ' — ' + (x.title || '')).join('\n')
-        }));
+        html += bande('SÉQUENCES', (i) => {
+            const nums = (l) => l.map(x => PlanningBoards._numDe(x)).join(' ');
+            const titres = (l) => l.map(x => (PlanningBoards._numDe(x)) + ' — ' + (x.title || '')).join('\n');
+            if(!i.decorsB) return { txt: nums(i.scenes), titre: titres(i.scenes) };
+            // v603 : meme separation que la bande DECORS — les sequences de
+            // la principale, puis « B : » et celles de l'equipe B en italique.
+            const a = PlanningBoards._scenesDe(i.jour, 'A'), b = PlanningBoards._scenesDe(i.jour, 'B');
+            return {
+                html: esc(nums(a)) + ' <span class="wp-seq-b">B' + (b.length ? ' : ' + esc(nums(b)) : '') + '</span>',
+                titre: 'Équipe principale :\n' + (titres(a) || '—') + '\n\n' + EquipeB.nom(i.jour) + ' :\n' + (titres(b) || '—')
+            };
+        });
         html += '<tr><th class="workplan-col-num">N°</th>';
         html += '<th class="workplan-col-role">RÔLE</th>';
         html += '<th class="workplan-col-actor">NOM</th>';
