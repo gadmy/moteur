@@ -1584,3 +1584,12 @@ vv602 (23 septembre 2026) — EN COURS.
   a ~4,96 Mo ; surtout, les notes internes (failles corrigees comprises)
   ne sont plus envoyees a chaque visiteur. ELLES RESTENT LISIBLES dans le
   depot tant qu'il est public (voir DEPOT GITHUB EN PRIVE).
+
+  RANGEMENT 2 — IMAGES : les illustrations du cours etaient enregistrees en
+  qualite maximale (1,5 Mo pour 1344x768). 48 JPEG reenregistres en
+  qualite 82, memes dimensions : 42,3 Mo -> 5,5 Mo (dossier images :
+  47 -> 9,5 Mo), verifie a l'oeil. Deux illustrations jamais branchees
+  l'ont ete (lignes-directrices, balance des blancs : les notions
+  existaient). Supprimes : « casting & décors.png » (aucun usage) et deux
+  .gitkeep dans des dossiers pleins. Les PNG de la page d'accueil ne sont
+  pas touches.
