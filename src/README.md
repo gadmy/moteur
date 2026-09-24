@@ -10,7 +10,7 @@ node tools/build.mjs --check   vérifie sans rien écrire
 
 ## Comment c'est découpé
 
-`src/parts/` contient **106 morceaux**, remis bout à bout dans l'ordre de leur
+`src/parts/` contient **116 morceaux**, remis bout à bout dans l'ordre de leur
 préfixe numérique :
 
 | | |
@@ -31,17 +31,23 @@ reconstruction redonne donc le fichier **à l'octet près**.
 C'est vérifiable : au premier découpage, l'empreinte SHA-256 de `index.html`
 était identique avant et après.
 
-Cela fonctionne parce que les 95 modules de l'application vivent dans **une
+Cela fonctionne parce que les quelque 150 modules de l'application vivent dans **une
 seule fonction** qui leur donne une mémoire commune. Recoller les morceaux
 reconstitue cette fonction à l'identique.
 
 ## Ce qui a été écarté
 
 Passer à de vrais modules JavaScript (`import` / `export`) demanderait de
-réécrire toutes les références entre les 95 modules, casserait l'ouverture du
+réécrire toutes les références entre les modules, casserait l'ouverture du
 fichier en double-clic (les navigateurs bloquent les modules en protocole
-`file:`) et imposerait 95 requêtes au démarrage, faute d'étape de
+`file:`) et imposerait une requête par module au démarrage, faute d'étape de
 construction. Le rapport bénéfice / risque ne le justifiait pas.
+
+## Le journal
+
+Le bloc de suivi (méthode, reste à faire, journal des versions) ne vit plus
+dans la page : il est dans `SUIVI.md`, à la racine. La tête de `index.html`
+ne garde que la version et un renvoi.
 
 ## Le garde-fou
 

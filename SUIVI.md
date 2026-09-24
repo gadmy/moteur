@@ -1593,3 +1593,10 @@ vv602 (23 septembre 2026) — EN COURS.
   existaient). Supprimes : « casting & décors.png » (aucun usage) et deux
   .gitkeep dans des dossiers pleins. Les PNG de la page d'accueil ne sont
   pas touches.
+
+  RANGEMENT 3 — README : le README annoncait une licence MIT (libre,
+  reutilisable par tous) alors que LICENSE dit « tous droits reserves ».
+  Corrige (badge et section Licence). Aussi : image d'apercu cassee
+  (og-image.png au lieu de Og-image.png), version v599 -> vv602, Forum
+  retire (ferme), vieux changelog v537 remplace par un renvoi a SUIVI.md.
+  src/README.md : 116 morceaux, nombre de modules et renvoi a SUIVI.md.

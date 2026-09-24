@@ -11,7 +11,7 @@
 //  exactement le fichier d'origine, octet pour octet. C'est ce qui rend le
 //  découpage vérifiable plutôt que risqué.
 //
-//  Pourquoi ça marche ici : les 95 modules de l'application vivent dans une
+//  Pourquoi ça marche ici : les modules de l'application vivent dans une
 //  seule fonction qui leur donne une mémoire commune. Recoller les morceaux
 //  reconstitue cette fonction à l'identique. Passer à de vrais modules
 //  JavaScript (import / export) demanderait, lui, de réécrire toutes les
