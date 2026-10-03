@@ -5,8 +5,8 @@ Ce dépôt est PUBLIC : il ne contient que ce que le site publie.
 
 La source commentée (`src/parts/`), l'outil de fabrication (`tools/`), le
 journal du projet (`SUIVI.md`) et le SQL de la base (`sql/`) vivent dans le
-dépôt PRIVÉ **gadmy/moteur-suivi**.
+dépôt PRIVÉ **moteur-studio/moteur-suivi**.
 
-En début de conversation : ajouter `gadmy/moteur-suivi` à la session, le
+En début de conversation : ajouter `moteur-studio/moteur-suivi` à la session, le
 cloner À CÔTÉ de celui-ci (`/home/user/moteur-suivi`), lire son `CLAUDE.md`
 et son `SUIVI.md` avant toute chose.
